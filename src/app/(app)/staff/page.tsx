@@ -1,0 +1,196 @@
+"use client";
+
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useForm } from "react-hook-form";
+import { toast } from "sonner";
+import { tenantsApi, usersApi } from "@/lib/api";
+import { ApiError } from "@/lib/api/client";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useAuthStore } from "@/lib/auth-store";
+
+type Form = {
+  fullName: string;
+  email: string;
+  password: string;
+  phone: string;
+  roleCode: string;
+  primaryStoreId: string;
+};
+
+export default function StaffPage() {
+  const qc = useQueryClient();
+  const roles = useAuthStore((s) => s.user?.roles ?? []);
+  const canManage = roles.some((r) => ["admin", "manager"].includes(r));
+
+  const list = useQuery({ queryKey: ["users"], queryFn: () => usersApi.list() });
+  const stores = useQuery({
+    queryKey: ["stores"],
+    queryFn: () => tenantsApi.listStores(),
+  });
+
+  const form = useForm<Form>({
+    defaultValues: {
+      fullName: "",
+      email: "",
+      password: "",
+      phone: "",
+      roleCode: "cashier",
+      primaryStoreId: "",
+    },
+  });
+
+  const create = useMutation({
+    mutationFn: (v: Form) =>
+      usersApi.create({
+        fullName: v.fullName,
+        email: v.email,
+        password: v.password,
+        phone: v.phone || undefined,
+        roleCode: v.roleCode,
+        primaryStoreId: v.primaryStoreId || undefined,
+      }),
+    onSuccess: () => {
+      toast.success("Staff created");
+      form.reset({
+        fullName: "",
+        email: "",
+        password: "",
+        phone: "",
+        roleCode: "cashier",
+        primaryStoreId: "",
+      });
+      void qc.invalidateQueries({ queryKey: ["users"] });
+    },
+    onError: (e) =>
+      toast.error(e instanceof ApiError ? e.messages.join(", ") : "Failed"),
+  });
+
+  const toggle = useMutation({
+    mutationFn: ({ id, isActive }: { id: string; isActive: boolean }) =>
+      usersApi.update(id, { isActive }),
+    onSuccess: () => {
+      toast.success("Updated");
+      void qc.invalidateQueries({ queryKey: ["users"] });
+    },
+    onError: (e) =>
+      toast.error(e instanceof ApiError ? e.messages.join(", ") : "Failed"),
+  });
+
+  return (
+    <div className="mx-auto max-w-5xl space-y-5">
+      <header>
+        <p className="text-sm tracking-[0.18em] text-[#0f766e] uppercase">Studio</p>
+        <h1 className="display mt-1 text-3xl text-[#111827]">Staff</h1>
+        <p className="mt-1 text-sm text-[#6b7280]">
+          Create accounts and assign roles (admin, manager, cashier, fitter, inventory)
+        </p>
+      </header>
+
+      <div className="grid gap-5 lg:grid-cols-[1.2fr_0.9fr]">
+        <section className="overflow-hidden rounded-2xl border border-[#e5e7eb] bg-white">
+          <ul className="divide-y divide-[#f3f4f6]">
+            {(list.data ?? []).map((u) => (
+              <li
+                key={u.id}
+                className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"
+              >
+                <div className="min-w-0">
+                  <p className="font-semibold text-[#111827]">{u.fullName}</p>
+                  <p className="text-sm text-[#6b7280]">{u.email}</p>
+                  <p className="mt-0.5 text-xs text-[#9ca3af]">
+                    {(u.roles ?? []).join(", ") || "no role"}
+                    {u.isActive ? "" : " · inactive"}
+                  </p>
+                </div>
+                {canManage ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    disabled={toggle.isPending}
+                    onClick={() =>
+                      toggle.mutate({ id: u.id, isActive: !u.isActive })
+                    }
+                  >
+                    {u.isActive ? "Deactivate" : "Activate"}
+                  </Button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+          {list.isLoading ? (
+            <p className="px-4 py-8 text-sm text-[#6b7280]">Loading…</p>
+          ) : null}
+        </section>
+
+        <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5">
+          <h2 className="display text-xl">Add staff</h2>
+          {!canManage ? (
+            <p className="mt-2 text-sm text-[#6b7280]">
+              Only admin/manager can invite staff.
+            </p>
+          ) : (
+            <form
+              className="mt-4 space-y-3"
+              onSubmit={form.handleSubmit((v) => create.mutate(v))}
+            >
+              <div>
+                <Label>Full name</Label>
+                <Input className="mt-1.5" {...form.register("fullName", { required: true })} />
+              </div>
+              <div>
+                <Label>Email</Label>
+                <Input
+                  className="mt-1.5"
+                  type="email"
+                  {...form.register("email", { required: true })}
+                />
+              </div>
+              <div>
+                <Label>Password</Label>
+                <Input
+                  className="mt-1.5"
+                  type="password"
+                  {...form.register("password", { required: true, minLength: 8 })}
+                />
+              </div>
+              <div>
+                <Label>Phone</Label>
+                <Input className="mt-1.5" {...form.register("phone")} />
+              </div>
+              <div>
+                <Label>Role</Label>
+                <select className="mt-1.5 select-field" {...form.register("roleCode")}>
+                  <option value="cashier">Cashier</option>
+                  <option value="fitter">Fitter</option>
+                  <option value="inventory">Inventory</option>
+                  <option value="manager">Manager</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </div>
+              <div>
+                <Label>Store</Label>
+                <select
+                  className="mt-1.5 select-field"
+                  {...form.register("primaryStoreId")}
+                >
+                  <option value="">Optional</option>
+                  {(stores.data ?? []).map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <Button type="submit" className="w-full" disabled={create.isPending}>
+                {create.isPending ? "Saving…" : "Create"}
+              </Button>
+            </form>
+          )}
+        </section>
+      </div>
+    </div>
+  );
+}

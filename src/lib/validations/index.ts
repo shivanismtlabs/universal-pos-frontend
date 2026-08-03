@@ -1,0 +1,212 @@
+import { z } from "zod";
+
+/** Matches backend IsStrongPassword (8–72, upper, lower, number, special) */
+export const strongPasswordSchema = z
+  .string()
+  .min(8, "Password must be at least 8 characters")
+  .max(72, "Password must be at most 72 characters")
+  .regex(/[a-z]/, "Include a lowercase letter")
+  .regex(/[A-Z]/, "Include an uppercase letter")
+  .regex(/\d/, "Include a number")
+  .regex(/[^A-Za-z0-9]/, "Include a special character");
+
+export const indianPhoneSchema = z
+  .string()
+  .regex(/^[6-9]\d{9}$/, "Enter a valid 10-digit Indian mobile");
+
+export const tenantSlugSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .min(2)
+  .max(50)
+  .regex(
+    /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+    "Use lowercase kebab-case (e.g. demo-shop)",
+  );
+
+export const loginSchema = z.object({
+  tenantSlug: tenantSlugSchema,
+  email: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .email("Enter a valid email")
+    .max(255),
+  password: z.string().min(1, "Password is required").max(72),
+});
+export type LoginInput = z.infer<typeof loginSchema>;
+
+export const registerTenantSchema = z
+  .object({
+    tenantName: z.string().trim().min(2).max(100),
+    tenantSlug: tenantSlugSchema,
+    storeName: z.string().trim().min(2).max(100),
+    adminFullName: z.string().trim().min(2).max(255),
+    adminEmail: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .email("Enter a valid email")
+      .max(255),
+    adminPassword: strongPasswordSchema,
+    confirmPassword: z.string().min(1, "Confirm your password"),
+    adminPhone: indianPhoneSchema.optional().or(z.literal("")),
+  })
+  .refine((v) => v.adminPassword === v.confirmPassword, {
+    message: "Passwords do not match",
+    path: ["confirmPassword"],
+  });
+export type RegisterTenantInput = z.infer<typeof registerTenantSchema>;
+
+export function passwordStrength(password: string) {
+  const checks = {
+    length: password.length >= 8 && password.length <= 72,
+    lower: /[a-z]/.test(password),
+    upper: /[A-Z]/.test(password),
+    number: /\d/.test(password),
+    special: /[^A-Za-z0-9]/.test(password),
+  };
+  const score = Object.values(checks).filter(Boolean).length;
+  return { checks, score, ok: score === 5 };
+}
+export const createCustomerSchema = z.object({
+  fullName: z.string().min(2, "Name is required").max(255),
+  phone: indianPhoneSchema,
+  email: z
+    .string()
+    .email("Invalid email")
+    .max(255)
+    .optional()
+    .or(z.literal("")),
+  eventDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD")
+    .optional()
+    .or(z.literal("")),
+  notes: z.string().max(2000).optional().or(z.literal("")),
+  marketingOptIn: z.boolean(),
+});
+export type CreateCustomerInput = z.infer<typeof createCustomerSchema>;
+
+const optionalMeasure = z
+  .union([z.string(), z.number()])
+  .optional()
+  .transform((v) => {
+    if (v === undefined || v === null || v === "") return undefined;
+    const n = typeof v === "number" ? v : Number(v);
+    return Number.isFinite(n) && n > 0 ? n : undefined;
+  });
+
+export const createMeasurementSchema = z
+  .object({
+    heightCm: optionalMeasure,
+    weightKg: optionalMeasure,
+    chest: optionalMeasure,
+    waist: optionalMeasure,
+    inseam: optionalMeasure,
+    sleeve: optionalMeasure,
+    shoeSize: z.string().max(20).optional().or(z.literal("")),
+  })
+  .refine(
+    (v) =>
+      v.heightCm != null ||
+      v.weightKg != null ||
+      v.chest != null ||
+      v.waist != null ||
+      v.inseam != null ||
+      v.sleeve != null ||
+      Boolean(v.shoeSize && v.shoeSize.length > 0),
+    { message: "Enter at least one measurement", path: ["heightCm"] },
+  );
+export type CreateMeasurementInput = z.output<typeof createMeasurementSchema>;
+
+export const createOrderSchema = z.object({
+  storeId: z.string().uuid("Select a store"),
+  customerId: z.string().uuid("Select a customer"),
+  partyId: z.string().uuid().optional().or(z.literal("")),
+  eventDate: z.string().optional().or(z.literal("")),
+  pickupDate: z.string().optional().or(z.literal("")),
+  returnDueDate: z.string().optional().or(z.literal("")),
+});
+export type CreateOrderInput = z.infer<typeof createOrderSchema>;
+
+export const createPaymentSchema = z.object({
+  orderId: z.string().uuid(),
+  method: z.enum(["cash", "card", "upi", "collect_later"]),
+  amount: z.coerce.number().positive("Amount must be greater than 0"),
+  type: z.enum(["payment", "deposit"]),
+  idempotencyKey: z.string().min(8, "Idempotency key required"),
+});
+export type CreatePaymentInput = z.infer<typeof createPaymentSchema>;
+
+export const createCategorySchema = z.object({
+  name: z.string().min(2).max(100),
+});
+
+export const createProductStyleSchema = z.object({
+  name: z.string().min(2).max(255),
+  styleCode: z.string().min(1).max(64),
+  color: z.string().max(64).optional().or(z.literal("")),
+  isRental: z.boolean(),
+  hsnSac: z.string().max(16).optional().or(z.literal("")),
+});
+
+export const createInventoryUnitSchema = z.object({
+  storeId: z.string().uuid(),
+  productStyleId: z.string().uuid(),
+  barcodeSku: z.string().min(1).max(64),
+  size: z.string().min(1).max(32),
+  condition: z.enum(["NEW", "GOOD", "DAMAGED"]),
+  ownership: z.enum(["own", "sub_rental", "network"]),
+  rentalPrice: z.coerce.number().min(0),
+  depositAmount: z.coerce.number().min(0),
+});
+
+export const createPartySchema = z.object({
+  name: z.string().min(2).max(255),
+  eventDate: z.string().optional().or(z.literal("")),
+  primaryCustomerId: z.string().uuid().optional().or(z.literal("")),
+});
+export type CreatePartyInput = z.infer<typeof createPartySchema>;
+
+export const addPartyMemberSchema = z.object({
+  customerId: z.string().uuid("Select a customer"),
+  roleLabel: z.string().max(100).optional().or(z.literal("")),
+});
+export type AddPartyMemberInput = z.infer<typeof addPartyMemberSchema>;
+
+export const addOrderItemSchema = z.object({
+  itemType: z.enum(["rental_unit", "retail", "special"]),
+  inventoryUnitId: z.string().uuid().optional().or(z.literal("")),
+  retailSkuId: z.string().uuid().optional().or(z.literal("")),
+  unitPrice: z.coerce.number().min(0).optional(),
+  size: z.string().max(50).optional().or(z.literal("")),
+});
+export type AddOrderItemInput = z.infer<typeof addOrderItemSchema>;
+
+export const createAppointmentSchema = z.object({
+  storeId: z.string().uuid("Select a store"),
+  customerId: z.string().uuid("Select a customer"),
+  orderId: z.string().uuid().optional().or(z.literal("")),
+  aptType: z.enum(["fitting", "pickup", "return"]),
+  startsAt: z.string().min(1, "Start time required"),
+  fittingNotes: z.string().max(2000).optional().or(z.literal("")),
+});
+export type CreateAppointmentInput = z.infer<typeof createAppointmentSchema>;
+
+export const createReturnSchema = z.object({
+  orderId: z.string().uuid("Select an order"),
+  inventoryUnitId: z.string().uuid("Select a unit"),
+  cleaningRequired: z.boolean(),
+  inspectNotes: z.string().max(2000).optional().or(z.literal("")),
+});
+export type CreateReturnInput = z.infer<typeof createReturnSchema>;
+
+export const availabilityQuerySchema = z.object({
+  startDate: z.string().min(1),
+  endDate: z.string().min(1),
+  productStyleId: z.string().uuid().optional().or(z.literal("")),
+  storeId: z.string().uuid().optional().or(z.literal("")),
+  size: z.string().max(32).optional().or(z.literal("")),
+});

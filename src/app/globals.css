@@ -1,26 +1,216 @@
 @import "tailwindcss";
 
+/**
+ * Tuxedo Studio — clean professional POS UI
+ * Soft paper, charcoal ink, restrained teal accent.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --ink: #111827;
+  --ink-soft: #374151;
+  --muted: #6b7280;
+  --line: #e5e7eb;
+  --line-strong: #d1d5db;
+  --accent: #0f766e;
+  --accent-soft: #ecfdf8;
+  --accent-ink: #115e59;
+  --danger: #b91c1c;
+  --shadow: 0 1px 2px rgba(17, 24, 39, 0.04), 0 8px 24px -16px rgba(17, 24, 39, 0.18);
+
+  --font-display: "Segoe UI Semibold", "Segoe UI", system-ui, sans-serif;
+  --font-body: "Segoe UI", system-ui, -apple-system, sans-serif;
+
+  --background: var(--bg);
+  --foreground: var(--ink);
+  --gold: var(--accent);
+  --ivory: var(--ink);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-background: #f6f7f9;
+  --color-foreground: #111827;
+  --font-sans: var(--font-body);
+  --font-display: var(--font-display);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  color-scheme: light;
+  background: #f6f7f9;
+}
+
+html,
+body {
+  min-height: 100%;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  margin: 0;
+  background: #f6f7f9;
+  color: #111827;
+  font-family: var(--font-body), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+::selection {
+  background: rgba(15, 118, 110, 0.16);
+}
+
+.panel {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  transition:
+    box-shadow 0.25s ease,
+    border-color 0.25s ease,
+    transform 0.25s ease;
+}
+
+.panel-interactive:hover {
+  border-color: #d1d5db;
+  box-shadow:
+    0 1px 2px rgba(17, 24, 39, 0.05),
+    0 16px 32px -20px rgba(17, 24, 39, 0.22);
+}
+
+.panel-accent {
+  border-top: 3px solid #0f766e;
+}
+
+.hairline {
+  height: 1px;
+  width: 100%;
+  background: #e5e7eb;
+}
+
+.display {
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  color: #111827;
+}
+
+.eyebrow {
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #0f766e;
+}
+
+.select-field {
+  display: flex;
+  height: 2.75rem;
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  padding: 0 0.85rem;
+  font-size: 0.875rem;
+  color: #111827;
+  outline: none;
+}
+
+.select-field:focus {
+  border-color: #0f766e;
+  box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.12);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel {
+    transition: none;
+  }
+}
+
+/* Thin, quiet scrollbars (Firefox + Chromium) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #d1d5db transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: #d1d5db;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: #9ca3af;
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.scroll-soft {
+  scrollbar-gutter: stable;
+}
+
+/* Receipt print — hide entire app; only portal slip (1 page) */
+@media print {
+  @page {
+    size: 80mm auto;
+    margin: 6mm 5mm;
+  }
+
+  html,
+  body {
+    width: auto !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+    overflow: visible !important;
+  }
+
+  body > *:not(.receipt-print-root) {
+    display: none !important;
+  }
+
+  .receipt-print-root {
+    display: block !important;
+    position: static !important;
+    inset: auto !important;
+    width: 100% !important;
+    height: auto !important;
+    background: #fff !important;
+    padding: 0 !important;
+  }
+
+  .receipt-sheet {
+    display: block !important;
+    width: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  .receipt-print {
+    width: 100% !important;
+    max-width: none !important;
+    color: #111 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .print\:hidden {
+    display: none !important;
+  }
 }
