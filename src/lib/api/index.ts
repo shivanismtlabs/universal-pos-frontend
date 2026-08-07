@@ -1,5 +1,6 @@
 import { apiRequest } from "./client";
 import { useAuthStore } from "../auth-store";
+import type { TenantBootstrap } from "../bootstrap-types";
 
 function token() {
   return useAuthStore.getState().accessToken;
@@ -35,6 +36,29 @@ export const authApi = {
       accessToken: string;
       refreshToken: string;
     }>("/auth/register-tenant", { method: "POST", body });
+  },
+
+  registerUser(body: {
+    tenantSlug: string;
+    fullName: string;
+    email: string;
+    password: string;
+    phone?: string;
+  }) {
+    return apiRequest<{
+      tenant: { id: string; slug: string; name: string };
+      store: { id: string; name: string } | null;
+      user: {
+        id: string;
+        email: string;
+        fullName: string;
+        roles: string[];
+        storeId?: string | null;
+        tenantId: string;
+      };
+      accessToken: string;
+      refreshToken: string;
+    }>("/auth/register-user", { method: "POST", body });
   },
 
   me() {
@@ -139,11 +163,11 @@ export const customersApi = {
           fullName: string;
           phone: string;
         } | null;
-        members: Array<{
+        members?: Array<{
           customerId: string;
           roleLabel?: string | null;
           customer: { id: string; fullName: string; phone: string };
-        }>;
+        }> | null;
       }>
     >("/parties", { token: token() });
   },
@@ -193,8 +217,33 @@ export const inventoryApi = {
   },
   listStyles() {
     return apiRequest<
-      Array<{ id: string; name: string; styleCode: string; color?: string }>
-    >("/product-styles", { token: token() });
+      Array<{
+        id: string;
+        name: string;
+        styleCode?: string;
+        skuCode?: string;
+        color?: string;
+        fulfillmentMode?: string;
+        kind?: string;
+        basePrice?: string | number;
+        trackSerial?: boolean;
+        trackQty?: boolean;
+        categoryId?: string | null;
+        category?: { id: string; name: string } | null;
+        meta?: { color?: string } | null;
+        photoUrl?: string | null;
+        _count?: { stockUnits?: number; stockLevels?: number };
+      }>
+    >("/product-styles", { token: token() }).then((rows) =>
+      rows.map((r) => ({
+        ...r,
+        styleCode: r.styleCode ?? r.skuCode ?? "",
+        color:
+          r.color ??
+          (typeof r.meta?.color === "string" ? r.meta.color : undefined),
+        photoUrl: r.photoUrl ?? null,
+      })),
+    );
   },
   createStyle(body: Record<string, unknown>) {
     return apiRequest<{ id: string }>("/product-styles", {
@@ -203,7 +252,7 @@ export const inventoryApi = {
       token: token(),
     });
   },
-  listUnits(params?: {
+  async listUnits(params?: {
     page?: number;
     limit?: number;
     barcodeSku?: string;
@@ -220,19 +269,51 @@ export const inventoryApi = {
       qs.set("availabilityStatus", params.availabilityStatus);
     if (params?.size) qs.set("size", params.size);
     const q = qs.toString();
-    return apiRequest<{
+    const res = await apiRequest<{
       items: Array<{
         id: string;
         barcodeSku: string;
-        size: string;
-        availabilityStatus: string;
+        variantLabel?: string | null;
+        size?: string;
+        status?: string;
+        availabilityStatus?: string;
         condition: string;
-        rentalPrice: string | number;
         depositAmount: string | number;
+        meta?: { rentalPrice?: number | string } | null;
+        product?: {
+          name: string;
+          skuCode?: string;
+          basePrice?: string | number;
+        };
         productStyle?: { name: string; styleCode: string; color?: string };
+        rentalPrice?: string | number;
       }>;
       meta: { page: number; limit: number; total: number; totalPages: number };
     }>(`/inventory-units${q ? `?${q}` : ""}`, { token: token() });
+
+    return {
+      ...res,
+      items: res.items.map((u) => ({
+        id: u.id,
+        barcodeSku: u.barcodeSku,
+        size: u.variantLabel ?? u.size ?? "",
+        availabilityStatus: u.status ?? u.availabilityStatus ?? "available",
+        condition: u.condition,
+        rentalPrice:
+          u.meta?.rentalPrice ??
+          u.product?.basePrice ??
+          u.rentalPrice ??
+          0,
+        depositAmount: u.depositAmount,
+        productStyle: u.productStyle ??
+          (u.product
+            ? {
+                name: u.product.name,
+                styleCode: u.product.skuCode ?? "",
+              }
+            : undefined),
+      })),
+    };
   },
   createUnit(body: Record<string, unknown>) {
     return apiRequest<{ id: string }>("/inventory-units", {
@@ -307,7 +388,9 @@ export const inventoryApi = {
         qtyOnHand: number;
         sellPrice: string | number;
         productStyle?: { name: string; styleCode: string };
+        product?: { id: string; name: string; skuCode?: string };
         store?: { name: string };
+        location?: { id: string; name: string; code?: string };
       }>;
       meta?: { page: number; limit: number; total: number; totalPages: number };
     }>(`/retail-skus${q ? `?${q}` : ""}`, { token: token() });
@@ -327,6 +410,7 @@ export const ordersApi = {
     page?: number;
     limit?: number;
     status?: string;
+    kind?: string;
     q?: string;
     customerId?: string;
   }) {
@@ -334,6 +418,7 @@ export const ordersApi = {
     if (params?.page) qs.set("page", String(params.page));
     if (params?.limit) qs.set("limit", String(params.limit));
     if (params?.status) qs.set("status", params.status);
+    if (params?.kind) qs.set("kind", params.kind);
     if (params?.q) qs.set("q", params.q);
     if (params?.customerId) qs.set("customerId", params.customerId);
     const q = qs.toString();
@@ -349,6 +434,11 @@ export const ordersApi = {
         pickupDate?: string | null;
         returnDueDate?: string | null;
         eventDate?: string | null;
+        rentalExt?: {
+          lifecycle: string;
+          pickupDate?: string | null;
+          returnDueDate?: string | null;
+        } | null;
       }>;
       meta: { page: number; limit: number; total: number; totalPages: number };
     }>(`/orders${q ? `?${q}` : ""}`, { token: token() });
@@ -367,6 +457,8 @@ export const ordersApi = {
       id: string;
       orderNumber: string;
       status: string;
+      kind?: string;
+      locationId?: string;
       subtotal: string | number;
       taxTotal: string | number;
       depositTotal: string | number;
@@ -376,19 +468,36 @@ export const ordersApi = {
       returnDueDate?: string | null;
       partyId?: string | null;
       customer?: { id: string; fullName: string; phone: string };
+      rentalExt?: {
+        lifecycle: string;
+        eventDate?: string | null;
+        pickupDate?: string | null;
+        returnDueDate?: string | null;
+        partyId?: string | null;
+      } | null;
       items: Array<{
         id: string;
-        itemType: string;
+        itemType?: string;
+        itemKind?: string;
+        description?: string | null;
+        quantity?: number | string;
         unitPrice: string | number;
-        discount: string | number;
+        discount?: string | number;
         taxAmount: string | number;
         size?: string | null;
         inventoryUnitId?: string | null;
+        stockUnitId?: string | null;
+        stockLevelId?: string | null;
         inventoryUnit?: {
           id: string;
           barcodeSku: string;
           size: string;
           rentalPrice: string | number;
+        } | null;
+        stockUnit?: {
+          id: string;
+          barcodeSku: string;
+          variantLabel?: string | null;
         } | null;
         retailSku?: { id: string; sku: string } | null;
         wearer?: { id: string; fullName: string } | null;
@@ -403,10 +512,26 @@ export const ordersApi = {
     }>(`/orders/${id}`, { token: token() });
   },
 
+  update(id: string, body: Record<string, unknown>) {
+    return apiRequest(`/orders/${id}`, {
+      method: "PATCH",
+      body,
+      token: token(),
+    });
+  },
+
   updateStatus(id: string, status: string) {
     return apiRequest(`/orders/${id}/status`, {
       method: "POST",
       body: { status },
+      token: token(),
+    });
+  },
+
+  changeRentalLifecycle(id: string, lifecycle: string) {
+    return apiRequest(`/orders/${id}/rental-lifecycle`, {
+      method: "POST",
+      body: { lifecycle },
       token: token(),
     });
   },
@@ -496,11 +621,43 @@ export const returnsApi = {
         cleaningRequired: boolean;
         cleaningCompletedAt?: string | null;
         inspectNotes?: string | null;
+        notes?: string | null;
         order?: { orderNumber: string };
-        inventoryUnit?: { barcodeSku: string; size: string };
+        stockUnit?: {
+          id: string;
+          barcodeSku: string;
+          variant?: string | null;
+          size?: string | null;
+        } | null;
+        inventoryUnit?: {
+          barcodeSku: string;
+          size?: string | null;
+          variant?: string | null;
+        } | null;
       }>;
       meta: { page: number; limit: number; total: number; totalPages: number };
     }>(`/returns${q ? `?${q}` : ""}`, { token: token() });
+  },
+
+  candidates() {
+    return apiRequest<{
+      items: Array<{
+        id: string;
+        orderNumber: string;
+        lifecycle: string | null;
+        customerName: string;
+        customerPhone?: string | null;
+        unitsOut: Array<{
+          stockUnitId: string;
+          barcode: string;
+          barcodeSku: string;
+          variant?: string | null;
+          size?: string | null;
+          title?: string | null;
+          productId?: string | null;
+        }>;
+      }>;
+    }>("/returns/candidates", { token: token() });
   },
 
   create(body: Record<string, unknown>) {
@@ -522,6 +679,26 @@ export const returnsApi = {
   completeCleaning(id: string) {
     return apiRequest(`/returns/${id}/cleaning/complete`, {
       method: "POST",
+      token: token(),
+    });
+  },
+
+  settleDeposit(
+    orderId: string,
+    body: {
+      refundAmount: number;
+      idempotencyKey: string;
+      reason?: string;
+    },
+  ) {
+    return apiRequest<{
+      orderId: string;
+      held: number;
+      refunded: number;
+      forfeited: number;
+    }>(`/returns/orders/${orderId}/settle-deposit`, {
+      method: "POST",
+      body,
       token: token(),
     });
   },
@@ -589,7 +766,11 @@ export const paymentsApi = {
     type?: string;
     method?: string;
   }) {
-    return apiRequest("/payments/stripe/verify", {
+    return apiRequest<{
+      payment: unknown;
+      needsSaleFinalize?: boolean;
+      balanceDue?: string | number | null;
+    }>("/payments/stripe/verify", {
       method: "POST",
       body,
       token: token(),
@@ -609,6 +790,743 @@ export const paymentsApi = {
 };
 
 export const posApi = {
+  saleSchema() {
+    return apiRequest<{
+      mode: "sale";
+      label: string;
+      description: string;
+      fields: Array<{
+        key: string;
+        label: string;
+        required: boolean;
+        type: string;
+        hint?: string;
+      }>;
+    }>("/pos/sale/schema", { token: token() });
+  },
+  /** Schema for any registered commerce mode (sale|rental|service|subscription|…) */
+  modeSchema(mode: string) {
+    return apiRequest<{
+      mode: string;
+      label: string;
+      description: string;
+      fields: Array<{
+        key: string;
+        label: string;
+        required: boolean;
+        type: string;
+        hint?: string;
+      }>;
+      categoryExamples?: string[];
+      lifecycle?: string[];
+    }>(`/pos/${encodeURIComponent(mode)}/schema`, { token: token() });
+  },
+  saleFloor(locationId?: string) {
+    const qs = locationId
+      ? `?locationId=${encodeURIComponent(locationId)}`
+      : "";
+    return apiRequest<{
+      schema: {
+        mode: "sale";
+        fields: Array<{
+          key: string;
+          label: string;
+          required: boolean;
+          type: string;
+          hint?: string;
+        }>;
+      };
+      locationId: string;
+      counts: {
+        categories: number;
+        products: number;
+        stockRows: number;
+        inStock: number;
+      };
+      categories: Array<{ id: string; name: string }>;
+      items: Array<{
+        id: string;
+        sku: string;
+        sellPrice: string | number;
+        qtyOnHand: number;
+        name: string;
+        category?: { id: string; name: string } | null;
+      }>;
+    }>(`/pos/sale/floor${qs}`, { token: token() });
+  },
+  addSaleCategory(body: { name: string }) {
+    return apiRequest<{ id: string; name: string }>("/pos/sale/categories", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  addSaleProduct(body: {
+    title: string;
+    description?: string;
+    categoryId: string;
+    sku: string;
+    price: number;
+    qty: number;
+    locationId?: string;
+    image?: string;
+    photoUrl?: string;
+  }) {
+    return apiRequest<{
+      mode: "sale";
+      fieldsUsed: string[];
+      product: {
+        id: string;
+        title: string;
+        sku: string;
+        image?: string | null;
+        photoUrl?: string | null;
+        category?: { id: string; name: string };
+      };
+      stockLevel: {
+        id: string;
+        sku: string;
+        sellPrice: string | number;
+        qtyOnHand: number;
+      };
+      posItem: {
+        id: string;
+        sku: string;
+        name: string;
+        sellPrice: string | number;
+        qtyOnHand: number;
+        image?: string | null;
+        photoUrl?: string | null;
+      };
+    }>("/pos/sale/products", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  listSaleProducts(params?: {
+    locationId?: string;
+    q?: string;
+    categoryId?: string;
+  }) {
+    const qs = new URLSearchParams();
+    if (params?.locationId) qs.set("locationId", params.locationId);
+    if (params?.q) qs.set("q", params.q);
+    if (params?.categoryId) qs.set("categoryId", params.categoryId);
+    const q = qs.toString();
+    return apiRequest<{
+      locationId: string;
+      fields: Array<{
+        key: string;
+        label: string;
+        required: boolean;
+        type: string;
+        hint?: string;
+      }>;
+      items: Array<{
+        id: string;
+        productId: string;
+        sku: string;
+        title: string;
+        description?: string | null;
+        image?: string | null;
+        photoUrl?: string | null;
+        price: string | number;
+        qty: number;
+        isActive: boolean;
+        category?: { id: string; name: string } | null;
+      }>;
+    }>(`/pos/sale/products${q ? `?${q}` : ""}`, { token: token() });
+  },
+  getSaleProduct(id: string) {
+    return apiRequest<{
+      id: string;
+      productId: string;
+      sku: string;
+      title: string;
+      description?: string | null;
+      image?: string | null;
+      photoUrl?: string | null;
+      price: string | number;
+      qty: number;
+      isActive: boolean;
+      category?: { id: string; name: string } | null;
+    }>(`/pos/sale/products/${id}`, { token: token() });
+  },
+  updateSaleProduct(
+    id: string,
+    body: {
+      title?: string;
+      description?: string;
+      categoryId?: string;
+      price?: number;
+      qty?: number;
+      isActive?: boolean;
+      image?: string;
+      photoUrl?: string;
+    },
+  ) {
+    return apiRequest<{
+      id: string;
+      productId: string;
+      sku: string;
+      title: string;
+      description?: string | null;
+      image?: string | null;
+      photoUrl?: string | null;
+      price: string | number;
+      qty: number;
+      isActive: boolean;
+      category?: { id: string; name: string } | null;
+    }>(`/pos/sale/products/${id}`, {
+      method: "PATCH",
+      body,
+      token: token(),
+    });
+  },
+  uploadSaleProductImage(id: string, imageBase64: string) {
+    return apiRequest<{
+      id: string;
+      image?: string | null;
+      photoUrl?: string | null;
+      title: string;
+    }>(`/pos/sale/products/${id}/image`, {
+      method: "POST",
+      body: { imageBase64 },
+      token: token(),
+    });
+  },
+  uploadRentalProductImage(id: string, imageBase64: string) {
+    return apiRequest<{
+      id: string;
+      image?: string | null;
+      photoUrl?: string | null;
+      title?: string;
+    }>(`/pos/rental/products/${id}/image`, {
+      method: "POST",
+      body: { imageBase64 },
+      token: token(),
+    });
+  },
+  adjustSaleStock(id: string, body: { delta: number }) {
+    return apiRequest<{
+      id: string;
+      sku: string;
+      qty: number;
+      delta: number;
+    }>(`/pos/sale/products/${id}/adjust-stock`, {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  listSaleCategories() {
+    return apiRequest<
+      Array<{ id: string; name: string; productCount: number }>
+    >("/pos/sale/categories", { token: token() });
+  },
+  renameSaleCategory(id: string, body: { name: string }) {
+    return apiRequest<{ id: string; name: string }>(
+      `/pos/sale/categories/${id}`,
+      {
+        method: "PATCH",
+        body,
+        token: token(),
+      },
+    );
+  },
+  listRecentSales(limit?: number) {
+    const qs = limit ? `?limit=${limit}` : "";
+    return apiRequest<{
+      items: Array<{
+        id: string;
+        orderNumber: string;
+        status: string;
+        subtotal: string | number;
+        balanceDue: string | number;
+        createdAt: string;
+        customerName: string;
+        itemCount: number;
+      }>;
+    }>(`/pos/sale/recent${qs}`, { token: token() });
+  },
+  saleCatalog(params?: {
+    locationId?: string;
+    q?: string;
+    limit?: number;
+    lowStock?: boolean;
+    maxQty?: number;
+  }) {
+    const qs = new URLSearchParams();
+    if (params?.locationId) qs.set("locationId", params.locationId);
+    if (params?.q) qs.set("q", params.q);
+    if (params?.limit) qs.set("limit", String(params.limit));
+    if (params?.lowStock) qs.set("lowStock", "1");
+    if (params?.maxQty) qs.set("maxQty", String(params.maxQty));
+    const q = qs.toString();
+    return apiRequest<{
+      locationId: string;
+      lowStock?: boolean;
+      maxQty?: number;
+      items: Array<{
+        id: string;
+        sku: string;
+        sellPrice: string | number;
+        qtyOnHand: number;
+        lowStock?: boolean;
+        name: string;
+        productSku?: string;
+        description?: string | null;
+        image?: string | null;
+        photoUrl?: string | null;
+        category?: { id: string; name: string } | null;
+      }>;
+    }>(`/pos/sale/catalog${q ? `?${q}` : ""}`, { token: token() });
+  },
+  saleLookup(sku: string, locationId?: string) {
+    const qs = new URLSearchParams({ sku });
+    if (locationId) qs.set("locationId", locationId);
+    return apiRequest<{
+      id: string;
+      sku: string;
+      sellPrice: string | number;
+      qtyOnHand: number;
+      name: string;
+      productSku?: string;
+      image?: string | null;
+      photoUrl?: string | null;
+      category?: { id: string; name: string } | null;
+    }>(`/pos/sale/lookup?${qs}`, { token: token() });
+  },
+  saleCheckout(body: {
+    locationId: string;
+    customerId?: string;
+    items: Array<{
+      stockLevelId: string;
+      quantity: number;
+      unitPrice?: number;
+    }>;
+    payments: Array<{
+      method: string;
+      amount: number;
+      idempotencyKey: string;
+      type?: string;
+    }>;
+    cashTendered?: number;
+    note?: string;
+    discountAmount?: number;
+  }) {
+    return apiRequest<{
+      order: {
+        id: string;
+        orderNumber: string;
+        status: string;
+        balanceDue: string | number;
+      };
+      change: string | number;
+      cashTendered: string | number | null;
+      receipt: ReceiptPayload;
+      replayed?: boolean;
+    }>("/pos/sale/checkout", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  prepareSale(body: {
+    locationId: string;
+    customerId?: string;
+    items: Array<{
+      stockLevelId: string;
+      quantity: number;
+      unitPrice?: number;
+    }>;
+    note?: string;
+    discountAmount?: number;
+  }) {
+    return apiRequest<{
+      orderId: string;
+      orderNumber: string;
+      balanceDue: string | number;
+      currencyCode: string;
+      awaitingStripePayment: boolean;
+    }>("/pos/sale/prepare", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  cancelPreparedSale(orderId: string) {
+    return apiRequest<{ id: string; status: string }>(
+      `/pos/sale/prepare/${orderId}/cancel`,
+      { method: "POST", token: token() },
+    );
+  },
+  finalizeStripeSale(orderId: string) {
+    return apiRequest<ReceiptPayload>(`/pos/sale/prepare/${orderId}/finalize`, {
+      method: "POST",
+      token: token(),
+    });
+  },
+
+  parkSale(body: {
+    locationId: string;
+    customerId?: string;
+    items: Array<{
+      stockLevelId: string;
+      quantity: number;
+      unitPrice?: number;
+    }>;
+    note?: string;
+    discountAmount?: number;
+    label?: string;
+  }) {
+    return apiRequest<{
+      id: string;
+      orderNumber: string;
+      balanceDue: string | number;
+      label?: string | null;
+    }>("/pos/sale/park", { method: "POST", body, token: token() });
+  },
+  listParkedSales(locationId?: string) {
+    const qs = locationId
+      ? `?locationId=${encodeURIComponent(locationId)}`
+      : "";
+    return apiRequest<{
+      items: Array<{
+        id: string;
+        orderNumber: string;
+        customerName: string;
+        balanceDue: string | number;
+        itemCount?: number;
+        label?: string | null;
+        updatedAt?: string;
+      }>;
+    }>(`/pos/sale/parked${qs}`, { token: token() });
+  },
+  resumeParkedSale(orderId: string) {
+    return apiRequest<{
+      id: string;
+      orderNumber: string;
+      customerId: string | null;
+      locationId: string;
+      discountAmount: number;
+      note: string | null;
+      cart: Array<{
+        stockLevelId: string;
+        sku: string;
+        name: string;
+        unitPrice: number;
+        qty: number;
+        maxQty: number;
+      }>;
+    }>(`/pos/sale/parked/${orderId}/resume`, {
+      method: "POST",
+      token: token(),
+    });
+  },
+  discardParkedSale(orderId: string) {
+    return apiRequest<{ id: string; status: string }>(
+      `/pos/sale/parked/${orderId}/discard`,
+      { method: "POST", token: token() },
+    );
+  },
+  openRegister(body: { locationId: string; openingFloat?: number }) {
+    return apiRequest<{
+      id: string;
+      locationId: string;
+      openingFloat: string | number;
+      openedAt: string;
+    }>("/pos/sale/register/open", { method: "POST", body, token: token() });
+  },
+  currentRegister(locationId?: string) {
+    const qs = locationId
+      ? `?locationId=${encodeURIComponent(locationId)}`
+      : "";
+    return apiRequest<{
+      session: {
+        id: string;
+        openingFloat: string | number;
+        openedAt: string;
+      } | null;
+      locationId: string;
+    }>(`/pos/sale/register/current${qs}`, { token: token() });
+  },
+  closeRegister(
+    id: string,
+    body: { closingCash: number; note?: string },
+  ) {
+    return apiRequest(`/pos/sale/register/${id}/close`, {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  saleReturn(body: {
+    orderId: string;
+    items: Array<{ stockLevelId: string; quantity: number }>;
+    refundMethod: string;
+    amount?: number;
+    reason?: string;
+    idempotencyKey: string;
+  }) {
+    return apiRequest<{
+      orderId: string;
+      orderNumber: string;
+      refundPaymentId: string;
+      amount: string | number;
+      restocked: Array<{ stockLevelId: string; quantity: number }>;
+    }>("/pos/sale/returns", { method: "POST", body, token: token() });
+  },
+
+  rentalSchema() {
+    return apiRequest<{
+      mode: "rental";
+      label: string;
+      description: string;
+      fields: Array<{
+        key: string;
+        label: string;
+        required: boolean;
+        type: string;
+        hint?: string;
+      }>;
+      ops: string[];
+      categoryExamples?: string[];
+      lifecycle?: string[];
+    }>("/pos/rental/schema", { token: token() });
+  },
+  rentalFloor(locationId?: string) {
+    const qs = locationId
+      ? `?locationId=${encodeURIComponent(locationId)}`
+      : "";
+    return apiRequest<{
+      schema: {
+        mode: "rental";
+        label?: string;
+        description?: string;
+        fields: Array<{
+          key: string;
+          label: string;
+          required: boolean;
+          type: string;
+          hint?: string;
+        }>;
+        ops: string[];
+        categoryExamples?: string[];
+        lifecycle?: string[];
+      };
+      locationId: string;
+      counts: {
+        categories: number;
+        products: number;
+        units: number;
+        available: number;
+        checkedOut: number;
+      };
+      categories: Array<{ id: string; name: string }>;
+      units: Array<RentalUnitRow>;
+    }>(`/pos/rental/floor${qs}`, { token: token() });
+  },
+  listRentalCategories() {
+    return apiRequest<
+      Array<{ id: string; name: string; productCount: number }>
+    >("/pos/rental/categories", { token: token() });
+  },
+  addRentalCategory(body: { name: string }) {
+    return apiRequest<{ id: string; name: string }>("/pos/rental/categories", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  renameRentalCategory(id: string, body: { name: string }) {
+    return apiRequest<{ id: string; name: string }>(
+      `/pos/rental/categories/${id}`,
+      { method: "PATCH", body, token: token() },
+    );
+  },
+  listRentalProducts(params?: { q?: string; categoryId?: string }) {
+    const qs = new URLSearchParams();
+    if (params?.q) qs.set("q", params.q);
+    if (params?.categoryId) qs.set("categoryId", params.categoryId);
+    const q = qs.toString();
+    return apiRequest<{
+      fields: Array<{
+        key: string;
+        label: string;
+        required: boolean;
+        type: string;
+        hint?: string;
+      }>;
+      items: Array<{
+        id: string;
+        title: string;
+        sku: string;
+        description?: string | null;
+        rentalPrice: string | number;
+        deposit: string | number;
+        isActive: boolean;
+        category?: { id: string; name: string } | null;
+        unitCount: number;
+        image?: string | null;
+        photoUrl?: string | null;
+      }>;
+    }>(`/pos/rental/products${q ? `?${q}` : ""}`, { token: token() });
+  },
+  addRentalProduct(body: {
+    title: string;
+    description?: string;
+    categoryId: string;
+    sku: string;
+    rentalPrice: number;
+    deposit?: number;
+    barcode: string;
+    variant?: string;
+    locationId?: string;
+  }) {
+    return apiRequest<{
+      mode: "rental";
+      product: { id: string; title: string; sku: string };
+      unit: RentalUnitRow;
+    }>("/pos/rental/products", { method: "POST", body, token: token() });
+  },
+  updateRentalProduct(
+    id: string,
+    body: {
+      title?: string;
+      description?: string;
+      categoryId?: string;
+      rentalPrice?: number;
+      isActive?: boolean;
+    },
+  ) {
+    return apiRequest(`/pos/rental/products/${id}`, {
+      method: "PATCH",
+      body,
+      token: token(),
+    });
+  },
+  listRentalUnits(params?: {
+    locationId?: string;
+    q?: string;
+    categoryId?: string;
+    productId?: string;
+    status?: string;
+  }) {
+    const qs = new URLSearchParams();
+    if (params?.locationId) qs.set("locationId", params.locationId);
+    if (params?.q) qs.set("q", params.q);
+    if (params?.categoryId) qs.set("categoryId", params.categoryId);
+    if (params?.productId) qs.set("productId", params.productId);
+    if (params?.status) qs.set("status", params.status);
+    const q = qs.toString();
+    return apiRequest<{ locationId: string; items: RentalUnitRow[] }>(
+      `/pos/rental/units${q ? `?${q}` : ""}`,
+      { token: token() },
+    );
+  },
+  addRentalUnit(body: {
+    productId: string;
+    barcode: string;
+    variant?: string;
+    rentalPrice?: number;
+    deposit?: number;
+    locationId?: string;
+  }) {
+    return apiRequest<RentalUnitRow>("/pos/rental/units", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  updateRentalUnit(
+    id: string,
+    body: {
+      variant?: string;
+      rentalPrice?: number;
+      deposit?: number;
+      isActive?: boolean;
+    },
+  ) {
+    return apiRequest<RentalUnitRow>(`/pos/rental/units/${id}`, {
+      method: "PATCH",
+      body,
+      token: token(),
+    });
+  },
+  rentalCatalog(params?: { locationId?: string; q?: string; limit?: number }) {
+    const qs = new URLSearchParams();
+    if (params?.locationId) qs.set("locationId", params.locationId);
+    if (params?.q) qs.set("q", params.q);
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const q = qs.toString();
+    return apiRequest<{ locationId: string; items: RentalUnitRow[] }>(
+      `/pos/rental/catalog${q ? `?${q}` : ""}`,
+      { token: token() },
+    );
+  },
+  rentalLookup(barcode: string, locationId?: string) {
+    const qs = new URLSearchParams({ barcode });
+    if (locationId) qs.set("locationId", locationId);
+    return apiRequest<RentalUnitRow>(`/pos/rental/lookup?${qs}`, {
+      token: token(),
+    });
+  },
+  listRecentRentals(limit?: number) {
+    const qs = limit ? `?limit=${limit}` : "";
+    return apiRequest<{
+      items: Array<{
+        id: string;
+        orderNumber: string;
+        status: string;
+        lifecycle: string | null;
+        subtotal: string | number;
+        balanceDue: string | number;
+        createdAt: string;
+        customerName: string;
+        itemCount: number;
+      }>;
+    }>(`/pos/rental/recent${qs}`, { token: token() });
+  },
+  rentalExchange(body: {
+    orderId: string;
+    fromStockUnitId: string;
+    toStockUnitId: string;
+    reason?: string;
+  }) {
+    return apiRequest<{
+      orderId: string;
+      orderNumber: string;
+      fromStockUnitId: string;
+      toStockUnitId: string;
+      lifecycle: string;
+    }>("/pos/rental/exchange", { method: "POST", body, token: token() });
+  },
+
+  rentalExtend(body: {
+    orderId: string;
+    newReturnDueDate: string;
+    ratePerDay?: number;
+    extensionAmount?: number;
+    payment?: {
+      method: string;
+      amount: number;
+      idempotencyKey: string;
+      type?: string;
+    };
+  }) {
+    return apiRequest<{
+      orderId: string;
+      orderNumber: string;
+      previousReturnDueDate: string;
+      newReturnDueDate: string;
+      extraDays: number;
+      extensionFee: number;
+      balanceDue: string | number;
+    }>("/pos/rental/extend", { method: "POST", body, token: token() });
+  },
+
   checkout(body: {
     orderId: string;
     payments: Array<{
@@ -619,39 +1537,74 @@ export const posApi = {
     }>;
     markReady?: boolean;
   }) {
-    return apiRequest<{ order: { id: string; status: string }; payments: unknown[] }>(
-      "/pos/checkout",
-      { method: "POST", body, token: token() },
-    );
+    return apiRequest<{
+      order: { id: string; status: string };
+      payments: unknown[];
+    }>("/pos/checkout", {
+      method: "POST",
+      body,
+      token: token(),
+    });
   },
   receipt(orderId: string) {
-    return apiRequest<{
-      orderNumber: string;
-      status: string;
-      store: { name: string; code?: string | null; address?: string | null };
-      customer: { fullName: string; phone: string; email?: string | null };
-      items: Array<{
-        itemType: string;
-        size?: string | null;
-        unitPrice: string | number;
-        inventoryUnit?: { barcodeSku: string; size: string } | null;
-        retailSku?: { sku: string } | null;
-      }>;
-      totals: {
-        subtotal: string | number;
-        taxTotal: string | number;
-        depositTotal: string | number;
-        balanceDue: string | number;
-      };
-      payments: Array<{
-        method: string;
-        type: string;
-        amount: string | number;
-        paidAt?: string | null;
-      }>;
-      printedAt: string;
-    }>(`/pos/orders/${orderId}/receipt`, { token: token() });
+    return apiRequest<ReceiptPayload>(`/pos/orders/${orderId}/receipt`, {
+      token: token(),
+    });
   },
+};
+
+type RentalUnitRow = {
+  id: string;
+  barcode: string;
+  barcodeSku: string;
+  variant?: string | null;
+  size?: string | null;
+  status: string;
+  deposit: string | number;
+  rentalPrice: string | number;
+  productId: string;
+  title: string;
+  sku: string;
+  isActive?: boolean;
+  category?: { id: string; name: string } | null;
+  image?: string | null;
+  photoUrl?: string | null;
+};
+
+type ReceiptPayload = {
+  orderNumber: string;
+  status: string;
+  kind?: string;
+  store: { name: string; code?: string | null; address?: string | null };
+  customer: {
+    fullName: string;
+    phone: string;
+    email?: string | null;
+  } | null;
+  items: Array<{
+    itemType: string;
+    description?: string | null;
+    quantity?: string | number;
+    unitPrice: string | number;
+    lineTotal?: string | number;
+    inventoryUnit?: { barcodeSku: string; size?: string | null } | null;
+    retailSku?: { sku: string } | null;
+    product?: { name: string; skuCode?: string } | null;
+  }>;
+  totals: {
+    subtotal: string | number;
+    taxTotal: string | number;
+    depositTotal: string | number;
+    balanceDue: string | number;
+  };
+  payments: Array<{
+    method: string;
+    type: string;
+    amount: string | number;
+    paidAt?: string | null;
+    createdAt?: string | null;
+  }>;
+  printedAt: string;
 };
 
 export const tenantsApi = {
@@ -661,12 +1614,199 @@ export const tenantsApi = {
       name: string;
       slug: string;
       gstin?: string | null;
+      taxId?: string | null;
+      currencyCode?: string;
+      locale?: string;
+      branding?: Record<string, unknown> | null;
     }>("/tenants/me", { token: token() });
   },
   listStores() {
     return apiRequest<
       Array<{ id: string; name: string; code?: string | null; isMain?: boolean }>
     >("/stores", { token: token() });
+  },
+  listLocations() {
+    return apiRequest<
+      Array<{
+        id: string;
+        name: string;
+        code?: string | null;
+        type?: string;
+        isActive?: boolean;
+      }>
+    >("/locations", { token: token() });
+  },
+  updateMe(body: {
+    name?: string;
+    currencyCode?: string;
+    locale?: string;
+    timezone?: string;
+    branding?: Record<string, unknown>;
+    settings?: Record<string, unknown>;
+    taxId?: string;
+    gstin?: string;
+    taxMode?: string;
+    tax?: {
+      ratePercent?: number;
+      inclusive?: boolean;
+      receiptFooter?: string;
+    };
+    maxCashierDiscountPercent?: number;
+  }) {
+    return apiRequest("/tenants/me", {
+      method: "PATCH",
+      body,
+      token: token(),
+    });
+  },
+};
+
+export const appsApi = {
+  bootstrap() {
+    return apiRequest<TenantBootstrap>(
+      "/tenants/me/bootstrap",
+      { token: token() },
+    );
+  },
+  listModules() {
+    return apiRequest<
+      Array<{
+        code: string;
+        name: string;
+        status: string;
+        dependsOn?: string[];
+      }>
+    >("/tenants/me/modules", { token: token() });
+  },
+  enableModule(code: string, config?: Record<string, unknown>) {
+    return apiRequest(`/tenants/me/modules/${code}/enable`, {
+      method: "POST",
+      body: config ? { config } : {},
+      token: token(),
+    });
+  },
+  disableModule(code: string) {
+    return apiRequest(`/tenants/me/modules/${code}/disable`, {
+      method: "POST",
+      token: token(),
+    });
+  },
+  listFeatureFlags() {
+    return apiRequest<Array<{ key: string; enabled: boolean }>>(
+      "/tenants/me/feature-flags",
+      { token: token() },
+    );
+  },
+  setFeatureFlag(body: { key: string; enabled: boolean }) {
+    return apiRequest("/tenants/me/feature-flags", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  setCommerceModes(body: {
+    mode?: "sale" | "rental";
+    modes?: Array<"sale" | "rental">;
+    shopTitle?: string;
+    tagline?: string;
+  }) {
+    return apiRequest<{
+      setupComplete: boolean;
+      modes: Array<"sale" | "rental">;
+      primary?: "sale" | "rental";
+      schemas: Record<string, unknown>;
+      fields?: unknown;
+      rentalLifecycle?: string[];
+    }>("/tenants/me/commerce-modes", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  createCatalogItem(body: {
+    mode: "sale" | "rental";
+    title: string;
+    description?: string;
+    categoryId: string;
+    sku: string;
+    locationId?: string;
+    price?: number;
+    qty?: number;
+    rentalPrice?: number;
+    deposit?: number;
+    barcode?: string;
+    size?: string;
+  }) {
+    return apiRequest<{
+      mode: "sale" | "rental";
+      product: {
+        id: string;
+        title: string;
+        sku: string;
+        description?: string | null;
+      };
+      stockLevel?: { id: string; qtyOnHand?: number; sellPrice?: string | number };
+      unit?: { id: string };
+    }>("/catalog/items", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  dashboardCatalog() {
+    return apiRequest<{
+      setupComplete?: boolean;
+      modes: Array<"sale" | "rental">;
+      primary?: "sale" | "rental" | null;
+      fields?: {
+        sale: unknown;
+        rental: unknown;
+        fitMeasurements: Array<{ key: string; label: string }>;
+      };
+      rentalLifecycle?: string[];
+      counts: {
+        categories: number;
+        products: number;
+        saleStockRows: number;
+        rentalUnits: number;
+        openOrders: number;
+      };
+      categories: Array<{ id: string; name: string }>;
+      products: Array<{
+        id: string;
+        title: string;
+        description?: string | null;
+        sku: string;
+        mode: string;
+        price: string | number;
+        category?: { id: string; name: string } | null;
+        stockLevels: number;
+        stockUnits: number;
+      }>;
+      openOrders?: Array<{
+        id: string;
+        orderNumber: string;
+        status: string;
+        kind: string;
+        balanceDue: string | number;
+        customer?: {
+          id: string;
+          fullName: string;
+          phone?: string | null;
+        } | null;
+        lifecycle?: string | null;
+        pickupDate?: string | null;
+        returnDueDate?: string | null;
+      }>;
+      recentReturns?: Array<{
+        id: string;
+        notes?: string | null;
+        createdAt: string;
+        orderNumber?: string | null;
+        barcodeSku?: string | null;
+        size?: string | null;
+      }>;
+    }>("/tenants/me/dashboard-catalog", { token: token() });
   },
 };
 
@@ -969,6 +2109,18 @@ export const suppliersApi = {
         expectedDelivery?: string | null;
         linkedOrderId?: string | null;
         supplier?: { name: string };
+        lines?: Array<{
+          id: string;
+          stockLevelId: string;
+          qtyOrdered: number;
+          qtyReceived: number;
+          stockLevel?: {
+            id: string;
+            sku: string;
+            qtyOnHand: number;
+            product?: { name: string };
+          };
+        }>;
       }>
     >("/purchase-orders", { token: token() });
   },
@@ -977,6 +2129,11 @@ export const suppliersApi = {
     poType?: string;
     linkedOrderId?: string;
     expectedDelivery?: string;
+    lines?: Array<{
+      stockLevelId: string;
+      qtyOrdered: number;
+      unitCost?: number;
+    }>;
   }) {
     return apiRequest("/purchase-orders", {
       method: "POST",
@@ -987,6 +2144,24 @@ export const suppliersApi = {
   updatePo(id: string, body: { status?: string; expectedDelivery?: string }) {
     return apiRequest(`/purchase-orders/${id}`, {
       method: "PATCH",
+      body,
+      token: token(),
+    });
+  },
+  receivePo(
+    id: string,
+    body: { lines: Array<{ stockLevelId: string; qty: number }> },
+  ) {
+    return apiRequest<{
+      purchaseOrder: { id: string; status: string };
+      received: Array<{
+        stockLevelId: string;
+        sku: string;
+        qtyAdded: number;
+        qtyOnHand: number;
+      }>;
+    }>(`/purchase-orders/${id}/receive`, {
+      method: "POST",
       body,
       token: token(),
     });
@@ -1027,14 +2202,22 @@ export const syncApi = {
 export const platformBillingApi = {
   listPlans() {
     return apiRequest<
-      Array<{ id: string; code: string; name: string; priceInr: string | number }>
+      Array<{
+        id: string;
+        code: string;
+        name: string;
+        priceInr?: string | number;
+        priceAmount?: string | number;
+        limits?: Record<string, unknown>;
+        features?: Record<string, unknown>;
+      }>
     >("/platform-billing/plans", { token: token() });
   },
   subscription() {
     return apiRequest<{
       id: string;
       status: string;
-      plan?: { code: string; name: string };
+      plan?: { code: string; name: string; priceInr?: string | number };
       seatsUsed?: number;
       locationsUsed?: number;
     } | null>("/platform-billing/subscription", { token: token() });
