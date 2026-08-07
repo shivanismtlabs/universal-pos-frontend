@@ -122,7 +122,7 @@ export async function apiRequest<T>(
   } catch {
     throw new ApiError(
       0,
-      "Cannot reach API. Start the backend with npm run start:dev",
+      "Cannot reach API. Check that the server API is running and the production URL is correct.",
     );
   }
 

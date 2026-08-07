@@ -14,7 +14,6 @@ import { AuthShell } from "@/components/auth-shell";
 import {
   passwordStrength,
   registerTenantSchema,
-  slugifyShopName,
   type RegisterTenantInput,
 } from "@/lib/validations";
 import { authApi } from "@/lib/api";
@@ -51,16 +50,15 @@ export default function RegisterPage() {
 
   async function onSubmit(values: RegisterTenantInput) {
     const shopName = values.tenantName.trim();
-    const slug = slugifyShopName(shopName);
     try {
       const data = await authApi.registerTenant({
         tenantName: shopName,
-        tenantSlug: slug,
-        storeName: shopName,
         adminFullName: values.adminFullName.trim(),
         adminEmail: values.adminEmail.trim().toLowerCase(),
         adminPassword: values.adminPassword,
-        adminPhone: values.adminPhone || undefined,
+        ...(values.adminPhone?.trim()
+          ? { adminPhone: values.adminPhone.trim() }
+          : {}),
       });
       setSession({
         accessToken: data.accessToken,

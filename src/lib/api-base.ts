@@ -5,7 +5,8 @@
  *   NEXT_PUBLIC_API_URL_LOCAL=http://127.0.0.1:3001/v1
  *   NEXT_PUBLIC_API_URL_PRODUCTION=http://13.126.105.138:3001/v1
  *
- * Auto: localhost → local API; any other host → production API.
+ * On a remote host (e.g. 13.x.x.x), never call localhost — that hits the
+ * user's PC, not the server.
  */
 
 const DEFAULT_LOCAL = "http://127.0.0.1:3001/v1";
@@ -38,18 +39,32 @@ function isLocalHost(host: string) {
   );
 }
 
+function isLoopbackUrl(url: string) {
+  return (
+    url.includes("://127.0.0.1") ||
+    url.includes("://localhost") ||
+    url.includes("://[::1]")
+  );
+}
+
 export function getApiBaseUrl(): string {
-  if (typeof window === "undefined") {
-    // SSR: prefer production URL when target is production
-    const target = (process.env.NEXT_PUBLIC_API_TARGET || "").toLowerCase();
-    return target === "production" ? envProductionUrl() : envLocalUrl();
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    if (isLocalHost(host)) {
+      return envLocalUrl();
+    }
+
+    const fromEnv = envProductionUrl();
+    // Baked .env accidentally pointing at 127.0.0.1 → use same host :3001
+    if (isLoopbackUrl(fromEnv)) {
+      const port = process.env.NEXT_PUBLIC_API_PORT || "3001";
+      return `${window.location.protocol}//${host}:${port}/v1`;
+    }
+    return fromEnv;
   }
 
-  const host = window.location.hostname;
-  if (isLocalHost(host)) {
-    return envLocalUrl();
-  }
-  return envProductionUrl();
+  const target = (process.env.NEXT_PUBLIC_API_TARGET || "").toLowerCase();
+  return target === "production" ? envProductionUrl() : envLocalUrl();
 }
 
 export function getApiOrigin(): string {
