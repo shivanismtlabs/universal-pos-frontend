@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -12,12 +13,11 @@ import { Label } from "@/components/ui/label";
 import { FieldError } from "@/components/ui/form";
 import { AuthShell } from "@/components/auth-shell";
 import { loginSchema, type LoginInput } from "@/lib/validations";
-import { authApi } from "@/lib/api";
+import { appsApi, authApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useAuthStore } from "@/lib/auth-store";
-import { Stagger, StaggerItem } from "@/components/motion";
 
-const FAIL_KEY = "tuxedo-login-fails";
+const FAIL_KEY = "universal-pos-login-fails";
 const LOCK_MS = 60_000;
 const MAX_FAILS = 5;
 
@@ -39,6 +39,7 @@ function writeLock(fails: number, until = 0) {
 export default function LoginForm() {
   const router = useRouter();
   const search = useSearchParams();
+  const qc = useQueryClient();
   const setSession = useAuthStore((s) => s.setSession);
   const token = useAuthStore((s) => s.accessToken);
   const savedSlug = useAuthStore((s) => s.tenantSlug);
@@ -67,7 +68,9 @@ export default function LoginForm() {
   }, [ready, token, router]);
 
   const locked = lockUntil > now;
-  const lockSeconds = locked ? Math.max(0, Math.ceil((lockUntil - now) / 1000)) : 0;
+  const lockSeconds = locked
+    ? Math.max(0, Math.ceil((lockUntil - now) / 1000))
+    : 0;
 
   useEffect(() => {
     if (lockUntil <= Date.now()) return;
@@ -124,6 +127,13 @@ export default function LoginForm() {
         },
         tenantSlug: payload.tenantSlug,
       });
+      // Prefetch shop config before navigation so dashboard skips "Loading shop…"
+      try {
+        const boot = await appsApi.bootstrap();
+        qc.setQueryData(["tenant-bootstrap"], boot);
+      } catch {
+        /* AppShell will retry */
+      }
       toast.success("Welcome back");
       router.replace("/dashboard");
     } catch (e) {
@@ -145,102 +155,90 @@ export default function LoginForm() {
 
   return (
     <AuthShell
-      title="Sign in to your shop"
-      subtitle="Staff access for Tuxedo POS — short-lived tokens, tenant isolation, and secure session handling."
+      title="Staff sign-in"
+      subtitle="Sign in to run your counter — products, checkout, and daily sales in one place."
     >
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-5" noValidate>
-        <Stagger className="space-y-5" delay={0.04}>
-          <StaggerItem>
-            <div>
-              <p className="eyebrow text-[#0f766e]">Staff access</p>
-              <h2 className="display mt-2 text-2xl text-[#111827]">
-                Continue to Tuxedo
-              </h2>
-              <p className="mt-1 text-sm text-[#6b7280]">
-                Enter tenant slug and credentials
-              </p>
-            </div>
-          </StaggerItem>
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
+        <div>
+          <h2 className="text-xl font-bold tracking-tight text-[#0b1f33]">
+            Sign in
+          </h2>
+          <p className="mt-1 text-[0.8125rem] text-[#5a6b7d]">
+            Enter your shop slug, email, and password.
+          </p>
+        </div>
 
-          <StaggerItem>
-            <div>
-              <Label htmlFor="tenantSlug">Tenant slug</Label>
-              <Input
-                id="tenantSlug"
-                className="mt-2"
-                autoComplete="organization"
-                spellCheck={false}
-                placeholder="your-shop"
-                {...register("tenantSlug")}
-              />
-              <FieldError message={errors.tenantSlug?.message} />
-            </div>
-          </StaggerItem>
+        <div className="space-y-1.5">
+          <Label htmlFor="tenantSlug">Shop slug</Label>
+          <Input
+            id="tenantSlug"
+            autoComplete="organization"
+            spellCheck={false}
+            placeholder="e.g. my-shop"
+            {...register("tenantSlug")}
+          />
+          <FieldError message={errors.tenantSlug?.message} />
+        </div>
 
-          <StaggerItem>
-            <div>
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                className="mt-2"
-                autoComplete="username"
-                placeholder="you@shop.com"
-                {...register("email")}
-              />
-              <FieldError message={errors.email?.message} />
-            </div>
-          </StaggerItem>
+        <div className="space-y-1.5">
+          <Label htmlFor="email">Email</Label>
+          <Input
+            id="email"
+            type="email"
+            autoComplete="username"
+            placeholder="you@shop.com"
+            {...register("email")}
+          />
+          <FieldError message={errors.email?.message} />
+        </div>
 
-          <StaggerItem>
-            <div>
-              <div className="flex items-center justify-between">
-                <Label htmlFor="password">Password</Label>
-                <button
-                  type="button"
-                  className="text-xs font-medium text-[#0f766e] hover:underline"
-                  onClick={() => setShowPassword((v) => !v)}
-                >
-                  {showPassword ? "Hide" : "Show"}
-                </button>
-              </div>
-              <Input
-                id="password"
-                type={showPassword ? "text" : "password"}
-                className="mt-2"
-                autoComplete="current-password"
-                {...register("password")}
-              />
-              <FieldError message={errors.password?.message} />
-            </div>
-          </StaggerItem>
-
-          <StaggerItem>
-            <Button
-              type="submit"
-              className="w-full"
-              disabled={isSubmitting || locked}
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="password">Password</Label>
+            <button
+              type="button"
+              className="text-[0.75rem] font-medium text-[#1a56db] hover:underline"
+              onClick={() => setShowPassword((v) => !v)}
             >
-              {locked
-                ? `Locked (${lockSeconds}s)`
-                : isSubmitting
-                  ? "Signing in…"
-                  : "Sign in"}
-            </Button>
-          </StaggerItem>
+              {showPassword ? "Hide" : "Show"}
+            </button>
+          </div>
+          <Input
+            id="password"
+            type={showPassword ? "text" : "password"}
+            autoComplete="current-password"
+            {...register("password")}
+          />
+          <FieldError message={errors.password?.message} />
+        </div>
 
-          <StaggerItem>
-            <p className="text-center text-sm text-[#6b7280]">
-              New shop?{" "}
-              <Link
-                href="/register"
-                className="font-semibold text-[#0f766e] hover:underline"
-              >
-                Register tenant
-              </Link>
-            </p>
-          </StaggerItem>
-        </Stagger>
+        <Button
+          type="submit"
+          className="w-full"
+          disabled={isSubmitting || locked}
+        >
+          {locked
+            ? `Try again in ${lockSeconds}s`
+            : isSubmitting
+              ? "Signing in…"
+              : "Sign in"}
+        </Button>
+
+        <p className="text-center text-[0.8125rem] text-[#5a6b7d]">
+          <Link
+            href="/register"
+            className="font-medium text-[#1a56db] hover:underline"
+          >
+            Create a shop
+          </Link>
+          {" · "}
+          <Link
+            href="/register-user"
+            className="font-medium text-[#1a56db] hover:underline"
+          >
+            Join as staff
+          </Link>
+        </p>
       </form>
     </AuthShell>
   );

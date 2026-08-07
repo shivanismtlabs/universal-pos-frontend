@@ -44,7 +44,10 @@ export function BootstrapProvider({ children }: { children: ReactNode }) {
     queryKey: ["tenant-bootstrap"],
     queryFn: () => appsApi.bootstrap(),
     enabled: Boolean(token),
-    staleTime: 60_000,
+    staleTime: 5 * 60_000,
+    gcTime: 30 * 60_000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
   });
 
   const data = query.data;
@@ -96,7 +99,7 @@ export function BootstrapProvider({ children }: { children: ReactNode }) {
   const value = useMemo<BootstrapContextValue>(
     () => ({
       data,
-      isLoading: query.isLoading,
+      isLoading: query.isLoading && !data,
       isError: query.isError,
       refetch: () => {
         void query.refetch();

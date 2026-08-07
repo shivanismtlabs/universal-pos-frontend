@@ -49,9 +49,22 @@ export function CommerceModeGate({ children }: { children: React.ReactNode }) {
   );
 
   const schemas = useMemo(() => {
-    const s = (data?.commerce as { schemas?: Record<string, { label?: string; description?: string }> })
-      ?.schemas;
-    return s ?? {};
+    const catalog = (
+      data?.commerce as {
+        modeCatalog?: Array<{ mode: string; label?: string; description?: string }>;
+        schemas?: Record<string, { label?: string; description?: string }>;
+      }
+    )?.modeCatalog;
+    if (catalog?.length) {
+      return Object.fromEntries(
+        catalog.map((c) => [c.mode, { label: c.label, description: c.description }]),
+      );
+    }
+    return (
+      data?.commerce as {
+        schemas?: Record<string, { label?: string; description?: string }>;
+      }
+    )?.schemas ?? {};
   }, [data?.commerce]);
 
   const save = useMutation({

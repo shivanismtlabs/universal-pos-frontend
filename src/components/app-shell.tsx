@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "motion/react";
 import {
   LayoutDashboard,
@@ -350,6 +351,7 @@ function SidebarBody({
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const qc = useQueryClient();
   const user = useAuthStore((s) => s.user);
   const clear = useAuthStore((s) => s.clear);
   const {
@@ -421,6 +423,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       /* still clear local session */
     } finally {
       clear();
+      qc.removeQueries({ queryKey: ["tenant-bootstrap"] });
       toast.success("Signed out");
       router.replace("/login");
     }
