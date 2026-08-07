@@ -1705,17 +1705,17 @@ export const appsApi = {
     });
   },
   setCommerceModes(body: {
-    mode?: "sale" | "rental";
-    modes?: Array<"sale" | "rental">;
+    mode?: string;
+    modes?: string[];
     shopTitle?: string;
     tagline?: string;
   }) {
     return apiRequest<{
       setupComplete: boolean;
-      modes: Array<"sale" | "rental">;
-      primary?: "sale" | "rental";
+      modes: string[];
+      primary?: string;
       schemas: Record<string, unknown>;
-      fields?: unknown;
+      registeredModes?: string[];
       rentalLifecycle?: string[];
     }>("/tenants/me/commerce-modes", {
       method: "POST",
@@ -1724,7 +1724,7 @@ export const appsApi = {
     });
   },
   createCatalogItem(body: {
-    mode: "sale" | "rental";
+    mode: string;
     title: string;
     description?: string;
     categoryId: string;

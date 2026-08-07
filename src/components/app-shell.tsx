@@ -1,13 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
 import {
   LayoutDashboard,
   Users,
-  Shirt,
   ClipboardList,
   CreditCard,
   LogOut,
@@ -19,12 +18,16 @@ import {
   MessageCircle,
   BarChart3,
   UserCog,
-  ShoppingBag,
   Truck,
+  Box,
+  Settings,
+  Package,
+  type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/lib/auth-store";
 import { authApi } from "@/lib/api";
+import { useBootstrap } from "@/lib/bootstrap";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import {
@@ -36,34 +39,134 @@ import {
 type NavItem = {
   href: string;
   label: string;
-  icon: typeof LayoutDashboard;
+  icon: LucideIcon;
+  section: string;
+  module?: string;
+  /** Required commerce mode code (sale|rental|service|…) */
+  commerce?: string;
 };
 
-const counterNav: NavItem[] = [
-  { href: "/dashboard", label: "Floor", icon: LayoutDashboard },
-  { href: "/pos", label: "Terminal", icon: CreditCard },
-  { href: "/returns", label: "Returns desk", icon: PackageCheck },
+const NAV_CATALOG: NavItem[] = [
+  {
+    href: "/catalog",
+    label: "Products",
+    icon: Box,
+    section: "Daily work",
+    module: "catalog",
+  },
+  {
+    href: "/dashboard",
+    label: "Home",
+    icon: LayoutDashboard,
+    section: "Daily work",
+  },
+  {
+    href: "/pos",
+    label: "Counter",
+    icon: CreditCard,
+    section: "Daily work",
+    module: "pos",
+  },
+  {
+    href: "/returns",
+    label: "Returns desk",
+    icon: PackageCheck,
+    section: "Daily work",
+    module: "orders",
+    commerce: "rental",
+  },
+  {
+    href: "/orders",
+    label: "All orders",
+    icon: ClipboardList,
+    section: "Daily work",
+    module: "orders",
+    commerce: "rental",
+  },
+  {
+    href: "/customers",
+    label: "Customers",
+    icon: Users,
+    section: "People",
+    module: "orders",
+  },
+  {
+    href: "/parties",
+    label: "Customer groups",
+    icon: UsersRound,
+    section: "People",
+    module: "rental",
+    commerce: "rental",
+  },
+  {
+    href: "/appointments",
+    label: "Appointments",
+    icon: CalendarDays,
+    section: "People",
+    module: "appointments",
+    commerce: "service",
+  },
+  {
+    href: "/staff",
+    label: "Staff accounts",
+    icon: UserCog,
+    section: "People",
+    module: "iam",
+  },
+  {
+    href: "/notify",
+    label: "WhatsApp",
+    icon: MessageCircle,
+    section: "People",
+    module: "notify",
+  },
+  {
+    href: "/reports",
+    label: "Reports",
+    icon: BarChart3,
+    section: "People",
+    module: "reports",
+  },
+  {
+    href: "/inventory",
+    label: "Barcode units",
+    icon: Package,
+    section: "Shop setup",
+    commerce: "rental" as const,
+    module: "rental",
+  },
+  {
+    href: "/suppliers",
+    label: "Suppliers",
+    icon: Truck,
+    section: "Shop setup",
+    commerce: "sale" as const,
+    module: "inventory",
+  },
+  {
+    href: "/settings",
+    label: "Shop branding",
+    icon: Settings,
+    section: "Shop setup",
+    module: "iam",
+  },
+  {
+    href: "/plan",
+    label: "Plans",
+    icon: CreditCard,
+    section: "Shop setup",
+  },
 ];
 
-const studioNav: NavItem[] = [
-  { href: "/orders", label: "Orders", icon: ClipboardList },
-  { href: "/appointments", label: "Fittings", icon: CalendarDays },
-  { href: "/customers", label: "Customers", icon: Users },
-  { href: "/parties", label: "Parties", icon: UsersRound },
-  { href: "/notify", label: "WhatsApp", icon: MessageCircle },
-  { href: "/reports", label: "Reports", icon: BarChart3 },
-  { href: "/staff", label: "Staff", icon: UserCog },
-];
-
-const catalogNav: NavItem[] = [
-  { href: "/inventory", label: "Inventory", icon: Shirt },
-  { href: "/retail", label: "Retail", icon: ShoppingBag },
-  { href: "/suppliers", label: "Suppliers", icon: Truck },
-  { href: "/plan", label: "Plan", icon: CreditCard },
-];
-
-function filterNav(items: NavItem[], roles: string[]) {
+function filterNav(
+  items: NavItem[],
+  roles: string[],
+  hasModule: (code: string) => boolean,
+  hasMode: (code: string) => boolean,
+) {
   return items.filter((item) => {
+    if (item.module && !hasModule(item.module)) return false;
+    if (item.commerce && !hasMode(item.commerce)) return false;
     const allowed = ROUTE_ROLES[item.href as keyof typeof ROUTE_ROLES];
     if (!allowed) return true;
     return allowed.some((r) => roles.includes(r));
@@ -83,8 +186,8 @@ function NavSection({
   if (!items.length) return null;
 
   return (
-    <div className="mt-4 first:mt-3">
-      <p className="px-3 pb-1.5 text-[0.65rem] font-semibold uppercase tracking-[0.16em] text-[#9ca3af]">
+    <div className="mt-5 first:mt-0">
+      <p className="px-3 pb-2 text-[0.62rem] font-semibold uppercase tracking-[0.14em] text-[#8b9bb0]">
         {title}
       </p>
       <div className="flex flex-col gap-0.5">
@@ -98,21 +201,27 @@ function NavSection({
               href={item.href}
               onClick={onNavigate}
               className={cn(
-                "relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition",
+                "group relative flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[0.8125rem] font-semibold tracking-[-0.01em] transition-colors",
                 active
-                  ? "bg-[#111827] text-white shadow-sm"
-                  : "text-[#4b5563] hover:bg-[#ecfdf8] hover:text-[#0f766e]",
+                  ? "text-white"
+                  : "text-[#2c3e50] hover:bg-[#eef3fb] hover:text-[#0b1f33]",
               )}
             >
               {active ? (
                 <motion.span
                   layoutId="nav-active"
-                  className="absolute inset-0 rounded-xl bg-[#111827]"
-                  transition={{ type: "spring", stiffness: 380, damping: 32 }}
+                  className="absolute inset-0 rounded-[10px] bg-[#1a56db] shadow-[0_1px_2px_rgba(26,86,219,0.25)]"
+                  transition={{ type: "spring", stiffness: 420, damping: 34 }}
                 />
               ) : null}
-              <Icon className="relative z-10 h-4 w-4 opacity-90" />
-              <span className="relative z-10">{item.label}</span>
+              <Icon
+                className={cn(
+                  "relative z-10 h-[1.05rem] w-[1.05rem] shrink-0",
+                  active ? "opacity-95" : "opacity-70 group-hover:opacity-90",
+                )}
+                strokeWidth={1.75}
+              />
+              <span className="relative z-10 truncate">{item.label}</span>
             </Link>
           );
         })}
@@ -124,29 +233,46 @@ function NavSection({
 function NavLinks({
   onNavigate,
   roles,
+  hasModule,
+  hasMode,
 }: {
   onNavigate?: () => void;
   roles: string[];
+  hasModule: (code: string) => boolean;
+  hasMode: (code: string) => boolean;
 }) {
+  const sections = useMemo(() => {
+    const items = filterNav(NAV_CATALOG, roles, hasModule, hasMode);
+    const order = ["Daily work", "People", "Shop setup"];
+    return order.map((title) => ({
+      title,
+      items: items.filter((i) => i.section === title),
+    }));
+  }, [roles, hasModule, hasMode]);
+
   return (
-    <nav className="scroll-soft mt-1 flex flex-1 flex-col overflow-y-auto px-3 pb-2">
-      <NavSection
-        title="Counter"
-        items={filterNav(counterNav, roles)}
-        onNavigate={onNavigate}
-      />
-      <NavSection
-        title="Studio"
-        items={filterNav(studioNav, roles)}
-        onNavigate={onNavigate}
-      />
-      <NavSection
-        title="Catalog"
-        items={filterNav(catalogNav, roles)}
-        onNavigate={onNavigate}
-      />
+    <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-1 [scrollbar-width:thin]">
+      {sections.map((s) => (
+        <NavSection
+          key={s.title}
+          title={s.title}
+          items={s.items}
+          onNavigate={onNavigate}
+        />
+      ))}
     </nav>
   );
+}
+
+function modeBadge(modes: string[]) {
+  if (!modes.length) return "Setup";
+  const labels: Record<string, string> = {
+    sale: "Sale",
+    rental: "Rent",
+    service: "Service",
+    subscription: "Sub",
+  };
+  return modes.map((m) => labels[m] ?? m).join(" + ");
 }
 
 function SidebarBody({
@@ -155,48 +281,78 @@ function SidebarBody({
   userName,
   userEmail,
   roles,
+  productName,
+  tagline,
+  hasModule,
+  hasMode,
+  commerceModes,
+  modeLabel,
 }: {
   onNavigate?: () => void;
   onLogout: () => void;
   userName?: string;
   userEmail?: string;
   roles: string[];
+  productName: string;
+  tagline: string;
+  hasModule: (code: string) => boolean;
+  hasMode: (code: string) => boolean;
+  commerceModes: string[];
+  modeLabel: string;
 }) {
+  const initial = (productName.trim()[0] || "P").toUpperCase();
   return (
-    <>
-      <div className="px-5 pb-4 pt-6">
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="shrink-0 px-4 pb-4 pt-5">
         <div className="flex items-center gap-3">
-          <div className="grid h-10 w-10 place-items-center rounded-xl bg-[#ecfdf8] text-sm font-bold text-[#0f766e]">
-            T
+          <div className="grid h-10 w-10 place-items-center rounded-[10px] bg-[#1a56db] text-sm font-semibold tracking-tight text-white shadow-[0_1px_2px_rgba(26,86,219,0.28)]">
+            {initial}
           </div>
-          <div>
-            <p className="display text-lg leading-none">Tuxedo</p>
-            <p className="mt-1 text-[0.68rem] font-medium text-[#6b7280]">
-              Formal rental POS
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[0.95rem] font-semibold tracking-tight text-[#0b1f33]">
+              {productName}
+            </p>
+            <p className="mt-0.5 truncate text-[0.68rem] text-[#5a6b7d]">
+              {tagline || modeLabel}
             </p>
           </div>
         </div>
+        <div className="mt-3 inline-flex items-center rounded-md border border-[#d9e0ea] bg-[#f4f6fa] px-2 py-0.5 text-[0.62rem] font-bold tracking-[0.1em] text-[#5a6b7d] uppercase">
+          {modeBadge(commerceModes)}
+        </div>
       </div>
-      <div className="mx-5 hairline" />
-      <NavLinks onNavigate={onNavigate} roles={roles} />
-      <div className="mt-auto border-t border-[#e5e7eb] px-4 py-4">
-        <div className="rounded-xl bg-[#f6f7f9] px-3 py-3">
-          <p className="truncate text-sm font-semibold text-[#111827]">
+
+      <div className="mx-4 shrink-0 border-t border-[#e8ebf0]" />
+
+      <NavLinks
+        onNavigate={onNavigate}
+        roles={roles}
+        hasModule={hasModule}
+        hasMode={hasMode}
+      />
+
+      <div className="shrink-0 border-t border-[#e8ebf0] bg-[#fafbfc] px-3 py-3">
+        <div className="rounded-lg border border-[#e8ebf0] bg-white px-3 py-2.5">
+          <p className="truncate text-[0.8125rem] font-semibold text-[#0b1f33]">
             {userName ?? "Staff"}
           </p>
-          <p className="truncate text-xs text-[#6b7280]">{userEmail}</p>
+          <p className="truncate text-[0.68rem] text-[#5a6b7d]">{userEmail}</p>
           {roles.length ? (
-            <p className="mt-1 truncate text-[0.65rem] font-medium tracking-wide text-[#0f766e] uppercase">
+            <p className="mt-1 truncate text-[0.6rem] font-medium tracking-[0.08em] text-[#1a56db] uppercase">
               {roles.join(" · ")}
             </p>
           ) : null}
         </div>
-        <Button variant="secondary" className="mt-3 w-full" onClick={onLogout}>
-          <LogOut className="h-4 w-4" />
-          Logout
+        <Button
+          variant="secondary"
+          className="mt-2.5 h-9 w-full text-[0.8125rem]"
+          onClick={onLogout}
+        >
+          <LogOut className="h-3.5 w-3.5" />
+          Sign out
         </Button>
       </div>
-    </>
+    </div>
   );
 }
 
@@ -205,22 +361,58 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const clear = useAuthStore((s) => s.clear);
+  const {
+    productName,
+    tagline,
+    hasModule,
+    hasMode,
+    commerceModes,
+    isLoading,
+    isError,
+  } = useBootstrap();
   const [open, setOpen] = useState(false);
   const wide = pathname === "/pos" || pathname.startsWith("/pos/");
   const roles = user?.roles ?? [];
+  const modeLabel = modeBadge(commerceModes) || "POS";
 
   useEffect(() => {
     setOpen(false);
   }, [pathname]);
 
   useEffect(() => {
-    if (!roles.length) return;
+    if (!roles.length || isLoading) return;
     if (!canAccessPath(pathname, roles)) {
       const home = defaultHomeForRoles(roles);
       toast.error("You don’t have access to that page");
       router.replace(home);
+      return;
     }
-  }, [pathname, roles, router]);
+    const item = NAV_CATALOG.find(
+      (n) => pathname === n.href || pathname.startsWith(`${n.href}/`),
+    );
+    if (item?.module && !hasModule(item.module)) {
+      toast.message("Module not enabled for this shop");
+      router.replace("/dashboard");
+      return;
+    }
+    if (item?.commerce && !hasMode(item.commerce)) {
+      toast.message("Not enabled for this shop’s commerce modes");
+      router.replace("/dashboard");
+    }
+  }, [pathname, roles, router, hasModule, hasMode, isLoading]);
+
+  useEffect(() => {
+    // App shell owns scrolling — keep document from scrolling under the fixed sidebar
+    const html = document.documentElement;
+    const prevHtml = html.style.overflow;
+    const prevBody = document.body.style.overflow;
+    html.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+    return () => {
+      html.style.overflow = prevHtml;
+      document.body.style.overflow = prevBody;
+    };
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -243,37 +435,76 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
   }
 
-  return (
-    <div className="min-h-dvh bg-[#f6f7f9] text-[#111827]">
-      <header className="sticky top-0 z-40 flex items-center justify-between border-b border-[#e5e7eb] bg-white/90 px-4 py-3 backdrop-blur md:hidden">
-        <div className="flex items-center gap-2.5">
-          <div className="grid h-8 w-8 place-items-center rounded-lg bg-[#ecfdf8] text-xs font-bold text-[#0f766e]">
-            T
-          </div>
-          <div>
-            <p className="display text-base leading-none">Tuxedo</p>
-            <p className="mt-0.5 text-[0.6rem] text-[#6b7280]">POS</p>
-          </div>
-        </div>
-        <button
-          type="button"
-          className="rounded-lg border border-[#e5e7eb] p-2"
-          onClick={() => setOpen(true)}
-          aria-label="Open menu"
-        >
-          <Menu className="h-5 w-5" />
-        </button>
-      </header>
+  if (isLoading) {
+    return (
+      <div className="grid h-dvh place-items-center bg-[#f4f6fa] text-sm text-[#5a6b7d]">
+        Loading shop…
+      </div>
+    );
+  }
 
-      <div className="md:flex">
-        <aside className="hidden min-h-dvh w-60 shrink-0 flex-col border-r border-[#e5e7eb] bg-white md:flex">
-          <SidebarBody
-            onLogout={() => void logout()}
-            userName={user?.fullName}
-            userEmail={user?.email}
-            roles={roles}
-          />
-        </aside>
+  if (isError) {
+    return (
+      <div className="grid h-dvh place-items-center bg-[#f4f6fa] px-4 text-center">
+        <div>
+          <p className="text-sm font-medium text-[#0b1f33]">
+            Couldn’t load shop configuration
+          </p>
+          <Button className="mt-4" onClick={() => window.location.reload()}>
+            Retry
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const initial = (productName.trim()[0] || "P").toUpperCase();
+
+  const sidebarProps = {
+    onLogout: () => void logout(),
+    userName: user?.fullName,
+    userEmail: user?.email,
+    roles,
+    productName,
+    tagline,
+    hasModule,
+    hasMode,
+    commerceModes,
+    modeLabel,
+  };
+
+  return (
+    <div className="flex h-dvh overflow-hidden bg-[#f4f6fa] text-[#0b1f33]">
+      {/* Desktop sidebar — fixed to viewport, never scrolls with page */}
+      <aside className="hidden h-dvh w-[15.5rem] shrink-0 flex-col border-r border-[#d9e0ea] bg-white md:flex">
+        <SidebarBody {...sidebarProps} />
+      </aside>
+
+      {/* Right column: mobile header + scrollable content only */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <header className="flex shrink-0 items-center justify-between border-b border-[#d9e0ea] bg-white/95 px-4 py-3 backdrop-blur md:hidden">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <div className="grid h-8 w-8 shrink-0 place-items-center rounded-[8px] bg-[#1a56db] text-xs font-semibold text-white">
+              {initial}
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold tracking-tight text-[#0b1f33]">
+                {productName}
+              </p>
+              <p className="mt-0.5 truncate text-[0.6rem] font-medium tracking-wide text-[#5a6b7d] uppercase">
+                {modeLabel}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="rounded-lg border border-[#d9e0ea] p-2 text-[#2c3e50]"
+            onClick={() => setOpen(true)}
+            aria-label="Open menu"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+        </header>
 
         <AnimatePresence>
           {open ? (
@@ -285,33 +516,32 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             >
               <button
                 type="button"
-                className="absolute inset-0 bg-black/40"
+                className="absolute inset-0 bg-[#0b1f33]/40"
                 aria-label="Close menu"
                 onClick={() => setOpen(false)}
               />
               <motion.aside
-                className="absolute top-0 left-0 flex h-full w-[min(18rem,86vw)] flex-col bg-white"
-                initial={{ x: -24, opacity: 0.6 }}
+                className="absolute top-0 left-0 flex h-full w-[min(17rem,88vw)] flex-col border-r border-[#d9e0ea] bg-white shadow-xl"
+                initial={{ x: -28, opacity: 0.85 }}
                 animate={{ x: 0, opacity: 1 }}
-                exit={{ x: -16, opacity: 0 }}
+                exit={{ x: -20, opacity: 0 }}
               >
-                <div className="flex justify-end p-3">
+                <div className="flex shrink-0 justify-end border-b border-[#e8ebf0] p-2.5">
                   <button
                     type="button"
-                    className="rounded-lg border border-[#e5e7eb] p-2"
+                    className="rounded-lg border border-[#d9e0ea] p-2"
                     onClick={() => setOpen(false)}
                     aria-label="Close"
                   >
                     <X className="h-5 w-5" />
                   </button>
                 </div>
-                <SidebarBody
-                  onNavigate={() => setOpen(false)}
-                  onLogout={() => void logout()}
-                  userName={user?.fullName}
-                  userEmail={user?.email}
-                  roles={roles}
-                />
+                <div className="min-h-0 flex-1">
+                  <SidebarBody
+                    {...sidebarProps}
+                    onNavigate={() => setOpen(false)}
+                  />
+                </div>
               </motion.aside>
             </motion.div>
           ) : null}
@@ -319,11 +549,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <main
           className={cn(
-            "min-w-0 flex-1 px-4 py-5 sm:px-6 sm:py-6",
-            wide ? "max-w-none" : "mx-auto w-full max-w-6xl",
+            "min-h-0 flex-1 overflow-y-auto overscroll-contain",
+            "[scrollbar-gutter:stable]",
           )}
         >
-          {canAccessPath(pathname, roles) ? children : null}
+          <div
+            className={cn(
+              "px-4 py-5 sm:px-6 sm:py-6 lg:px-8",
+              wide ? "max-w-none" : "mx-auto w-full max-w-6xl",
+            )}
+          >
+            {canAccessPath(pathname, roles) ? children : null}
+          </div>
         </main>
       </div>
     </div>
