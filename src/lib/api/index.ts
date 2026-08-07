@@ -427,6 +427,7 @@ export const ordersApi = {
         id: string;
         orderNumber: string;
         status: string;
+        kind?: string;
         balanceDue: string | number;
         subtotal: string | number;
         depositTotal?: string | number;

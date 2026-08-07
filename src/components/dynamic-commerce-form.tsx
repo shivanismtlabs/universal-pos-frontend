@@ -12,11 +12,20 @@ import {
   type SellUnit,
 } from "@/lib/sell-units";
 
+export type CommerceFieldType =
+  | "string"
+  | "text"
+  | "number"
+  | "category"
+  | "image"
+  | "select";
+
 export type CommerceFieldDef = {
   key: string;
   label: string;
   required: boolean;
-  type: "string" | "text" | "number" | "category" | "image" | "select";
+  /** API may send plain string; runtime still handles known types. */
+  type: CommerceFieldType | (string & {});
   hint?: string;
   options?: Array<{ value: string; label: string }>;
 };

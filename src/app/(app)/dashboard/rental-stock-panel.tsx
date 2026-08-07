@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ProductThumb } from "@/components/product-thumb";
 import { DynamicCommerceForm } from "@/components/dynamic-commerce-form";
-import { cn } from "@/lib/utils";
+import { cn, readFileAsDataUrl } from "@/lib/utils";
 
 const EMPTY = {
   title: "",
