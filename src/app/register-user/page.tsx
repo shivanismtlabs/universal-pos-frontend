@@ -82,19 +82,11 @@ export default function RegisterUserPage() {
 
   return (
     <AuthShell
-      title="Register user"
-      subtitle="Join an existing shop with your email and password."
+      layout="stacked"
+      title="Join as staff"
+      subtitle="Use the shop slug your owner gave you, then create your login."
     >
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
-        <div>
-          <p className="eyebrow">Staff account</p>
-          <h2 className="display mt-2 text-2xl text-[#0b1f33]">
-            Create your user
-          </h2>
-          <p className="mt-1 text-sm text-[#5a6b7d]">
-            Use the shop slug your owner gave you (e.g. demo-shop)
-          </p>
-        </div>
 
         <div>
           <Label htmlFor="tenantSlug">Shop slug</Label>
