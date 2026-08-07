@@ -128,14 +128,6 @@ const NAV_CATALOG: NavItem[] = [
     module: "reports",
   },
   {
-    href: "/inventory",
-    label: "Barcode units",
-    icon: Package,
-    section: "Shop setup",
-    commerce: "rental" as const,
-    module: "rental",
-  },
-  {
     href: "/suppliers",
     label: "Suppliers",
     icon: Truck,
