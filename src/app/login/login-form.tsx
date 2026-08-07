@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FieldError } from "@/components/ui/form";
 import { AuthShell } from "@/components/auth-shell";
+import { ApiTargetSwitch } from "@/components/api-target-switch";
 import { loginSchema, type LoginInput } from "@/lib/validations";
 import { appsApi, authApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
@@ -239,6 +240,8 @@ export default function LoginForm() {
             Join as staff
           </Link>
         </p>
+
+        <ApiTargetSwitch className="mt-1 rounded-xl border border-[#d9e0ea] bg-[#f7f9fc] px-3 py-2.5" />
       </form>
     </AuthShell>
   );

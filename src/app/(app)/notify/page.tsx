@@ -8,8 +8,7 @@ import { ApiError } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { formatDate } from "@/lib/utils";
-import { cn } from "@/lib/utils";
+import { formatDate, cn } from "@/lib/utils";
 
 type FormValues = {
   customerId: string;
@@ -19,17 +18,11 @@ type FormValues = {
   customMessage: string;
 };
 
-const TEMPLATES = [
-  { value: "order_ready_for_pickup", label: "Order ready for pickup" },
-  { value: "fitting_reminder", label: "Fitting reminder" },
+const SALE_TEMPLATES = [
   { value: "payment_received", label: "Payment received" },
-  { value: "return_due", label: "Return due reminder" },
+  { value: "order_ready_for_pickup", label: "Order ready for pickup" },
   { value: "custom", label: "Custom message" },
 ];
-
-function templateLabel(key: string) {
-  return TEMPLATES.find((t) => t.value === key)?.label ?? key;
-}
 
 function StatusPill({ status }: { status: string }) {
   const mock = status.includes("mock");
@@ -44,7 +37,7 @@ function StatusPill({ status }: { status: string }) {
           : mock
             ? "bg-amber-50 text-amber-800"
             : ok
-              ? "bg-[#ecfdf8] text-[#0f766e]"
+              ? "bg-[#e8eefb] text-[#0b1f33]"
               : "bg-[#f3f4f6] text-[#4b5563]",
       )}
     >
@@ -55,6 +48,9 @@ function StatusPill({ status }: { status: string }) {
 
 export default function NotifyPage() {
   const qc = useQueryClient();
+  const TEMPLATES = SALE_TEMPLATES;
+  const templateLabel = (key: string) =>
+    TEMPLATES.find((t) => t.value === key)?.label ?? key;
 
   const config = useQuery({
     queryKey: ["notify-config"],
@@ -73,8 +69,8 @@ export default function NotifyPage() {
     defaultValues: {
       customerId: "",
       phone: "",
-      templateKey: "order_ready_for_pickup",
-      orderNumber: "ORD-DEMO-READY",
+      templateKey: "payment_received",
+      orderNumber: "",
       customMessage: "",
     },
   });
@@ -118,7 +114,7 @@ export default function NotifyPage() {
   return (
     <div className="mx-auto max-w-6xl space-y-6 sm:space-y-8">
       <header>
-        <p className="text-sm tracking-[0.2em] text-[#0f766e] uppercase">
+        <p className="text-sm tracking-[0.2em] text-[#0b1f33] uppercase">
           Notify
         </p>
         <h1 className="display mt-2 text-3xl text-[#111827] sm:text-4xl">
@@ -135,7 +131,7 @@ export default function NotifyPage() {
           "rounded-xl border px-4 py-3 text-sm leading-relaxed",
           cfg?.mock
             ? "border-amber-200 bg-amber-50 text-amber-950"
-            : "border-[#99f6e4] bg-[#ecfdf8] text-[#0f766e]",
+            : "border-[#8b9bb0] bg-[#e8eefb] text-[#0b1f33]",
         )}
       >
         {config.isLoading

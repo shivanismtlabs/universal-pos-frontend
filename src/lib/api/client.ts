@@ -1,4 +1,5 @@
 import { useAuthStore } from "../auth-store";
+import { getApiBaseUrl } from "../api-base";
 
 export type ApiSuccess<T> = {
   success: true;
@@ -38,10 +39,6 @@ export class ApiError extends Error {
   }
 }
 
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ??
-  "http://localhost:3001/v1";
-
 type RequestOptions = {
   method?: string;
   body?: unknown;
@@ -61,7 +58,7 @@ async function tryRefreshTokens(): Promise<boolean> {
     if (!refreshToken) return false;
 
     try {
-      const res = await fetch(`${API_URL}/auth/refresh`, {
+      const res = await fetch(`${getApiBaseUrl()}/auth/refresh`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refreshToken }),
@@ -110,7 +107,7 @@ export async function apiRequest<T>(
   let res: Response;
   try {
     res = await fetch(
-      `${API_URL}${path.startsWith("/") ? path : `/${path}`}`,
+      `${getApiBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`,
       {
         method,
         headers: {
@@ -125,7 +122,7 @@ export async function apiRequest<T>(
   } catch {
     throw new ApiError(
       0,
-      "Cannot reach API (localhost:3001). Start the backend with npm run start:dev",
+      "Cannot reach API. Start the backend with npm run start:dev",
     );
   }
 

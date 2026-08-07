@@ -10,9 +10,22 @@ export const strongPasswordSchema = z
   .regex(/\d/, "Include a number")
   .regex(/[^A-Za-z0-9]/, "Include a special character");
 
-export const indianPhoneSchema = z
+/** Any country: 7–15 digits; +, spaces, dashes, () allowed */
+export const phoneSchema = z
   .string()
-  .regex(/^[6-9]\d{9}$/, "Enter a valid 10-digit Indian mobile");
+  .trim()
+  .max(22, "Phone is too long")
+  .refine(
+    (v) => {
+      if (!/^\+?[\d\s().-]+$/.test(v)) return false;
+      const digits = v.replace(/\D/g, "");
+      return digits.length >= 7 && digits.length <= 15;
+    },
+    { message: "Enter a valid phone number (any country)" },
+  );
+
+/** @deprecated use phoneSchema — kept for older imports */
+export const indianPhoneSchema = phoneSchema;
 
 export const tenantSlugSchema = z
   .string()
@@ -51,28 +64,91 @@ export const registerTenantSchema = z
       .max(255),
     adminPassword: strongPasswordSchema,
     confirmPassword: z.string().min(1, "Confirm your password"),
-    adminPhone: indianPhoneSchema.optional().or(z.literal("")),
+    adminPhone: phoneSchema.optional().or(z.literal("")),
   })
   .refine((v) => v.adminPassword === v.confirmPassword, {
     message: "Passwords do not match",
     path: ["confirmPassword"],
-  });
+  })
+  .refine(
+    (v) => {
+      const local = v.adminEmail.split("@")[0]?.toLowerCase() ?? "";
+      return !local || !v.adminPassword.toLowerCase().includes(local);
+    },
+    {
+      message: "Password must not contain email local-part",
+      path: ["adminPassword"],
+    },
+  )
+  .refine(
+    (v) => !v.adminPassword.toLowerCase().includes(v.tenantSlug.toLowerCase()),
+    {
+      message: "Password must not contain tenant slug",
+      path: ["adminPassword"],
+    },
+  );
 export type RegisterTenantInput = z.infer<typeof registerTenantSchema>;
 
-export function passwordStrength(password: string) {
+export const registerUserSchema = z
+  .object({
+    tenantSlug: tenantSlugSchema,
+    fullName: z.string().trim().min(2).max(255),
+    email: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .email("Enter a valid email")
+      .max(255),
+    password: strongPasswordSchema,
+    confirmPassword: z.string().min(1, "Confirm your password"),
+    phone: phoneSchema.optional().or(z.literal("")),
+  })
+  .refine((v) => v.password === v.confirmPassword, {
+    message: "Passwords do not match",
+    path: ["confirmPassword"],
+  })
+  .refine(
+    (v) => {
+      const local = v.email.split("@")[0]?.toLowerCase() ?? "";
+      return !local || !v.password.toLowerCase().includes(local);
+    },
+    {
+      message: "Password must not contain email local-part",
+      path: ["password"],
+    },
+  )
+  .refine(
+    (v) => !v.password.toLowerCase().includes(v.tenantSlug.toLowerCase()),
+    {
+      message: "Password must not contain tenant slug",
+      path: ["password"],
+    },
+  );
+export type RegisterUserInput = z.infer<typeof registerUserSchema>;
+
+export function passwordStrength(
+  password: string,
+  opts?: { email?: string; slug?: string },
+) {
+  const local = opts?.email?.split("@")[0]?.toLowerCase() ?? "";
+  const slug = opts?.slug?.toLowerCase() ?? "";
   const checks = {
     length: password.length >= 8 && password.length <= 72,
     lower: /[a-z]/.test(password),
     upper: /[A-Z]/.test(password),
     number: /\d/.test(password),
     special: /[^A-Za-z0-9]/.test(password),
+    noEmailPart:
+      !local || local.length < 2 || !password.toLowerCase().includes(local),
+    noSlug:
+      !slug || slug.length < 2 || !password.toLowerCase().includes(slug),
   };
   const score = Object.values(checks).filter(Boolean).length;
-  return { checks, score, ok: score === 5 };
+  return { checks, score, ok: score === 7 };
 }
 export const createCustomerSchema = z.object({
   fullName: z.string().min(2, "Name is required").max(255),
-  phone: indianPhoneSchema,
+  phone: phoneSchema,
   email: z
     .string()
     .email("Invalid email")
@@ -143,6 +219,107 @@ export type CreatePaymentInput = z.infer<typeof createPaymentSchema>;
 export const createCategorySchema = z.object({
   name: z.string().min(2).max(100),
 });
+
+const sellUnitEnum = z.enum(["pcs", "pack", "kg", "g", "L", "ml"]);
+
+/** Sale / grocery product — unit-aware qty (kg/L decimals; pcs whole). */
+export const addSaleProductSchema = z
+  .object({
+    title: z.string().trim().min(2, "Title needs at least 2 characters").max(255),
+    description: z.string().trim().max(2000).optional().or(z.literal("")),
+    categoryId: z.string().uuid("Select a category"),
+    sku: z
+      .string()
+      .trim()
+      .min(1, "SKU is required")
+      .max(100)
+      .regex(
+        /^[A-Za-z0-9][A-Za-z0-9._\-/]*$/,
+        "SKU: use letters, numbers, and . _ - / only",
+      ),
+    sellUnit: sellUnitEnum.default("pcs"),
+    price: z.coerce
+      .number({ invalid_type_error: "Enter a valid price" })
+      .positive("Price must be greater than 0")
+      .max(9_999_999.99, "Price is too large")
+      .refine((n) => Math.round(n * 100) / 100 === n, {
+        message: "Price can have at most 2 decimal places",
+      }),
+    qty: z.coerce
+      .number({ invalid_type_error: "Enter a valid quantity" })
+      .min(0, "Quantity cannot be negative")
+      .max(99_999_999, "Quantity is too large"),
+  })
+  .superRefine((v, ctx) => {
+    const whole = v.sellUnit === "pcs" || v.sellUnit === "pack" || v.sellUnit === "g" || v.sellUnit === "ml";
+    if (whole && !Number.isInteger(v.qty)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["qty"],
+        message:
+          v.sellUnit === "pcs" || v.sellUnit === "pack"
+            ? `Quantity for ${v.sellUnit} must be a whole number (no decimals)`
+            : `Quantity for ${v.sellUnit} must be a whole number`,
+      });
+      return;
+    }
+    if (!whole) {
+      const rounded = Math.round(v.qty * 1000) / 1000;
+      if (Math.abs(rounded - v.qty) > 1e-9) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["qty"],
+          message: `Quantity for ${v.sellUnit} can have at most 3 decimal places (e.g. 1.250)`,
+        });
+      }
+    }
+  });
+export type AddSaleProductInput = z.infer<typeof addSaleProductSchema>;
+
+/** Edit sale product (SKU not changed in inline editor). */
+export const updateSaleProductSchema = z
+  .object({
+    title: z.string().trim().min(2, "Title needs at least 2 characters").max(255),
+    description: z.string().trim().max(2000).optional().or(z.literal("")),
+    categoryId: z.string().uuid("Select a category").optional().or(z.literal("")),
+    sellUnit: sellUnitEnum.default("pcs"),
+    price: z.coerce
+      .number({ invalid_type_error: "Enter a valid price" })
+      .positive("Price must be greater than 0")
+      .max(9_999_999.99, "Price is too large")
+      .refine((n) => Math.round(n * 100) / 100 === n, {
+        message: "Price can have at most 2 decimal places",
+      }),
+    qty: z.coerce
+      .number({ invalid_type_error: "Enter a valid quantity" })
+      .min(0, "Quantity cannot be negative")
+      .max(99_999_999, "Quantity is too large"),
+  })
+  .superRefine((v, ctx) => {
+    const whole =
+      v.sellUnit === "pcs" ||
+      v.sellUnit === "pack" ||
+      v.sellUnit === "g" ||
+      v.sellUnit === "ml";
+    if (whole && !Number.isInteger(v.qty)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["qty"],
+        message: `Quantity for ${v.sellUnit} must be a whole number`,
+      });
+      return;
+    }
+    if (!whole) {
+      const rounded = Math.round(v.qty * 1000) / 1000;
+      if (Math.abs(rounded - v.qty) > 1e-9) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["qty"],
+          message: `Quantity for ${v.sellUnit} can have at most 3 decimal places`,
+        });
+      }
+    }
+  });
 
 export const createProductStyleSchema = z.object({
   name: z.string().min(2).max(255),

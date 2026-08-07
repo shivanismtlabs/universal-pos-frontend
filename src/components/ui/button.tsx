@@ -6,22 +6,41 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f766e]/25 disabled:pointer-events-none disabled:opacity-50",
+  [
+    "inline-flex items-center justify-center gap-1.5 whitespace-nowrap",
+    "rounded-lg text-[0.8125rem] font-medium tracking-[-0.01em]",
+    "transition-[background-color,border-color,box-shadow,color] duration-150",
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1a56db]/30",
+    "disabled:pointer-events-none disabled:opacity-45",
+  ].join(" "),
   {
     variants: {
       variant: {
-        default: "bg-[#111827] text-white hover:bg-[#1f2937]",
-        secondary:
-          "border border-[#e5e7eb] bg-white text-[#111827] hover:bg-[#f9fafb]",
-        ghost: "text-[#4b5563] hover:bg-[#f3f4f6] hover:text-[#111827]",
-        danger:
-          "border border-[#fecaca] bg-white text-[#b91c1c] hover:bg-[#fef2f2]",
+        default: [
+          "bg-[#1a56db] text-white",
+          "shadow-[0_1px_2px_rgba(26,86,219,0.2)]",
+          "hover:bg-[#1548c0]",
+          "active:bg-[#1341a8]",
+        ].join(" "),
+        secondary: [
+          "border border-[#d9e0ea] bg-white text-[#0b1f33]",
+          "hover:border-[#c5d0e0] hover:bg-[#f8fafc]",
+        ].join(" "),
+        soft: [
+          "bg-[#e8eefb] text-[#1341a8]",
+          "hover:bg-[#dce6f8]",
+        ].join(" "),
+        ghost: "text-[#5a6b7d] hover:bg-[#eef3fb] hover:text-[#0b1f33]",
+        danger: [
+          "border border-[#efc4c4] bg-white text-[#c81e1e]",
+          "hover:bg-[#fff6f6]",
+        ].join(" "),
       },
       size: {
-        default: "h-10 px-4",
-        sm: "h-8 px-3 text-xs",
-        lg: "h-11 px-5",
-        icon: "h-9 w-9",
+        default: "h-10 px-3.5",
+        sm: "h-8 rounded-md px-2.5 text-[0.75rem]",
+        lg: "h-11 px-5 text-[0.875rem]",
+        icon: "h-10 w-10",
       },
     },
     defaultVariants: { variant: "default", size: "default" },

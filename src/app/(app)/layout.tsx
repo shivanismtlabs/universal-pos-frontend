@@ -2,6 +2,8 @@
 
 import { RequireAuth } from "@/components/require-auth";
 import { AppShell } from "@/components/app-shell";
+import { BootstrapProvider } from "@/lib/bootstrap";
+import { CommerceModeGate } from "@/components/commerce-mode-gate";
 
 export default function AppLayout({
   children,
@@ -10,7 +12,11 @@ export default function AppLayout({
 }) {
   return (
     <RequireAuth>
-      <AppShell>{children}</AppShell>
+      <BootstrapProvider>
+        <CommerceModeGate>
+          <AppShell>{children}</AppShell>
+        </CommerceModeGate>
+      </BootstrapProvider>
     </RequireAuth>
   );
 }

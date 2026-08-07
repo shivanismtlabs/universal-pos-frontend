@@ -19,6 +19,14 @@ import { SaleReturnDialog } from "@/components/sale-return-dialog";
 import RetailPosWorkstation from "@/app/(app)/pos/retail-pos-workstation";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { ModeBadge } from "@/components/mode-badge";
+import { addSaleProductSchema } from "@/lib/validations";
+import {
+  formatQtyWithUnit,
+  normalizeSellUnit,
+  priceUnitLabel,
+  qtyStep,
+  SELL_UNIT_OPTIONS,
+} from "@/lib/sell-units";
 
 type MainTab = "inventory" | "pos" | "sales";
 
@@ -72,6 +80,7 @@ export default function CatalogPage() {
   const [form, setForm] = useState({
     title: "",
     sku: "",
+    sellUnit: "pcs",
     price: "",
     qty: "10",
     categoryId: "",
@@ -134,16 +143,25 @@ export default function CatalogPage() {
         });
         categoryId = cat.id;
       }
-      if (!form.title.trim() || !form.sku.trim()) {
-        throw new Error("Title and SKU required");
-      }
       if (!categoryId) throw new Error("Select or create a category");
-      return posApi.addSaleProduct({
-        title: form.title.trim(),
-        sku: form.sku.trim(),
-        price: Number(form.price) || 0,
-        qty: Math.max(0, Number(form.qty) || 0),
+      const parsed = addSaleProductSchema.safeParse({
+        title: form.title,
+        sku: form.sku,
+        sellUnit: form.sellUnit || "pcs",
+        price: form.price,
+        qty: form.qty,
         categoryId,
+      });
+      if (!parsed.success) {
+        throw new Error(parsed.error.issues[0]?.message ?? "Check the form");
+      }
+      return posApi.addSaleProduct({
+        title: parsed.data.title,
+        sku: parsed.data.sku,
+        sellUnit: parsed.data.sellUnit,
+        price: parsed.data.price,
+        qty: parsed.data.qty,
+        categoryId: parsed.data.categoryId,
       });
     },
     onSuccess: () => {
@@ -151,6 +169,7 @@ export default function CatalogPage() {
       setForm({
         title: "",
         sku: "",
+        sellUnit: "pcs",
         price: "",
         qty: "10",
         categoryId: "",
@@ -270,9 +289,30 @@ export default function CatalogPage() {
                   </div>
                 </div>
                 <div className="space-y-1.5">
-                  <Label>Price</Label>
+                  <Label>Sell unit</Label>
+                  <Select
+                    value={form.sellUnit}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, sellUnit: e.target.value }))
+                    }
+                  >
+                    {SELL_UNIT_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </Select>
+                  <p className="text-[0.7rem] text-[#8b9bb0]">
+                    Grocery weight/volume: kg or L (decimals OK). Packaged: pcs /
+                    pack.
+                  </p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Price ({priceUnitLabel(form.sellUnit)})</Label>
                   <Input
                     type="number"
+                    step="0.01"
+                    min="0"
                     value={form.price}
                     onChange={(e) =>
                       setForm((f) => ({ ...f, price: e.target.value }))
@@ -281,9 +321,15 @@ export default function CatalogPage() {
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label>Qty</Label>
+                  <Label>Qty on hand ({form.sellUnit})</Label>
                   <Input
                     type="number"
+                    step={
+                      form.sellUnit === "kg" || form.sellUnit === "L"
+                        ? "0.001"
+                        : "1"
+                    }
+                    min="0"
                     value={form.qty}
                     onChange={(e) =>
                       setForm((f) => ({ ...f, qty: e.target.value }))
@@ -376,22 +422,30 @@ export default function CatalogPage() {
 
                   <p className="text-sm font-semibold tabular-nums text-[#0b1f33] sm:text-right">
                     {money(item.price)}
+                    <span className="mt-0.5 block text-[0.65rem] font-medium text-[#5a6b7d]">
+                      {priceUnitLabel(item.sellUnit)}
+                    </span>
                   </p>
 
                   <div className="flex items-center justify-center gap-1.5">
                     <button
                       type="button"
-                      disabled={!canWrite || adjustStock.isPending || item.qty < 1}
+                      disabled={
+                        !canWrite || adjustStock.isPending || item.qty <= 0
+                      }
                       aria-label="Decrease stock"
                       className="grid h-8 w-8 place-items-center rounded-lg border border-[#d9e0ea] bg-white text-[#5a6b7d] transition hover:bg-[#f4f6fa] disabled:opacity-40"
                       onClick={() =>
-                        adjustStock.mutate({ id: item.id, delta: -1 })
+                        adjustStock.mutate({
+                          id: item.id,
+                          delta: -qtyStep(normalizeSellUnit(item.sellUnit)),
+                        })
                       }
                     >
                       <Minus className="h-3.5 w-3.5" strokeWidth={2} />
                     </button>
-                    <span className="min-w-[2rem] text-center text-sm font-semibold tabular-nums text-[#0b1f33]">
-                      {item.qty}
+                    <span className="min-w-[2.75rem] text-center text-sm font-semibold tabular-nums text-[#0b1f33]">
+                      {formatQtyWithUnit(Number(item.qty), item.sellUnit)}
                     </span>
                     <button
                       type="button"
@@ -399,7 +453,10 @@ export default function CatalogPage() {
                       aria-label="Increase stock"
                       className="grid h-8 w-8 place-items-center rounded-lg border border-[#d9e0ea] bg-white text-[#5a6b7d] transition hover:bg-[#f4f6fa] disabled:opacity-40"
                       onClick={() =>
-                        adjustStock.mutate({ id: item.id, delta: 1 })
+                        adjustStock.mutate({
+                          id: item.id,
+                          delta: qtyStep(normalizeSellUnit(item.sellUnit)),
+                        })
                       }
                     >
                       <Plus className="h-3.5 w-3.5" strokeWidth={2} />

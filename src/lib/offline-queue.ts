@@ -3,8 +3,8 @@
 import { syncApi } from "@/lib/api";
 import { newIdempotencyKey } from "@/lib/utils";
 
-const QUEUE_KEY = "tuxedo-offline-queue";
-const DEVICE_KEY = "tuxedo-device-id";
+const QUEUE_KEY = "universal-pos-offline-queue";
+const DEVICE_KEY = "universal-pos-device-id";
 
 export type OfflineEvent = {
   clientEventId: string;

@@ -51,7 +51,7 @@ export const useAuthStore = create<AuthState>()(
         }),
     }),
     {
-      name: "tuxedo-pos-auth",
+      name: "universal-pos-auth",
       storage: createJSONStorage(() => sessionStorage),
       partialize: (s) => ({
         accessToken: s.accessToken,

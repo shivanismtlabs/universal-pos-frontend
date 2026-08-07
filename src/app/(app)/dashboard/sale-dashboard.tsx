@@ -1,0 +1,161 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { posApi } from "@/lib/api";
+import { useBootstrap } from "@/lib/bootstrap";
+import { Button } from "@/components/ui/button";
+import { FloorTabs } from "@/components/getting-started";
+import { SaleReturnDialog } from "@/components/sale-return-dialog";
+import RetailPosWorkstation from "@/app/(app)/pos/retail-pos-workstation";
+import { SaleStockPanel } from "./sale-stock-panel";
+import { canRefund } from "@/lib/roles";
+import { useAuthStore } from "@/lib/auth-store";
+
+type Tab = "stock" | "sell" | "recent";
+
+/**
+ * Home floor: only the three tabs — Products, Sell, Sales.
+ */
+export function SaleDashboard() {
+  const { productName, money } = useBootstrap();
+  const userRoles = useAuthStore((s) => s.user?.roles);
+  const allowReturn = canRefund(userRoles);
+  const [tab, setTab] = useState<Tab>("stock");
+  const [posKey, setPosKey] = useState(0);
+  const [tabTouched, setTabTouched] = useState(false);
+  const [returnTarget, setReturnTarget] = useState<{
+    id: string;
+    orderNumber: string;
+  } | null>(null);
+
+  const floor = useQuery({
+    queryKey: ["pos-sale-floor"],
+    queryFn: () => posApi.saleFloor(),
+  });
+
+  const recent = useQuery({
+    queryKey: ["pos-sale-recent"],
+    queryFn: () => posApi.listRecentSales(25),
+    enabled: tab === "recent",
+  });
+
+  const counts = floor.data?.counts;
+  const hasProducts = (counts?.products ?? 0) > 0;
+  const hasStock = (counts?.inStock ?? 0) > 0;
+
+  useEffect(() => {
+    if (tabTouched || floor.isLoading) return;
+    setTab(hasStock || hasProducts ? "sell" : "stock");
+  }, [tabTouched, floor.isLoading, hasStock, hasProducts]);
+
+  function goTab(id: Tab) {
+    setTabTouched(true);
+    setTab(id);
+  }
+
+  const tabHint =
+    tab === "stock"
+      ? "Add and edit products"
+      : tab === "sell"
+        ? "Charge at the counter"
+        : "Recent tickets";
+
+  return (
+    <div className="space-y-4">
+      <header>
+        <h1 className="text-xl font-bold tracking-tight text-[#0b1f33] sm:text-2xl">
+          {productName}
+        </h1>
+        <p className="mt-1 text-sm text-[#5a6b7d]">{tabHint}</p>
+      </header>
+
+      <FloorTabs
+        value={tab}
+        onChange={goTab}
+        tabs={[
+          { id: "stock", label: "Products" },
+          { id: "sell", label: "Sell" },
+          { id: "recent", label: "Sales" },
+        ]}
+      />
+
+      {tab === "sell" ? (
+        <RetailPosWorkstation key={posKey} compact />
+      ) : null}
+
+      {tab === "stock" ? (
+        <SaleStockPanel
+          onAdded={() => {
+            setPosKey((k) => k + 1);
+          }}
+        />
+      ) : null}
+
+      {tab === "recent" ? (
+        <section className="rounded-xl border border-[#d9e0ea] bg-white">
+          <div className="border-b border-[#eef1f4] px-4 py-3">
+            <h2 className="text-[0.9375rem] font-semibold text-[#0b1f33]">
+              Recent sales
+            </h2>
+            <p className="mt-0.5 text-[0.75rem] text-[#5a6b7d]">
+              {allowReturn
+                ? "Return restocks and refunds the ticket."
+                : "Ask a manager for returns."}
+            </p>
+          </div>
+          <ul className="divide-y divide-[#eef1f4]">
+            {(recent.data?.items ?? []).map((o) => (
+              <li
+                key={o.id}
+                className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm"
+              >
+                <div>
+                  <p className="font-medium text-[#0b1f33]">{o.orderNumber}</p>
+                  <p className="text-[0.75rem] text-[#5a6b7d]">
+                    {o.customerName} · {o.itemCount} item
+                    {o.itemCount === 1 ? "" : "s"} ·{" "}
+                    {new Date(o.createdAt).toLocaleString()}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold tabular-nums text-[#0b1f33]">
+                    {money(o.subtotal)}
+                  </span>
+                  {allowReturn ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      onClick={() =>
+                        setReturnTarget({
+                          id: o.id,
+                          orderNumber: o.orderNumber,
+                        })
+                      }
+                    >
+                      Return
+                    </Button>
+                  ) : null}
+                </div>
+              </li>
+            ))}
+            {!recent.data?.items?.length && !recent.isLoading ? (
+              <li className="px-4 py-10 text-center text-sm text-[#5a6b7d]">
+                No sales yet. Open the Sell tab to charge.
+              </li>
+            ) : null}
+          </ul>
+        </section>
+      ) : null}
+
+      {returnTarget ? (
+        <SaleReturnDialog
+          orderId={returnTarget.id}
+          orderNumber={returnTarget.orderNumber}
+          onClose={() => setReturnTarget(null)}
+        />
+      ) : null}
+    </div>
+  );
+}

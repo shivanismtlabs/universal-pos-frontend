@@ -10,7 +10,19 @@ export const Input = React.forwardRef<
   <input
     type={type}
     className={cn(
-      "flex h-11 w-full rounded-xl border border-[#e5e7eb] bg-white px-3.5 py-2 text-sm text-[#111827] placeholder:text-[#9ca3af] outline-none transition focus:border-[#0f766e] focus:ring-4 focus:ring-[#0f766e]/12 disabled:opacity-50",
+      [
+        "flex h-10 w-full rounded-lg",
+        "border border-[#d9e0ea] bg-white",
+        "px-3 text-[0.875rem] text-[#0b1f33]",
+        "placeholder:text-[#94a3b8]",
+        "outline-none transition-[border-color,box-shadow] duration-150",
+        "hover:border-[#c5d0e0]",
+        "focus:border-[#1a56db]",
+        "focus:shadow-[0_0_0_3px_rgba(26,86,219,0.12)]",
+        "disabled:cursor-not-allowed disabled:bg-[#f4f6fa] disabled:text-[#94a3b8]",
+        "file:mr-2 file:rounded-md file:border-0 file:bg-[#e8eefb] file:px-2 file:py-1",
+        "file:text-xs file:font-medium file:text-[#1a56db]",
+      ].join(" "),
       className,
     )}
     ref={ref}

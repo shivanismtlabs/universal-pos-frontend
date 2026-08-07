@@ -57,7 +57,12 @@ function CheckoutForm({
     });
 
     if (result.error) {
-      setError(result.error.message ?? "Payment failed");
+      const bits = [
+        result.error.message,
+        result.error.code ? `(${result.error.code})` : null,
+        result.error.decline_code ? `decline: ${result.error.decline_code}` : null,
+      ].filter(Boolean);
+      setError(bits.join(" ") || "Payment failed");
       setBusy(false);
       return;
     }
@@ -94,6 +99,11 @@ function CheckoutForm({
         <PaymentElement
           options={{
             layout: "tabs",
+            wallets: {
+              applePay: "never",
+              googlePay: "never",
+              link: "never",
+            },
           }}
         />
       </div>
@@ -138,7 +148,7 @@ export function StripeCheckoutModal(props: Props) {
             appearance: {
               theme: "stripe",
               variables: {
-                colorPrimary: "#0f766e",
+                colorPrimary: "#0b1f33",
                 borderRadius: "8px",
               },
             },

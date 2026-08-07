@@ -14,14 +14,14 @@ import { AuthShell } from "@/components/auth-shell";
 import { ApiTargetSwitch } from "@/components/api-target-switch";
 import {
   passwordStrength,
-  registerTenantSchema,
-  type RegisterTenantInput,
+  registerUserSchema,
+  type RegisterUserInput,
 } from "@/lib/validations";
 import { authApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useAuthStore } from "@/lib/auth-store";
 
-export default function RegisterPage() {
+export default function RegisterUserPage() {
   const router = useRouter();
   const setSession = useAuthStore((s) => s.setSession);
   const [showPassword, setShowPassword] = useState(false);
@@ -31,33 +31,32 @@ export default function RegisterPage() {
     handleSubmit,
     control,
     formState: { errors, isSubmitting },
-  } = useForm<RegisterTenantInput>({
-    resolver: zodResolver(registerTenantSchema),
+  } = useForm<RegisterUserInput>({
+    resolver: zodResolver(registerUserSchema),
     defaultValues: {
-      tenantName: "",
       tenantSlug: "",
-      storeName: "Main Store",
-      adminFullName: "",
-      adminEmail: "",
-      adminPassword: "",
+      fullName: "",
+      email: "",
+      password: "",
       confirmPassword: "",
-      adminPhone: "",
+      phone: "",
     },
   });
 
-  const password = useWatch({ control, name: "adminPassword" }) ?? "";
-  const email = useWatch({ control, name: "adminEmail" }) ?? "";
+  const password = useWatch({ control, name: "password" }) ?? "";
+  const email = useWatch({ control, name: "email" }) ?? "";
   const slug = useWatch({ control, name: "tenantSlug" }) ?? "";
   const strength = passwordStrength(password, { email, slug });
 
-  async function onSubmit(values: RegisterTenantInput) {
+  async function onSubmit(values: RegisterUserInput) {
     const { confirmPassword: _c, ...rest } = values;
     try {
-      const data = await authApi.registerTenant({
-        ...rest,
+      const data = await authApi.registerUser({
         tenantSlug: rest.tenantSlug.trim().toLowerCase(),
-        adminEmail: rest.adminEmail.trim().toLowerCase(),
-        adminPhone: rest.adminPhone || undefined,
+        fullName: rest.fullName.trim(),
+        email: rest.email.trim().toLowerCase(),
+        password: rest.password,
+        phone: rest.phone || undefined,
       });
       setSession({
         accessToken: data.accessToken,
@@ -66,13 +65,13 @@ export default function RegisterPage() {
           id: data.user.id,
           email: data.user.email,
           fullName: data.user.fullName,
-          roles: data.user.roles ?? ["admin"],
-          storeId: data.store?.id,
+          roles: data.user.roles ?? ["staff"],
+          storeId: data.user.storeId ?? data.store?.id,
           tenantId: data.user.tenantId ?? data.tenant.id,
         },
         tenantSlug: data.tenant.slug,
       });
-      toast.success("Shop created — opening your dashboard");
+      toast.success("Account created — opening your dashboard");
       router.replace("/dashboard");
     } catch (e) {
       toast.error(
@@ -83,57 +82,72 @@ export default function RegisterPage() {
 
   return (
     <AuthShell
-      title="Create shop"
-      subtitle="Register any business. One counter for products, checkout, customers, and reports — you create your own categories."
+      title="Register user"
+      subtitle="Join an existing shop with your email and password."
     >
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
         <div>
-          <p className="eyebrow">New shop</p>
+          <p className="eyebrow">Staff account</p>
           <h2 className="display mt-2 text-2xl text-[#0b1f33]">
-            Register your POS
+            Create your user
           </h2>
           <p className="mt-1 text-sm text-[#5a6b7d]">
-            Pick a unique shop slug for every sign-in
+            Use the shop slug your owner gave you (e.g. demo-shop)
           </p>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2">
-          {(
-            [
-              ["tenantName", "Shop name", "text"],
-              ["tenantSlug", "Slug", "text"],
-              ["storeName", "Store name", "text"],
-              ["adminFullName", "Admin name", "text"],
-              ["adminEmail", "Admin email", "email"],
-              ["adminPhone", "Admin phone", "tel"],
-            ] as const
-          ).map(([name, label, type]) => (
-            <div key={name}>
-              <Label htmlFor={name}>{label}</Label>
-              <Input
-                id={name}
-                type={type}
-                className="mt-1.5"
-                autoComplete={
-                  name === "adminEmail"
-                    ? "email"
-                    : name === "adminPhone"
-                      ? "tel"
-                      : "off"
-                }
-                spellCheck={false}
-                {...register(name)}
-              />
-              <FieldError
-                message={errors[name]?.message as string | undefined}
-              />
-            </div>
-          ))}
+        <div>
+          <Label htmlFor="tenantSlug">Shop slug</Label>
+          <Input
+            id="tenantSlug"
+            className="mt-1.5"
+            autoComplete="organization"
+            spellCheck={false}
+            placeholder="demo-shop"
+            {...register("tenantSlug")}
+          />
+          <FieldError message={errors.tenantSlug?.message} />
+        </div>
+
+        <div>
+          <Label htmlFor="fullName">Full name</Label>
+          <Input
+            id="fullName"
+            className="mt-1.5"
+            autoComplete="name"
+            {...register("fullName")}
+          />
+          <FieldError message={errors.fullName?.message} />
+        </div>
+
+        <div>
+          <Label htmlFor="email">Email</Label>
+          <Input
+            id="email"
+            type="email"
+            className="mt-1.5"
+            autoComplete="email"
+            spellCheck={false}
+            {...register("email")}
+          />
+          <FieldError message={errors.email?.message} />
+        </div>
+
+        <div>
+          <Label htmlFor="phone">Phone (optional)</Label>
+          <Input
+            id="phone"
+            type="tel"
+            className="mt-1.5"
+            autoComplete="tel"
+            {...register("phone")}
+          />
+          <FieldError message={errors.phone?.message} />
         </div>
 
         <div>
           <div className="flex items-center justify-between">
-            <Label htmlFor="adminPassword">Admin password</Label>
+            <Label htmlFor="password">Password</Label>
             <button
               type="button"
               className="text-xs font-medium text-[#0b1f33] hover:underline"
@@ -143,13 +157,13 @@ export default function RegisterPage() {
             </button>
           </div>
           <Input
-            id="adminPassword"
+            id="password"
             type={showPassword ? "text" : "password"}
             className="mt-1.5"
             autoComplete="new-password"
-            {...register("adminPassword")}
+            {...register("password")}
           />
-          <FieldError message={errors.adminPassword?.message} />
+          <FieldError message={errors.password?.message} />
           <ul className="mt-2 grid grid-cols-2 gap-1 text-[0.7rem] text-[#6b7280]">
             {(
               [
@@ -187,10 +201,10 @@ export default function RegisterPage() {
         </div>
 
         <Button type="submit" disabled={isSubmitting} className="w-full">
-          {isSubmitting ? "Creating…" : "Create shop & sign in"}
+          {isSubmitting ? "Creating…" : "Register & sign in"}
         </Button>
         <p className="text-center text-sm text-[#6b7280]">
-          Already have a shop?{" "}
+          Already registered?{" "}
           <Link
             href="/login"
             className="font-semibold text-[#0b1f33] hover:underline"
@@ -198,12 +212,12 @@ export default function RegisterPage() {
             Sign in
           </Link>
           {" · "}
-          Joining a shop?{" "}
+          Opening a new shop?{" "}
           <Link
-            href="/register-user"
+            href="/register"
             className="font-semibold text-[#0b1f33] hover:underline"
           >
-            Register user
+            Create shop
           </Link>
         </p>
         <ApiTargetSwitch />

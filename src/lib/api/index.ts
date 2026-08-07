@@ -866,6 +866,7 @@ export const posApi = {
     description?: string;
     categoryId: string;
     sku: string;
+    sellUnit?: "pcs" | "pack" | "kg" | "g" | "L" | "ml";
     price: number;
     qty: number;
     locationId?: string;
@@ -888,6 +889,7 @@ export const posApi = {
         sku: string;
         sellPrice: string | number;
         qtyOnHand: number;
+        sellUnit?: string;
       };
       posItem: {
         id: string;
@@ -895,6 +897,7 @@ export const posApi = {
         name: string;
         sellPrice: string | number;
         qtyOnHand: number;
+        sellUnit?: string;
         image?: string | null;
         photoUrl?: string | null;
       };
@@ -933,6 +936,7 @@ export const posApi = {
         photoUrl?: string | null;
         price: string | number;
         qty: number;
+        sellUnit?: string;
         isActive: boolean;
         category?: { id: string; name: string } | null;
       }>;
@@ -949,6 +953,7 @@ export const posApi = {
       photoUrl?: string | null;
       price: string | number;
       qty: number;
+      sellUnit?: string;
       isActive: boolean;
       category?: { id: string; name: string } | null;
     }>(`/pos/sale/products/${id}`, { token: token() });
@@ -959,6 +964,7 @@ export const posApi = {
       title?: string;
       description?: string;
       categoryId?: string;
+      sellUnit?: "pcs" | "pack" | "kg" | "g" | "L" | "ml";
       price?: number;
       qty?: number;
       isActive?: boolean;
@@ -976,6 +982,7 @@ export const posApi = {
       photoUrl?: string | null;
       price: string | number;
       qty: number;
+      sellUnit?: string;
       isActive: boolean;
       category?: { id: string; name: string } | null;
     }>(`/pos/sale/products/${id}`, {
@@ -1013,6 +1020,7 @@ export const posApi = {
       id: string;
       sku: string;
       qty: number;
+      sellUnit?: string;
       delta: number;
     }>(`/pos/sale/products/${id}/adjust-stock`, {
       method: "POST",
@@ -1073,6 +1081,7 @@ export const posApi = {
         sku: string;
         sellPrice: string | number;
         qtyOnHand: number;
+        sellUnit?: string;
         lowStock?: boolean;
         name: string;
         productSku?: string;
@@ -1091,6 +1100,7 @@ export const posApi = {
       sku: string;
       sellPrice: string | number;
       qtyOnHand: number;
+      sellUnit?: string;
       name: string;
       productSku?: string;
       image?: string | null;
@@ -1219,6 +1229,7 @@ export const posApi = {
         unitPrice: number;
         qty: number;
         maxQty: number;
+        sellUnit?: string;
       }>;
     }>(`/pos/sale/parked/${orderId}/resume`, {
       method: "POST",

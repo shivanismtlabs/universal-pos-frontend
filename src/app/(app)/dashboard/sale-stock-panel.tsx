@@ -13,12 +13,25 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { ProductThumb } from "@/components/product-thumb";
 import { DynamicCommerceForm } from "@/components/dynamic-commerce-form";
+import { readFileAsDataUrl } from "@/lib/utils";
+import {
+  addSaleProductSchema,
+  updateSaleProductSchema,
+} from "@/lib/validations";
+import {
+  formatQtyWithUnit,
+  normalizeSellUnit,
+  priceUnitLabel,
+  qtyStep,
+  type SellUnit,
+} from "@/lib/sell-units";
 
 const EMPTY = {
   title: "",
   description: "",
   categoryId: "",
   sku: "",
+  sellUnit: "pcs",
   price: "",
   qty: "10",
   imagePreview: "" as string,
@@ -28,9 +41,13 @@ type EditDraft = {
   title: string;
   description: string;
   categoryId: string;
+  sellUnit: SellUnit;
   price: string;
   qty: string;
 };
+
+const textareaClass =
+  "mt-0 min-h-[72px] w-full rounded-lg border border-[#d9e0ea] bg-white px-3 py-2 text-[0.875rem] leading-snug text-[#0b1f33] outline-none transition-[border-color,box-shadow] duration-150 placeholder:text-[#94a3b8] hover:border-[#c5d0e0] focus:border-[#1a56db] focus:shadow-[0_0_0_3px_rgba(26,86,219,0.12)]";
 
 function errMsg(e: unknown) {
   if (e instanceof ApiError) return e.messages.join(", ");
@@ -61,6 +78,9 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
     "products",
   );
   const [form, setForm] = useState(EMPTY);
+  const [formErrors, setFormErrors] = useState<
+    Partial<Record<string, string>>
+  >({});
   const [catName, setCatName] = useState("");
   const [q, setQ] = useState("");
   const [filterCat, setFilterCat] = useState("");
@@ -117,17 +137,33 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
 
   const addProduct = useMutation({
     mutationFn: async () => {
-      if (!form.title.trim() || !form.sku.trim()) {
-        throw new Error("Title and SKU are required");
-      }
-      if (!form.categoryId) throw new Error("Category is required");
-      const res = await posApi.addSaleProduct({
-        title: form.title.trim(),
-        description: form.description.trim() || undefined,
+      const parsed = addSaleProductSchema.safeParse({
+        title: form.title,
+        description: form.description,
         categoryId: form.categoryId,
-        sku: form.sku.trim(),
-        price: Number(form.price) || 0,
-        qty: Number(form.qty) || 0,
+        sku: form.sku,
+        sellUnit: form.sellUnit || "pcs",
+        price: form.price,
+        qty: form.qty,
+      });
+      if (!parsed.success) {
+        const next: Partial<Record<string, string>> = {};
+        for (const issue of parsed.error.issues) {
+          const key = String(issue.path[0] ?? "title");
+          if (!next[key]) next[key] = issue.message;
+        }
+        setFormErrors(next);
+        throw new Error(parsed.error.issues[0]?.message ?? "Check the form");
+      }
+      setFormErrors({});
+      const res = await posApi.addSaleProduct({
+        title: parsed.data.title,
+        description: parsed.data.description || undefined,
+        categoryId: parsed.data.categoryId,
+        sku: parsed.data.sku,
+        sellUnit: parsed.data.sellUnit,
+        price: parsed.data.price,
+        qty: parsed.data.qty,
         locationId: floor.data?.locationId,
       });
       if (form.imagePreview) {
@@ -143,8 +179,10 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
       setForm((f) => ({
         ...EMPTY,
         categoryId: f.categoryId,
+        sellUnit: f.sellUnit,
         qty: "10",
       }));
+      setFormErrors({});
       invalidateSale(qc);
       onAdded?.();
     },
@@ -164,12 +202,24 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
   const updateProduct = useMutation({
     mutationFn: () => {
       if (!editingId || !draft) throw new Error("Nothing to save");
+      const parsed = updateSaleProductSchema.safeParse({
+        title: draft.title,
+        description: draft.description,
+        categoryId: draft.categoryId,
+        sellUnit: draft.sellUnit,
+        price: draft.price,
+        qty: draft.qty,
+      });
+      if (!parsed.success) {
+        throw new Error(parsed.error.issues[0]?.message ?? "Invalid values");
+      }
       return posApi.updateSaleProduct(editingId, {
-        title: draft.title.trim(),
-        description: draft.description.trim(),
-        categoryId: draft.categoryId || undefined,
-        price: Number(draft.price) || 0,
-        qty: Number(draft.qty) || 0,
+        title: parsed.data.title,
+        description: parsed.data.description || "",
+        categoryId: parsed.data.categoryId || undefined,
+        sellUnit: parsed.data.sellUnit,
+        price: parsed.data.price,
+        qty: parsed.data.qty,
       });
     },
     onSuccess: () => {
@@ -185,7 +235,9 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
     mutationFn: ({ id, delta }: { id: string; delta: number }) =>
       posApi.adjustSaleStock(id, { delta }),
     onSuccess: (res) => {
-      toast.success(`Stock → ${res.qty}`);
+      toast.success(
+        `Stock → ${formatQtyWithUnit(Number(res.qty), res.sellUnit)}`,
+      );
       invalidateSale(qc);
     },
     onError: (e) => toast.error(errMsg(e)),
@@ -249,7 +301,7 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
               Add product
             </h2>
             <p className="mt-0.5 text-[0.75rem] text-[#5a6b7d]">
-              Name, category, price, and quantity.
+              Pick sell unit (kg, pcs…) — qty rules follow the unit.
             </p>
 
             <div className="mt-5">
@@ -257,9 +309,16 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
                 schema={fields}
                 values={form}
                 categories={categoryOptions}
-                onChange={(key, value) =>
-                  setForm((f) => ({ ...f, [key]: value }))
-                }
+                fieldErrors={formErrors}
+                onChange={(key, value) => {
+                  setFormErrors((e) => {
+                    if (!e[key]) return e;
+                    const next = { ...e };
+                    delete next[key];
+                    return next;
+                  });
+                  setForm((f) => ({ ...f, [key]: value }));
+                }}
               />
             </div>
 
@@ -396,30 +455,43 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-sm font-semibold text-[#0b1f33]">
-                          ₹{Number(item.price).toLocaleString("en-IN")}
+                          ₹{Number(item.price).toLocaleString("en-IN")}{" "}
+                          <span className="text-xs font-medium text-[#5a6b7d]">
+                            {priceUnitLabel(item.sellUnit)}
+                          </span>
                         </span>
                         <span className="rounded-lg bg-[#e8eefb] px-2.5 py-1 text-xs font-semibold text-[#1341a8]">
-                          qty {item.qty}
+                          {formatQtyWithUnit(Number(item.qty), item.sellUnit)}
                         </span>
                         <Button
                           size="sm"
                           variant="secondary"
                           disabled={adjustStock.isPending}
                           onClick={() =>
-                            adjustStock.mutate({ id: item.id, delta: 1 })
+                            adjustStock.mutate({
+                              id: item.id,
+                              delta: qtyStep(
+                                normalizeSellUnit(item.sellUnit),
+                              ),
+                            })
                           }
                         >
-                          +1
+                          +{qtyStep(normalizeSellUnit(item.sellUnit))}
                         </Button>
                         <Button
                           size="sm"
                           variant="secondary"
-                          disabled={adjustStock.isPending || item.qty < 1}
+                          disabled={adjustStock.isPending || item.qty <= 0}
                           onClick={() =>
-                            adjustStock.mutate({ id: item.id, delta: -1 })
+                            adjustStock.mutate({
+                              id: item.id,
+                              delta: -qtyStep(
+                                normalizeSellUnit(item.sellUnit),
+                              ),
+                            })
                           }
                         >
-                          −1
+                          −{qtyStep(normalizeSellUnit(item.sellUnit))}
                         </Button>
                         <Button
                           size="sm"
@@ -430,6 +502,7 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
                               title: item.title,
                               description: item.description ?? "",
                               categoryId: item.category?.id ?? "",
+                              sellUnit: normalizeSellUnit(item.sellUnit),
                               price: String(Number(item.price)),
                               qty: String(item.qty),
                             });
@@ -495,9 +568,38 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
                         />
                       </div>
                       <div className="field-shell">
-                        <Label>Price</Label>
+                        <Label>Sell unit</Label>
+                        <Select
+                          value={draft?.sellUnit ?? "pcs"}
+                          onChange={(e) =>
+                            setDraft((d) =>
+                              d
+                                ? {
+                                    ...d,
+                                    sellUnit: normalizeSellUnit(
+                                      e.target.value,
+                                    ),
+                                  }
+                                : d,
+                            )
+                          }
+                        >
+                          <option value="pcs">Piece (pcs)</option>
+                          <option value="pack">Pack / box</option>
+                          <option value="kg">Kilogram (kg)</option>
+                          <option value="g">Gram (g)</option>
+                          <option value="L">Litre (L)</option>
+                          <option value="ml">Millilitre (ml)</option>
+                        </Select>
+                      </div>
+                      <div className="field-shell">
+                        <Label>
+                          Price ({priceUnitLabel(draft?.sellUnit)})
+                        </Label>
                         <Input
                           type="number"
+                          step="0.01"
+                          min="0"
                           value={draft?.price ?? ""}
                           onChange={(e) =>
                             setDraft((d) =>
@@ -507,9 +609,15 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
                         />
                       </div>
                       <div className="field-shell">
-                        <Label>Qty</Label>
+                        <Label>Qty ({draft?.sellUnit ?? "pcs"})</Label>
                         <Input
                           type="number"
+                          step={
+                            draft?.sellUnit === "kg" || draft?.sellUnit === "L"
+                              ? "0.001"
+                              : "1"
+                          }
+                          min="0"
                           value={draft?.qty ?? ""}
                           onChange={(e) =>
                             setDraft((d) =>
