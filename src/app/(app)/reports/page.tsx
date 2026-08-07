@@ -3,12 +3,15 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { reportsApi } from "@/lib/api";
-import { formatDate, formatInr, todayYmd } from "@/lib/utils";
+import { useBootstrap } from "@/lib/bootstrap";
+import { formatDate, todayYmd } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/page-header";
 
 export default function ReportsPage() {
+  const { money } = useBootstrap();
   const [from, setFrom] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() - 30);
@@ -38,13 +41,10 @@ export default function ReportsPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-5">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-sm tracking-[0.18em] text-[#0f766e] uppercase">
-            Insights
-          </p>
-          <h1 className="display mt-1 text-3xl text-[#111827]">Reports</h1>
-        </div>
+      <PageHeader
+        title="Reports"
+        subtitle="Performance by period — export when you need a spreadsheet."
+        action={
         <div className="flex flex-wrap items-end gap-2">
           <div>
             <Label className="text-xs">From</Label>
@@ -73,13 +73,14 @@ export default function ReportsPage() {
             Apply
           </Button>
         </div>
-      </header>
+        }
+      />
 
       <div className="grid gap-3 sm:grid-cols-3">
         {[
           ["Orders", totals?.orderCount ?? "—"],
-          ["Subtotal", totals?.subtotal != null ? formatInr(totals.subtotal) : "—"],
-          ["Balance due", totals?.balanceDue != null ? formatInr(totals.balanceDue) : "—"],
+          ["Subtotal", totals?.subtotal != null ? money(totals.subtotal) : "—"],
+          ["Balance due", totals?.balanceDue != null ? money(totals.balanceDue) : "—"],
         ].map(([k, v]) => (
           <div
             key={k}
@@ -120,7 +121,7 @@ export default function ReportsPage() {
               <li key={r.method} className="flex justify-between py-2">
                 <span className="uppercase text-[#6b7280]">{r.method}</span>
                 <span className="font-medium tabular-nums">
-                  {formatInr(r.amount)} · {r.count}
+                  {money(r.amount)} · {r.count}
                 </span>
               </li>
             ))}
@@ -132,7 +133,7 @@ export default function ReportsPage() {
 
         <section className="rounded-2xl border border-[#e5e7eb] bg-white p-4">
           <h2 className="text-sm font-semibold text-[#111827]">
-            Inventory utilization
+            Inventory status
           </h2>
           <ul className="mt-3 divide-y divide-[#f3f4f6] text-sm">
             {(util.data?.byAvailabilityStatus ?? []).map((r) => (
@@ -163,7 +164,7 @@ export default function ReportsPage() {
                   </p>
                 </div>
                 <span className="shrink-0 font-semibold tabular-nums">
-                  {formatInr(o.balanceDue)}
+                  {money(o.balanceDue)}
                 </span>
               </li>
             ))}

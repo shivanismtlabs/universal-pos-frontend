@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuthStore } from "@/lib/auth-store";
+import { passwordStrength } from "@/lib/validations";
+import { PageHeader } from "@/components/page-header";
 
 type Form = {
   fullName: string;
@@ -23,6 +25,33 @@ export default function StaffPage() {
   const qc = useQueryClient();
   const roles = useAuthStore((s) => s.user?.roles ?? []);
   const canManage = roles.some((r) => ["admin", "manager"].includes(r));
+  const isOwner = roles.includes("admin");
+  const roleOptions = [
+    {
+      value: "cashier",
+      label: "Cashier",
+      hint: "Counter charge, customers — no staff/settings/plan",
+    },
+    {
+      value: "inventory",
+      label: "Inventory",
+      hint: "Products, stock, suppliers — no charge/settings",
+    },
+    {
+      value: "manager",
+      label: "Manager",
+      hint: "Day ops, reports, returns, staff (not plan / not grant admin)",
+    },
+    ...(isOwner
+      ? [
+          {
+            value: "admin",
+            label: "Admin (owner)",
+            hint: "Full shop control — only you can grant this",
+          },
+        ]
+      : []),
+  ];
 
   const list = useQuery({ queryKey: ["users"], queryFn: () => usersApi.list() });
   const stores = useQuery({
@@ -40,6 +69,8 @@ export default function StaffPage() {
       primaryStoreId: "",
     },
   });
+  const watchPassword = form.watch("password") ?? "";
+  const strength = passwordStrength(watchPassword);
 
   const create = useMutation({
     mutationFn: (v: Form) =>
@@ -80,13 +111,10 @@ export default function StaffPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-5">
-      <header>
-        <p className="text-sm tracking-[0.18em] text-[#0f766e] uppercase">Studio</p>
-        <h1 className="display mt-1 text-3xl text-[#111827]">Staff</h1>
-        <p className="mt-1 text-sm text-[#6b7280]">
-          Create accounts and assign roles (admin, manager, cashier, fitter, inventory)
-        </p>
-      </header>
+      <PageHeader
+        title="Staff accounts"
+        subtitle="Who has access and what role — invite staff with shop slug + email + password. Role hints show next to each option."
+      />
 
       <div className="grid gap-5 lg:grid-cols-[1.2fr_0.9fr]">
         <section className="overflow-hidden rounded-2xl border border-[#e5e7eb] bg-white">
@@ -153,22 +181,56 @@ export default function StaffPage() {
                 <Input
                   className="mt-1.5"
                   type="password"
-                  {...form.register("password", { required: true, minLength: 8 })}
+                  {...form.register("password", {
+                    required: true,
+                    minLength: 8,
+                    validate: (v) =>
+                      passwordStrength(v).ok ||
+                      "Need 8–72 chars with upper, lower, number, special",
+                  })}
                 />
+                <ul className="mt-1.5 grid grid-cols-2 gap-0.5 text-[0.65rem] text-[#6b7280]">
+                  {(
+                    [
+                      ["length", "8–72 chars"],
+                      ["upper", "Uppercase"],
+                      ["lower", "Lowercase"],
+                      ["number", "Number"],
+                      ["special", "Special"],
+                    ] as const
+                  ).map(([k, label]) => (
+                    <li
+                      key={k}
+                      className={
+                        strength.checks[k] ? "text-[#0b1f33]" : "text-[#9ca3af]"
+                      }
+                    >
+                      {strength.checks[k] ? "✓" : "○"} {label}
+                    </li>
+                  ))}
+                </ul>
               </div>
               <div>
                 <Label>Phone</Label>
-                <Input className="mt-1.5" {...form.register("phone")} />
+                <Input
+                  className="mt-1.5"
+                  placeholder="+91… or any country"
+                  {...form.register("phone")}
+                />
               </div>
               <div>
                 <Label>Role</Label>
                 <select className="mt-1.5 select-field" {...form.register("roleCode")}>
-                  <option value="cashier">Cashier</option>
-                  <option value="fitter">Fitter</option>
-                  <option value="inventory">Inventory</option>
-                  <option value="manager">Manager</option>
-                  <option value="admin">Admin</option>
+                  {roleOptions.map((r) => (
+                    <option key={r.value} value={r.value}>
+                      {r.label}
+                    </option>
+                  ))}
                 </select>
+                <p className="mt-1 text-[0.7rem] text-[#6b7280]">
+                  {roleOptions.find((r) => r.value === form.watch("roleCode"))
+                    ?.hint ?? ""}
+                </p>
               </div>
               <div>
                 <Label>Store</Label>

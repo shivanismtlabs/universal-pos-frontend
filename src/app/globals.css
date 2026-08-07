@@ -1,25 +1,51 @@
 @import "tailwindcss";
 
 /**
- * Tuxedo Studio — clean professional POS UI
- * Soft paper, charcoal ink, restrained teal accent.
+ * Universal POS — mode-agnostic enterprise system
+ * Neutral sapphire base + per-mode color map (see lib/mode-colors.ts)
  */
 :root {
-  --bg: #f6f7f9;
+  --bg: #f3f5f9;
   --surface: #ffffff;
-  --ink: #111827;
-  --ink-soft: #374151;
-  --muted: #6b7280;
-  --line: #e5e7eb;
-  --line-strong: #d1d5db;
-  --accent: #0f766e;
-  --accent-soft: #ecfdf8;
-  --accent-ink: #115e59;
-  --danger: #b91c1c;
-  --shadow: 0 1px 2px rgba(17, 24, 39, 0.04), 0 8px 24px -16px rgba(17, 24, 39, 0.18);
+  --ink: #0b1f33;
+  --ink-soft: #2c3e50;
+  --muted: #5a6b7d;
+  --line: #d9e0ea;
+  --line-strong: #cfd8e6;
+  --accent: #1a56db;
+  --accent-soft: #e8eefb;
+  --accent-ink: #1341a8;
+  --danger: #c81e1e;
 
-  --font-display: "Segoe UI Semibold", "Segoe UI", system-ui, sans-serif;
-  --font-body: "Segoe UI", system-ui, -apple-system, sans-serif;
+  /* Commerce mode colors — add a mode = add a pair (keep in sync with mode-colors.ts) */
+  --mode-sale: #1a56db;
+  --mode-sale-soft: #e8eefb;
+  --mode-rental: #1e3a5f;
+  --mode-rental-soft: #e8eef2;
+  --mode-service: #0f766e;
+  --mode-service-soft: #e6f4f2;
+  --mode-subscription: #6d28d9;
+  --mode-subscription-soft: #f1eaff;
+  --mode-mixed: #0b1f33;
+  --mode-mixed-soft: #eef1f5;
+  --mode-fallback: #5a6b7d;
+
+  /* Type scale */
+  --text-page: 1.25rem; /* 20px */
+  --text-section: 1rem; /* 16px */
+  --text-body: 0.875rem; /* 14px */
+  --text-caption: 0.75rem; /* 12px */
+
+  /* Spacing scale: 4 / 8 / 12 / 16 / 24 / 32 */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+
+  --shadow: 0 1px 2px rgba(11, 31, 51, 0.04),
+    0 10px 24px -18px rgba(11, 31, 51, 0.14);
 
   --background: var(--bg);
   --foreground: var(--ink);
@@ -28,15 +54,14 @@
 }
 
 @theme inline {
-  --color-background: #f6f7f9;
-  --color-foreground: #111827;
-  --font-sans: var(--font-body);
-  --font-display: var(--font-display);
+  --color-background: #f4f6fa;
+  --color-foreground: #0b1f33;
+  --font-sans: var(--font-body), ui-sans-serif, system-ui, sans-serif;
 }
 
 html {
   color-scheme: light;
-  background: #f6f7f9;
+  background: #f3f5f9;
 }
 
 html,
@@ -46,76 +71,175 @@ body {
 
 body {
   margin: 0;
-  background: #f6f7f9;
-  color: #111827;
-  font-family: var(--font-body), system-ui, sans-serif;
+  background: #f3f5f9;
+  color: #0b1f33;
+  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+  font-size: var(--text-body);
+  line-height: 1.55;
+  letter-spacing: -0.011em;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
   overflow-x: hidden;
 }
 
 ::selection {
-  background: rgba(15, 118, 110, 0.16);
+  background: rgba(26, 86, 219, 0.16);
+}
+
+/* Visible keyboard focus — every interactive element */
+:focus-visible {
+  outline: 2px solid #1a56db;
+  outline-offset: 2px;
+}
+
+.page-title {
+  font-size: var(--text-page);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  color: var(--ink);
+}
+
+.page-subtitle {
+  font-size: var(--text-body);
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.section-title {
+  font-size: var(--text-section);
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+}
+
+.text-body {
+  font-size: var(--text-body);
+  font-weight: 400;
+}
+
+.text-caption {
+  font-size: var(--text-caption);
+  font-weight: 400;
 }
 
 .panel {
   background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 16px;
+  border: 1px solid #d9e0ea;
+  border-radius: 12px;
   box-shadow: var(--shadow);
   transition:
-    box-shadow 0.25s ease,
-    border-color 0.25s ease,
-    transform 0.25s ease;
+    box-shadow 0.2s ease,
+    border-color 0.2s ease;
 }
 
 .panel-interactive:hover {
-  border-color: #d1d5db;
+  border-color: #c2ccd9;
   box-shadow:
-    0 1px 2px rgba(17, 24, 39, 0.05),
-    0 16px 32px -20px rgba(17, 24, 39, 0.22);
+    0 1px 2px rgba(11, 31, 51, 0.05),
+    0 14px 28px -20px rgba(11, 31, 51, 0.18);
 }
 
 .panel-accent {
-  border-top: 3px solid #0f766e;
+  border-top: 3px solid #1a56db;
 }
 
 .hairline {
   height: 1px;
   width: 100%;
-  background: #e5e7eb;
+  background: #d9e0ea;
 }
 
 .display {
-  font-family: var(--font-display), system-ui, sans-serif;
+  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;
   font-weight: 650;
-  letter-spacing: -0.03em;
-  color: #111827;
+  letter-spacing: -0.035em;
+  line-height: 1.12;
+  color: #0b1f33;
 }
 
 .eyebrow {
-  font-size: 0.72rem;
-  font-weight: 650;
-  letter-spacing: 0.14em;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #0f766e;
+  color: #1a56db;
 }
 
+/* Legacy class — prefer <Select /> component; keep in sync */
 .select-field {
   display: flex;
-  height: 2.75rem;
+  height: 2.5rem;
   width: 100%;
-  border-radius: 12px;
-  border: 1px solid #e5e7eb;
-  background: #ffffff;
-  padding: 0 0.85rem;
+  appearance: none;
+  border-radius: 0.5rem;
+  border: 1px solid #d9e0ea;
+  background-color: #ffffff;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4 6l4 4 4-4' stroke='%238b9bb0' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  padding: 0 2.25rem 0 0.75rem;
   font-size: 0.875rem;
-  color: #111827;
+  color: #0b1f33;
   outline: none;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.select-field:hover {
+  border-color: #c5d0e0;
 }
 
 .select-field:focus {
-  border-color: #0f766e;
-  box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.12);
+  border-color: #1a56db;
+  background-color: #ffffff;
+  box-shadow: 0 0 0 3px rgba(26, 86, 219, 0.12);
+}
+
+.select-field:disabled {
+  cursor: not-allowed;
+  background-color: #eef2f7;
+  opacity: 0.65;
+}
+
+.field-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.seg-control {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  border-bottom: 1px solid #d9e0ea;
+  padding-bottom: 0;
+}
+
+.seg-control button {
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  padding: 0.55rem 0.85rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #5a6b7d;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.seg-control button[data-active="true"] {
+  border-bottom-color: #1a56db;
+  color: #1a56db;
+  background: transparent;
+  box-shadow: none;
+}
+
+.seg-control button:not([data-active="true"]):hover {
+  color: #0b1f33;
+  background: transparent;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -124,10 +248,9 @@ body {
   }
 }
 
-/* Thin, quiet scrollbars (Firefox + Chromium) */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #d1d5db transparent;
+  scrollbar-color: #c2ccd9 transparent;
 }
 
 *::-webkit-scrollbar {
@@ -140,14 +263,14 @@ body {
 }
 
 *::-webkit-scrollbar-thumb {
-  background-color: #d1d5db;
+  background-color: #c2ccd9;
   border-radius: 999px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background-color: #9ca3af;
+  background-color: #8b9bb0;
 }
 
 *::-webkit-scrollbar-corner {
@@ -158,7 +281,6 @@ body {
   scrollbar-gutter: stable;
 }
 
-/* Receipt print — hide entire app; only portal slip (1 page) */
 @media print {
   @page {
     size: 80mm auto;
@@ -205,7 +327,14 @@ body {
   .receipt-print {
     width: 100% !important;
     max-width: none !important;
-    color: #111 !important;
+    color: #0b1f33 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .receipt-paid-bar {
+    background: #0b1f33 !important;
+    color: #fff !important;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }

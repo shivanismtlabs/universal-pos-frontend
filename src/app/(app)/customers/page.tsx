@@ -21,6 +21,8 @@ import { FieldError } from "@/components/ui/form";
 import { formatDate } from "@/lib/utils";
 import { FadeIn } from "@/components/motion";
 import { cn } from "@/lib/utils";
+import { useBootstrap } from "@/lib/bootstrap";
+import { PageHeader } from "@/components/page-header";
 
 function numOrUndef(v: unknown) {
   if (v === "" || v === undefined || v === null) return undefined;
@@ -49,6 +51,8 @@ export default function CustomersPage() {
   const [q, setQ] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const qc = useQueryClient();
+  const { hasModule } = useBootstrap();
+  const rental = hasModule("rental");
 
   const list = useQuery({
     queryKey: ["customers", q],
@@ -64,7 +68,7 @@ export default function CustomersPage() {
   const measurements = useQuery({
     queryKey: ["measurements", selectedId],
     queryFn: () => customersApi.listMeasurements(selectedId!),
-    enabled: Boolean(selectedId),
+    enabled: Boolean(selectedId) && rental,
   });
 
   const form = useForm<CreateCustomerInput>({
@@ -141,22 +145,15 @@ export default function CustomersPage() {
   return (
     <div className="mx-auto max-w-6xl space-y-8">
       <FadeIn>
-        <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="text-sm tracking-[0.2em] text-[#0f766e] uppercase">
-              Customers
+        <PageHeader
+          title="Customers"
+          subtitle="Universal contact list — search, add, and open purchase or rental history."
+          action={
+            <p className="text-caption text-[var(--muted)]">
+              {list.isLoading ? "Loading…" : `${items.length} shown`}
             </p>
-            <h1 className="display mt-1 text-3xl text-[#111827] sm:text-4xl">
-              Client book
-            </h1>
-            <p className="mt-2 max-w-md text-sm leading-relaxed text-[#6b7280]">
-              Search and select a client, then add fittings below.
-            </p>
-          </div>
-          <p className="text-sm text-[#6b7280]">
-            {list.isLoading ? "Loading…" : `${items.length} shown`}
-          </p>
-        </header>
+          }
+        />
       </FadeIn>
 
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)]">
@@ -186,7 +183,7 @@ export default function CustomersPage() {
                       className={cn(
                         "flex w-full flex-col gap-1 px-4 py-3.5 text-left transition sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-5",
                         active
-                          ? "bg-[#ecfdf8]"
+                          ? "bg-[#e8eefb]"
                           : "bg-white hover:bg-[#f9fafb]",
                       )}
                     >
@@ -194,7 +191,7 @@ export default function CustomersPage() {
                         <p
                           className={cn(
                             "truncate text-[0.95rem] font-semibold",
-                            active ? "text-[#0f766e]" : "text-[#111827]",
+                            active ? "text-[#0b1f33]" : "text-[#111827]",
                           )}
                         >
                           {c.fullName}
@@ -204,12 +201,18 @@ export default function CustomersPage() {
                         </p>
                       </div>
                       <div className="shrink-0 text-left sm:text-right">
-                        <p className="text-[0.65rem] font-semibold tracking-wide text-[#9ca3af] uppercase">
-                          Event
-                        </p>
-                        <p className="text-sm text-[#374151]">
-                          {c.eventDate ? formatDate(c.eventDate) : "—"}
-                        </p>
+                        {rental ? (
+                          <>
+                            <p className="text-[0.65rem] font-semibold tracking-wide text-[#9ca3af] uppercase">
+                              Event
+                            </p>
+                            <p className="text-sm text-[#374151]">
+                              {c.eventDate ? formatDate(c.eventDate) : "—"}
+                            </p>
+                          </>
+                        ) : (
+                          <p className="text-sm text-[#6b7280]">{c.email ?? "—"}</p>
+                        )}
                       </div>
                     </button>
                   </li>
@@ -251,15 +254,28 @@ export default function CustomersPage() {
                   <Input className="mt-1.5" {...form.register("phone")} />
                   <FieldError message={form.formState.errors.phone?.message} />
                 </div>
-                <div>
-                  <Label>Event date</Label>
-                  <Input
-                    className="mt-1.5"
-                    type="date"
-                    {...form.register("eventDate")}
-                  />
-                </div>
+                {rental ? (
+                  <div>
+                    <Label>Event date</Label>
+                    <Input
+                      className="mt-1.5"
+                      type="date"
+                      {...form.register("eventDate")}
+                    />
+                  </div>
+                ) : (
+                  <div>
+                    <Label>Email</Label>
+                    <Input
+                      className="mt-1.5"
+                      type="email"
+                      {...form.register("email")}
+                    />
+                    <FieldError message={form.formState.errors.email?.message} />
+                  </div>
+                )}
               </div>
+              {rental ? (
               <div>
                 <Label>Email</Label>
                 <Input
@@ -269,6 +285,7 @@ export default function CustomersPage() {
                 />
                 <FieldError message={form.formState.errors.email?.message} />
               </div>
+              ) : null}
               <div>
                 <Label>Notes</Label>
                 <Input className="mt-1.5" {...form.register("notes")} />
@@ -285,12 +302,13 @@ export default function CustomersPage() {
         </FadeIn>
       </div>
 
-      {/* Measurements */}
+      {/* Measurements — rental module only */}
+      {rental ? (
       <FadeIn delay={0.1}>
         <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5 sm:p-6">
           {!selected ? (
             <div className="py-10 text-center">
-              <p className="eyebrow text-[#0f766e]">Measurements</p>
+              <p className="eyebrow text-[#0b1f33]">Measurements</p>
               <h2 className="display mt-2 text-2xl text-[#111827]">
                 Select a customer
               </h2>
@@ -302,7 +320,7 @@ export default function CustomersPage() {
             <>
               <div className="flex flex-col gap-3 border-b border-[#e5e7eb] pb-5 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <p className="eyebrow text-[#0f766e]">Measurements</p>
+                  <p className="eyebrow text-[#0b1f33]">Measurements</p>
                   <h2 className="display mt-1 text-2xl text-[#111827] sm:text-[1.75rem]">
                     {selected.fullName}
                   </h2>
@@ -381,7 +399,7 @@ export default function CustomersPage() {
                         key={m.id}
                         className="rounded-xl border border-[#e5e7eb] bg-[#f9fafb] p-4"
                       >
-                        <p className="text-xs font-semibold tracking-wide text-[#0f766e] uppercase">
+                        <p className="text-xs font-semibold tracking-wide text-[#0b1f33] uppercase">
                           {formatDate(m.takenAt)}
                         </p>
                         <div className="mt-3 grid grid-cols-3 gap-x-3 gap-y-3 sm:grid-cols-4">
@@ -411,6 +429,7 @@ export default function CustomersPage() {
           )}
         </section>
       </FadeIn>
+      ) : null}
     </div>
   );
 }

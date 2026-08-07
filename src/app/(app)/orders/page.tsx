@@ -6,9 +6,16 @@ import { useQuery } from "@tanstack/react-query";
 import { ordersApi } from "@/lib/api";
 import { useBootstrap } from "@/lib/bootstrap";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { ModeBadge } from "@/components/mode-badge";
+import {
+  EmptyState,
+  PageHeader,
+  PageSkeleton,
+} from "@/components/page-header";
 
 /**
- * Order history only — create tickets via Counter (POS checkout).
+ * All orders — read-only history. Create tickets only at the counter.
  */
 export default function OrdersPage() {
   const { money, commerceModes } = useBootstrap();
@@ -21,7 +28,7 @@ export default function OrdersPage() {
 
   const kinds = useMemo(() => {
     const fromData = new Set(
-      (orders.data?.items ?? []).map((o) => o.kind).filter(Boolean),
+      (orders.data?.items ?? []).map((o) => o.kind).filter(Boolean) as string[],
     );
     commerceModes.forEach((m) => fromData.add(m));
     return ["all", ...[...fromData].sort()];
@@ -31,26 +38,25 @@ export default function OrdersPage() {
     (o) => kind === "all" || o.kind === kind,
   );
 
+  if (orders.isLoading) {
+    return <PageSkeleton rows={6} />;
+  }
+
   return (
-    <div className="space-y-5">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="display text-2xl sm:text-3xl">Orders</h1>
-          <p className="mt-1 text-sm text-[#5a6b7d]">
-            History and filters. New orders are created at the Counter.
-          </p>
-        </div>
-        <Link
-          href="/pos"
-          className="inline-flex h-10 items-center rounded-[10px] bg-[#1a56db] px-4 text-sm font-semibold text-white shadow-[0_1px_2px_rgba(26,86,219,0.28)] hover:bg-[#1341a8]"
-        >
-          Open counter
-        </Link>
-      </header>
+    <div className="space-y-6">
+      <PageHeader
+        title="All orders"
+        subtitle="History and lookup only — new orders are created at the counter, not here."
+        action={
+          <Button asChild>
+            <Link href="/pos">Open counter</Link>
+          </Button>
+        }
+      />
 
       <div
         role="tablist"
-        className="inline-flex flex-wrap rounded-lg border border-[#d9e0ea] bg-[#eef2f7] p-0.5"
+        className="inline-flex flex-wrap rounded-lg border border-[var(--line)] bg-[#eef2f7] p-0.5"
       >
         {kinds.map((k) => (
           <button
@@ -60,57 +66,66 @@ export default function OrdersPage() {
             aria-selected={kind === k}
             onClick={() => setKind(k)}
             className={cn(
-              "rounded-md px-3 py-1.5 text-[0.8125rem] font-semibold capitalize transition",
+              "rounded-md px-3 py-1.5 text-[0.8125rem] font-medium capitalize transition",
               kind === k
                 ? "bg-white text-[#1a56db] shadow-sm"
-                : "text-[#5a6b7d] hover:text-[#0b1f33]",
+                : "text-[var(--muted)] hover:text-[var(--ink)]",
             )}
           >
-            {k}
+            {k === "all" ? "All" : k}
           </button>
         ))}
       </div>
 
-      <section className="overflow-x-auto rounded-xl border border-[#d9e0ea] bg-white">
-        <table className="w-full min-w-[520px] text-left text-sm">
-          <thead className="border-b border-[#e8ebf0] text-[0.65rem] font-semibold tracking-wide text-[#8b9bb0] uppercase">
-            <tr>
-              <th className="px-4 py-3">Order</th>
-              <th className="px-4 py-3">Kind</th>
-              <th className="px-4 py-3">Customer</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Balance</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-[#f0f3f7]">
-            {rows.map((o) => (
-              <tr key={o.id} className="hover:bg-[#f7f9fc]">
-                <td className="px-4 py-3 font-medium">
-                  <Link
-                    href={`/orders/${o.id}`}
-                    className="text-[#0b1f33] hover:underline"
-                  >
-                    {o.orderNumber}
-                  </Link>
-                </td>
-                <td className="px-4 py-3 capitalize text-[#5a6b7d]">
-                  {o.kind ?? "—"}
-                </td>
-                <td className="px-4 py-3 text-[#374151]">
-                  {o.customer?.fullName ?? "—"}
-                </td>
-                <td className="px-4 py-3">{o.status}</td>
-                <td className="px-4 py-3 tabular-nums">{money(o.balanceDue)}</td>
+      {!rows.length ? (
+        <EmptyState
+          title="No orders yet"
+          detail="Orders appear here after you check out at the counter. There is no create button on this page."
+          action={
+            <Button asChild>
+              <Link href="/pos">Open counter</Link>
+            </Button>
+          }
+        />
+      ) : (
+        <section className="overflow-x-auto rounded-xl border border-[var(--line)] bg-white">
+          <table className="w-full min-w-[560px] text-left text-body">
+            <thead className="border-b border-[var(--line)] text-caption font-medium tracking-wide text-[var(--muted)] uppercase">
+              <tr>
+                <th className="px-4 py-3">Order</th>
+                <th className="px-4 py-3">Mode</th>
+                <th className="px-4 py-3">Customer</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Balance</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-        {!rows.length && !orders.isLoading ? (
-          <p className="px-4 py-8 text-center text-sm text-[#5a6b7d]">
-            No orders in this filter
-          </p>
-        ) : null}
-      </section>
+            </thead>
+            <tbody className="divide-y divide-[#f0f3f7]">
+              {rows.map((o) => (
+                <tr key={o.id} className="hover:bg-[#f7f9fc]">
+                  <td className="px-4 py-3 font-medium">
+                    <Link
+                      href={`/orders/${o.id}`}
+                      className="text-[var(--ink)] hover:underline"
+                    >
+                      {o.orderNumber}
+                    </Link>
+                  </td>
+                  <td className="px-4 py-3">
+                    <ModeBadge mode={o.kind} />
+                  </td>
+                  <td className="px-4 py-3 text-[var(--muted)]">
+                    {o.customer?.fullName ?? "—"}
+                  </td>
+                  <td className="px-4 py-3 capitalize">{o.status}</td>
+                  <td className="px-4 py-3 tabular-nums">
+                    {money(o.balanceDue)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
     </div>
   );
 }

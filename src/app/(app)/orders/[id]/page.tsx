@@ -12,6 +12,7 @@ import {
   inventoryApi,
   ordersApi,
   paymentsApi,
+  posApi,
   tenantsApi,
 } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
@@ -22,6 +23,10 @@ import {
 import {
   ITEMS_MUTABLE_STATUSES,
   ORDER_STATUS_TRANSITIONS,
+  RENTAL_LIFECYCLE_TRANSITIONS,
+  canMutateRentalItems,
+  lifecycleLabel,
+  rentalLifecycleOf,
 } from "@/lib/order-status";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,6 +41,8 @@ import {
 import { useAuthStore } from "@/lib/auth-store";
 import { canFinance, canRefund } from "@/lib/roles";
 import { useState } from "react";
+import { ModeBadge } from "@/components/mode-badge";
+import { PageBreadcrumb, PageSkeleton } from "@/components/page-header";
 
 export default function OrderDetailPage() {
   const params = useParams<{ id: string }>();
@@ -48,6 +55,8 @@ export default function OrderDetailPage() {
   const [layAmt, setLayAmt] = useState("");
   const [feeType, setFeeType] = useState<"late" | "damage" | "other">("late");
   const [feeAmt, setFeeAmt] = useState("");
+  const [extendDate, setExtendDate] = useState("");
+  const [extendPay, setExtendPay] = useState(true);
 
   const order = useQuery({
     queryKey: ["order", id],
@@ -110,7 +119,12 @@ export default function OrderDetailPage() {
   };
 
   const statusMut = useMutation({
-    mutationFn: (status: string) => ordersApi.updateStatus(id, status),
+    mutationFn: (status: string) => {
+      if (order.data?.rentalExt) {
+        return ordersApi.changeRentalLifecycle(id, status);
+      }
+      return ordersApi.updateStatus(id, status);
+    },
     onSuccess: () => {
       toast.success("Status updated");
       invalidate();
@@ -262,23 +276,67 @@ export default function OrderDetailPage() {
       toast.error(e instanceof ApiError ? e.messages.join(", ") : "Failed"),
   });
 
+  const extendRental = useMutation({
+    mutationFn: () =>
+      posApi.rentalExtend({
+        orderId: id,
+        newReturnDueDate: extendDate,
+      }),
+    onSuccess: async (r) => {
+      toast.success(
+        `Extended +${r.extraDays} day(s) to ${r.newReturnDueDate}. Fee ${formatInr(r.extensionFee)}`,
+      );
+      setExtendDate("");
+      if (extendPay && Number(r.extensionFee) > 0) {
+        try {
+          await paymentsApi.create({
+            orderId: id,
+            method: "cash",
+            amount: Number(r.extensionFee),
+            idempotencyKey: newIdempotencyKey("extend-pay"),
+          });
+          toast.success("Extension fee collected (cash)");
+        } catch {
+          toast.message("Extension saved — collect fee from Payments");
+        }
+      }
+      invalidate();
+    },
+    onError: (e) =>
+      toast.error(e instanceof ApiError ? e.messages.join(", ") : "Failed"),
+  });
+
   const data = order.data;
+  const isRental = Boolean(data?.rentalExt);
+  const lifecycle = data ? rentalLifecycleOf(data) : "quote";
   const nextStatuses = data
-    ? (ORDER_STATUS_TRANSITIONS[data.status] ?? [])
+    ? isRental
+      ? (RENTAL_LIFECYCLE_TRANSITIONS[lifecycle] ?? []).filter(
+          (s) => s !== "cancelled",
+        )
+      : (ORDER_STATUS_TRANSITIONS[data.status] ?? [])
     : [];
   const canEditItems = data
-    ? ITEMS_MUTABLE_STATUSES.has(data.status)
+    ? isRental
+      ? canMutateRentalItems(data)
+      : ITEMS_MUTABLE_STATUSES.has(data.status)
     : false;
 
   if (order.isLoading) {
-    return <p className="text-[#6b7280]">Loading order…</p>;
+    return <PageSkeleton rows={6} />;
   }
   if (order.isError || !data) {
     return (
       <div className="space-y-3">
-        <p className="text-red-600">Order not found</p>
-        <Link href="/orders" className="text-sm text-[#0f766e] underline">
-          Back to orders
+        <PageBreadcrumb
+          items={[
+            { label: "All orders", href: "/orders" },
+            { label: "Not found" },
+          ]}
+        />
+        <p className="text-[#c81e1e]">Order not found</p>
+        <Link href="/orders" className="text-sm text-[#1a56db] hover:underline">
+          Back to all orders
         </Link>
       </div>
     );
@@ -286,24 +344,28 @@ export default function OrderDetailPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
+      <PageBreadcrumb
+        items={[
+          { label: "All orders", href: "/orders" },
+          { label: data.orderNumber },
+        ]}
+      />
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <Link
-            href="/orders"
-            className="text-xs font-semibold text-[#0f766e] hover:underline"
-          >
-            ← Orders
-          </Link>
-          <h1 className="display mt-1 text-3xl text-[#111827]">
-            {data.orderNumber}
-          </h1>
-          <p className="mt-1 text-sm text-[#6b7280]">
-            {data.customer?.fullName} · {data.customer?.phone} ·{" "}
-            {data.status.replaceAll("_", " ")}
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="page-title">{data.orderNumber}</h1>
+            <ModeBadge mode={data.kind} />
+          </div>
+          <p className="page-subtitle mt-1">
+            {data.customer?.fullName ?? "Walk-in"}
+            {data.customer?.phone ? ` · ${data.customer.phone}` : ""} ·{" "}
+            {isRental
+              ? lifecycleLabel(lifecycle)
+              : data.status.replaceAll("_", " ")}
           </p>
         </div>
         <div className="text-right">
-          <p className="text-[0.65rem] font-semibold tracking-wide text-[#9ca3af] uppercase">
+          <p className="text-caption font-medium tracking-wide text-[var(--muted)] uppercase">
             Balance
           </p>
           <p className="text-2xl font-semibold tabular-nums">
@@ -322,7 +384,7 @@ export default function OrderDetailPage() {
             disabled={statusMut.isPending}
             onClick={() => statusMut.mutate(s)}
           >
-            → {s.replaceAll("_", " ")}
+            → {lifecycleLabel(s)}
           </Button>
         ))}
         <Link href={`/pos?order=${data.id}`}>
@@ -331,6 +393,46 @@ export default function OrderDetailPage() {
           </Button>
         </Link>
       </div>
+
+      {isRental &&
+      ["reserved", "ready", "checked_out"].includes(lifecycle) ? (
+        <section className="rounded-2xl border border-[#e5e7eb] bg-white p-4">
+          <h2 className="text-sm font-semibold">Extend rental</h2>
+          <p className="mt-1 text-xs text-[#6b7280]">
+            Current due:{" "}
+            {formatDate(
+              data.rentalExt?.returnDueDate ?? data.returnDueDate ?? null,
+            )}
+          </p>
+          <div className="mt-3 flex flex-wrap items-end gap-2">
+            <div>
+              <Label>New return date</Label>
+              <Input
+                className="mt-1"
+                type="date"
+                value={extendDate}
+                onChange={(e) => setExtendDate(e.target.value)}
+              />
+            </div>
+            <label className="flex items-center gap-2 pb-2 text-sm">
+              <input
+                type="checkbox"
+                checked={extendPay}
+                onChange={(e) => setExtendPay(e.target.checked)}
+              />
+              Collect fee now (cash)
+            </label>
+            <Button
+              type="button"
+              size="sm"
+              disabled={!extendDate || extendRental.isPending}
+              onClick={() => extendRental.mutate()}
+            >
+              {extendRental.isPending ? "Extending…" : "Extend"}
+            </Button>
+          </div>
+        </section>
+      ) : null}
 
       <div className="grid gap-4 sm:grid-cols-4">
         {[
@@ -359,11 +461,24 @@ export default function OrderDetailPage() {
               {data.items.map((item) => (
                 <tr key={item.id}>
                   <td className="py-2.5">
-                    <span className="font-medium">
-                      {item.inventoryUnit?.barcodeSku ??
-                        item.retailSku?.sku ??
-                        item.itemType}
-                    </span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <ModeBadge
+                        mode={
+                          item.itemType === "retail" ||
+                          item.itemType === "sale"
+                            ? "sale"
+                            : item.itemType === "rental_unit" ||
+                                item.itemType === "rental"
+                              ? "rental"
+                              : item.itemType
+                        }
+                      />
+                      <span className="font-medium">
+                        {item.inventoryUnit?.barcodeSku ??
+                          item.retailSku?.sku ??
+                          item.itemType}
+                      </span>
+                    </div>
                     {item.size ? (
                       <span className="text-[#6b7280]"> · {item.size}</span>
                     ) : null}
@@ -466,7 +581,7 @@ export default function OrderDetailPage() {
                   </p>
                   <button
                     type="button"
-                    className="mt-1 text-xs font-medium text-[#0f766e] hover:underline"
+                    className="mt-1 text-xs font-medium text-[#0b1f33] hover:underline"
                     onClick={() => {
                       const w = window.open("", "_blank");
                       if (!w) return;

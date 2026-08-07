@@ -56,7 +56,7 @@ const NAV_CATALOG: NavItem[] = [
   },
   {
     href: "/dashboard",
-    label: "Home",
+    label: "Start here",
     icon: LayoutDashboard,
     section: "Daily work",
   },
@@ -81,7 +81,6 @@ const NAV_CATALOG: NavItem[] = [
     icon: ClipboardList,
     section: "Daily work",
     module: "orders",
-    commerce: "rental",
   },
   {
     href: "/customers",
@@ -144,7 +143,7 @@ const NAV_CATALOG: NavItem[] = [
   },
   {
     href: "/plan",
-    label: "Plans",
+    label: "Subscription plan",
     icon: CreditCard,
     section: "Shop setup",
   },

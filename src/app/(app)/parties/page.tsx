@@ -126,7 +126,7 @@ function PartiesDesk() {
         </p>
         <h1 className="display mt-2 text-2xl sm:text-4xl">Customer groups</h1>
         <p className="mt-1 text-sm text-[#6b7280]">
-          Optional groups for shared rentals — wedding parties, event crews,
+          Optional groups for shared rentals — event parties, crews,
           corporate bookings, tour groups, etc.
         </p>
       </header>
@@ -182,7 +182,7 @@ function PartiesDesk() {
               <Label>Name</Label>
               <Input
                 className="mt-2"
-                placeholder="e.g. Sharma wedding, Fleet crew A"
+                placeholder="e.g. Sharma event, Fleet crew A"
                 {...form.register("name")}
               />
               <FieldError message={form.formState.errors.name?.message} />

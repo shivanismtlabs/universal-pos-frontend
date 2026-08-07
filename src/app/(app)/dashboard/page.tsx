@@ -1,8 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useBootstrap } from "@/lib/bootstrap";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { PageHeader, EmptyState, PageSkeleton } from "@/components/page-header";
+import { ModeBadge } from "@/components/mode-badge";
 import { SaleDashboard } from "./sale-dashboard";
 import { RentalDashboard } from "./rental-dashboard";
 
@@ -20,17 +24,14 @@ const FLOOR_META: Array<{
 ];
 
 /**
- * Home floors for each enabled commerce mode.
- * Mode list comes from tenant bootstrap — never hardcoded shop type.
+ * Start here — today's snapshot per enabled mode.
  */
 export default function DashboardPage() {
   const { isLoading, hasMode, commerceModes } = useBootstrap();
   const [floor, setFloor] = useState<Floor>("sale");
 
   if (isLoading) {
-    return (
-      <p className="py-16 text-center text-sm text-[#5a6b7d]">Loading…</p>
-    );
+    return <PageSkeleton rows={5} />;
   }
 
   const available = FLOOR_META.filter((f) => hasMode(f.mode));
@@ -39,19 +40,30 @@ export default function DashboardPage() {
 
   if (!available.length) {
     return (
-      <p className="rounded-xl border border-[#d9e0ea] bg-white p-8 text-center text-sm text-[#5a6b7d]">
-        No commerce modes enabled yet. Complete shop setup to continue.
-      </p>
+      <EmptyState
+        title="Finish shop setup"
+        detail="Choose what your business does so we can show the right counters and products."
+      />
     );
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
+      <PageHeader
+        title="Start here"
+        subtitle="Today’s snapshot for each enabled mode. Open the counter when you’re ready to check out."
+        action={
+          <Button asChild>
+            <Link href="/pos">Open counter</Link>
+          </Button>
+        }
+      />
+
       {available.length > 1 ? (
         <div
           role="tablist"
           aria-label="Commerce floors"
-          className="inline-flex flex-wrap rounded-lg border border-[#d9e0ea] bg-[#eef2f7] p-0.5"
+          className="inline-flex flex-wrap rounded-lg border border-[var(--line)] bg-[#eef2f7] p-0.5"
         >
           {available.map((f) => (
             <button
@@ -61,32 +73,38 @@ export default function DashboardPage() {
               aria-selected={active?.id === f.id}
               onClick={() => setFloor(f.id)}
               className={cn(
-                "rounded-md px-4 py-2 text-[0.8125rem] font-semibold transition",
+                "inline-flex items-center gap-2 rounded-md px-4 py-2 text-[0.8125rem] font-medium transition",
                 active?.id === f.id
                   ? "bg-white text-[#1a56db] shadow-sm"
-                  : "text-[#5a6b7d] hover:text-[#0b1f33]",
+                  : "text-[var(--muted)] hover:text-[var(--ink)]",
               )}
             >
-              {f.label}
+              <ModeBadge mode={f.mode} />
+              <span className="sr-only sm:not-sr-only sm:inline">
+                {f.label}
+              </span>
             </button>
           ))}
         </div>
-      ) : null}
+      ) : (
+        <div className="flex items-center gap-2 text-caption text-[var(--muted)]">
+          <span>Active mode</span>
+          <ModeBadge mode={available[0].mode} />
+        </div>
+      )}
 
       {active?.id === "sale" ? <SaleDashboard /> : null}
       {active?.id === "rent" ? <RentalDashboard /> : null}
       {active?.id === "service" || active?.id === "subscription" ? (
-        <div className="rounded-xl border border-[#d9e0ea] bg-white p-8">
-          <h1 className="text-xl font-bold text-[#0b1f33]">
-            {active.label}
-          </h1>
-          <p className="mt-2 text-sm text-[#5a6b7d]">
-            Mode <code className="text-[#1a56db]">{active.mode}</code> is enabled
-            for this shop ({commerceModes.join(", ")}). Dedicated KPI panel and
-            counter for this mode ship next — catalog create already accepts
-            these field schemas.
-          </p>
-        </div>
+        <EmptyState
+          title={`${active.label} floor is on`}
+          detail={`Mode ${active.mode} is enabled (${commerceModes.join(", ")}). Add catalog items under Products, then check out from the counter when the flow ships.`}
+          action={
+            <Button asChild variant="secondary">
+              <Link href="/catalog">Go to products</Link>
+            </Button>
+          }
+        />
       ) : null}
     </div>
   );
