@@ -11,7 +11,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FieldError } from "@/components/ui/form";
 import { AuthShell } from "@/components/auth-shell";
-import { ApiTargetSwitch } from "@/components/api-target-switch";
 import {
   passwordStrength,
   registerUserSchema,
@@ -82,7 +81,6 @@ export default function RegisterUserPage() {
 
   return (
     <AuthShell
-      layout="stacked"
       title="Join as staff"
       subtitle="Use the shop slug your owner gave you, then create your login."
     >
@@ -212,7 +210,6 @@ export default function RegisterUserPage() {
             Create shop
           </Link>
         </p>
-        <ApiTargetSwitch />
       </form>
     </AuthShell>
   );

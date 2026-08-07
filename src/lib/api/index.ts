@@ -7,7 +7,11 @@ function token() {
 }
 
 export const authApi = {
-  login(body: { tenantSlug: string; email: string; password: string }) {
+  login(body: {
+    email: string;
+    password: string;
+    tenantSlug?: string;
+  }) {
     return apiRequest<{
       user: {
         id: string;
@@ -17,6 +21,7 @@ export const authApi = {
         storeId?: string | null;
         tenantId: string;
       };
+      tenant?: { id: string; slug: string; name: string };
       accessToken: string;
       refreshToken: string;
     }>("/auth/login", { method: "POST", body });

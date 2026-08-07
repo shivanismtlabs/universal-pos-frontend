@@ -1,18 +1,12 @@
 /**
- * API base URL — local ↔ production.
+ * API base URL.
  *
- * Single file: frontend/.env
- *   NEXT_PUBLIC_API_TARGET=local|production
- *   NEXT_PUBLIC_API_URL_LOCAL=...
- *   NEXT_PUBLIC_API_URL_PRODUCTION=...
+ * .env:
+ *   NEXT_PUBLIC_API_URL_LOCAL=http://127.0.0.1:3001/v1
+ *   NEXT_PUBLIC_API_URL_PRODUCTION=http://13.126.105.138:3001/v1
  *
- * Login UI switch stores override in localStorage (`upos_api_target`).
+ * Auto: localhost → local API; any other host → production API.
  */
-
-export type ApiTarget = "local" | "production";
-
-export const API_TARGET_STORAGE_KEY = "upos_api_target";
-export const API_TARGET_CHANGE_EVENT = "upos-api-target-change";
 
 const DEFAULT_LOCAL = "http://127.0.0.1:3001/v1";
 const DEFAULT_PRODUCTION = "http://13.126.105.138:3001/v1";
@@ -35,77 +29,27 @@ function envProductionUrl() {
   );
 }
 
-/** Default target from env (local if unset). */
-export function getDefaultApiTarget(): ApiTarget {
-  const t = (process.env.NEXT_PUBLIC_API_TARGET || "local").toLowerCase();
-  return t === "production" ? "production" : "local";
-}
-
-export function getApiUrlForTarget(target: ApiTarget): string {
-  return target === "production" ? envProductionUrl() : envLocalUrl();
-}
-
-/** Active target: localStorage override → env default. */
-export function getApiTarget(): ApiTarget {
-  if (typeof window !== "undefined") {
-    try {
-      const saved = localStorage.getItem(API_TARGET_STORAGE_KEY);
-      if (saved === "local" || saved === "production") return saved;
-    } catch {
-      /* ignore */
-    }
-  }
-  return getDefaultApiTarget();
-}
-
-export function setApiTarget(target: ApiTarget) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(API_TARGET_STORAGE_KEY, target);
-  window.dispatchEvent(
-    new CustomEvent(API_TARGET_CHANGE_EVENT, { detail: target }),
+function isLocalHost(host: string) {
+  return (
+    !host ||
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host.endsWith(".local")
   );
 }
 
-/**
- * Resolve API base for fetch calls.
- * - Hard override: NEXT_PUBLIC_API_URL when NEXT_PUBLIC_API_TARGET is empty
- *   and no localStorage override (backward compatible)
- * - Otherwise local / production URLs from env + target switch
- */
 export function getApiBaseUrl(): string {
-  const target = getApiTarget();
-  const fromTarget = getApiUrlForTarget(target);
-
-  // Legacy single-URL mode when TARGET not configured and no storage override
-  const legacyOnly =
-    !process.env.NEXT_PUBLIC_API_TARGET &&
-    process.env.NEXT_PUBLIC_API_URL &&
-    typeof window !== "undefined" &&
-    !localStorage.getItem(API_TARGET_STORAGE_KEY);
-
-  if (legacyOnly) {
-    return stripSlash(process.env.NEXT_PUBLIC_API_URL!);
-  }
-
   if (typeof window === "undefined") {
-    return fromTarget;
+    // SSR: prefer production URL when target is production
+    const target = (process.env.NEXT_PUBLIC_API_TARGET || "").toLowerCase();
+    return target === "production" ? envProductionUrl() : envLocalUrl();
   }
 
-  // LAN / phone on same Wi‑Fi: when browsing via LAN IP and target is local,
-  // hit API on that host:port (unless local URL is already a remote host).
   const host = window.location.hostname;
-  if (
-    target === "local" &&
-    host &&
-    host !== "localhost" &&
-    host !== "127.0.0.1" &&
-    fromTarget.includes("127.0.0.1")
-  ) {
-    const port = process.env.NEXT_PUBLIC_API_PORT || "3001";
-    return `http://${host}:${port}/v1`;
+  if (isLocalHost(host)) {
+    return envLocalUrl();
   }
-
-  return fromTarget;
+  return envProductionUrl();
 }
 
 export function getApiOrigin(): string {

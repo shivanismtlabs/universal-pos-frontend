@@ -39,7 +39,6 @@ export const tenantSlugSchema = z
   );
 
 export const loginSchema = z.object({
-  tenantSlug: tenantSlugSchema,
   email: z
     .string()
     .trim()
@@ -50,12 +49,11 @@ export const loginSchema = z.object({
 });
 export type LoginInput = z.infer<typeof loginSchema>;
 
+/** Shop name only — slug/store derived on submit */
 export const registerTenantSchema = z
   .object({
-    tenantName: z.string().trim().min(2).max(100),
-    tenantSlug: tenantSlugSchema,
-    storeName: z.string().trim().min(2).max(100),
-    adminFullName: z.string().trim().min(2).max(255),
+    tenantName: z.string().trim().min(2, "Shop name is required").max(100),
+    adminFullName: z.string().trim().min(2, "Name is required").max(255),
     adminEmail: z
       .string()
       .trim()
@@ -79,15 +77,18 @@ export const registerTenantSchema = z
       message: "Password must not contain email local-part",
       path: ["adminPassword"],
     },
-  )
-  .refine(
-    (v) => !v.adminPassword.toLowerCase().includes(v.tenantSlug.toLowerCase()),
-    {
-      message: "Password must not contain tenant slug",
-      path: ["adminPassword"],
-    },
   );
 export type RegisterTenantInput = z.infer<typeof registerTenantSchema>;
+
+export function slugifyShopName(name: string) {
+  const base = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+  return base.length >= 2 ? base : `shop-${Date.now().toString(36)}`;
+}
 
 export const registerUserSchema = z
   .object({

@@ -12,7 +12,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FieldError } from "@/components/ui/form";
 import { AuthShell } from "@/components/auth-shell";
-import { ApiTargetSwitch } from "@/components/api-target-switch";
 import { loginSchema, type LoginInput } from "@/lib/validations";
 import { appsApi, authApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
@@ -43,7 +42,6 @@ export default function LoginForm() {
   const qc = useQueryClient();
   const setSession = useAuthStore((s) => s.setSession);
   const token = useAuthStore((s) => s.accessToken);
-  const savedSlug = useAuthStore((s) => s.tenantSlug);
   const [ready, setReady] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [lockUntil, setLockUntil] = useState(0);
@@ -93,7 +91,6 @@ export default function LoginForm() {
   } = useForm<LoginInput>({
     resolver: zodResolver(loginSchema),
     defaultValues: {
-      tenantSlug: savedSlug ?? "",
       email: "",
       password: "",
     },
@@ -105,8 +102,7 @@ export default function LoginForm() {
       return;
     }
 
-    const payload: LoginInput = {
-      tenantSlug: values.tenantSlug.trim().toLowerCase(),
+    const payload = {
       email: values.email.trim().toLowerCase(),
       password: values.password,
     };
@@ -126,9 +122,8 @@ export default function LoginForm() {
           storeId: data.user.storeId,
           tenantId: data.user.tenantId,
         },
-        tenantSlug: payload.tenantSlug,
+        tenantSlug: data.tenant?.slug ?? "",
       });
-      // Prefetch shop config before navigation so dashboard skips "Loading shop…"
       try {
         const boot = await appsApi.bootstrap();
         qc.setQueryData(["tenant-bootstrap"], boot);
@@ -156,31 +151,10 @@ export default function LoginForm() {
 
   return (
     <AuthShell
-      title="Staff sign-in"
-      subtitle="Sign in to run your counter — products, checkout, and daily sales in one place."
+      title="Sign in"
+      subtitle="Enter your email and password to open the counter."
     >
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
-        <div>
-          <h2 className="text-xl font-bold tracking-tight text-[#0b1f33]">
-            Sign in
-          </h2>
-          <p className="mt-1 text-[0.8125rem] text-[#5a6b7d]">
-            Enter your shop slug, email, and password.
-          </p>
-        </div>
-
-        <div className="space-y-1.5">
-          <Label htmlFor="tenantSlug">Shop slug</Label>
-          <Input
-            id="tenantSlug"
-            autoComplete="organization"
-            spellCheck={false}
-            placeholder="e.g. my-shop"
-            {...register("tenantSlug")}
-          />
-          <FieldError message={errors.tenantSlug?.message} />
-        </div>
-
         <div className="space-y-1.5">
           <Label htmlFor="email">Email</Label>
           <Input
@@ -226,22 +200,14 @@ export default function LoginForm() {
         </Button>
 
         <p className="text-center text-[0.8125rem] text-[#5a6b7d]">
+          New here?{" "}
           <Link
             href="/register"
-            className="font-medium text-[#1a56db] hover:underline"
+            className="font-semibold text-[#1a56db] hover:underline"
           >
             Create a shop
           </Link>
-          {" · "}
-          <Link
-            href="/register-user"
-            className="font-medium text-[#1a56db] hover:underline"
-          >
-            Join as staff
-          </Link>
         </p>
-
-        <ApiTargetSwitch className="mt-1 rounded-xl border border-[#d9e0ea] bg-[#f7f9fc] px-3 py-2.5" />
       </form>
     </AuthShell>
   );
