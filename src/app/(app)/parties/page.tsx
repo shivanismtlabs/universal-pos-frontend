@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -18,21 +18,48 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FieldError } from "@/components/ui/form";
 import { formatDate } from "@/lib/utils";
+import { RequireCommerceMode } from "@/components/require-commerce-mode";
 
-export default function PartiesPage() {
+type PartyMember = {
+  customerId: string;
+  roleLabel?: string | null;
+  customer?: { id: string; fullName: string; phone: string } | null;
+};
+
+type PartyRow = {
+  id: string;
+  name: string;
+  eventDate?: string | null;
+  primaryCustomer?: { id: string; fullName: string; phone: string } | null;
+  members?: PartyMember[] | null;
+};
+
+function normalizeParties(rows: PartyRow[] | null | undefined): PartyRow[] {
+  return (rows ?? []).map((p) => ({
+    ...p,
+    members: Array.isArray(p.members) ? p.members : [],
+  }));
+}
+
+function PartiesDesk() {
   const qc = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const parties = useQuery({
     queryKey: ["parties"],
-    queryFn: () => customersApi.listParties(),
+    queryFn: async () => normalizeParties(await customersApi.listParties()),
   });
   const customers = useQuery({
     queryKey: ["customers", "pick"],
     queryFn: () => customersApi.list({ limit: 100 }),
   });
 
-  const selected = (parties.data ?? []).find((p) => p.id === selectedId);
+  const partyList = parties.data ?? [];
+  const selected = useMemo(
+    () => partyList.find((p) => p.id === selectedId) ?? null,
+    [partyList, selectedId],
+  );
+  const selectedMembers = selected?.members ?? [];
 
   const form = useForm<CreatePartyInput>({
     resolver: zodResolver(createPartySchema),
@@ -52,7 +79,7 @@ export default function PartiesPage() {
         primaryCustomerId: v.primaryCustomerId || undefined,
       }),
     onSuccess: (row) => {
-      toast.success("Party created");
+      toast.success("Group created");
       form.reset();
       setSelectedId(row.id);
       void qc.invalidateQueries({ queryKey: ["parties"] });
@@ -63,7 +90,7 @@ export default function PartiesPage() {
 
   const addMember = useMutation({
     mutationFn: (v: AddPartyMemberInput) => {
-      if (!selectedId) throw new Error("Select a party");
+      if (!selectedId) throw new Error("Select a group");
       return customersApi.addPartyMember(selectedId, {
         customerId: v.customerId,
         roleLabel: v.roleLabel || undefined,
@@ -80,7 +107,7 @@ export default function PartiesPage() {
 
   const removeMember = useMutation({
     mutationFn: (customerId: string) => {
-      if (!selectedId) throw new Error("Select a party");
+      if (!selectedId) throw new Error("Select a group");
       return customersApi.removePartyMember(selectedId, customerId);
     },
     onSuccess: () => {
@@ -94,10 +121,14 @@ export default function PartiesPage() {
   return (
     <div className="space-y-6 sm:space-y-8">
       <header>
-        <p className="text-sm uppercase tracking-[0.2em] text-[#0f766e]">
-          Parties
+        <p className="text-sm uppercase tracking-[0.2em] text-[#0b1f33]">
+          Groups
         </p>
-        <h1 className="display mt-2 text-2xl sm:text-4xl">Wedding parties</h1>
+        <h1 className="display mt-2 text-2xl sm:text-4xl">Customer groups</h1>
+        <p className="mt-1 text-sm text-[#6b7280]">
+          Optional groups for shared rentals — wedding parties, event crews,
+          corporate bookings, tour groups, etc.
+        </p>
       </header>
 
       <div className="grid gap-6 lg:grid-cols-2 xl:grid-cols-[1.1fr_0.9fr]">
@@ -112,10 +143,10 @@ export default function PartiesPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#e5e7eb]">
-              {(parties.data ?? []).map((p) => (
+              {partyList.map((p) => (
                 <tr
                   key={p.id}
-                  className={`cursor-pointer ${selectedId === p.id ? "bg-[#ecfdf8]" : "hover:bg-[#f9fafb]"}`}
+                  className={`cursor-pointer ${selectedId === p.id ? "bg-[#e8eefb]" : "hover:bg-[#f9fafb]"}`}
                   onClick={() => setSelectedId(p.id)}
                 >
                   <td className="py-3 font-medium">{p.name}</td>
@@ -132,11 +163,11 @@ export default function PartiesPage() {
             <p className="py-6 text-sm text-[#b91c1c]">
               {parties.error instanceof ApiError
                 ? parties.error.messages.join(", ")
-                : "Could not load parties — check API on port 3001"}
+                : "Could not load groups — check API on port 3001"}
             </p>
           ) : null}
-          {!parties.data?.length && !parties.isLoading && !parties.isError ? (
-            <p className="py-6 text-[#6b7280]">No parties yet</p>
+          {!partyList.length && !parties.isLoading && !parties.isError ? (
+            <p className="py-6 text-[#6b7280]">No groups yet</p>
           ) : null}
         </section>
 
@@ -146,10 +177,14 @@ export default function PartiesPage() {
             onSubmit={form.handleSubmit((v) => create.mutate(v))}
             noValidate
           >
-            <h2 className="display text-2xl">New party</h2>
+            <h2 className="display text-2xl">New group</h2>
             <div>
               <Label>Name</Label>
-              <Input className="mt-2" {...form.register("name")} />
+              <Input
+                className="mt-2"
+                placeholder="e.g. Sharma wedding, Fleet crew A"
+                {...form.register("name")}
+              />
               <FieldError message={form.formState.errors.name?.message} />
             </div>
             <div>
@@ -175,7 +210,7 @@ export default function PartiesPage() {
               </select>
             </div>
             <Button type="submit" className="w-full" disabled={create.isPending}>
-              {create.isPending ? "Saving…" : "Create party"}
+              {create.isPending ? "Saving…" : "Create group"}
             </Button>
           </form>
 
@@ -183,13 +218,13 @@ export default function PartiesPage() {
             <section className="panel space-y-4 p-5">
               <h2 className="display text-2xl">{selected.name}</h2>
               <ul className="space-y-2 text-sm">
-                {selected.members.map((m) => (
+                {selectedMembers.map((m) => (
                   <li
                     key={m.customerId}
                     className="flex items-center justify-between gap-2 rounded-lg bg-[#f6f7f9] px-3 py-2"
                   >
                     <span>
-                      {m.customer.fullName}
+                      {m.customer?.fullName ?? "Customer"}
                       {m.roleLabel ? (
                         <span className="text-[#6b7280]"> · {m.roleLabel}</span>
                       ) : null}
@@ -200,13 +235,18 @@ export default function PartiesPage() {
                       size="sm"
                       disabled={removeMember.isPending}
                       onClick={() =>
-                        removeMember.mutate(m.customerId ?? m.customer.id)
+                        removeMember.mutate(
+                          m.customerId ?? m.customer?.id ?? "",
+                        )
                       }
                     >
                       Remove
                     </Button>
                   </li>
                 ))}
+                {!selectedMembers.length ? (
+                  <li className="py-2 text-[#6b7280]">No members yet</li>
+                ) : null}
               </ul>
               <form
                 className="space-y-3 border-t border-[#e5e7eb] pt-4"
@@ -229,7 +269,7 @@ export default function PartiesPage() {
                   message={memberForm.formState.errors.customerId?.message}
                 />
                 <Input
-                  placeholder="Role (groom, best man…)"
+                  placeholder="Role (optional)"
                   {...memberForm.register("roleLabel")}
                 />
                 <Button
@@ -245,5 +285,13 @@ export default function PartiesPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function PartiesPage() {
+  return (
+    <RequireCommerceMode modes={["rental"]} label="Customer groups need rental mode">
+      <PartiesDesk />
+    </RequireCommerceMode>
   );
 }

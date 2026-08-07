@@ -16,8 +16,9 @@ import { Label } from "@/components/ui/label";
 import { FieldError } from "@/components/ui/form";
 import { useAuthStore } from "@/lib/auth-store";
 import { formatDate } from "@/lib/utils";
+import { RequireCommerceMode } from "@/components/require-commerce-mode";
 
-export default function AppointmentsPage() {
+function AppointmentsDesk() {
   const qc = useQueryClient();
   const storeId = useAuthStore((s) => s.user?.storeId) ?? "";
 
@@ -96,7 +97,7 @@ export default function AppointmentsPage() {
   return (
     <div className="space-y-6 sm:space-y-8">
       <header>
-        <p className="text-sm uppercase tracking-[0.2em] text-[#0f766e]">
+        <p className="text-sm uppercase tracking-[0.2em] text-[#0b1f33]">
           Schedule
         </p>
         <h1 className="display mt-2 text-2xl sm:text-4xl">Appointments</h1>
@@ -220,5 +221,16 @@ export default function AppointmentsPage() {
         </form>
       </div>
     </div>
+  );
+}
+
+export default function AppointmentsPage() {
+  return (
+    <RequireCommerceMode
+      modes={["service", "rental"]}
+      label="Appointments need service (or rental) mode"
+    >
+      <AppointmentsDesk />
+    </RequireCommerceMode>
   );
 }
