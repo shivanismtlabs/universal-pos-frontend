@@ -41,7 +41,7 @@ export default function CatalogPage() {
     <div className="space-y-5">
       <PageHeader
         title="Products"
-        description="Single place to manage what you sell — these items show up on the counter."
+        subtitle="Single place to manage what you sell — these items show up on the counter."
       />
       <p className="flex flex-wrap items-center gap-2 text-caption text-[var(--muted)]">
         <span>Catalog mode</span>
