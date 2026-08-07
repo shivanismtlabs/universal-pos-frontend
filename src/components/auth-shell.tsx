@@ -1,11 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import { motion } from "motion/react";
 import { AuthHeroVisual } from "@/components/auth-hero-visual";
 
 /**
- * Auth layout — visual left panel + form. Enterprise sapphire / cool gray.
+ * Conversly-style auth card: animated left + form right.
+ * Brand colors: sapphire / navy / cool gray (not peach-purple).
  */
 export function AuthShell({
   children,
@@ -17,46 +17,34 @@ export function AuthShell({
   subtitle: string;
 }) {
   return (
-    <div className="min-h-dvh bg-[#f4f6fa] text-[#0b1f33]">
-      <div className="mx-auto grid min-h-dvh max-w-6xl lg:grid-cols-2">
-        <motion.aside
-          className="relative p-4 sm:p-6 lg:min-h-dvh lg:p-0"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.45 }}
-        >
+    <div className="grid min-h-dvh place-items-center bg-[#e8edf4] px-3 py-6 text-[#0b1f33] sm:px-6 sm:py-10">
+      <motion.div
+        className="grid w-full max-w-[980px] overflow-hidden rounded-[22px] bg-white shadow-[0_24px_80px_-32px_rgba(11,31,51,0.35)] lg:grid-cols-2"
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4 }}
+      >
+        <aside className="relative min-h-[280px] lg:min-h-[640px]">
           <AuthHeroVisual />
-        </motion.aside>
+        </aside>
 
-        <div className="flex flex-col justify-center px-4 py-8 sm:px-8 lg:px-12 lg:py-12">
+        <div className="flex flex-col justify-center px-5 py-8 sm:px-10 sm:py-12 lg:px-12">
           <motion.div
-            className="mx-auto w-full max-w-md"
-            initial={{ opacity: 0, y: 12 }}
+            initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.35, delay: 0.05 }}
+            transition={{ duration: 0.35, delay: 0.08 }}
           >
-            <Link href="/login" className="inline-flex items-center gap-2.5">
-              <span className="grid h-9 w-9 place-items-center rounded-[10px] bg-[#1a56db] text-sm font-bold text-white shadow-[0_4px_12px_rgba(26,86,219,0.28)]">
-                U
-              </span>
-              <span className="text-lg font-bold tracking-tight">
-                Universal POS
-              </span>
-            </Link>
-
-            <h1 className="mt-7 text-[1.65rem] font-bold tracking-tight sm:text-[1.85rem]">
+            <h1 className="bg-[linear-gradient(105deg,#1a56db_0%,#0b1f33_85%)] bg-clip-text text-[1.65rem] font-bold tracking-tight text-transparent sm:text-[1.85rem]">
               {title}
             </h1>
-            <p className="mt-2 text-[0.9375rem] leading-relaxed text-[#5a6b7d]">
+            <p className="mt-2 max-w-md text-[0.9375rem] leading-relaxed text-[#5a6b7d]">
               {subtitle}
             </p>
 
-            <div className="mt-7 rounded-[14px] border border-[#d9e0ea] bg-white p-5 shadow-[0_1px_2px_rgba(11,31,51,0.04),0_18px_40px_-28px_rgba(11,31,51,0.2)] sm:p-6">
-              {children}
-            </div>
+            <div className="mt-7">{children}</div>
           </motion.div>
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 }

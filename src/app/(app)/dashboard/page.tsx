@@ -5,40 +5,31 @@ import Link from "next/link";
 import { useBootstrap } from "@/lib/bootstrap";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { PageHeader, EmptyState, PageSkeleton } from "@/components/page-header";
-import { ModeBadge } from "@/components/mode-badge";
+import { EmptyState, PageSkeleton } from "@/components/page-header";
+import { OverviewDashboard } from "./overview-dashboard";
 import { SaleDashboard } from "./sale-dashboard";
 import { RentalDashboard } from "./rental-dashboard";
 
-type Floor = "sale" | "rent" | "service" | "subscription";
-
-const FLOOR_META: Array<{
-  id: Floor;
-  mode: string;
-  label: string;
-}> = [
-  { id: "sale", mode: "sale", label: "Sale" },
-  { id: "rent", mode: "rental", label: "Rent" },
-  { id: "service", mode: "service", label: "Services" },
-  { id: "subscription", mode: "subscription", label: "Plans" },
-];
+type View = "overview" | "sale" | "rent" | "service" | "subscription";
 
 /**
- * Start here — today's snapshot per enabled mode.
+ * Dashboard — Overview (enterprise) + mode floors.
  */
 export default function DashboardPage() {
   const { isLoading, hasMode, commerceModes } = useBootstrap();
-  const [floor, setFloor] = useState<Floor>("sale");
+  const [view, setView] = useState<View>("overview");
 
   if (isLoading) {
-    return <PageSkeleton rows={5} />;
+    return <PageSkeleton rows={6} />;
   }
 
-  const available = FLOOR_META.filter((f) => hasMode(f.mode));
-  const active =
-    available.find((f) => f.id === floor) ?? available[0] ?? null;
+  const hasSale = hasMode("sale");
+  const hasRent = hasMode("rental");
+  const hasService = hasMode("service");
+  const hasSub = hasMode("subscription");
+  const hasAnyMode = hasSale || hasRent || hasService || hasSub;
 
-  if (!available.length) {
+  if (!hasAnyMode) {
     return (
       <EmptyState
         title="Finish shop setup"
@@ -47,58 +38,49 @@ export default function DashboardPage() {
     );
   }
 
+  const tabs: Array<{ id: View; label: string; show: boolean }> = [
+    { id: "overview", label: "Overview", show: true },
+    { id: "sale", label: "Sell floor", show: hasSale },
+    { id: "rent", label: "Rent floor", show: hasRent },
+    { id: "service", label: "Services", show: hasService },
+    { id: "subscription", label: "Plans", show: hasSub },
+  ];
+
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Start here"
-        subtitle="Today’s snapshot for each enabled mode. Open the counter when you’re ready to check out."
-        action={
-          <Button asChild>
-            <Link href="/pos">Open counter</Link>
-          </Button>
-        }
-      />
-
-      {available.length > 1 ? (
-        <div
-          role="tablist"
-          aria-label="Commerce floors"
-          className="inline-flex flex-wrap rounded-lg border border-[var(--line)] bg-[#eef2f7] p-0.5"
-        >
-          {available.map((f) => (
+      <div
+        role="tablist"
+        aria-label="Dashboard views"
+        className="inline-flex flex-wrap rounded-lg border border-[#d9e0ea] bg-[#eef2f7] p-0.5"
+      >
+        {tabs
+          .filter((t) => t.show)
+          .map((t) => (
             <button
-              key={f.id}
+              key={t.id}
               type="button"
               role="tab"
-              aria-selected={active?.id === f.id}
-              onClick={() => setFloor(f.id)}
+              aria-selected={view === t.id}
+              onClick={() => setView(t.id)}
               className={cn(
-                "inline-flex items-center gap-2 rounded-md px-4 py-2 text-[0.8125rem] font-medium transition",
-                active?.id === f.id
+                "rounded-md px-3.5 py-2 text-[0.8125rem] font-semibold transition",
+                view === t.id
                   ? "bg-white text-[#1a56db] shadow-sm"
-                  : "text-[var(--muted)] hover:text-[var(--ink)]",
+                  : "text-[#5a6b7d] hover:text-[#0b1f33]",
               )}
             >
-              <ModeBadge mode={f.mode} />
-              <span className="sr-only sm:not-sr-only sm:inline">
-                {f.label}
-              </span>
+              {t.label}
             </button>
           ))}
-        </div>
-      ) : (
-        <div className="flex items-center gap-2 text-caption text-[var(--muted)]">
-          <span>Active mode</span>
-          <ModeBadge mode={available[0].mode} />
-        </div>
-      )}
+      </div>
 
-      {active?.id === "sale" ? <SaleDashboard /> : null}
-      {active?.id === "rent" ? <RentalDashboard /> : null}
-      {active?.id === "service" || active?.id === "subscription" ? (
+      {view === "overview" ? <OverviewDashboard /> : null}
+      {view === "sale" ? <SaleDashboard /> : null}
+      {view === "rent" ? <RentalDashboard /> : null}
+      {view === "service" || view === "subscription" ? (
         <EmptyState
-          title={`${active.label} floor is on`}
-          detail={`Mode ${active.mode} is enabled (${commerceModes.join(", ")}). Add catalog items under Products, then check out from the counter when the flow ships.`}
+          title={`${view === "service" ? "Services" : "Plans"} floor is on`}
+          detail={`Mode is enabled (${commerceModes.join(", ")}). Add catalog items under Products when this flow ships.`}
           action={
             <Button asChild variant="secondary">
               <Link href="/catalog">Go to products</Link>

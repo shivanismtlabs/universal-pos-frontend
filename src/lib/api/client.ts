@@ -136,6 +136,7 @@ export async function apiRequest<T>(
   const isAuthPath =
     path.startsWith("/auth/login") ||
     path.startsWith("/auth/register") ||
+    path.startsWith("/auth/google") ||
     path.startsWith("/auth/refresh");
 
   if (res.status === 401 && token && !_retry && !isAuthPath) {

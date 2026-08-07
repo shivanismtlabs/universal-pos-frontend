@@ -12,8 +12,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { ProductThumb } from "@/components/product-thumb";
+import { ImageLightbox } from "@/components/image-lightbox";
 import { DynamicCommerceForm } from "@/components/dynamic-commerce-form";
 import { readFileAsDataUrl } from "@/lib/utils";
+import { X } from "lucide-react";
 import {
   addSaleProductSchema,
   updateSaleProductSchema,
@@ -34,8 +36,21 @@ const EMPTY = {
   sellUnit: "pcs",
   price: "",
   qty: "10",
-  imagePreview: "" as string,
+  imagePreviews: [] as string[],
 };
+
+const MAX_IMAGES = 8;
+
+function galleryOf(item: {
+  images?: string[] | null;
+  image?: string | null;
+  photoUrl?: string | null;
+}) {
+  const list = item.images?.length
+    ? item.images
+    : [item.image ?? item.photoUrl].filter(Boolean);
+  return list as string[];
+}
 
 type EditDraft = {
   title: string;
@@ -88,6 +103,11 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
   const [draft, setDraft] = useState<EditDraft | null>(null);
   const [renameId, setRenameId] = useState<string | null>(null);
   const [renameVal, setRenameVal] = useState("");
+  const [lightbox, setLightbox] = useState<{
+    images: string[];
+    index: number;
+    label: string;
+  } | null>(null);
 
   const floor = useQuery({
     queryKey: ["pos-sale-floor"],
@@ -166,11 +186,8 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
         qty: parsed.data.qty,
         locationId: floor.data?.locationId,
       });
-      if (form.imagePreview) {
-        await posApi.uploadSaleProductImage(
-          res.stockLevel.id,
-          form.imagePreview,
-        );
+      for (const dataUrl of form.imagePreviews.slice(0, MAX_IMAGES)) {
+        await posApi.uploadSaleProductImage(res.stockLevel.id, dataUrl);
       }
       return res;
     },
@@ -190,14 +207,54 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
   });
 
   const uploadImage = useMutation({
-    mutationFn: ({ id, dataUrl }: { id: string; dataUrl: string }) =>
-      posApi.uploadSaleProductImage(id, dataUrl),
+    mutationFn: async ({
+      id,
+      dataUrls,
+    }: {
+      id: string;
+      dataUrls: string[];
+    }) => {
+      for (const dataUrl of dataUrls) {
+        await posApi.uploadSaleProductImage(id, dataUrl);
+      }
+    },
     onSuccess: () => {
-      toast.success("Image updated");
+      toast.success("Image(s) added");
       invalidateSale(qc);
     },
     onError: (e) => toast.error(errMsg(e)),
   });
+
+  const removeImage = useMutation({
+    mutationFn: ({ id, imageUrl }: { id: string; imageUrl: string }) =>
+      posApi.removeSaleProductImage(id, imageUrl),
+    onSuccess: () => {
+      toast.success("Image removed");
+      invalidateSale(qc);
+    },
+    onError: (e) => toast.error(errMsg(e)),
+  });
+
+  async function pickFiles(
+    fileList: FileList | null,
+    onDataUrls: (urls: string[]) => void,
+  ) {
+    const files = Array.from(fileList ?? []);
+    if (!files.length) return;
+    const urls: string[] = [];
+    for (const file of files) {
+      if (file.size > 4 * 1024 * 1024) {
+        toast.error(`${file.name} is over 4 MB`);
+        continue;
+      }
+      try {
+        urls.push(await readFileAsDataUrl(file));
+      } catch {
+        toast.error(`Could not read ${file.name}`);
+      }
+    }
+    if (urls.length) onDataUrls(urls);
+  }
 
   const updateProduct = useMutation({
     mutationFn: () => {
@@ -397,42 +454,78 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
           <ul className="mt-4 divide-y divide-[#eef2f8]">
             {items.map((item) => {
               const isEdit = editingId === item.id;
+              const images = galleryOf(item);
               return (
                 <li key={item.id} className="py-3.5">
                   {!isEdit ? (
                     <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="flex min-w-0 gap-2.5">
-                        <label className="relative cursor-pointer">
-                          <ProductThumb
-                            src={item.image ?? item.photoUrl}
-                            label={item.title}
-                            size="md"
-                          />
-                          <input
-                            type="file"
-                            accept="image/jpeg,image/png,image/webp,image/gif"
-                            className="absolute inset-0 cursor-pointer opacity-0"
-                            title="Change image"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              if (!file) return;
-                              if (file.size > 4 * 1024 * 1024) {
-                                toast.error("Image must be under 4 MB");
-                                return;
-                              }
-                              void readFileAsDataUrl(file)
-                                .then((dataUrl) =>
-                                  uploadImage.mutate({
-                                    id: item.id,
-                                    dataUrl,
-                                  }),
-                                )
-                                .catch(() =>
-                                  toast.error("Could not read image"),
-                                );
-                            }}
-                          />
-                        </label>
+                      <div className="flex min-w-0 flex-1 gap-2.5">
+                        <div className="flex shrink-0 flex-col gap-1.5">
+                          <div className="flex flex-wrap gap-1.5">
+                            {images.length ? (
+                              images.map((src, idx) => (
+                                <div key={`${src}-${idx}`} className="relative">
+                                  <ProductThumb
+                                    src={src}
+                                    label={item.title}
+                                    size="lg"
+                                    count={idx === 0 ? images.length : undefined}
+                                    onClick={() =>
+                                      setLightbox({
+                                        images,
+                                        index: idx,
+                                        label: item.title,
+                                      })
+                                    }
+                                  />
+                                  {canWrite ? (
+                                    <button
+                                      type="button"
+                                      className="absolute -right-1 -top-1 grid h-5 w-5 place-items-center rounded-full bg-[#c81e1e] text-white shadow"
+                                      title="Remove image"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        removeImage.mutate({
+                                          id: item.id,
+                                          imageUrl: src,
+                                        });
+                                      }}
+                                    >
+                                      <X className="h-3 w-3" />
+                                    </button>
+                                  ) : null}
+                                </div>
+                              ))
+                            ) : (
+                              <ProductThumb
+                                src={null}
+                                label={item.title}
+                                size="lg"
+                              />
+                            )}
+                          </div>
+                          {canWrite && images.length < MAX_IMAGES ? (
+                            <label className="inline-flex cursor-pointer items-center justify-center rounded-lg border border-dashed border-[#cfd8e6] px-2 py-1 text-[0.7rem] font-semibold text-[#1a56db] hover:bg-[#e8eefb]">
+                              + Add photos
+                              <input
+                                type="file"
+                                accept="image/jpeg,image/png,image/webp,image/gif"
+                                multiple
+                                className="sr-only"
+                                onChange={(e) => {
+                                  const remaining = MAX_IMAGES - images.length;
+                                  void pickFiles(e.target.files, (urls) =>
+                                    uploadImage.mutate({
+                                      id: item.id,
+                                      dataUrls: urls.slice(0, remaining),
+                                    }),
+                                  );
+                                  e.target.value = "";
+                                }}
+                              />
+                            </label>
+                          ) : null}
+                        </div>
                         <div className="min-w-0">
                           <p className="font-semibold text-[#0b1f33]">
                             {item.title}
@@ -742,6 +835,14 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
           </ul>
         </section>
       ) : null}
+
+      <ImageLightbox
+        open={Boolean(lightbox)}
+        images={lightbox?.images ?? []}
+        startIndex={lightbox?.index ?? 0}
+        label={lightbox?.label}
+        onClose={() => setLightbox(null)}
+      />
     </div>
   );
 }

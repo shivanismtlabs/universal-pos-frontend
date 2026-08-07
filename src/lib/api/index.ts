@@ -43,6 +43,26 @@ export const authApi = {
     }>("/auth/register-tenant", { method: "POST", body });
   },
 
+  googleAuth(body: {
+    idToken: string;
+    mode: "login" | "register";
+    tenantName?: string;
+  }) {
+    return apiRequest<{
+      user: {
+        id: string;
+        email: string;
+        fullName: string;
+        roles?: string[];
+        storeId?: string | null;
+        tenantId: string;
+      };
+      tenant?: { id: string; slug: string; name: string };
+      accessToken: string;
+      refreshToken: string;
+    }>("/auth/google", { method: "POST", body });
+  },
+
   registerUser(body: {
     tenantSlug: string;
     fullName: string;
@@ -940,6 +960,7 @@ export const posApi = {
         description?: string | null;
         image?: string | null;
         photoUrl?: string | null;
+        images?: string[];
         price: string | number;
         qty: number;
         sellUnit?: string;
@@ -957,6 +978,7 @@ export const posApi = {
       description?: string | null;
       image?: string | null;
       photoUrl?: string | null;
+      images?: string[];
       price: string | number;
       qty: number;
       sellUnit?: string;
@@ -1002,10 +1024,25 @@ export const posApi = {
       id: string;
       image?: string | null;
       photoUrl?: string | null;
+      images?: string[];
       title: string;
     }>(`/pos/sale/products/${id}/image`, {
       method: "POST",
       body: { imageBase64 },
+      token: token(),
+    });
+  },
+
+  removeSaleProductImage(id: string, imageUrl: string) {
+    return apiRequest<{
+      id: string;
+      image?: string | null;
+      photoUrl?: string | null;
+      images?: string[];
+      title: string;
+    }>(`/pos/sale/products/${id}/image/remove`, {
+      method: "POST",
+      body: { imageUrl },
       token: token(),
     });
   },
@@ -1094,6 +1131,7 @@ export const posApi = {
         description?: string | null;
         image?: string | null;
         photoUrl?: string | null;
+        images?: string[];
         category?: { id: string; name: string } | null;
       }>;
     }>(`/pos/sale/catalog${q ? `?${q}` : ""}`, { token: token() });

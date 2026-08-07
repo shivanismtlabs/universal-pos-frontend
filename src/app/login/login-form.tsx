@@ -12,6 +12,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FieldError } from "@/components/ui/form";
 import { AuthShell } from "@/components/auth-shell";
+import {
+  AuthDivider,
+  AuthGoogleButton,
+} from "@/components/auth-google-button";
 import { loginSchema, type LoginInput } from "@/lib/validations";
 import { appsApi, authApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
@@ -111,25 +115,7 @@ export default function LoginForm() {
       const data = await authApi.login(payload);
       writeLock(0, 0);
       setLockUntil(0);
-      setSession({
-        accessToken: data.accessToken,
-        refreshToken: data.refreshToken,
-        user: {
-          id: data.user.id,
-          email: data.user.email,
-          fullName: data.user.fullName,
-          roles: data.user.roles ?? ["admin"],
-          storeId: data.user.storeId,
-          tenantId: data.user.tenantId,
-        },
-        tenantSlug: data.tenant?.slug ?? "",
-      });
-      try {
-        const boot = await appsApi.bootstrap();
-        qc.setQueryData(["tenant-bootstrap"], boot);
-      } catch {
-        /* AppShell will retry */
-      }
+      await applySession(data);
       toast.success("Welcome back");
       router.replace("/dashboard");
     } catch (e) {
@@ -149,14 +135,72 @@ export default function LoginForm() {
     }
   }
 
+  async function applySession(data: {
+    accessToken: string;
+    refreshToken: string;
+    user: {
+      id: string;
+      email: string;
+      fullName: string;
+      roles?: string[];
+      storeId?: string | null;
+      tenantId: string;
+    };
+    tenant?: { slug?: string };
+  }) {
+    setSession({
+      accessToken: data.accessToken,
+      refreshToken: data.refreshToken,
+      user: {
+        id: data.user.id,
+        email: data.user.email,
+        fullName: data.user.fullName,
+        roles: data.user.roles ?? ["admin"],
+        storeId: data.user.storeId,
+        tenantId: data.user.tenantId,
+      },
+      tenantSlug: data.tenant?.slug ?? "",
+    });
+    try {
+      const boot = await appsApi.bootstrap();
+      qc.setQueryData(["tenant-bootstrap"], boot);
+    } catch {
+      /* AppShell will retry */
+    }
+  }
+
+  async function onGoogle(idToken: string) {
+    try {
+      const data = await authApi.googleAuth({ idToken, mode: "login" });
+      writeLock(0, 0);
+      setLockUntil(0);
+      await applySession(data);
+      toast.success("Welcome back");
+      router.replace("/dashboard");
+    } catch (e) {
+      toast.error(
+        e instanceof ApiError
+          ? e.messages.join(", ")
+          : "Google sign-in failed. Create a shop first, or use email.",
+      );
+    }
+  }
+
   return (
     <AuthShell
-      title="Sign in"
-      subtitle="Enter your email and password to open the counter."
+      title="Welcome back"
+      subtitle="Sign in to open your counter — grocery, furniture, swim, or any shop."
     >
+      <AuthGoogleButton
+        mode="login"
+        onCredential={onGoogle}
+        disabled={locked || isSubmitting}
+      />
+      <AuthDivider />
+
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
         <div className="space-y-1.5">
-          <Label htmlFor="email">Email</Label>
+          <Label htmlFor="email">Email address</Label>
           <Input
             id="email"
             type="email"
@@ -203,7 +247,7 @@ export default function LoginForm() {
           New here?{" "}
           <Link
             href="/register"
-            className="font-semibold text-[#1a56db] hover:underline"
+            className="font-semibold text-[#1a56db] underline-offset-2 hover:underline"
           >
             Create a shop
           </Link>

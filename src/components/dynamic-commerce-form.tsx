@@ -47,19 +47,23 @@ export function DynamicCommerceForm({
   values,
   onChange,
   categories,
-  imageKey = "imagePreview",
+  imageKey = "imagePreviews",
   fieldErrors,
 }: {
   schema: CommerceFieldDef[];
-  values: Record<string, string>;
-  onChange: (key: string, value: string) => void;
+  values: Record<string, string | string[]>;
+  onChange: (key: string, value: string | string[]) => void;
   categories: Array<{ id: string; name: string }>;
-  /** Form key holding data-URL preview for image fields */
+  /** Form key holding data-URL preview(s) for image fields */
   imageKey?: string;
   fieldErrors?: Partial<Record<string, string>>;
 }) {
-  const sellUnit = normalizeSellUnit(values.sellUnit) as SellUnit;
-  const unitHints = unitMeta(values.sellUnit);
+  const sellUnit = normalizeSellUnit(
+    typeof values.sellUnit === "string" ? values.sellUnit : "pcs",
+  ) as SellUnit;
+  const unitHints = unitMeta(
+    typeof values.sellUnit === "string" ? values.sellUnit : "pcs",
+  );
 
   return (
     <div className="space-y-4">
@@ -74,7 +78,13 @@ export function DynamicCommerceForm({
                 {field.required ? " *" : ""}
               </Label>
               <Select
-                value={values.categoryId ?? values[field.key] ?? ""}
+                value={
+                  typeof values.categoryId === "string"
+                    ? values.categoryId
+                    : typeof values[field.key] === "string"
+                      ? values[field.key]
+                      : ""
+                }
                 onChange={(e) => onChange(field.key, e.target.value)}
               >
                 <option value="">Select category…</option>
@@ -108,7 +118,11 @@ export function DynamicCommerceForm({
                 {field.required ? " *" : ""}
               </Label>
               <Select
-                value={values[field.key] || "pcs"}
+                value={
+                  (typeof values[field.key] === "string"
+                    ? values[field.key]
+                    : "pcs") || "pcs"
+                }
                 onChange={(e) => onChange(field.key, e.target.value)}
               >
                 {options.map((o) => (
@@ -137,7 +151,9 @@ export function DynamicCommerceForm({
               </Label>
               <textarea
                 className={textareaClass}
-                value={values[field.key] ?? ""}
+                value={
+                  typeof values[field.key] === "string" ? values[field.key] : ""
+                }
                 onChange={(e) => onChange(field.key, e.target.value)}
                 placeholder={field.hint}
               />
@@ -149,58 +165,74 @@ export function DynamicCommerceForm({
         }
 
         if (field.type === "image" || field.key === "image") {
-          const preview = values[imageKey] ?? values[field.key] ?? "";
+          const raw = values[imageKey] ?? values[field.key];
+          const previews: string[] = Array.isArray(raw)
+            ? raw.filter((x): x is string => typeof x === "string" && !!x)
+            : typeof raw === "string" && raw
+              ? [raw]
+              : [];
+          const max = 8;
           return (
             <div key={field.key} className="field-shell">
               <Label>{field.label}</Label>
-              <div className="flex items-start gap-3">
-                <div className="grid h-12 w-12 place-items-center overflow-hidden rounded-lg border border-[#d9e0ea] bg-[#f7f9fc]">
-                  {preview ? (
-                    // eslint-disable-next-line @next/next/no-img-element
+              <p className="mb-2 text-[0.7rem] text-[#8b9bb0]">
+                {field.hint ?? "Optional — add up to 8 photos"}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {previews.map((src, idx) => (
+                  <div key={`${idx}-${src.slice(0, 24)}`} className="relative">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src={preview}
+                      src={src}
                       alt=""
-                      className="h-full w-full object-cover"
+                      className="h-14 w-14 rounded-lg border border-[#d9e0ea] object-cover"
                     />
-                  ) : (
-                    <span className="px-1 text-center text-[0.55rem] text-[#8b9bb0]">
-                      No img
-                    </span>
-                  )}
-                </div>
-                <div className="min-w-0 flex-1 space-y-2">
-                  <Input
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp,image/gif"
-                    className="cursor-pointer text-xs"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (!file) return;
-                      if (file.size > 4 * 1024 * 1024) {
-                        toast.error("Image must be under 4 MB");
-                        return;
-                      }
-                      void readFileAsDataUrl(file)
-                        .then((dataUrl) => onChange(imageKey, dataUrl))
-                        .catch(() => toast.error("Could not read image"));
-                    }}
-                  />
-                  {preview ? (
-                    <Button
+                    <button
                       type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-auto px-0 text-[#c81e1e] hover:bg-transparent hover:text-[#a01818]"
-                      onClick={() => onChange(imageKey, "")}
+                      className="absolute -right-1 -top-1 grid h-5 w-5 place-items-center rounded-full bg-[#c81e1e] text-[0.65rem] font-bold text-white"
+                      onClick={() =>
+                        onChange(
+                          imageKey,
+                          previews.filter((_, i) => i !== idx),
+                        )
+                      }
                     >
-                      Remove
-                    </Button>
-                  ) : (
-                    <p className="text-[0.7rem] text-[#8b9bb0]">
-                      {field.hint ?? "Optional photo"}
-                    </p>
-                  )}
-                </div>
+                      ×
+                    </button>
+                  </div>
+                ))}
+                {previews.length < max ? (
+                  <label className="grid h-14 w-14 cursor-pointer place-items-center rounded-lg border border-dashed border-[#cfd8e6] text-xs font-semibold text-[#1a56db] hover:bg-[#e8eefb]">
+                    +
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/gif"
+                      multiple
+                      className="sr-only"
+                      onChange={(e) => {
+                        const files = Array.from(e.target.files ?? []);
+                        e.target.value = "";
+                        if (!files.length) return;
+                        void (async () => {
+                          const next = [...previews];
+                          for (const file of files) {
+                            if (next.length >= max) break;
+                            if (file.size > 4 * 1024 * 1024) {
+                              toast.error(`${file.name} is over 4 MB`);
+                              continue;
+                            }
+                            try {
+                              next.push(await readFileAsDataUrl(file));
+                            } catch {
+                              toast.error(`Could not read ${file.name}`);
+                            }
+                          }
+                          onChange(imageKey, next);
+                        })();
+                      }}
+                    />
+                  </label>
+                ) : null}
               </div>
             </div>
           );
@@ -237,7 +269,9 @@ export function DynamicCommerceForm({
               inputMode={field.type === "number" ? "decimal" : undefined}
               step={step}
               min={field.type === "number" ? "0" : undefined}
-              value={values[field.key] ?? ""}
+              value={
+                typeof values[field.key] === "string" ? values[field.key] : ""
+              }
               onChange={(e) => onChange(field.key, e.target.value)}
               placeholder={hint}
             />

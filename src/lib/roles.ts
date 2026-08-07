@@ -38,6 +38,7 @@ export const ROUTE_ROLES: Record<string, RoleCode[]> = {
   "/inventory": ["admin", "manager", "inventory"],
   "/retail": ["admin", "manager", "inventory"],
   "/catalog": ["admin", "manager", "inventory", "cashier"],
+  "/products": ["admin", "manager", "inventory", "cashier"],
   "/settings": ["admin", "manager"],
   "/suppliers": ["admin", "manager", "inventory"],
   "/plan": ["admin"],

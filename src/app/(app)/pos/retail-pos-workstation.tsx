@@ -15,6 +15,7 @@ import { Select } from "@/components/ui/select";
 import { ReceiptModal, type ReceiptData } from "@/components/receipt-modal";
 import { StripeCheckoutModal } from "@/components/stripe-checkout-modal";
 import { ProductThumb } from "@/components/product-thumb";
+import { ImageLightbox } from "@/components/image-lightbox";
 import {
   flushOfflineQueue,
   isOnline,
@@ -108,6 +109,11 @@ export default function RetailPosWorkstation({
   const [online, setOnline] = useState(true);
   const chargeLock = useRef(false);
   const [stripeBusy, setStripeBusy] = useState(false);
+  const [lightbox, setLightbox] = useState<{
+    images: string[];
+    index: number;
+    label: string;
+  } | null>(null);
   const [stripeCheckout, setStripeCheckout] = useState<{
     orderId: string;
     orderNumber: string;
@@ -287,8 +293,9 @@ export default function RetailPosWorkstation({
     qtyOnHand: number;
     sellUnit?: string;
     category?: { name: string } | null;
-    image?: string | null;
-    photoUrl?: string | null;
+  image?: string | null;
+  photoUrl?: string | null;
+  images?: string[];
   }) {
     const price = moneyNumber(row.sellPrice);
     const image = row.image ?? row.photoUrl ?? null;
@@ -907,46 +914,73 @@ export default function RetailPosWorkstation({
           >
             <ul className="divide-y divide-[#eef2f8]">
               {items.map((row) => {
-                const src = row.image ?? row.photoUrl;
-                const low = row.qtyOnHand < 5;
+                const gallery =
+                  row.images?.length
+                    ? row.images
+                    : ([row.image ?? row.photoUrl].filter(Boolean) as string[]);
+                const src = gallery[0] ?? row.image ?? row.photoUrl;
                 const inCart = cart.find((l) => l.stockLevelId === row.id);
+                const cartQty = inCart?.qty ?? 0;
+                const available = Math.max(
+                  0,
+                  Number(row.qtyOnHand) - cartQty,
+                );
+                const low = available < 5;
                 return (
                   <li key={row.id}>
                     <button
                       type="button"
                       onClick={() => upsertLine(row)}
-                      className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition hover:bg-[#f8fafc] sm:px-3.5"
+                      className="flex w-full items-center gap-3 px-3 py-3 text-left transition hover:bg-[#f8fafc] sm:gap-3.5 sm:px-4"
                     >
-                      <ProductThumb src={src} label={row.name} size="md" />
+                      <ProductThumb
+                        src={src}
+                        label={row.name}
+                        size="xl"
+                        count={gallery.length}
+                        onClick={
+                          gallery.length
+                            ? () =>
+                                setLightbox({
+                                  images: gallery,
+                                  index: 0,
+                                  label: row.name,
+                                })
+                            : undefined
+                        }
+                      />
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold text-[#0b1f33]">
+                        <p className="truncate text-[0.9375rem] font-semibold text-[#0b1f33]">
                           {row.name}
                         </p>
-                        <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[0.65rem] text-[#8b9bb0]">
+                        <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[0.7rem] text-[#8b9bb0]">
                           <span>{row.sku}</span>
                           {row.category?.name ? (
-                            <span className="font-sans text-[#a0aec0]">
+                            <span className="font-sans text-[#5a6b7d]">
                               · {row.category.name}
                             </span>
                           ) : null}
                           <span
                             className={cn(
-                              "rounded px-1 py-px font-sans text-[0.6rem] font-semibold",
-                              low
-                                ? "bg-[#fff7ed] text-[#9a3412]"
-                                : "bg-[#f1f5f9] text-[#64748b]",
+                              "rounded-md px-1.5 py-0.5 font-sans text-[0.65rem] font-semibold",
+                              available <= 0
+                                ? "bg-[#fef2f2] text-[#c81e1e]"
+                                : low
+                                  ? "bg-[#fff7ed] text-[#9a3412]"
+                                  : "bg-[#e8eefb] text-[#1a56db]",
                             )}
                           >
-                            {formatQtyWithUnit(Number(row.qtyOnHand), row.sellUnit)}{" "}
-                            left
+                            {available <= 0
+                              ? "In ticket"
+                              : `${formatQtyWithUnit(available, row.sellUnit)} left`}
                           </span>
                         </p>
                       </div>
-                      <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-                        <p className="text-sm font-bold tabular-nums text-[#0b1f33]">
+                      <div className="flex shrink-0 flex-col items-end gap-1.5 sm:flex-row sm:items-center sm:gap-3">
+                        <p className="text-[0.9375rem] font-bold tabular-nums text-[#0b1f33]">
                           {money(row.sellPrice)}
                         </p>
-                        <span className="inline-flex h-8 min-w-[3.5rem] items-center justify-center rounded-lg bg-[#1a56db] px-2.5 text-xs font-semibold text-white">
+                        <span className="inline-flex h-9 min-w-[3.75rem] items-center justify-center rounded-[10px] bg-[#1a56db] px-3 text-xs font-semibold text-white shadow-[0_4px_12px_rgba(26,86,219,0.22)]">
                           {inCart ? `+${inCart.qty}` : "ADD"}
                         </span>
                       </div>
@@ -968,7 +1002,7 @@ export default function RetailPosWorkstation({
                         (title, category, sku, price, qty, image).
                       </p>
                       <Link
-                        href="/products"
+                        href="/catalog"
                         className="inline-flex text-sm font-semibold text-[#1a56db] hover:underline"
                       >
                         Open Products →
@@ -1085,7 +1119,7 @@ export default function RetailPosWorkstation({
                 key={l.stockLevelId}
                 className="flex items-center gap-2.5 rounded-[10px] border border-[#e8edf4] bg-[#f8fafc] px-2 py-1.5"
               >
-                <ProductThumb src={l.image} label={l.name} size="sm" />
+                <ProductThumb src={l.image} label={l.name} size="md" />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-[#0b1f33]">
                     {l.name}
@@ -1452,6 +1486,14 @@ export default function RetailPosWorkstation({
           onClose={() => setReceipt(null)}
         />
       ) : null}
+
+      <ImageLightbox
+        open={Boolean(lightbox)}
+        images={lightbox?.images ?? []}
+        startIndex={lightbox?.index ?? 0}
+        label={lightbox?.label}
+        onClose={() => setLightbox(null)}
+      />
     </div>
   );
 }

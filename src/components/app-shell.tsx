@@ -57,7 +57,7 @@ const NAV_CATALOG: NavItem[] = [
   },
   {
     href: "/dashboard",
-    label: "Start here",
+    label: "Dashboard",
     icon: LayoutDashboard,
     section: "Daily work",
   },

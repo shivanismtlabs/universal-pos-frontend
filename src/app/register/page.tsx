@@ -12,6 +12,10 @@ import { Label } from "@/components/ui/label";
 import { FieldError } from "@/components/ui/form";
 import { AuthShell } from "@/components/auth-shell";
 import {
+  AuthDivider,
+  AuthGoogleButton,
+} from "@/components/auth-google-button";
+import {
   passwordStrength,
   registerTenantSchema,
   type RegisterTenantInput,
@@ -30,6 +34,7 @@ export default function RegisterPage() {
     register,
     handleSubmit,
     control,
+    getValues,
     formState: { errors, isSubmitting },
   } = useForm<RegisterTenantInput>({
     resolver: zodResolver(registerTenantSchema),
@@ -82,22 +87,66 @@ export default function RegisterPage() {
     }
   }
 
+  async function onGoogle(idToken: string) {
+    const shopName = getValues("tenantName")?.trim() ?? "";
+    if (!shopName || shopName.length < 2) {
+      toast.error("Enter your shop name first, then continue with Google.");
+      return;
+    }
+    try {
+      const data = await authApi.googleAuth({
+        idToken,
+        mode: "register",
+        tenantName: shopName,
+      });
+      setSession({
+        accessToken: data.accessToken,
+        refreshToken: data.refreshToken,
+        user: {
+          id: data.user.id,
+          email: data.user.email,
+          fullName: data.user.fullName,
+          roles: data.user.roles ?? ["admin"],
+          storeId: data.user.storeId,
+          tenantId: data.user.tenantId,
+        },
+        tenantSlug: data.tenant?.slug ?? "",
+      });
+      toast.success("Shop created — opening your dashboard");
+      router.replace("/dashboard");
+    } catch (e) {
+      toast.error(
+        e instanceof ApiError
+          ? e.messages.join(", ")
+          : "Google sign-up failed",
+      );
+    }
+  }
+
   return (
     <AuthShell
-      title="Create your shop"
-      subtitle="Just your shop name and owner login — we’ll set up the rest."
+      title="Join Universal POS"
+      subtitle="Create your shop in a minute — then sell from a clean counter."
     >
+      <div className="mb-4 space-y-1.5">
+        <Label htmlFor="tenantName">Shop name</Label>
+        <Input
+          id="tenantName"
+          placeholder="e.g. City Furniture"
+          autoComplete="organization"
+          {...register("tenantName")}
+        />
+        <FieldError message={errors.tenantName?.message} />
+      </div>
+
+      <AuthGoogleButton
+        mode="register"
+        onCredential={onGoogle}
+        disabled={isSubmitting}
+      />
+      <AuthDivider label="or continue with email" />
+
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
-        <div className="space-y-1.5">
-          <Label htmlFor="tenantName">Shop name</Label>
-          <Input
-            id="tenantName"
-            placeholder="e.g. City Grocery"
-            autoComplete="organization"
-            {...register("tenantName")}
-          />
-          <FieldError message={errors.tenantName?.message} />
-        </div>
 
         <div className="space-y-1.5">
           <Label htmlFor="adminFullName">Your name</Label>
@@ -184,13 +233,13 @@ export default function RegisterPage() {
           {isSubmitting ? "Creating shop…" : "Create shop & sign in"}
         </Button>
 
-        <p className="text-center text-[0.8125rem] text-[#5a6b7d]">
-          Already have a shop?{" "}
+        <p className="pt-1 text-center text-[0.8125rem] text-[#5a6b7d]">
+          Already have an account?{" "}
           <Link
             href="/login"
-            className="font-semibold text-[#1a56db] hover:underline"
+            className="font-semibold text-[#1a56db] underline-offset-2 hover:underline"
           >
-            Sign in
+            Login here
           </Link>
         </p>
       </form>
