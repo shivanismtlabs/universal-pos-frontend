@@ -2,9 +2,11 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { reportsApi } from "@/lib/api";
 import { useBootstrap } from "@/lib/bootstrap";
 import { formatDate, todayYmd } from "@/lib/utils";
+import { downloadCsv } from "@/lib/csv";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -39,11 +41,67 @@ export default function ReportsPage() {
 
   const totals = sales.data?.totals;
 
+  function exportCsv() {
+    if (!sales.data && !payments.data) {
+      toast.error("Load a date range first");
+      return;
+    }
+    const stamp = `${range.from}_to_${range.to}`;
+    const summaryRows: Array<Array<string | number>> = [
+      ["section", "metric", "value"],
+      ["sales", "from", range.from],
+      ["sales", "to", range.to],
+      ["sales", "order_count", totals?.orderCount ?? 0],
+      ["sales", "subtotal", Number(totals?.subtotal ?? 0)],
+      ["sales", "tax_total", Number(totals?.taxTotal ?? 0)],
+      ["sales", "balance_due", Number(totals?.balanceDue ?? 0)],
+    ];
+    for (const r of sales.data?.byStatus ?? []) {
+      summaryRows.push(["orders_by_status", r.status, r.count]);
+    }
+    const byKind = (sales.data as { byKind?: Array<{ kind: string; count: number; subtotal: string | number }> })
+      ?.byKind;
+    for (const r of byKind ?? []) {
+      summaryRows.push([
+        "orders_by_kind",
+        r.kind,
+        `${r.count}|${Number(r.subtotal ?? 0)}`,
+      ]);
+    }
+    for (const r of payments.data?.byMethod ?? []) {
+      summaryRows.push([
+        "payments_by_method",
+        r.method,
+        `${r.count}|${Number(r.amount ?? 0)}`,
+      ]);
+    }
+    for (const r of util.data?.byAvailabilityStatus ?? []) {
+      summaryRows.push([
+        "inventory_status",
+        r.availabilityStatus,
+        r.count,
+      ]);
+    }
+    for (const o of balances.data?.items ?? []) {
+      summaryRows.push([
+        "outstanding",
+        o.orderNumber,
+        `${o.customer?.fullName ?? ""}|${Number(o.balanceDue ?? 0)}`,
+      ]);
+    }
+    downloadCsv(
+      `universal-pos-report_${stamp}.csv`,
+      summaryRows[0] as string[],
+      summaryRows.slice(1),
+    );
+    toast.success("Report CSV downloaded");
+  }
+
   return (
     <div className="mx-auto max-w-5xl space-y-5">
       <PageHeader
         title="Reports"
-        subtitle="Performance by period — export when you need a spreadsheet."
+        subtitle="Performance by period — export a spreadsheet for any business type."
         action={
         <div className="flex flex-wrap items-end gap-2">
           <div>
@@ -71,6 +129,16 @@ export default function ReportsPage() {
             onClick={() => setRange({ from, to })}
           >
             Apply
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="h-9"
+            disabled={sales.isLoading || payments.isLoading}
+            onClick={exportCsv}
+          >
+            Export CSV
           </Button>
         </div>
         }

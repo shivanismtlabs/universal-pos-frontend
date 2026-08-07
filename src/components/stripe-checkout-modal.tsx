@@ -7,7 +7,7 @@ import {
   useElements,
   useStripe,
 } from "@stripe/react-stripe-js";
-import { loadStripe, type Stripe } from "@stripe/stripe-js";
+import { loadStripe, type PaymentIntent, type Stripe } from "@stripe/stripe-js";
 import { Button } from "@/components/ui/button";
 import { formatInr } from "@/lib/utils";
 
@@ -22,6 +22,10 @@ function getStripe(publishableKey: string) {
   return promise;
 }
 
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 type Props = {
   publishableKey: string;
   clientSecret: string;
@@ -31,15 +35,69 @@ type Props = {
   onClose: () => void;
 };
 
+/**
+ * After confirmPayment, UPI/3DS often lands on requires_action or processing.
+ * Drive next action + short poll so we don't show a false error.
+ */
+async function settlePaymentIntent(
+  stripe: Stripe,
+  clientSecret: string,
+  initial: PaymentIntent | undefined,
+  onStatus?: (msg: string) => void,
+): Promise<PaymentIntent | undefined> {
+  let intent = initial;
+
+  if (
+    intent?.status === "requires_action" ||
+    intent?.status === "requires_confirmation"
+  ) {
+    onStatus?.("Complete UPI / bank verification…");
+    const next = await stripe.handleNextAction({ clientSecret });
+    if (next.error) {
+      throw new Error(next.error.message || "Payment action failed");
+    }
+    intent = next.paymentIntent ?? undefined;
+  }
+
+  // UPI often sits in "processing" until the bank confirms
+  for (let i = 0; i < 45 && intent?.status === "processing"; i++) {
+    onStatus?.(
+      i < 2
+        ? "Waiting for UPI confirmation…"
+        : `Still waiting for bank… (${i + 1}s)`,
+    );
+    await sleep(1000);
+    const retrieved = await stripe.retrievePaymentIntent(clientSecret);
+    intent = retrieved.paymentIntent ?? intent;
+  }
+
+  // One more next-action pass if bank bounced us back
+  if (
+    intent?.status === "requires_action" ||
+    intent?.status === "requires_confirmation"
+  ) {
+    onStatus?.("Additional verification required…");
+    const next = await stripe.handleNextAction({ clientSecret });
+    if (next.error) {
+      throw new Error(next.error.message || "Payment action failed");
+    }
+    intent = next.paymentIntent ?? undefined;
+  }
+
+  return intent;
+}
+
 function CheckoutForm({
+  clientSecret,
   amount,
   description,
   onSuccess,
   onClose,
-}: Omit<Props, "publishableKey" | "clientSecret">) {
+}: Omit<Props, "publishableKey">) {
   const stripe = useStripe();
   const elements = useElements();
   const [busy, setBusy] = useState(false);
+  const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function onSubmit(e: FormEvent) {
@@ -47,50 +105,76 @@ function CheckoutForm({
     if (!stripe || !elements) return;
     setBusy(true);
     setError(null);
+    setStatusMsg("Confirming payment…");
 
-    const result = await stripe.confirmPayment({
-      elements,
-      redirect: "if_required",
-      confirmParams: {
-        return_url: `${window.location.origin}/pos`,
-      },
-    });
+    try {
+      const result = await stripe.confirmPayment({
+        elements,
+        redirect: "if_required",
+        confirmParams: {
+          return_url: `${window.location.origin}/pos`,
+        },
+      });
 
-    if (result.error) {
-      const bits = [
-        result.error.message,
-        result.error.code ? `(${result.error.code})` : null,
-        result.error.decline_code ? `decline: ${result.error.decline_code}` : null,
-      ].filter(Boolean);
-      setError(bits.join(" ") || "Payment failed");
-      setBusy(false);
-      return;
-    }
+      if (result.error) {
+        const bits = [
+          result.error.message,
+          result.error.code ? `(${result.error.code})` : null,
+          result.error.decline_code
+            ? `decline: ${result.error.decline_code}`
+            : null,
+        ].filter(Boolean);
+        setError(bits.join(" ") || "Payment failed");
+        setBusy(false);
+        setStatusMsg(null);
+        return;
+      }
 
-    const intent = result.paymentIntent;
-    if (intent?.status === "succeeded") {
-      try {
+      const intent = await settlePaymentIntent(
+        stripe,
+        clientSecret,
+        result.paymentIntent,
+        setStatusMsg,
+      );
+
+      if (intent?.status === "succeeded") {
+        setStatusMsg("Payment received — finishing sale…");
         await onSuccess(intent.id);
         onClose();
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Verify failed");
-        setBusy(false);
+        return;
       }
-      return;
-    }
 
-    setError(`Unexpected status: ${intent?.status ?? "unknown"}`);
-    setBusy(false);
+      if (intent?.status === "processing") {
+        setError(
+          "Payment is still processing at the bank. Keep this window open, or check the order in a minute and verify if it completed.",
+        );
+        setBusy(false);
+        setStatusMsg(null);
+        return;
+      }
+
+      setError(
+        intent?.status === "requires_payment_method"
+          ? "Payment was not completed. Try again with UPI or card."
+          : `Payment not finished (status: ${intent?.status ?? "unknown"}). Try again or use cash.`,
+      );
+      setBusy(false);
+      setStatusMsg(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Payment failed");
+      setBusy(false);
+      setStatusMsg(null);
+    }
   }
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <div>
         <p className="text-xs font-semibold uppercase tracking-wide text-[#6b7280]">
-          Stripe test checkout
+          Card / UPI checkout
         </p>
         <p className="mt-1 text-sm text-[#111827]">{description}</p>
-        <p className="mt-1 text-lg font-semibold tabular-nums">
+        <p className="mt-1 text-lg font-semibold tabular-nums text-[#1a56db]">
           {formatInr(amount)}
         </p>
       </div>
@@ -108,6 +192,9 @@ function CheckoutForm({
         />
       </div>
 
+      {statusMsg ? (
+        <p className="text-sm font-medium text-[#1341a8]">{statusMsg}</p>
+      ) : null}
       {error ? <p className="text-sm text-[#b91c1c]">{error}</p> : null}
 
       <div className="flex gap-2">
@@ -126,7 +213,8 @@ function CheckoutForm({
       </div>
 
       <p className="text-center text-[0.65rem] text-[#9ca3af]">
-        Test card: 4242 4242 4242 4242 · any future expiry · any CVC
+        UPI: scan the QR in this window. Card test: 4242 4242 4242 4242 · any
+        future expiry · any CVC
       </p>
     </form>
   );
@@ -148,13 +236,14 @@ export function StripeCheckoutModal(props: Props) {
             appearance: {
               theme: "stripe",
               variables: {
-                colorPrimary: "#0b1f33",
+                colorPrimary: "#1a56db",
                 borderRadius: "8px",
               },
             },
           }}
         >
           <CheckoutForm
+            clientSecret={props.clientSecret}
             amount={props.amount}
             description={props.description}
             onSuccess={props.onSuccess}

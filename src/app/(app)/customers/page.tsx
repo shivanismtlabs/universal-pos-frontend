@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -49,21 +49,58 @@ function MeasureValue({ label, value }: { label: string; value: unknown }) {
 
 export default function CustomersPage() {
   const [q, setQ] = useState("");
+  const [debouncedQ, setDebouncedQ] = useState("");
+  const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const qc = useQueryClient();
   const { hasModule } = useBootstrap();
   const rental = hasModule("rental");
+  const pageSize = 30;
+
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      setDebouncedQ(q.trim());
+      setPage(1);
+    }, 280);
+    return () => window.clearTimeout(t);
+  }, [q]);
 
   const list = useQuery({
-    queryKey: ["customers", q],
-    queryFn: () => customersApi.list({ q: q || undefined, limit: 50 }),
+    queryKey: ["customers", debouncedQ, page],
+    queryFn: () =>
+      customersApi.list({
+        q: debouncedQ || undefined,
+        page,
+        limit: pageSize,
+      }),
+    placeholderData: (prev) => prev,
   });
 
   const items = list.data?.items ?? [];
-  const selected = useMemo(
-    () => items.find((c) => c.id === selectedId) ?? null,
-    [items, selectedId],
-  );
+  const meta = list.data?.meta;
+  const total = meta?.total ?? items.length;
+  const totalPages = meta?.totalPages ?? 1;
+
+  const selectedDetail = useQuery({
+    queryKey: ["customer", selectedId],
+    queryFn: () => customersApi.get(selectedId!),
+    enabled: Boolean(selectedId),
+  });
+
+  const selected = useMemo(() => {
+    const fromPage = items.find((c) => c.id === selectedId);
+    if (fromPage) return fromPage;
+    const row = selectedDetail.data;
+    if (!row || !selectedId) return null;
+    return {
+      id: String(row.id),
+      fullName: String(row.fullName ?? ""),
+      phone: String(row.phone ?? ""),
+      email: (row.email as string | null | undefined) ?? null,
+      eventDate: (row.eventDate as string | null | undefined) ?? null,
+      notes: (row.notes as string | null | undefined) ?? null,
+    };
+  }, [items, selectedId, selectedDetail.data]);
 
   const measurements = useQuery({
     queryKey: ["measurements", selectedId],
@@ -150,14 +187,16 @@ export default function CustomersPage() {
           subtitle="Universal contact list — search, add, and open purchase or rental history."
           action={
             <p className="text-caption text-[var(--muted)]">
-              {list.isLoading ? "Loading…" : `${items.length} shown`}
+              {list.isLoading
+                ? "Loading…"
+                : `${total.toLocaleString()} customer${total === 1 ? "" : "s"}`}
             </p>
           }
         />
       </FadeIn>
 
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)]">
-        {/* Client list — stacked rows, no horizontal scroll */}
+        {/* Client list — search + pages (never render the whole book) */}
         <FadeIn delay={0.04}>
           <section className="overflow-hidden rounded-2xl border border-[#e5e7eb] bg-white">
             <div className="border-b border-[#e5e7eb] p-4 sm:p-5">
@@ -165,11 +204,16 @@ export default function CustomersPage() {
                 <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-[#9ca3af]" />
                 <Input
                   className="pl-10"
-                  placeholder="Search name or phone"
+                  placeholder="Search name, phone, or email"
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
                 />
               </label>
+              <p className="mt-2 text-[0.7rem] text-[#8b9bb0]">
+                Showing {items.length} of {total.toLocaleString()}
+                {debouncedQ ? ` for “${debouncedQ}”` : ""} · page {page} /{" "}
+                {totalPages}
+              </p>
             </div>
 
             <ul className="max-h-[28rem] divide-y divide-[#f3f4f6] overflow-y-auto">
@@ -227,6 +271,32 @@ export default function CustomersPage() {
               <p className="px-5 py-8 text-sm text-[#6b7280]">
                 No customers found
               </p>
+            ) : null}
+
+            {totalPages > 1 ? (
+              <div className="flex items-center justify-between gap-2 border-t border-[#eef2f8] px-4 py-3">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  disabled={page <= 1 || list.isFetching}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  Previous
+                </Button>
+                <span className="text-[0.75rem] text-[#5a6b7d]">
+                  Page {page} of {totalPages}
+                </span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  disabled={page >= totalPages || list.isFetching}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  Next
+                </Button>
+              </div>
             ) : null}
           </section>
         </FadeIn>

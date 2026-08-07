@@ -1,22 +1,22 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import { useBootstrap } from "@/lib/bootstrap";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
 import { EmptyState, PageSkeleton } from "@/components/page-header";
 import { OverviewDashboard } from "./overview-dashboard";
 import { SaleDashboard } from "./sale-dashboard";
 import { RentalDashboard } from "./rental-dashboard";
+import { SubscriptionDashboard } from "./subscription-dashboard";
+import { ServiceDashboard } from "./service-dashboard";
 
 type View = "overview" | "sale" | "rent" | "service" | "subscription";
 
 /**
- * Dashboard — Overview (enterprise) + mode floors.
+ * Dashboard — Overview + live mode floors (sale / rent / service / plans).
  */
 export default function DashboardPage() {
-  const { isLoading, hasMode, commerceModes } = useBootstrap();
+  const { isLoading, hasMode } = useBootstrap();
   const [view, setView] = useState<View>("overview");
 
   if (isLoading) {
@@ -77,17 +77,8 @@ export default function DashboardPage() {
       {view === "overview" ? <OverviewDashboard /> : null}
       {view === "sale" ? <SaleDashboard /> : null}
       {view === "rent" ? <RentalDashboard /> : null}
-      {view === "service" || view === "subscription" ? (
-        <EmptyState
-          title={`${view === "service" ? "Services" : "Plans"} floor is on`}
-          detail={`Mode is enabled (${commerceModes.join(", ")}). Add catalog items under Products when this flow ships.`}
-          action={
-            <Button asChild variant="secondary">
-              <Link href="/catalog">Go to products</Link>
-            </Button>
-          }
-        />
-      ) : null}
+      {view === "service" ? <ServiceDashboard /> : null}
+      {view === "subscription" ? <SubscriptionDashboard /> : null}
     </div>
   );
 }

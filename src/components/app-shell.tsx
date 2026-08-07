@@ -23,6 +23,7 @@ import {
   Box,
   Settings,
   Package,
+  ArrowRightLeft,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -30,6 +31,8 @@ import { useAuthStore } from "@/lib/auth-store";
 import { authApi } from "@/lib/api";
 import { useBootstrap } from "@/lib/bootstrap";
 import { Button } from "@/components/ui/button";
+import { StationPinLock } from "@/components/station-pin-lock";
+import { SetPinDialog } from "@/components/set-pin-dialog";
 import { toast } from "sonner";
 import {
   canAccessPath,
@@ -134,6 +137,13 @@ const NAV_CATALOG: NavItem[] = [
     section: "Shop setup",
     commerce: "sale" as const,
     module: "inventory",
+  },
+  {
+    href: "/transfers",
+    label: "Stock transfer",
+    icon: ArrowRightLeft,
+    section: "Shop setup",
+    module: "catalog",
   },
   {
     href: "/settings",
@@ -353,6 +363,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const qc = useQueryClient();
   const user = useAuthStore((s) => s.user);
+  const stationUser = useAuthStore((s) => s.stationUser);
+  const pinLocked = useAuthStore((s) => s.pinLocked);
+  const stationToken = useAuthStore((s) => s.stationToken);
   const clear = useAuthStore((s) => s.clear);
   const {
     productName,
@@ -362,18 +375,30 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     commerceModes,
     isLoading,
     isError,
+    data: boot,
   } = useBootstrap();
   const [open, setOpen] = useState(false);
+  const [showSetPin, setShowSetPin] = useState(false);
   const wide = pathname === "/pos" || pathname.startsWith("/pos/");
-  const roles = user?.roles ?? [];
+  const roles = user?.roles ?? stationUser?.roles ?? [];
   const modeLabel = modeBadge(commerceModes) || "POS";
+  const pinSwitchEnabled =
+    (boot?.tenant?.settings as { pos?: { pinSwitchEnabled?: boolean } } | null)
+      ?.pos?.pinSwitchEnabled !== false;
 
   useEffect(() => {
     setOpen(false);
   }, [pathname]);
 
   useEffect(() => {
-    if (!roles.length || isLoading) return;
+    if (pinLocked || !user || !pinSwitchEnabled) return;
+    if (user.pinSet === false) {
+      setShowSetPin(true);
+    }
+  }, [user, pinLocked, pinSwitchEnabled]);
+
+  useEffect(() => {
+    if (pinLocked || !roles.length || isLoading) return;
     if (!canAccessPath(pathname, roles)) {
       const home = defaultHomeForRoles(roles);
       toast.error("You don’t have access to that page");
@@ -392,7 +417,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       toast.message("Not enabled for this shop’s commerce modes");
       router.replace("/dashboard");
     }
-  }, [pathname, roles, router, hasModule, hasMode, isLoading]);
+  }, [pathname, roles, router, hasModule, hasMode, isLoading, pinLocked]);
 
   useEffect(() => {
     // App shell owns scrolling — keep document from scrolling under the fixed sidebar
@@ -454,10 +479,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const initial = (productName.trim()[0] || "P").toUpperCase();
 
+  const acting = user ?? stationUser;
   const sidebarProps = {
     onLogout: () => void logout(),
-    userName: user?.fullName,
-    userEmail: user?.email,
+    userName: acting?.fullName,
+    userEmail: acting?.email,
     roles,
     productName,
     tagline,
@@ -469,6 +495,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-dvh overflow-hidden bg-[#f4f6fa] text-[#0b1f33]">
+      {pinLocked && stationToken ? (
+        <StationPinLock open locationId={acting?.storeId} />
+      ) : null}
+      <SetPinDialog
+        open={showSetPin && !pinLocked}
+        title="Set your counter PIN"
+        onClose={() => setShowSetPin(false)}
+        onSaved={() => {
+          if (user) {
+            useAuthStore.setState({
+              user: { ...user, pinSet: true },
+              stationUser: stationUser
+                ? { ...stationUser, pinSet: true }
+                : stationUser,
+            });
+          }
+          setShowSetPin(false);
+        }}
+      />
       {/* Desktop sidebar — fixed to viewport, never scrolls with page */}
       <aside className="hidden h-dvh w-[15.5rem] shrink-0 flex-col border-r border-[#d9e0ea] bg-white md:flex">
         <SidebarBody {...sidebarProps} />

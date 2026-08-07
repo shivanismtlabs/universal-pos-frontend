@@ -137,6 +137,7 @@ export default function LoginForm() {
 
   async function applySession(data: {
     accessToken: string;
+    stationToken?: string;
     refreshToken: string;
     user: {
       id: string;
@@ -145,11 +146,13 @@ export default function LoginForm() {
       roles?: string[];
       storeId?: string | null;
       tenantId: string;
+      pinSet?: boolean;
     };
     tenant?: { slug?: string };
   }) {
     setSession({
       accessToken: data.accessToken,
+      stationToken: data.stationToken ?? data.accessToken,
       refreshToken: data.refreshToken,
       user: {
         id: data.user.id,
@@ -158,6 +161,7 @@ export default function LoginForm() {
         roles: data.user.roles ?? ["admin"],
         storeId: data.user.storeId,
         tenantId: data.user.tenantId,
+        pinSet: data.user.pinSet,
       },
       tenantSlug: data.tenant?.slug ?? "",
     });

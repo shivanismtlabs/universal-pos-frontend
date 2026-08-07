@@ -25,6 +25,7 @@ export type ReceiptData = {
   totals: {
     subtotal: string | number;
     taxTotal: string | number;
+    discountTotal?: string | number;
     depositTotal: string | number;
     balanceDue: string | number;
   };
@@ -82,9 +83,13 @@ export function ReceiptModal({
   const paidTotal =
     paidFromPayments > 0
       ? paidFromPayments
-      : moneyNumber(data?.totals.subtotal) +
-        moneyNumber(data?.totals.taxTotal) +
-        moneyNumber(data?.totals.depositTotal);
+      : Math.max(
+          0,
+          moneyNumber(data?.totals.subtotal) +
+            moneyNumber(data?.totals.taxTotal) -
+            moneyNumber(data?.totals.discountTotal) +
+            moneyNumber(data?.totals.depositTotal),
+        );
 
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -232,6 +237,14 @@ export function ReceiptModal({
                     <span>Tax</span>
                     <span className="tabular-nums text-[#0b1f33]">
                       {money(data.totals.taxTotal)}
+                    </span>
+                  </div>
+                ) : null}
+                {moneyNumber(data.totals.discountTotal) > 0 ? (
+                  <div className="flex justify-between gap-3 py-1 text-[#5a6b7d]">
+                    <span>Discount</span>
+                    <span className="tabular-nums text-[#0b1f33]">
+                      −{money(data.totals.discountTotal)}
                     </span>
                   </div>
                 ) : null}

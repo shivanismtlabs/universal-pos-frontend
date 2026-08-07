@@ -59,6 +59,7 @@ export default function RegisterUserPage() {
       });
       setSession({
         accessToken: data.accessToken,
+        stationToken: data.stationToken ?? data.accessToken,
         refreshToken: data.refreshToken,
         user: {
           id: data.user.id,

@@ -64,10 +64,38 @@ function PosGate() {
     return <RetailPosWorkstation />;
   }
 
+  if (hasMode("subscription") || hasMode("service") || wantService) {
+    return (
+      <div className="rounded-xl border border-[#d9e0ea] bg-white p-6 text-sm text-[#5a6b7d]">
+        <p className="font-semibold text-[#0b1f33]">
+          Use Dashboard for Plans &amp; Services
+        </p>
+        <p className="mt-1">
+          Enroll members, renew plans, and charge services from{" "}
+          <Link href="/dashboard" className="font-semibold text-[#1a56db]">
+            Dashboard
+          </Link>
+          {hasMode("service") ? (
+            <>
+              {" "}
+              or schedule on{" "}
+              <Link
+                href="/appointments"
+                className="font-semibold text-[#1a56db]"
+              >
+                Appointments
+              </Link>
+            </>
+          ) : null}
+          .
+        </p>
+      </div>
+    );
+  }
+
   return (
     <p className="rounded-xl border border-[#d9e0ea] bg-white p-6 text-sm text-[#5a6b7d]">
-      No counter available for modes: {commerceModes.join(", ")}. Sale or rental
-      is required for the POS floor today.
+      No counter available for modes: {commerceModes.join(", ")}.
     </p>
   );
 }

@@ -4,9 +4,10 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { customersApi, paymentsApi, posApi, tenantsApi } from "@/lib/api";
+import { paymentsApi, posApi, tenantsApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useBootstrap } from "@/lib/bootstrap";
+import { useAuthStore } from "@/lib/auth-store";
 import { moneyNumber, newIdempotencyKey, cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,6 +17,8 @@ import { ReceiptModal, type ReceiptData } from "@/components/receipt-modal";
 import { StripeCheckoutModal } from "@/components/stripe-checkout-modal";
 import { ProductThumb } from "@/components/product-thumb";
 import { ImageLightbox } from "@/components/image-lightbox";
+import { CustomerPicker } from "@/components/customer-picker";
+import { StationPinLock } from "@/components/station-pin-lock";
 import {
   flushOfflineQueue,
   isOnline,
@@ -55,6 +58,28 @@ export default function RetailPosWorkstation({
 }) {
   const qc = useQueryClient();
   const { money, productName, currencyCode, data: boot } = useBootstrap();
+  const roles = useAuthStore((s) => s.user?.roles ?? []);
+  const actingUser = useAuthStore((s) => s.user);
+  const lockStation = useAuthStore((s) => s.lockStation);
+  const stationToken = useAuthStore((s) => s.stationToken);
+  const pinLocked = useAuthStore((s) => s.pinLocked);
+  const [manualPinSwitch, setManualPinSwitch] = useState(false);
+  const canOverrideDiscount = roles.some(
+    (r) => r === "admin" || r === "manager",
+  );
+  const pinSwitchEnabled = (() => {
+    const settings = boot?.tenant?.settings as
+      | { pos?: { pinSwitchEnabled?: boolean } }
+      | undefined;
+    return settings?.pos?.pinSwitchEnabled !== false;
+  })();
+  const idleMinutes = (() => {
+    const settings = boot?.tenant?.settings as
+      | { pos?: { pinIdleMinutes?: number } }
+      | undefined;
+    const n = settings?.pos?.pinIdleMinutes;
+    return typeof n === "number" && n > 0 ? n : 5;
+  })();
   const currencySymbol =
     currencyCode === "USD"
       ? "$"
@@ -143,6 +168,33 @@ export default function RetailPosWorkstation({
     locations.data?.find((l) => l.code === "MAIN")?.id ??
     locations.data?.[0]?.id;
 
+  useEffect(() => {
+    if (!pinSwitchEnabled || !stationToken || pinLocked) return;
+    let timer: number | undefined;
+    const bump = () => {
+      if (timer) window.clearTimeout(timer);
+      timer = window.setTimeout(
+        () => {
+          lockStation();
+        },
+        idleMinutes * 60_000,
+      );
+    };
+    bump();
+    const events = ["pointerdown", "keydown", "touchstart", "mousemove"] as const;
+    for (const ev of events) window.addEventListener(ev, bump, { passive: true });
+    return () => {
+      if (timer) window.clearTimeout(timer);
+      for (const ev of events) window.removeEventListener(ev, bump);
+    };
+  }, [
+    pinSwitchEnabled,
+    stationToken,
+    pinLocked,
+    idleMinutes,
+    lockStation,
+  ]);
+
   const catalog = useQuery({
     queryKey: ["pos-sale-catalog", locationId, filter, lowStockOnly],
     queryFn: () =>
@@ -155,11 +207,6 @@ export default function RetailPosWorkstation({
       }),
     enabled: Boolean(locationId),
     refetchInterval: 30_000,
-  });
-
-  const customers = useQuery({
-    queryKey: ["customers", "pos"],
-    queryFn: () => customersApi.list({ limit: 80 }),
   });
 
   const categories = useMemo(() => {
@@ -234,13 +281,6 @@ export default function RetailPosWorkstation({
   });
 
   const subtotal = cart.reduce((s, l) => s + l.unitPrice * l.qty, 0);
-  const maxDiscountAmount =
-    Math.round(((subtotal * maxCashierDiscountPercent) / 100) * 100) / 100;
-  const discountNum = Math.min(
-    Math.max(0, moneyNumber(discountAmount || 0)),
-    subtotal,
-    maxDiscountAmount,
-  );
   const taxAmount = (() => {
     if (taxSettings.rate <= 0) return 0;
     if (taxSettings.inclusive) {
@@ -249,12 +289,23 @@ export default function RetailPosWorkstation({
     }
     return Math.round(subtotal * taxSettings.rate * 100) / 100;
   })();
-  const totalDue = Math.max(
-    0,
-    taxSettings.inclusive
-      ? subtotal - discountNum
-      : subtotal + taxAmount - discountNum,
+  /** Pre-discount ticket total (matches server discountable base). */
+  const ticketBeforeDiscount = taxSettings.inclusive
+    ? subtotal
+    : subtotal + taxAmount;
+  const maxDiscountAmount =
+    Math.round(
+      ((ticketBeforeDiscount * maxCashierDiscountPercent) / 100) * 100,
+    ) / 100;
+  const discountEntered = Math.max(0, moneyNumber(discountAmount || 0));
+  const discountNum = Math.min(
+    discountEntered,
+    ticketBeforeDiscount,
+    canOverrideDiscount ? ticketBeforeDiscount : maxDiscountAmount,
   );
+  const discountCapped =
+    discountEntered > discountNum + 0.001 && !canOverrideDiscount;
+  const totalDue = Math.max(0, ticketBeforeDiscount - discountNum);
   const tenderedNum = moneyNumber(cashTendered || 0);
   const changeDue =
     payMethod === "cash" && tenderedNum > 0
@@ -393,14 +444,10 @@ export default function RetailPosWorkstation({
       toast.error("Cash tendered is less than total");
       return;
     }
-    if (
-      moneyNumber(discountAmount || 0) > maxDiscountAmount + 0.001 &&
-      maxDiscountAmount >= 0
-    ) {
-      toast.error(
-        `Cashier discount max is ${maxCashierDiscountPercent}% (${money(maxDiscountAmount)})`,
+    if (discountCapped) {
+      toast.message(
+        `Discount capped at ${money(maxDiscountAmount)} (${maxCashierDiscountPercent}% cashier max)`,
       );
-      return;
     }
     if (totalDue < 60 && (payMethod === "card" || payMethod === "upi")) {
       toast.error(
@@ -668,6 +715,14 @@ export default function RetailPosWorkstation({
         compact ? "" : "min-h-[calc(100vh-7rem)]",
       )}
     >
+      {/* Idle lock is handled in AppShell; this overlay is manual Switch user only */}
+      <StationPinLock
+        open={Boolean(manualPinSwitch && stationToken && pinSwitchEnabled && !pinLocked)}
+        locationId={locationId}
+        dismissible
+        onDismiss={() => setManualPinSwitch(false)}
+        onUnlocked={() => setManualPinSwitch(false)}
+      />
       {!compact ? (
         <header className="mb-4 flex flex-wrap items-end justify-between gap-3">
           <div>
@@ -689,10 +744,26 @@ export default function RetailPosWorkstation({
               {productName}
             </h1>
             <p className="mt-1 text-sm text-[#5a6b7d]">
-              Tap a product, then charge.
+              Tap a product, then charge. Open the register at shift start; close
+              it when you count the drawer.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {actingUser ? (
+              <span className="rounded-md border border-[#d9e0ea] bg-white px-2.5 py-1.5 text-xs font-medium text-[#0b1f33]">
+                {actingUser.fullName}
+              </span>
+            ) : null}
+            {pinSwitchEnabled && stationToken ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={() => setManualPinSwitch(true)}
+              >
+                Switch user
+              </Button>
+            ) : null}
             {!registerSession ? (
               <>
                 <Input
@@ -701,7 +772,7 @@ export default function RetailPosWorkstation({
                   value={openingFloat}
                   onChange={(e) => setOpeningFloat(e.target.value)}
                   placeholder="Float"
-                  title="Opening float"
+                  title="Cash in drawer at start of shift"
                 />
                 <Button
                   type="button"
@@ -779,7 +850,10 @@ export default function RetailPosWorkstation({
 
       {!compact && !registerSession ? (
         <div className="mb-3 rounded-xl border border-[#fdba74] bg-[#fff7ed] px-3 py-2 text-sm text-[#9a3412]">
-          Open the cash register (float) before charging customers.
+          <strong className="font-semibold">Open register</strong> starts your
+          shift with a cash float. Charging stays locked until the drawer is
+          open. <strong className="font-semibold">Close register</strong> ends
+          the shift and compares counted cash to expected sales.
         </div>
       ) : null}
 
@@ -1100,17 +1174,12 @@ export default function RetailPosWorkstation({
             <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
               Customer
             </Label>
-            <Select
+            <CustomerPicker
               value={customerId}
-              onChange={(e) => setCustomerId(e.target.value)}
-            >
-              <option value="">Walk-in customer</option>
-              {(customers.data?.items ?? []).map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.fullName} · {c.phone}
-                </option>
-              ))}
-            </Select>
+              onChange={(id) => setCustomerId(id)}
+              allowWalkIn
+              placeholder="Search customer book…"
+            />
           </div>
 
           <ul className="max-h-48 flex-1 space-y-1.5 overflow-y-auto px-3 py-3">
@@ -1223,7 +1292,10 @@ export default function RetailPosWorkstation({
             <div className="grid grid-cols-2 gap-2">
               <div className="field-shell">
                 <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
-                  Discount {currencySymbol} (max {maxCashierDiscountPercent}%)
+                  Discount {currencySymbol}
+                  {!canOverrideDiscount
+                    ? ` (max ${maxCashierDiscountPercent}%)`
+                    : ""}
                 </Label>
                 <Input
                   className="h-10"
@@ -1232,20 +1304,33 @@ export default function RetailPosWorkstation({
                   value={discountAmount}
                   onChange={(e) => setDiscountAmount(e.target.value)}
                 />
-                <p className="text-[0.65rem] text-[#8b9bb0]">
-                  Cap {money(maxDiscountAmount)}
+                <p
+                  className={cn(
+                    "text-[0.65rem]",
+                    discountCapped ? "text-[#c81e1e]" : "text-[#8b9bb0]",
+                  )}
+                >
+                  {discountCapped
+                    ? `Applied ${money(discountNum)} — cashier cap ${money(maxDiscountAmount)}`
+                    : canOverrideDiscount
+                      ? `Up to ticket total ${money(ticketBeforeDiscount)}`
+                      : `Cashier cap ${money(maxDiscountAmount)}`}
                 </p>
               </div>
               <div className="field-shell">
                 <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
-                  Park label
+                  Hold name
                 </Label>
                 <Input
                   className="h-10"
-                  placeholder="Optional"
+                  placeholder="e.g. Table 4"
                   value={parkLabel}
                   onChange={(e) => setParkLabel(e.target.value)}
+                  maxLength={80}
                 />
+                <p className="text-[0.65rem] text-[#8b9bb0]">
+                  Optional name when parking a cart
+                </p>
               </div>
             </div>
 
@@ -1257,6 +1342,7 @@ export default function RetailPosWorkstation({
                 className="h-10"
                 disabled={busy || !cart.length}
                 onClick={() => void parkCart()}
+                title="Save this cart as a hold without taking stock or payment — resume later"
               >
                 Park sale
               </Button>

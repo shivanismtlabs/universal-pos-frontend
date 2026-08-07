@@ -232,8 +232,8 @@ export const addSaleProductSchema = z
     sku: z
       .string()
       .trim()
-      .min(1, "SKU is required")
-      .max(100)
+      .min(15, "SKU must be 15–18 characters")
+      .max(18, "SKU must be 15–18 characters")
       .regex(
         /^[A-Za-z0-9][A-Za-z0-9._\-/]*$/,
         "SKU: use letters, numbers, and . _ - / only",

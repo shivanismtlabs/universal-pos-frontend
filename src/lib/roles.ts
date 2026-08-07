@@ -23,7 +23,7 @@ export const ALL_ROLES: RoleCode[] = [
   "inventory",
 ];
 
-/** Route prefixes → roles that may open them */
+/** Route prefixes → roles that may open them (keep aligned with backend RoleGroup) */
 export const ROUTE_ROLES: Record<string, RoleCode[]> = {
   "/dashboard": ALL_ROLES,
   "/pos": ["admin", "manager", "cashier"],
@@ -32,13 +32,15 @@ export const ROUTE_ROLES: Record<string, RoleCode[]> = {
   "/appointments": ["admin", "manager", "cashier", "fitter"],
   "/customers": ["admin", "manager", "cashier", "fitter"],
   "/parties": ["admin", "manager", "cashier", "fitter"],
-  "/notify": ["admin", "manager"],
+  /** Matches backend RoleGroup.notify */
+  "/notify": ["admin", "manager", "cashier", "fitter"],
   "/reports": ["admin", "manager"],
   "/staff": ["admin", "manager"],
   "/inventory": ["admin", "manager", "inventory"],
   "/retail": ["admin", "manager", "inventory"],
   "/catalog": ["admin", "manager", "inventory", "cashier"],
   "/products": ["admin", "manager", "inventory", "cashier"],
+  "/transfers": ["admin", "manager", "inventory"],
   "/settings": ["admin", "manager"],
   "/suppliers": ["admin", "manager", "inventory"],
   "/plan": ["admin"],
@@ -67,7 +69,8 @@ export function canAccessPath(
 export function defaultHomeForRoles(userRoles: string[] | undefined | null) {
   if (hasAnyRole(userRoles, ["admin", "manager", "cashier"])) return "/dashboard";
   if (hasAnyRole(userRoles, ["fitter"])) return "/appointments";
-  if (hasAnyRole(userRoles, ["inventory"])) return "/inventory";
+  // /inventory redirects away — send stock staff to the live products page
+  if (hasAnyRole(userRoles, ["inventory"])) return "/catalog";
   return "/dashboard";
 }
 

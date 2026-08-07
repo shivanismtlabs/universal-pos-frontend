@@ -269,6 +269,7 @@ export function DynamicCommerceForm({
               inputMode={field.type === "number" ? "decimal" : undefined}
               step={step}
               min={field.type === "number" ? "0" : undefined}
+              maxLength={field.key === "sku" ? 18 : undefined}
               value={
                 typeof values[field.key] === "string" ? values[field.key] : ""
               }

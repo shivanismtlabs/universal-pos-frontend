@@ -54,8 +54,15 @@ async function tryRefreshTokens(): Promise<boolean> {
   if (refreshInFlight) return refreshInFlight;
 
   refreshInFlight = (async () => {
-    const refreshToken = useAuthStore.getState().refreshToken;
+    const state = useAuthStore.getState();
+    const refreshToken = state.refreshToken;
     if (!refreshToken) return false;
+
+    // PIN acting sessions must not be replaced by the station owner's access token
+    const actingIsPinUser =
+      Boolean(state.user) &&
+      Boolean(state.stationUser) &&
+      state.user!.id !== state.stationUser!.id;
 
     try {
       const res = await fetch(`${getApiBaseUrl()}/auth/refresh`, {
@@ -65,7 +72,11 @@ async function tryRefreshTokens(): Promise<boolean> {
         cache: "no-store",
       });
       const json = (await res.json().catch(() => null)) as
-        | ApiSuccess<{ accessToken: string; refreshToken: string }>
+        | ApiSuccess<{
+            accessToken: string;
+            refreshToken: string;
+            stationToken?: string;
+          }>
         | ApiErrorBody
         | null;
 
@@ -73,9 +84,24 @@ async function tryRefreshTokens(): Promise<boolean> {
         return false;
       }
 
+      const next = json.data;
+      if (actingIsPinUser) {
+        // Renew station + refresh only; keep pin_access until it expires or idle-lock
+        useAuthStore.getState().setTokens(
+          state.accessToken ?? next.accessToken,
+          next.refreshToken,
+          next.stationToken ?? state.stationToken,
+        );
+        return Boolean(state.accessToken);
+      }
+
       useAuthStore
         .getState()
-        .setTokens(json.data.accessToken, json.data.refreshToken);
+        .setTokens(
+          next.accessToken,
+          next.refreshToken,
+          next.stationToken ?? undefined,
+        );
       return true;
     } catch {
       return false;
@@ -88,6 +114,12 @@ async function tryRefreshTokens(): Promise<boolean> {
 }
 
 function forceLogout() {
+  const state = useAuthStore.getState();
+  // Prefer counter PIN lock when the station JWT is still present
+  if (state.stationToken) {
+    state.lockStation();
+    return;
+  }
   useAuthStore.getState().clear();
   if (typeof window !== "undefined") {
     const path = window.location.pathname;

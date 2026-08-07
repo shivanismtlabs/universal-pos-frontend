@@ -6,6 +6,20 @@ function token() {
   return useAuthStore.getState().accessToken;
 }
 
+function stationToken() {
+  return useAuthStore.getState().stationToken;
+}
+
+type AuthUserPayload = {
+  id: string;
+  email: string;
+  fullName: string;
+  roles: string[];
+  storeId?: string | null;
+  tenantId: string;
+  pinSet?: boolean;
+};
+
 export const authApi = {
   login(body: {
     email: string;
@@ -13,16 +27,10 @@ export const authApi = {
     tenantSlug?: string;
   }) {
     return apiRequest<{
-      user: {
-        id: string;
-        email: string;
-        fullName: string;
-        roles: string[];
-        storeId?: string | null;
-        tenantId: string;
-      };
+      user: AuthUserPayload;
       tenant?: { id: string; slug: string; name: string };
       accessToken: string;
+      stationToken: string;
       refreshToken: string;
     }>("/auth/login", { method: "POST", body });
   },
@@ -39,6 +47,7 @@ export const authApi = {
         tenantId?: string;
       };
       accessToken: string;
+      stationToken: string;
       refreshToken: string;
     }>("/auth/register-tenant", { method: "POST", body });
   },
@@ -49,16 +58,10 @@ export const authApi = {
     tenantName?: string;
   }) {
     return apiRequest<{
-      user: {
-        id: string;
-        email: string;
-        fullName: string;
-        roles?: string[];
-        storeId?: string | null;
-        tenantId: string;
-      };
+      user: AuthUserPayload;
       tenant?: { id: string; slug: string; name: string };
       accessToken: string;
+      stationToken: string;
       refreshToken: string;
     }>("/auth/google", { method: "POST", body });
   },
@@ -73,15 +76,9 @@ export const authApi = {
     return apiRequest<{
       tenant: { id: string; slug: string; name: string };
       store: { id: string; name: string } | null;
-      user: {
-        id: string;
-        email: string;
-        fullName: string;
-        roles: string[];
-        storeId?: string | null;
-        tenantId: string;
-      };
+      user: AuthUserPayload;
       accessToken: string;
+      stationToken: string;
       refreshToken: string;
     }>("/auth/register-user", { method: "POST", body });
   },
@@ -94,21 +91,67 @@ export const authApi = {
       roles: string[];
       primaryStoreId?: string | null;
       tenantId: string;
+      pinSet?: boolean;
+      pinSwitchEnabled?: boolean;
     }>("/auth/me", { token: token() });
   },
 
   logout() {
+    const t = token() ?? stationToken();
     return apiRequest<null>("/auth/logout", {
       method: "POST",
-      token: token(),
+      token: t,
     });
   },
 
   refresh(refreshToken: string) {
-    return apiRequest<{ accessToken: string; refreshToken: string }>(
-      "/auth/refresh",
-      { method: "POST", body: { refreshToken } },
-    );
+    return apiRequest<{
+      accessToken: string;
+      stationToken: string;
+      refreshToken: string;
+    }>("/auth/refresh", { method: "POST", body: { refreshToken } });
+  },
+
+  setOwnPin(pin: string) {
+    return apiRequest<{ pinSet: boolean }>("/auth/pin/set", {
+      method: "POST",
+      body: { pin },
+      token: token(),
+    });
+  },
+
+  setUserPin(userId: string, pin: string) {
+    return apiRequest<{ pinSet: boolean }>(`/auth/pin/set/${userId}`, {
+      method: "POST",
+      body: { pin },
+      token: token(),
+    });
+  },
+
+  listPinStaff(locationId: string) {
+    const t = stationToken() ?? token();
+    return apiRequest<
+      Array<{
+        id: string;
+        fullName: string;
+        email: string;
+        roles: string[];
+        pinSet: boolean;
+      }>
+    >(`/auth/pin/staff?locationId=${encodeURIComponent(locationId)}`, {
+      token: t,
+    });
+  },
+
+  pinLogin(body: { locationId: string; userId: string; pin: string }) {
+    return apiRequest<{
+      user: AuthUserPayload;
+      accessToken: string;
+    }>("/auth/pin/login", {
+      method: "POST",
+      body,
+      token: stationToken(),
+    });
   },
 };
 
@@ -427,6 +470,47 @@ export const inventoryApi = {
       body,
       token: token(),
     });
+  },
+
+  listStockAtLocation(locationId: string, q?: string) {
+    const qs = new URLSearchParams({ locationId });
+    if (q) qs.set("q", q);
+    return apiRequest<
+      Array<{
+        stockLevelId: string;
+        productId: string;
+        sku: string;
+        sellUnit: string;
+        qtyOnHand: number;
+        sellPrice: string | number;
+        name: string;
+        productSku: string;
+        trackQty: boolean;
+        fulfillmentMode?: string;
+        photoUrl?: string | null;
+      }>
+    >(`/stock-levels?${qs}`, { token: token() });
+  },
+
+  transferStock(body: {
+    fromLocationId: string;
+    toLocationId: string;
+    notes?: string;
+    lines: Array<{ productId: string; qty: number }>;
+  }) {
+    return apiRequest<{
+      fromLocationId: string;
+      toLocationId: string;
+      notes: string | null;
+      lines: Array<{
+        productId: string;
+        productName: string;
+        sku: string;
+        qty: number;
+        fromQtyOnHand: number;
+        toQtyOnHand: number;
+      }>;
+    }>("/stock-transfers", { method: "POST", body, token: token() });
   },
 };
 
@@ -1791,14 +1875,17 @@ export const appsApi = {
     deposit?: number;
     barcode?: string;
     size?: string;
+    billingPeriod?: number;
+    durationMinutes?: number;
   }) {
     return apiRequest<{
-      mode: "sale" | "rental";
+      mode: "sale" | "rental" | "service" | "subscription";
       product: {
         id: string;
         title: string;
         sku: string;
         description?: string | null;
+        fulfillmentMode?: string;
       };
       stockLevel?: { id: string; qtyOnHand?: number; sellPrice?: string | number };
       unit?: { id: string };
@@ -1862,6 +1949,176 @@ export const appsApi = {
         size?: string | null;
       }>;
     }>("/tenants/me/dashboard-catalog", { token: token() });
+  },
+};
+
+/** Customer memberships (commerce subscription mode — not SaaS /plan) */
+export const subscriptionsApi = {
+  summary() {
+    return apiRequest<{
+      plans: number;
+      activeMembers: number;
+      expired: number;
+      cancelled: number;
+    }>("/subscriptions/summary", { token: token() });
+  },
+  listPlans() {
+    return apiRequest<{
+      items: Array<{
+        id: string;
+        title: string;
+        sku: string;
+        description?: string | null;
+        price: string | number;
+        billingPeriodDays: number;
+        isActive: boolean;
+        category?: { id: string; name: string } | null;
+        activeMembers: number;
+      }>;
+      counts: { plans: number; activePlans: number };
+    }>("/subscriptions/plans", { token: token() });
+  },
+  createPlan(body: {
+    title: string;
+    description?: string;
+    categoryId: string;
+    sku: string;
+    price: number;
+    billingPeriodDays: number;
+  }) {
+    return apiRequest("/subscriptions/plans", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  updatePlan(
+    id: string,
+    body: {
+      title?: string;
+      description?: string;
+      price?: number;
+      billingPeriodDays?: number;
+      isActive?: boolean;
+    },
+  ) {
+    return apiRequest(`/subscriptions/plans/${id}`, {
+      method: "PATCH",
+      body,
+      token: token(),
+    });
+  },
+  list(params?: { status?: string; customerId?: string; limit?: number }) {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set("status", params.status);
+    if (params?.customerId) qs.set("customerId", params.customerId);
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const q = qs.toString();
+    return apiRequest<{
+      items: Array<{
+        id: string;
+        status: string;
+        billingPeriodDays: number;
+        price: string | number;
+        startsAt: string;
+        currentPeriodEnd: string;
+        customer: { id: string; fullName: string; phone: string };
+        plan: { id: string; title: string; sku: string; price?: string | number };
+      }>;
+      counts: { active: number; listed: number };
+    }>(`/subscriptions${q ? `?${q}` : ""}`, { token: token() });
+  },
+  enroll(body: {
+    customerId: string;
+    productId: string;
+    paymentMethod?: string;
+    idempotencyKey?: string;
+  }) {
+    return apiRequest<{
+      subscription: { id: string; status: string; currentPeriodEnd: string };
+      order: { id: string; orderNumber: string };
+      payment: { id: string; amount: string | number; method: string };
+    }>("/subscriptions/enroll", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  renew(id: string, body?: { paymentMethod?: string; idempotencyKey?: string }) {
+    return apiRequest(`/subscriptions/${id}/renew`, {
+      method: "POST",
+      body: body ?? {},
+      token: token(),
+    });
+  },
+  cancel(id: string) {
+    return apiRequest(`/subscriptions/${id}/cancel`, {
+      method: "POST",
+      token: token(),
+    });
+  },
+};
+
+/** Billable services catalog + charge */
+export const servicesCommerceApi = {
+  summary() {
+    return apiRequest<{ services: number; openAppointments: number }>(
+      "/services/summary",
+      { token: token() },
+    );
+  },
+  list() {
+    return apiRequest<{
+      items: Array<{
+        id: string;
+        title: string;
+        sku: string;
+        description?: string | null;
+        price: string | number;
+        durationMinutes?: number | null;
+        isActive: boolean;
+        category?: { id: string; name: string } | null;
+      }>;
+      counts: { services: number; active: number };
+    }>("/services", { token: token() });
+  },
+  create(body: {
+    title: string;
+    description?: string;
+    categoryId: string;
+    sku: string;
+    price: number;
+    durationMinutes?: number;
+  }) {
+    return apiRequest("/services", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  setActive(id: string, isActive: boolean) {
+    return apiRequest(`/services/${id}/active`, {
+      method: "PATCH",
+      body: { isActive },
+      token: token(),
+    });
+  },
+  bill(body: {
+    customerId: string;
+    productId: string;
+    paymentMethod?: "cash" | "card" | "upi";
+    appointmentId?: string;
+    idempotencyKey?: string;
+  }) {
+    return apiRequest<{
+      order: { id: string; orderNumber: string };
+      payment: { amount: string | number; method: string };
+      service: { title: string; price: string | number };
+    }>("/services/bill", {
+      method: "POST",
+      body,
+      token: token(),
+    });
   },
 };
 
@@ -2076,6 +2333,7 @@ export const usersApi = {
         isActive: boolean;
         primaryStoreId?: string | null;
         roles: string[];
+        pinSet?: boolean;
       }>
     >("/users", { token: token() });
   },

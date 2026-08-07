@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -11,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { useAuthStore } from "@/lib/auth-store";
 import { passwordStrength } from "@/lib/validations";
 import { PageHeader } from "@/components/page-header";
+import { SetPinDialog } from "@/components/set-pin-dialog";
 
 type Form = {
   fullName: string;
@@ -24,13 +26,23 @@ type Form = {
 export default function StaffPage() {
   const qc = useQueryClient();
   const roles = useAuthStore((s) => s.user?.roles ?? []);
+  const me = useAuthStore((s) => s.user);
   const canManage = roles.some((r) => ["admin", "manager"].includes(r));
   const isOwner = roles.includes("admin");
+  const [pinTarget, setPinTarget] = useState<{
+    id?: string;
+    name: string;
+  } | null>(null);
   const roleOptions = [
     {
       value: "cashier",
       label: "Cashier",
-      hint: "Counter charge, customers — no staff/settings/plan",
+      hint: "Counter charge, customers, enroll/bill — no staff/settings/plan",
+    },
+    {
+      value: "fitter",
+      label: "Fitter",
+      hint: "Appointments, customers, view orders — no counter charge",
     },
     {
       value: "inventory",
@@ -113,11 +125,38 @@ export default function StaffPage() {
     <div className="mx-auto max-w-5xl space-y-5">
       <PageHeader
         title="Staff accounts"
-        subtitle="Who has access and what role — invite staff with shop slug + email + password. Role hints show next to each option."
+        subtitle="Who has access and what role — invite staff with shop slug + email + password. Set a counter PIN for fast staff-switch on the POS."
+      />
+
+      <SetPinDialog
+        open={Boolean(pinTarget)}
+        title={
+          pinTarget?.id
+            ? `Set PIN · ${pinTarget.name}`
+            : "Change my PIN"
+        }
+        userId={pinTarget?.id}
+        onClose={() => setPinTarget(null)}
+        onSaved={() => void qc.invalidateQueries({ queryKey: ["users"] })}
       />
 
       <div className="grid gap-5 lg:grid-cols-[1.2fr_0.9fr]">
         <section className="overflow-hidden rounded-2xl border border-[#e5e7eb] bg-white">
+          <div className="flex items-center justify-between border-b border-[#f3f4f6] px-4 py-3">
+            <p className="text-sm text-[#6b7280]">Team</p>
+            {me ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={() =>
+                  setPinTarget({ name: me.fullName })
+                }
+              >
+                Change my PIN
+              </Button>
+            ) : null}
+          </div>
           <ul className="divide-y divide-[#f3f4f6]">
             {(list.data ?? []).map((u) => (
               <li
@@ -130,21 +169,36 @@ export default function StaffPage() {
                   <p className="mt-0.5 text-xs text-[#9ca3af]">
                     {(u.roles ?? []).join(", ") || "no role"}
                     {u.isActive ? "" : " · inactive"}
+                    {u.pinSet ? " · PIN set" : " · no PIN"}
                   </p>
                 </div>
-                {canManage ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    disabled={toggle.isPending}
-                    onClick={() =>
-                      toggle.mutate({ id: u.id, isActive: !u.isActive })
-                    }
-                  >
-                    {u.isActive ? "Deactivate" : "Activate"}
-                  </Button>
-                ) : null}
+                <div className="flex flex-wrap gap-2">
+                  {canManage && u.isActive ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      onClick={() =>
+                        setPinTarget({ id: u.id, name: u.fullName })
+                      }
+                    >
+                      Set PIN
+                    </Button>
+                  ) : null}
+                  {canManage ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      disabled={toggle.isPending}
+                      onClick={() =>
+                        toggle.mutate({ id: u.id, isActive: !u.isActive })
+                      }
+                    >
+                      {u.isActive ? "Deactivate" : "Activate"}
+                    </Button>
+                  ) : null}
+                </div>
               </li>
             ))}
           </ul>

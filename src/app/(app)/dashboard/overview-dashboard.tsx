@@ -14,7 +14,12 @@ import {
   Package,
   ShoppingBag,
 } from "lucide-react";
-import { posApi, reportsApi } from "@/lib/api";
+import {
+  posApi,
+  reportsApi,
+  servicesCommerceApi,
+  subscriptionsApi,
+} from "@/lib/api";
 import { useBootstrap } from "@/lib/bootstrap";
 import { useAuthStore } from "@/lib/auth-store";
 import { Button } from "@/components/ui/button";
@@ -36,8 +41,11 @@ function formatInr(n: number) {
  * Brand: sapphire / cool gray (not purple reference mock).
  */
 export function OverviewDashboard() {
-  const { money, productName } = useBootstrap();
+  const { money, productName, hasMode } = useBootstrap();
   const user = useAuthStore((s) => s.user);
+  const hasSale = hasMode("sale");
+  const hasSub = hasMode("subscription");
+  const hasService = hasMode("service");
 
   const sales = useQuery({
     queryKey: ["reports-sales-summary"],
@@ -50,10 +58,28 @@ export function OverviewDashboard() {
   const floor = useQuery({
     queryKey: ["pos-sale-floor"],
     queryFn: () => posApi.saleFloor(),
+    enabled: hasSale,
+  });
+  const lowStockQ = useQuery({
+    queryKey: ["pos-sale-low-stock"],
+    queryFn: () =>
+      posApi.saleCatalog({ lowStock: true, maxQty: 5, limit: 8 }),
+    enabled: hasSale,
   });
   const recent = useQuery({
     queryKey: ["pos-sale-recent-overview"],
     queryFn: () => posApi.listRecentSales(8),
+    enabled: hasSale,
+  });
+  const subSummary = useQuery({
+    queryKey: ["subscriptions-summary"],
+    queryFn: () => subscriptionsApi.summary(),
+    enabled: hasSub,
+  });
+  const svcSummary = useQuery({
+    queryKey: ["services-summary"],
+    queryFn: () => servicesCommerceApi.summary(),
+    enabled: hasService,
   });
 
   const revenue = moneyNum(sales.data?.totals?.subtotal);
@@ -62,12 +88,13 @@ export function OverviewDashboard() {
   const inStock = floor.data?.counts?.inStock ?? 0;
   const stockRows = floor.data?.counts?.stockRows ?? 0;
   const lowStock = Math.max(0, stockRows - inStock);
+  const lowItems = lowStockQ.data?.items ?? [];
+  const lowCount = lowItems.length || lowStock;
 
   const payMethods = payments.data?.byMethod ?? [];
   const payTotal = payMethods.reduce((s, m) => s + moneyNum(m.amount), 0) || 1;
 
   const spark = useMemo(() => {
-    // Visual trend from recent tickets (fallback flat)
     const vals = (recent.data?.items ?? [])
       .slice(0, 7)
       .reverse()
@@ -78,16 +105,38 @@ export function OverviewDashboard() {
   }, [recent.data]);
 
   const tasks = [
-    {
-      label: "Open counter & take a sale",
-      href: "/pos",
-      priority: "HIGH" as const,
-    },
-    {
-      label: "Review products & stock",
-      href: "/catalog",
-      priority: "MEDIUM" as const,
-    },
+    ...(hasSale
+      ? [
+          {
+            label: "Open counter & take a sale",
+            href: "/pos",
+            priority: "HIGH" as const,
+          },
+          {
+            label: "Review products & stock",
+            href: "/catalog",
+            priority: "MEDIUM" as const,
+          },
+        ]
+      : []),
+    ...(hasSub
+      ? [
+          {
+            label: "Enroll a member on a plan",
+            href: "/dashboard",
+            priority: "HIGH" as const,
+          },
+        ]
+      : []),
+    ...(hasService
+      ? [
+          {
+            label: "Charge a service or book appointment",
+            href: "/appointments",
+            priority: "MEDIUM" as const,
+          },
+        ]
+      : []),
     {
       label: "Check today’s reports",
       href: "/reports",
@@ -114,12 +163,21 @@ export function OverviewDashboard() {
               Reports
             </Link>
           </Button>
-          <Button asChild>
-            <Link href="/pos">
-              <CreditCard className="h-4 w-4" />
-              Open counter
-            </Link>
-          </Button>
+          {hasSale ? (
+            <Button asChild>
+              <Link href="/pos">
+                <CreditCard className="h-4 w-4" />
+                Open counter
+              </Link>
+            </Button>
+          ) : (
+            <Button asChild>
+              <Link href="/dashboard">
+                <CreditCard className="h-4 w-4" />
+                Open floor
+              </Link>
+            </Button>
+          )}
         </div>
       </header>
 
@@ -143,25 +201,65 @@ export function OverviewDashboard() {
           tone="neutral"
           icon={ClipboardList}
         />
-        <MetricCard
-          label="In stock SKUs"
-          value={`${inStock}`}
-          hint={
-            lowStock > 0
-              ? `${lowStock} row${lowStock === 1 ? "" : "s"} need attention`
-              : "Stock looking healthy"
-          }
-          tone={lowStock > 0 ? "warn" : "up"}
-          icon={Package}
-        />
-        <MetricCard
-          label="Products"
-          value={String(products)}
-          hint={`${floor.data?.counts?.categories ?? 0} categories`}
-          tone="neutral"
-          icon={BarChart3}
-          progress={products ? Math.min(100, products * 8) : 0}
-        />
+        {hasSale ? (
+          <>
+            <MetricCard
+              label="In stock SKUs"
+              value={`${inStock}`}
+              hint={
+                lowCount > 0
+                  ? `${lowCount} SKU${lowCount === 1 ? "" : "s"} low or out`
+                  : "Stock looking healthy"
+              }
+              tone={lowCount > 0 ? "warn" : "up"}
+              icon={Package}
+            />
+            <MetricCard
+              label="Products"
+              value={String(products)}
+              hint={`${floor.data?.counts?.categories ?? 0} categories`}
+              tone="neutral"
+              icon={BarChart3}
+              progress={products ? Math.min(100, products * 8) : 0}
+            />
+          </>
+        ) : null}
+        {hasSub ? (
+          <>
+            <MetricCard
+              label="Active members"
+              value={String(subSummary.data?.activeMembers ?? 0)}
+              hint={`${subSummary.data?.plans ?? 0} plans`}
+              tone="up"
+              icon={ClipboardList}
+            />
+            <MetricCard
+              label="Plan renewals due"
+              value={String(subSummary.data?.expired ?? 0)}
+              hint="Expired periods"
+              tone={(subSummary.data?.expired ?? 0) > 0 ? "warn" : "neutral"}
+              icon={Package}
+            />
+          </>
+        ) : null}
+        {hasService ? (
+          <>
+            <MetricCard
+              label="Services"
+              value={String(svcSummary.data?.services ?? 0)}
+              hint="Active on menu"
+              tone="neutral"
+              icon={BarChart3}
+            />
+            <MetricCard
+              label="Open appointments"
+              value={String(svcSummary.data?.openAppointments ?? 0)}
+              hint="Scheduled / checked in"
+              tone="neutral"
+              icon={ClipboardList}
+            />
+          </>
+        ) : null}
       </div>
 
       {/* Charts row */}
@@ -324,18 +422,64 @@ export function OverviewDashboard() {
                 </Link>
               </li>
             ))}
-            {lowStock > 0 ? (
+            {lowCount > 0 ? (
               <li className="flex items-start gap-2 rounded-[10px] border border-[#fecaca] bg-[#fff6f6] px-3 py-2.5 text-sm text-[#c81e1e]">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>
-                  {lowStock} stock row{lowStock === 1 ? "" : "s"} may need
-                  restock — check Products.
+                  {lowCount} SKU{lowCount === 1 ? "" : "s"} low/out — restock from
+                  Products or accept a purchase.
                 </span>
               </li>
             ) : null}
           </ul>
         </section>
       </div>
+
+      {hasSale && lowItems.length > 0 ? (
+        <section className="rounded-[14px] border border-[#fecaca] bg-white p-5 shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <h2 className="text-[0.9375rem] font-semibold text-[#0b1f33]">
+                Needs attention — low stock
+              </h2>
+              <p className="text-[0.75rem] text-[#5a6b7d]">
+                Any product type — restock before the counter sells out.
+              </p>
+            </div>
+            <Button asChild size="sm" variant="secondary">
+              <Link href="/catalog">Open products</Link>
+            </Button>
+          </div>
+          <ul className="mt-4 divide-y divide-[#eef1f4]">
+            {lowItems.map((row) => (
+              <li
+                key={row.id}
+                className="flex items-center justify-between gap-3 py-2.5 text-sm"
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-medium text-[#0b1f33]">
+                    {row.name}
+                  </p>
+                  <p className="truncate text-[0.75rem] text-[#5a6b7d]">
+                    {row.productSku || row.sku}
+                    {row.category?.name ? ` · ${row.category.name}` : ""}
+                  </p>
+                </div>
+                <span
+                  className={cn(
+                    "shrink-0 rounded-md px-2 py-0.5 text-xs font-bold tabular-nums",
+                    row.qtyOnHand <= 0
+                      ? "bg-[#fff6f6] text-[#c81e1e]"
+                      : "bg-[#fff7ed] text-[#9a3412]",
+                  )}
+                >
+                  {row.qtyOnHand} left
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
     </div>
   );
 }
