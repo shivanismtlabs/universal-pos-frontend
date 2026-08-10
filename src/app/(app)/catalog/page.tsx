@@ -9,7 +9,7 @@ import { useAuthStore } from "@/lib/auth-store";
 import { Button } from "@/components/ui/button";
 import { FloorTabs } from "@/components/getting-started";
 import { SaleReturnDialog } from "@/components/sale-return-dialog";
-import RetailPosWorkstation from "@/app/(app)/pos/retail-pos-workstation";
+import RetailPosWorkstation from "@/app/(app)/counter/retail-pos-workstation";
 import { SaleStockPanel } from "@/app/(app)/dashboard/sale-stock-panel";
 import { PageHeader } from "@/components/page-header";
 import { ModeBadge } from "@/components/mode-badge";
@@ -41,12 +41,12 @@ export default function CatalogPage() {
     <div className="space-y-5">
       <PageHeader
         title="Products"
-        subtitle="Single place to manage what you sell — these items show up on the counter."
+        subtitle="Manage your catalog and stock. Items you add here are available on the counter."
       />
       <p className="flex flex-wrap items-center gap-2 text-caption text-[var(--muted)]">
-        <span>Catalog mode</span>
+        <span>Commerce mode</span>
         <ModeBadge mode="sale" />
-        <span>— add more modes from Start here setup</span>
+        <span>— enable additional modes from shop setup if needed</span>
       </p>
 
       <FloorTabs

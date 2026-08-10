@@ -1,11 +1,8 @@
 "use client";
 
-import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import { Button } from "@/components/ui/button";
-import { readFileAsDataUrl } from "@/lib/utils";
 import {
   normalizeSellUnit,
   SELL_UNIT_OPTIONS,
@@ -39,22 +36,22 @@ function unitMeta(unitRaw: string | undefined) {
 }
 
 /**
- * Schema-driven product form — one component for every commerce mode.
- * Renders from GET /pos/:mode/schema (or floor.schema.fields).
+ * Schema-driven product form (text / number / category / select only).
+ * Image fields are intentionally omitted — use ProductImagePicker outside
+ * so large file payloads never live in parent form state.
  */
 export function DynamicCommerceForm({
   schema,
   values,
   onChange,
   categories,
-  imageKey = "imagePreviews",
   fieldErrors,
 }: {
   schema: CommerceFieldDef[];
   values: Record<string, string | string[]>;
   onChange: (key: string, value: string | string[]) => void;
   categories: Array<{ id: string; name: string }>;
-  /** Form key holding data-URL preview(s) for image fields */
+  /** @deprecated images are handled by ProductImagePicker */
   imageKey?: string;
   fieldErrors?: Partial<Record<string, string>>;
 }) {
@@ -65,9 +62,13 @@ export function DynamicCommerceForm({
     typeof values.sellUnit === "string" ? values.sellUnit : "pcs",
   );
 
+  const fields = schema.filter(
+    (f) => f.type !== "image" && f.key !== "image" && f.key !== "imagePreviews",
+  );
+
   return (
     <div className="space-y-4">
-      {schema.map((field) => {
+      {fields.map((field) => {
         const err = fieldErrors?.[field.key];
 
         if (field.type === "category" || field.key === "categoryId") {
@@ -104,13 +105,12 @@ export function DynamicCommerceForm({
         }
 
         if (field.type === "select" || field.key === "sellUnit") {
-          const options =
-            field.options?.length
-              ? field.options
-              : SELL_UNIT_OPTIONS.map((o) => ({
-                  value: o.value,
-                  label: o.label,
-                }));
+          const options = field.options?.length
+            ? field.options
+            : SELL_UNIT_OPTIONS.map((o) => ({
+                value: o.value,
+                label: o.label,
+              }));
           return (
             <div key={field.key} className="field-shell">
               <Label>
@@ -164,80 +164,6 @@ export function DynamicCommerceForm({
           );
         }
 
-        if (field.type === "image" || field.key === "image") {
-          const raw = values[imageKey] ?? values[field.key];
-          const previews: string[] = Array.isArray(raw)
-            ? raw.filter((x): x is string => typeof x === "string" && !!x)
-            : typeof raw === "string" && raw
-              ? [raw]
-              : [];
-          const max = 8;
-          return (
-            <div key={field.key} className="field-shell">
-              <Label>{field.label}</Label>
-              <p className="mb-2 text-[0.7rem] text-[#8b9bb0]">
-                {field.hint ?? "Optional — add up to 8 photos"}
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {previews.map((src, idx) => (
-                  <div key={`${idx}-${src.slice(0, 24)}`} className="relative">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={src}
-                      alt=""
-                      className="h-14 w-14 rounded-lg border border-[#d9e0ea] object-cover"
-                    />
-                    <button
-                      type="button"
-                      className="absolute -right-1 -top-1 grid h-5 w-5 place-items-center rounded-full bg-[#c81e1e] text-[0.65rem] font-bold text-white"
-                      onClick={() =>
-                        onChange(
-                          imageKey,
-                          previews.filter((_, i) => i !== idx),
-                        )
-                      }
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
-                {previews.length < max ? (
-                  <label className="grid h-14 w-14 cursor-pointer place-items-center rounded-lg border border-dashed border-[#cfd8e6] text-xs font-semibold text-[#1a56db] hover:bg-[#e8eefb]">
-                    +
-                    <input
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp,image/gif"
-                      multiple
-                      className="sr-only"
-                      onChange={(e) => {
-                        const files = Array.from(e.target.files ?? []);
-                        e.target.value = "";
-                        if (!files.length) return;
-                        void (async () => {
-                          const next = [...previews];
-                          for (const file of files) {
-                            if (next.length >= max) break;
-                            if (file.size > 4 * 1024 * 1024) {
-                              toast.error(`${file.name} is over 4 MB`);
-                              continue;
-                            }
-                            try {
-                              next.push(await readFileAsDataUrl(file));
-                            } catch {
-                              toast.error(`Could not read ${file.name}`);
-                            }
-                          }
-                          onChange(imageKey, next);
-                        })();
-                      }}
-                    />
-                  </label>
-                ) : null}
-              </div>
-            </div>
-          );
-        }
-
         const isPrice = field.key === "price";
         const isQty = field.key === "qty";
         const step = isQty
@@ -247,12 +173,11 @@ export function DynamicCommerceForm({
           : isPrice
             ? "0.01"
             : undefined;
-        const hint =
-          isPrice
-            ? unitHints.priceHint
-            : isQty
-              ? unitHints.qtyHint
-              : field.hint;
+        const hint = isPrice
+          ? unitHints.priceHint
+          : isQty
+            ? unitHints.qtyHint
+            : field.hint;
 
         return (
           <div key={field.key} className="field-shell">

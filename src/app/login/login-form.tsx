@@ -193,7 +193,7 @@ export default function LoginForm() {
   return (
     <AuthShell
       title="Welcome back"
-      subtitle="Sign in to open your counter — grocery, furniture, swim, or any shop."
+      subtitle="Sign in to access your shop dashboard, catalog, and counter."
     >
       <AuthGoogleButton
         mode="login"
@@ -209,7 +209,7 @@ export default function LoginForm() {
             id="email"
             type="email"
             autoComplete="username"
-            placeholder="you@shop.com"
+            placeholder="you@business.com"
             {...register("email")}
           />
           <FieldError message={errors.email?.message} />

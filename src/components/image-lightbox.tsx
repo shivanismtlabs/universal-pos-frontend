@@ -122,7 +122,7 @@ export function ImageLightbox({
             <div className="flex max-w-full gap-1.5 overflow-x-auto px-2 pb-1">
               {urls.map((u, i) => (
                 <button
-                  key={`${u}-${i}`}
+                  key={`thumb-${i}`}
                   type="button"
                   onClick={() => setIndex(i)}
                   className={cn(

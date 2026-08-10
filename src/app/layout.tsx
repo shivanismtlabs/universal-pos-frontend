@@ -45,7 +45,7 @@ export const metadata: Metadata = {
     template: "%s · Universal POS",
   },
   description:
-    "Universal multi-tenant POS for any business — catalog, inventory, billing, and reports",
+    "Point of sale for product sales, rentals, services, and memberships — catalog, counter, and reports in one system.",
 };
 
 export const viewport: Viewport = {

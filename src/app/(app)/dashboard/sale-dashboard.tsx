@@ -7,7 +7,7 @@ import { useBootstrap } from "@/lib/bootstrap";
 import { Button } from "@/components/ui/button";
 import { FloorTabs } from "@/components/getting-started";
 import { SaleReturnDialog } from "@/components/sale-return-dialog";
-import RetailPosWorkstation from "@/app/(app)/pos/retail-pos-workstation";
+import RetailPosWorkstation from "@/app/(app)/counter/retail-pos-workstation";
 import { SaleStockPanel } from "./sale-stock-panel";
 import { canRefund } from "@/lib/roles";
 import { useAuthStore } from "@/lib/auth-store";
@@ -15,9 +15,10 @@ import { useAuthStore } from "@/lib/auth-store";
 type Tab = "stock" | "sell" | "recent";
 
 /**
- * Home floor: only the three tabs — Products, Sell, Sales.
+ * Sale floor: Products / Sell / Sales tabs.
+ * @param embed omit large title when nested under Dashboard tabs
  */
-export function SaleDashboard() {
+export function SaleDashboard({ embed = false }: { embed?: boolean }) {
   const { productName, money } = useBootstrap();
   const userRoles = useAuthStore((s) => s.user?.roles);
   const allowReturn = canRefund(userRoles);
@@ -46,6 +47,7 @@ export function SaleDashboard() {
 
   useEffect(() => {
     if (tabTouched || floor.isLoading) return;
+    // Prefer product manager when catalog is empty
     setTab(hasStock || hasProducts ? "sell" : "stock");
   }, [tabTouched, floor.isLoading, hasStock, hasProducts]);
 
@@ -56,19 +58,23 @@ export function SaleDashboard() {
 
   const tabHint =
     tab === "stock"
-      ? "Add and edit products"
+      ? "Maintain product catalog and stock levels"
       : tab === "sell"
-        ? "Charge at the counter"
-        : "Recent tickets";
+        ? "Process sales at the counter"
+        : "Recent closed sales";
 
   return (
     <div className="space-y-4">
-      <header>
-        <h1 className="text-xl font-bold tracking-tight text-[#0b1f33] sm:text-2xl">
-          {productName}
-        </h1>
-        <p className="mt-1 text-sm text-[#5a6b7d]">{tabHint}</p>
-      </header>
+      {!embed ? (
+        <header>
+          <h1 className="text-xl font-bold tracking-tight text-[#0b1f33] sm:text-2xl">
+            {productName}
+          </h1>
+          <p className="mt-1 text-sm text-[#5a6b7d]">{tabHint}</p>
+        </header>
+      ) : (
+        <p className="text-sm text-[#5a6b7d]">{tabHint}</p>
+      )}
 
       <FloorTabs
         value={tab}

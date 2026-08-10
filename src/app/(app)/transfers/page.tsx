@@ -128,7 +128,7 @@ export default function StockTransferPage() {
     <div className="mx-auto max-w-5xl space-y-5">
       <PageHeader
         title="Stock transfer"
-        subtitle="Move quantity between branches or warehouses — any product type that tracks stock (not serial-only rental units)."
+        subtitle="Move stock quantities between branches or warehouses for products that use quantity tracking."
       />
 
       {activeLocations.length < 2 ? (
@@ -185,7 +185,7 @@ export default function StockTransferPage() {
           <Label>Notes (optional)</Label>
           <Input
             className="mt-1.5"
-            placeholder="e.g. Weekend restock — works for every industry"
+            placeholder="Optional note (for example: weekend restock)"
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
           />

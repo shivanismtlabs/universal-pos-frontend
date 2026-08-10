@@ -1791,6 +1791,7 @@ export const tenantsApi = {
       receiptFooter?: string;
     };
     maxCashierDiscountPercent?: number;
+    pinSwitchEnabled?: boolean;
   }) {
     return apiRequest("/tenants/me", {
       method: "PATCH",

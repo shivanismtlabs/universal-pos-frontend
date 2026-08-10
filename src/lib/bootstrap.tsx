@@ -71,7 +71,7 @@ export function BootstrapProvider({ children }: { children: ReactNode }) {
     data?.tenant?.name?.trim() ||
     "Business OS";
   const tagline =
-    data?.tenant?.branding?.tagline?.trim() || "Universal POS";
+    data?.tenant?.branding?.tagline?.trim() || "Point of sale";
   const currencyCode = data?.tenant?.currencyCode || "INR";
   const locale = data?.tenant?.locale || "en-IN";
 

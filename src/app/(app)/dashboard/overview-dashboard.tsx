@@ -36,16 +36,28 @@ function formatInr(n: number) {
   return `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 }
 
+function formatDisplayName(fullName?: string | null) {
+  if (!fullName?.trim()) return null;
+  const parts = fullName.trim().split(/\s+/);
+  // "Shop Owner" → prefer full string over bare "Shop"
+  if (parts[0]?.toLowerCase() === "shop" && parts.length > 1) {
+    return parts.slice(1).join(" ");
+  }
+  return parts[0] ?? fullName.trim();
+}
+
 /**
- * Enterprise overview — metrics, simple charts, activity, quick tasks.
- * Brand: sapphire / cool gray (not purple reference mock).
+ * Enterprise overview — metrics, charts, activity.
+ * Brand: sapphire / cool gray.
+ * @param embed when true, omit redundant page title (parent Dashboard provides it)
  */
-export function OverviewDashboard() {
+export function OverviewDashboard({ embed = false }: { embed?: boolean }) {
   const { money, productName, hasMode } = useBootstrap();
   const user = useAuthStore((s) => s.user);
   const hasSale = hasMode("sale");
   const hasSub = hasMode("subscription");
   const hasService = hasMode("service");
+  const greetName = formatDisplayName(user?.fullName);
 
   const sales = useQuery({
     queryKey: ["reports-sales-summary"],
@@ -105,11 +117,20 @@ export function OverviewDashboard() {
   }, [recent.data]);
 
   const tasks = [
+    ...(hasSale && products === 0
+      ? [
+          {
+            label: "Add your first product",
+            href: "/catalog",
+            priority: "HIGH" as const,
+          },
+        ]
+      : []),
     ...(hasSale
       ? [
           {
             label: "Open counter & take a sale",
-            href: "/pos",
+            href: "/counter",
             priority: "HIGH" as const,
           },
           {
@@ -145,44 +166,91 @@ export function OverviewDashboard() {
   ];
 
   return (
-    <div className="space-y-6">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-[#0b1f33] sm:text-[1.75rem]">
-            Overview
-          </h1>
-          <p className="mt-1 text-[0.9375rem] text-[#5a6b7d]">
-            Welcome back{user?.fullName ? `, ${user.fullName.split(" ")[0]}` : ""}
-            — here&apos;s what&apos;s happening at {productName}.
+    <div className="space-y-5">
+      {!embed ? (
+        <header className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-[#0b1f33] sm:text-[1.75rem]">
+              Overview
+            </h1>
+            <p className="mt-1 text-[0.9375rem] text-[#5a6b7d]">
+              Welcome back{greetName ? `, ${greetName}` : ""}
+              — here&apos;s what&apos;s happening at {productName}.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="secondary">
+              <Link href="/reports">
+                <Download className="h-4 w-4" />
+                Reports
+              </Link>
+            </Button>
+            {hasSale ? (
+              <Button asChild>
+                <Link href="/counter">
+                  <CreditCard className="h-4 w-4" />
+                  Open counter
+                </Link>
+              </Button>
+            ) : (
+              <Button asChild>
+                <Link href="/dashboard">
+                  <CreditCard className="h-4 w-4" />
+                  Open floor
+                </Link>
+              </Button>
+            )}
+          </div>
+        </header>
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-[#5a6b7d]">
+            Welcome back{greetName ? `, ${greetName}` : ""}
+            {productName ? ` · ${productName}` : ""}
           </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button asChild variant="secondary">
-            <Link href="/reports">
-              <Download className="h-4 w-4" />
-              Reports
-            </Link>
-          </Button>
-          {hasSale ? (
-            <Button asChild>
-              <Link href="/pos">
-                <CreditCard className="h-4 w-4" />
-                Open counter
+          <div className="flex flex-wrap gap-2">
+            <Button asChild size="sm" variant="secondary">
+              <Link href="/catalog">
+                <Package className="h-4 w-4" />
+                Products
               </Link>
             </Button>
-          ) : (
-            <Button asChild>
-              <Link href="/dashboard">
-                <CreditCard className="h-4 w-4" />
-                Open floor
+            <Button asChild size="sm" variant="secondary">
+              <Link href="/reports">
+                <Download className="h-4 w-4" />
+                Reports
               </Link>
             </Button>
-          )}
+            {hasSale ? (
+              <Button asChild size="sm">
+                <Link href="/counter">
+                  <CreditCard className="h-4 w-4" />
+                  Counter
+                </Link>
+              </Button>
+            ) : null}
+          </div>
         </div>
-      </header>
+      )}
 
-      {/* Metric cards */}
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      {hasSale && products === 0 ? (
+        <section className="flex flex-wrap items-center justify-between gap-3 rounded-[14px] border border-[#bfd0f5] bg-[#eef4ff] px-4 py-3.5">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-[#0b1f33]">
+              No products yet
+            </p>
+            <p className="mt-0.5 text-[0.8rem] text-[#5a6b7d]">
+              Add items in Products so they appear on the counter.
+            </p>
+          </div>
+          <Button asChild size="sm">
+            <Link href="/catalog">Add products</Link>
+          </Button>
+        </section>
+      ) : null}
+
+      {/* Metric cards — equal columns, stable grid */}
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <MetricCard
           label="Total sales"
           value={formatInr(revenue)}
@@ -200,27 +268,36 @@ export function OverviewDashboard() {
           hint="Closed tickets"
           tone="neutral"
           icon={ClipboardList}
+          href="/orders"
         />
         {hasSale ? (
           <>
+            <MetricCard
+              label="Products"
+              value={String(products)}
+              hint={
+                products
+                  ? `${floor.data?.counts?.categories ?? 0} categories`
+                  : "Tap to add stock"
+              }
+              tone={products ? "neutral" : "warn"}
+              icon={Package}
+              href="/catalog"
+              progress={products ? Math.min(100, products * 8) : 0}
+            />
             <MetricCard
               label="In stock SKUs"
               value={`${inStock}`}
               hint={
                 lowCount > 0
                   ? `${lowCount} SKU${lowCount === 1 ? "" : "s"} low or out`
-                  : "Stock looking healthy"
+                  : products
+                    ? "Stock levels look healthy"
+                    : "Add products first"
               }
               tone={lowCount > 0 ? "warn" : "up"}
-              icon={Package}
-            />
-            <MetricCard
-              label="Products"
-              value={String(products)}
-              hint={`${floor.data?.counts?.categories ?? 0} categories`}
-              tone="neutral"
               icon={BarChart3}
-              progress={products ? Math.min(100, products * 8) : 0}
+              href="/catalog"
             />
           </>
         ) : null}
@@ -262,8 +339,8 @@ export function OverviewDashboard() {
         ) : null}
       </div>
 
-      {/* Charts row */}
-      <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
+      {/* Charts — stack on mobile, side-by-side on large */}
+      <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-[1.35fr_1fr]">
         <section className="rounded-[14px] border border-[#d9e0ea] bg-white p-5 shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
           <div className="flex items-center justify-between gap-2">
             <div>
@@ -386,7 +463,7 @@ export function OverviewDashboard() {
             {!recent.data?.items?.length && !recent.isLoading ? (
               <li className="rounded-xl bg-[#f4f6fa] px-4 py-8 text-center text-sm text-[#5a6b7d]">
                 No sales yet.{" "}
-                <Link href="/pos" className="font-semibold text-[#1a56db]">
+                <Link href="/counter" className="font-semibold text-[#1a56db]">
                   Open counter →
                 </Link>
               </li>
@@ -491,6 +568,7 @@ function MetricCard({
   icon: Icon,
   tone,
   progress,
+  href,
 }: {
   label: string;
   value: string;
@@ -498,9 +576,10 @@ function MetricCard({
   icon: React.ComponentType<{ className?: string }>;
   tone: "up" | "warn" | "neutral";
   progress?: number;
+  href?: string;
 }) {
-  return (
-    <div className="rounded-[14px] border border-[#d9e0ea] bg-white p-4 shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
+  const inner = (
+    <>
       <div className="flex items-start justify-between gap-2">
         <p className="text-[0.75rem] font-medium text-[#5a6b7d]">{label}</p>
         <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#e8eefb] text-[#1a56db]">
@@ -528,8 +607,22 @@ function MetricCard({
           />
         </div>
       ) : null}
-    </div>
+    </>
   );
+
+  const shell = cn(
+    "flex h-full min-h-[7.5rem] flex-col rounded-[14px] border border-[#d9e0ea] bg-white p-4 shadow-[0_1px_2px_rgba(11,31,51,0.04)]",
+    href && "transition hover:border-[#1a56db]/30 hover:shadow-sm",
+  );
+
+  if (href) {
+    return (
+      <Link href={href} className={shell}>
+        {inner}
+      </Link>
+    );
+  }
+  return <div className={shell}>{inner}</div>;
 }
 
 function Donut({

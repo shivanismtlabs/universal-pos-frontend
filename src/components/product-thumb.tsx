@@ -70,7 +70,7 @@ export function ProductThumb({
       )}
       {count && count > 1 ? (
         <span className="absolute bottom-0.5 right-0.5 rounded bg-[#0b1f33]/8 px-1 text-[0.55rem] font-bold text-white">
-          {count}
+          {count}×
         </span>
       ) : null}
     </button>

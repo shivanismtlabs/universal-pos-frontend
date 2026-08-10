@@ -46,10 +46,10 @@ export default function OrdersPage() {
     <div className="space-y-6">
       <PageHeader
         title="All orders"
-        subtitle="History and lookup only — new orders are created at the counter, not here."
+        subtitle="View completed sales and look up tickets. Create new sales at the counter."
         action={
           <Button asChild>
-            <Link href="/pos">Open counter</Link>
+            <Link href="/counter">Open counter</Link>
           </Button>
         }
       />
@@ -83,7 +83,7 @@ export default function OrdersPage() {
           detail="Orders appear here after you check out at the counter. There is no create button on this page."
           action={
             <Button asChild>
-              <Link href="/pos">Open counter</Link>
+              <Link href="/counter">Open counter</Link>
             </Button>
           }
         />

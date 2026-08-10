@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { posApi } from "@/lib/api";
@@ -12,7 +12,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ProductThumb } from "@/components/product-thumb";
 import { DynamicCommerceForm } from "@/components/dynamic-commerce-form";
-import { cn, readFileAsDataUrl } from "@/lib/utils";
+import {
+  ProductImagePicker,
+  type ProductImagePickerHandle,
+} from "@/components/product-image-picker";
+import { prepareProductImageDataUrl } from "@/lib/image-prepare";
+import { cn } from "@/lib/utils";
 
 const EMPTY = {
   title: "",
@@ -23,7 +28,6 @@ const EMPTY = {
   deposit: "",
   barcode: "",
   variant: "",
-  imagePreview: "" as string,
 };
 
 function errMsg(e: unknown) {
@@ -52,6 +56,7 @@ export function RentalStockPanel() {
   const canWrite = canWriteCatalog(roles);
   const [panel, setPanel] = useState<"units" | "add" | "categories">("units");
   const [form, setForm] = useState(EMPTY);
+  const imagePickerRef = useRef<ProductImagePickerHandle>(null);
   const [catName, setCatName] = useState("");
   const [q, setQ] = useState("");
   const [filterCat, setFilterCat] = useState("");
@@ -135,17 +140,15 @@ export function RentalStockPanel() {
         variant: form.variant.trim() || undefined,
         locationId: floor.data?.locationId,
       });
-      if (form.imagePreview) {
-        await posApi.uploadRentalProductImage(
-          res.product.id,
-          form.imagePreview,
-        );
+      for (const dataUrl of imagePickerRef.current?.getUploadDataUrls() ?? []) {
+        await posApi.uploadRentalProductImage(res.product.id, dataUrl);
       }
       return res;
     },
     onSuccess: (res) => {
       toast.success(`${res.product.title} ready to rent`);
       setForm((f) => ({ ...EMPTY, categoryId: f.categoryId }));
+      imagePickerRef.current?.clear();
       invalidateRental(qc);
       setPanel("units");
     },
@@ -256,17 +259,19 @@ export function RentalStockPanel() {
                 );
               })}
             </div>
-            <div className="mt-4">
+            <div className="mt-4 space-y-4">
               <DynamicCommerceForm
                 schema={fields}
                 values={form}
                 categories={categories}
                 onChange={(key, value) => {
+                  if (typeof value !== "string") return;
                   const k =
                     key === "variant" || key === "size" ? "variant" : key;
                   setForm((f) => ({ ...f, [k]: value }));
                 }}
               />
+              <ProductImagePicker ref={imagePickerRef} />
             </div>
             <Button
               className="mt-5 w-full"
@@ -396,18 +401,20 @@ export function RentalStockPanel() {
                       onChange={(e) => {
                         const file = e.target.files?.[0];
                         if (!file || !u.productId) return;
-                        if (file.size > 4 * 1024 * 1024) {
-                          toast.error("Image must be under 4 MB");
-                          return;
-                        }
-                        void readFileAsDataUrl(file)
+                        void prepareProductImageDataUrl(file)
                           .then((dataUrl) =>
                             uploadImage.mutate({
                               productId: u.productId,
                               imageBase64: dataUrl,
                             }),
                           )
-                          .catch(() => toast.error("Could not read image"));
+                          .catch((e) =>
+                            toast.error(
+                              e instanceof Error
+                                ? e.message
+                                : "Could not read image",
+                            ),
+                          );
                       }}
                     />
                   </div>

@@ -387,7 +387,7 @@ export default function OrderDetailPage() {
             → {lifecycleLabel(s)}
           </Button>
         ))}
-        <Link href={`/pos?order=${data.id}`}>
+        <Link href={`/counter?order=${data.id}`}>
           <Button type="button" size="sm">
             Open terminal
           </Button>

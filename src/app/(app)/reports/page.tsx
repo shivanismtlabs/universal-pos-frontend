@@ -101,7 +101,7 @@ export default function ReportsPage() {
     <div className="mx-auto max-w-5xl space-y-5">
       <PageHeader
         title="Reports"
-        subtitle="Performance by period — export a spreadsheet for any business type."
+        subtitle="Review performance by period. Export results to a spreadsheet when needed."
         action={
         <div className="flex flex-wrap items-end gap-2">
           <div>

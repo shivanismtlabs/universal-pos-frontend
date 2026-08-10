@@ -82,8 +82,8 @@ export default function RegisterUserPage() {
 
   return (
     <AuthShell
-      title="Join as staff"
-      subtitle="Use the shop slug your owner gave you, then create your login."
+      title="Join your team"
+      subtitle="Enter the shop identifier from your owner, then create your staff login."
     >
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
 

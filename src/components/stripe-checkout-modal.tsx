@@ -112,7 +112,7 @@ function CheckoutForm({
         elements,
         redirect: "if_required",
         confirmParams: {
-          return_url: `${window.location.origin}/pos`,
+          return_url: `${window.location.origin}/counter`,
         },
       });
 

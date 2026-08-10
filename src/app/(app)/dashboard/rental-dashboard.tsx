@@ -364,10 +364,10 @@ export function RentalDashboard() {
         </div>
         <div className="flex flex-wrap gap-2">
           <Button asChild>
-            <Link href="/pos?view=rent&new=1">Start new rental</Link>
+            <Link href="/counter?view=rent&new=1">Start new rental</Link>
           </Button>
           <Button asChild variant="secondary">
-            <Link href="/pos?view=rent">Open rent counter</Link>
+            <Link href="/counter?view=rent">Open rent counter</Link>
           </Button>
         </div>
       </header>
@@ -448,7 +448,7 @@ export function RentalDashboard() {
               </p>
             </div>
             <Button asChild>
-              <Link href="/pos?new=1">New rental</Link>
+              <Link href="/counter?new=1">New rental</Link>
             </Button>
           </div>
           <ul className="mt-4 divide-y divide-[#f3f4f6]">
@@ -551,7 +551,7 @@ export function RentalDashboard() {
                       </Button>
                     )}
                     <Button size="sm" variant="secondary" className="h-8" asChild>
-                      <Link href={`/pos?order=${o.id}`}>POS</Link>
+                      <Link href={`/counter?order=${o.id}`}>Counter</Link>
                     </Button>
                   </div>
                 </li>
@@ -561,7 +561,7 @@ export function RentalDashboard() {
               <li className="py-10 text-center text-sm text-[#6b7280]">
                 No open tickets.{" "}
                 <Link
-                  href="/pos?new=1"
+                  href="/counter?new=1"
                   className="font-semibold text-[#0b1f33] hover:underline"
                 >
                   Start a rental
@@ -907,7 +907,7 @@ export function RentalDashboard() {
                   </p>
                 </div>
                 <Button size="sm" variant="secondary" asChild>
-                  <Link href={`/pos?order=${o.id}`}>POS</Link>
+                  <Link href={`/counter?order=${o.id}`}>Counter</Link>
                 </Button>
               </li>
             ))}

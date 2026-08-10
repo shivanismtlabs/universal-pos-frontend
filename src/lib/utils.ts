@@ -83,7 +83,14 @@ export function mediaUrl(path?: string | null) {
 export function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result !== "string" || !result.startsWith("data:")) {
+        reject(new Error("Could not read image"));
+        return;
+      }
+      resolve(result);
+    };
     reader.onerror = () => reject(new Error("Could not read image"));
     reader.readAsDataURL(file);
   });

@@ -184,7 +184,7 @@ export default function CustomersPage() {
       <FadeIn>
         <PageHeader
           title="Customers"
-          subtitle="Universal contact list — search, add, and open purchase or rental history."
+          subtitle="Customer directory for your shop. Search, add contacts, and review history."
           action={
             <p className="text-caption text-[var(--muted)]">
               {list.isLoading

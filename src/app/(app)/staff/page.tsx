@@ -125,7 +125,7 @@ export default function StaffPage() {
     <div className="mx-auto max-w-5xl space-y-5">
       <PageHeader
         title="Staff accounts"
-        subtitle="Who has access and what role — invite staff with shop slug + email + password. Set a counter PIN for fast staff-switch on the POS."
+        subtitle="Manage staff accounts and roles. Invite with email and password, and set a counter PIN for shared terminals."
       />
 
       <SetPinDialog

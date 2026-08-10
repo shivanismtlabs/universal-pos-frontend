@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { posApi } from "@/lib/api";
@@ -14,7 +14,11 @@ import { Select } from "@/components/ui/select";
 import { ProductThumb } from "@/components/product-thumb";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { DynamicCommerceForm } from "@/components/dynamic-commerce-form";
-import { readFileAsDataUrl } from "@/lib/utils";
+import {
+  ProductImagePicker,
+  type ProductImagePickerHandle,
+} from "@/components/product-image-picker";
+import { prepareProductImageDataUrl } from "@/lib/image-prepare";
 import { X } from "lucide-react";
 import {
   addSaleProductSchema,
@@ -36,8 +40,74 @@ const EMPTY = {
   sellUnit: "pcs",
   price: "",
   qty: "10",
-  imagePreviews: [] as string[],
 };
+
+/** Used when /pos/sale/floor has no schema (old API / load error) so the form never goes blank. */
+const FALLBACK_SALE_FIELDS: Array<{
+  key: string;
+  label: string;
+  required: boolean;
+  type: string;
+  hint?: string;
+  options?: Array<{ value: string; label: string }>;
+}> = [
+  {
+    key: "title",
+    label: "Product name",
+    required: true,
+    type: "string",
+    hint: "Display name shown on the counter and receipts",
+  },
+  {
+    key: "description",
+    label: "Description",
+    required: false,
+    type: "text",
+    hint: "Optional details for staff",
+  },
+  {
+    key: "categoryId",
+    label: "Category",
+    required: true,
+    type: "category",
+    hint: "Group this item with similar products",
+  },
+  {
+    key: "sku",
+    label: "SKU",
+    required: true,
+    type: "string",
+    hint: "15–18 characters · letters, numbers, and . _ - /",
+  },
+  {
+    key: "sellUnit",
+    label: "Unit of measure",
+    required: true,
+    type: "select",
+    hint: "Use pcs/pack for countable items · kg, g, L, or ml for measured goods",
+  },
+  {
+    key: "price",
+    label: "Selling price",
+    required: true,
+    type: "number",
+    hint: "Price charged per unit of measure",
+  },
+  {
+    key: "qty",
+    label: "Quantity on hand",
+    required: true,
+    type: "number",
+    hint: "Whole numbers for pcs/pack · up to three decimals for kg/L",
+  },
+  {
+    key: "image",
+    label: "Product images",
+    required: false,
+    type: "image",
+    hint: "Optional · up to eight photos · first image is the cover",
+  },
+];
 
 const MAX_IMAGES = 8;
 
@@ -96,6 +166,7 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
   const [formErrors, setFormErrors] = useState<
     Partial<Record<string, string>>
   >({});
+  const imagePickerRef = useRef<ProductImagePickerHandle>(null);
   const [catName, setCatName] = useState("");
   const [q, setQ] = useState("");
   const [filterCat, setFilterCat] = useState("");
@@ -108,6 +179,8 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
     index: number;
     label: string;
   } | null>(null);
+  /** Which product row has the photo manager strip open */
+  const [photosOpenId, setPhotosOpenId] = useState<string | null>(null);
 
   const floor = useQuery({
     queryKey: ["pos-sale-floor"],
@@ -129,8 +202,12 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
     queryFn: () => posApi.listSaleCategories(),
   });
 
-  const fields = floor.data?.schema.fields ?? [];
+  const fields =
+    floor.data?.schema?.fields?.length
+      ? floor.data.schema.fields
+      : FALLBACK_SALE_FIELDS;
   const categories = categoriesQ.data ?? floor.data?.categories ?? [];
+  const schemaLoading = floor.isLoading;
 
   const addCat = useMutation({
     mutationFn: () => posApi.addSaleCategory({ name: catName.trim() }),
@@ -186,7 +263,7 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
         qty: parsed.data.qty,
         locationId: floor.data?.locationId,
       });
-      for (const dataUrl of form.imagePreviews.slice(0, MAX_IMAGES)) {
+      for (const dataUrl of imagePickerRef.current?.getUploadDataUrls() ?? []) {
         await posApi.uploadSaleProductImage(res.stockLevel.id, dataUrl);
       }
       return res;
@@ -199,6 +276,7 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
         sellUnit: f.sellUnit,
         qty: "10",
       }));
+      imagePickerRef.current?.clear();
       setFormErrors({});
       invalidateSale(qc);
       onAdded?.();
@@ -243,14 +321,12 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
     if (!files.length) return;
     const urls: string[] = [];
     for (const file of files) {
-      if (file.size > 4 * 1024 * 1024) {
-        toast.error(`${file.name} is over 4 MB`);
-        continue;
-      }
       try {
-        urls.push(await readFileAsDataUrl(file));
-      } catch {
-        toast.error(`Could not read ${file.name}`);
+        urls.push(await prepareProductImageDataUrl(file));
+      } catch (e) {
+        toast.error(
+          e instanceof Error ? e.message : `Could not read ${file.name}`,
+        );
       }
     }
     if (urls.length) onDataUrls(urls);
@@ -324,8 +400,9 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
   if (!canWrite) {
     return (
       <p className="rounded-2xl border border-[#e5e7eb] bg-white p-6 text-sm text-[#6b7280]">
-        Ask an owner or inventory staff to manage products. You can still sell
-        on the Sell tab.
+        You do not have permission to manage products. An owner or inventory
+        manager can update the catalog. You can still process sales on the
+        counter.
       </p>
     );
   }
@@ -353,51 +430,73 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
 
       {panel === "add" ? (
         <div className="grid gap-4 lg:grid-cols-[1fr_0.85fr]">
-          <section className="rounded-xl border border-[#d9e0ea] bg-white p-4">
+          <section className="relative rounded-xl border border-[#d9e0ea] bg-white p-4 pb-24">
             <h2 className="text-[0.9375rem] font-semibold text-[#0b1f33]">
               Add product
             </h2>
             <p className="mt-0.5 text-[0.75rem] text-[#5a6b7d]">
-              Pick sell unit (kg, pcs…) — qty rules follow the unit.
+              Enter product details below, then save. Scroll if required fields
+              or Save are not visible.
             </p>
 
-            <div className="mt-5">
-              <DynamicCommerceForm
-                schema={fields}
-                values={form}
-                categories={categoryOptions}
-                fieldErrors={formErrors}
-                onChange={(key, value) => {
-                  setFormErrors((e) => {
-                    if (!e[key]) return e;
-                    const next = { ...e };
-                    delete next[key];
-                    return next;
-                  });
-                  setForm((f) => ({ ...f, [key]: value }));
-                }}
-              />
-            </div>
+            {!categories.length ? (
+              <div className="mt-4 rounded-xl border border-[#fde68a] bg-[#fffbeb] px-3 py-2.5 text-sm text-[#92400e]">
+                No categories yet. Create one in the panel on the right (or
+                below on mobile), then select it here. A category is required for
+                every product.
+              </div>
+            ) : null}
 
-            <Button
-              className="mt-6 w-full"
-              disabled={addProduct.isPending}
-              onClick={() => addProduct.mutate()}
-            >
-              {addProduct.isPending ? "Saving…" : "Save product"}
-            </Button>
+            {schemaLoading ? (
+              <p className="mt-6 text-sm text-[#5a6b7d]">Loading form…</p>
+            ) : (
+              <div className="mt-5 space-y-4">
+                <DynamicCommerceForm
+                  schema={fields}
+                  values={form}
+                  categories={categoryOptions}
+                  fieldErrors={formErrors}
+                  onChange={(key, value) => {
+                    if (typeof value !== "string") return;
+                    setFormErrors((e) => {
+                      if (!e[key]) return e;
+                      const next = { ...e };
+                      delete next[key];
+                      return next;
+                    });
+                    setForm((f) => ({ ...f, [key]: value }));
+                  }}
+                />
+                <ProductImagePicker ref={imagePickerRef} />
+              </div>
+            )}
+
+            {/* Always visible action bar — avoids “missing Save” when form is long */}
+            <div className="sticky bottom-0 z-10 -mx-4 mt-6 border-t border-[#eef1f4] bg-white/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-white/90">
+              <Button
+                className="w-full"
+                disabled={addProduct.isPending || schemaLoading}
+                onClick={() => addProduct.mutate()}
+              >
+                {addProduct.isPending ? "Saving…" : "Save product"}
+              </Button>
+              <p className="mt-1.5 text-center text-[0.7rem] text-[#8b9bb0]">
+                Required: name, category, SKU (15–18), unit, price, and quantity
+              </p>
+            </div>
           </section>
 
-          <section className="rounded-xl border border-[#d9e0ea] bg-white p-4">
+          <section className="rounded-xl border border-[#d9e0ea] bg-white p-4 lg:sticky lg:top-4 lg:self-start">
             <h3 className="text-[0.875rem] font-semibold text-[#0b1f33]">
-              Category first?
+              Categories
             </h3>
             <p className="mt-0.5 text-[0.75rem] text-[#5a6b7d]">
-              Create a category name for your products.
+              Create a category before adding products, then assign each item to
+              a group.
             </p>
             <div className="mt-3 flex gap-2">
               <Input
-                placeholder="e.g. Accessories"
+                placeholder="Category name"
                 value={catName}
                 onChange={(e) => setCatName(e.target.value)}
               />
@@ -409,6 +508,13 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
                 Add
               </Button>
             </div>
+            {categories.length ? (
+              <ul className="mt-3 max-h-40 space-y-1 overflow-y-auto text-sm text-[#5a6b7d]">
+                {categories.map((c) => (
+                  <li key={c.id}>· {c.name}</li>
+                ))}
+              </ul>
+            ) : null}
           </section>
         </div>
       ) : null}
@@ -421,7 +527,7 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
                 Products
               </h2>
               <p className="mt-0.5 text-[0.75rem] text-[#5a6b7d]">
-                Edit price, stock, or add new items.
+                Search, edit prices, adjust stock, and manage product images.
               </p>
             </div>
             <Button size="sm" onClick={() => setPanel("add")}>
@@ -432,7 +538,7 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
           <div className="mt-4 flex flex-wrap gap-2">
             <Input
               className="max-w-xs"
-              placeholder="Search title or SKU…"
+              placeholder="Search by name or SKU"
               value={q}
               onChange={(e) => setQ(e.target.value)}
             />
@@ -455,98 +561,100 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
             {items.map((item) => {
               const isEdit = editingId === item.id;
               const images = galleryOf(item);
+              const photosOpen = photosOpenId === item.id;
+              const cover = images[0] ?? null;
               return (
                 <li key={item.id} className="py-3.5">
                   {!isEdit ? (
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="flex min-w-0 flex-1 gap-2.5">
-                        <div className="flex shrink-0 flex-col gap-1.5">
-                          <div className="flex flex-wrap gap-1.5">
-                            {images.length ? (
-                              images.map((src, idx) => (
-                                <div key={`${src}-${idx}`} className="relative">
-                                  <ProductThumb
-                                    src={src}
-                                    label={item.title}
-                                    size="lg"
-                                    count={idx === 0 ? images.length : undefined}
+                    <div className="space-y-2.5">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="flex min-w-0 flex-1 gap-3">
+                          {/* Cover only — never stack all photos in the list row */}
+                          <div className="relative shrink-0">
+                            <ProductThumb
+                              src={cover}
+                              label={item.title}
+                              size="lg"
+                              count={images.length}
+                              onClick={
+                                images.length
+                                  ? () =>
+                                      setLightbox({
+                                        images,
+                                        index: 0,
+                                        label: item.title,
+                                      })
+                                  : undefined
+                              }
+                            />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="font-semibold text-[#0b1f33]">
+                              {item.title}
+                              {!item.isActive ? (
+                                <span className="ml-2 text-xs font-medium text-[#b45309]">
+                                  inactive
+                                </span>
+                              ) : null}
+                            </p>
+                            <p className="font-mono text-[0.7rem] text-[#5a6b7d]">
+                              {item.sku}
+                              {item.category ? ` · ${item.category.name}` : ""}
+                            </p>
+                            {item.description ? (
+                              <p className="mt-0.5 line-clamp-2 text-xs text-[#8b9bb0]">
+                                {item.description}
+                              </p>
+                            ) : null}
+                            {canWrite ? (
+                              <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                                <button
+                                  type="button"
+                                  className="text-[0.75rem] font-semibold text-[#1a56db] hover:underline"
+                                  onClick={() =>
+                                    setPhotosOpenId((id) =>
+                                      id === item.id ? null : item.id,
+                                    )
+                                  }
+                                >
+                                  {images.length
+                                    ? `${images.length} photo${images.length === 1 ? "" : "s"} · manage`
+                                    : "Add photos"}
+                                </button>
+                                {images.length > 1 ? (
+                                  <button
+                                    type="button"
+                                    className="text-[0.75rem] font-medium text-[#5a6b7d] hover:text-[#1a56db]"
                                     onClick={() =>
                                       setLightbox({
                                         images,
-                                        index: idx,
+                                        index: 0,
                                         label: item.title,
                                       })
                                     }
-                                  />
-                                  {canWrite ? (
-                                    <button
-                                      type="button"
-                                      className="absolute -right-1 -top-1 grid h-5 w-5 place-items-center rounded-full bg-[#c81e1e] text-white shadow"
-                                      title="Remove image"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        removeImage.mutate({
-                                          id: item.id,
-                                          imageUrl: src,
-                                        });
-                                      }}
-                                    >
-                                      <X className="h-3 w-3" />
-                                    </button>
-                                  ) : null}
-                                </div>
-                              ))
-                            ) : (
-                              <ProductThumb
-                                src={null}
-                                label={item.title}
-                                size="lg"
-                              />
-                            )}
-                          </div>
-                          {canWrite && images.length < MAX_IMAGES ? (
-                            <label className="inline-flex cursor-pointer items-center justify-center rounded-lg border border-dashed border-[#cfd8e6] px-2 py-1 text-[0.7rem] font-semibold text-[#1a56db] hover:bg-[#e8eefb]">
-                              + Add photos
-                              <input
-                                type="file"
-                                accept="image/jpeg,image/png,image/webp,image/gif"
-                                multiple
-                                className="sr-only"
-                                onChange={(e) => {
-                                  const remaining = MAX_IMAGES - images.length;
-                                  void pickFiles(e.target.files, (urls) =>
-                                    uploadImage.mutate({
-                                      id: item.id,
-                                      dataUrls: urls.slice(0, remaining),
-                                    }),
-                                  );
-                                  e.target.value = "";
-                                }}
-                              />
-                            </label>
-                          ) : null}
-                        </div>
-                        <div className="min-w-0">
-                          <p className="font-semibold text-[#0b1f33]">
-                            {item.title}
-                            {!item.isActive ? (
-                              <span className="ml-2 text-xs font-medium text-[#b45309]">
-                                inactive
-                              </span>
+                                  >
+                                    View gallery
+                                  </button>
+                                ) : null}
+                              </div>
+                            ) : images.length > 1 ? (
+                              <button
+                                type="button"
+                                className="mt-1.5 text-[0.75rem] font-medium text-[#1a56db] hover:underline"
+                                onClick={() =>
+                                  setLightbox({
+                                    images,
+                                    index: 0,
+                                    label: item.title,
+                                  })
+                                }
+                              >
+                                {images.length} photos · view
+                              </button>
                             ) : null}
-                          </p>
-                          <p className="font-mono text-[0.7rem] text-[#5a6b7d]">
-                            {item.sku}
-                            {item.category ? ` · ${item.category.name}` : ""}
-                          </p>
-                          {item.description ? (
-                            <p className="mt-0.5 line-clamp-2 text-xs text-[#8b9bb0]">
-                              {item.description}
-                            </p>
-                          ) : null}
+                          </div>
                         </div>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                         <span className="text-sm font-semibold text-[#0b1f33]">
                           ₹{Number(item.price).toLocaleString("en-IN")}{" "}
                           <span className="text-xs font-medium text-[#5a6b7d]">
@@ -591,12 +699,13 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
                           variant="soft"
                           onClick={() => {
                             setEditingId(item.id);
+                            setPhotosOpenId(null);
                             setDraft({
                               title: item.title,
                               description: item.description ?? "",
                               categoryId: item.category?.id ?? "",
                               sellUnit: normalizeSellUnit(item.sellUnit),
-                              price: String(Number(item.price)),
+                              price: String(item.price),
                               qty: String(item.qty),
                             });
                           }}
@@ -616,7 +725,84 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
                         >
                           {item.isActive ? "Deactivate" : "Activate"}
                         </Button>
+                        </div>
                       </div>
+
+                      {/* Compact gallery manager — max-width strip, scroll if many */}
+                      {canWrite && photosOpen ? (
+                        <div className="ml-0 rounded-xl border border-[#e8edf4] bg-[#f7f9fc] px-3 py-2.5 sm:ml-[3.75rem]">
+                          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-[0.75rem] font-semibold text-[#0b1f33]">
+                              Photos ({images.length}/{MAX_IMAGES})
+                            </p>
+                            <p className="text-[0.7rem] text-[#8b9bb0]">
+                              Cover = first · tap thumbnail to enlarge
+                            </p>
+                          </div>
+                          <div className="flex max-w-full items-center gap-2 overflow-x-auto pb-1">
+                            {images.map((src, idx) => (
+                              <div
+                                key={`${item.id}-ph-${idx}`}
+                                className="relative shrink-0"
+                              >
+                                <ProductThumb
+                                  src={src}
+                                  label={item.title}
+                                  size="md"
+                                  onClick={() =>
+                                    setLightbox({
+                                      images,
+                                      index: idx,
+                                      label: item.title,
+                                    })
+                                  }
+                                />
+                                {idx === 0 ? (
+                                  <span className="absolute bottom-0.5 left-0.5 rounded bg-[#1a56db] px-1 text-[0.5rem] font-bold text-white">
+                                    cover
+                                  </span>
+                                ) : null}
+                                <button
+                                  type="button"
+                                  className="absolute -right-1 -top-1 grid h-5 w-5 place-items-center rounded-full bg-[#c81e1e] text-white shadow"
+                                  title="Remove image"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    removeImage.mutate({
+                                      id: item.id,
+                                      imageUrl: src,
+                                    });
+                                  }}
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </div>
+                            ))}
+                            {images.length < MAX_IMAGES ? (
+                              <label className="inline-flex h-10 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-dashed border-[#cfd8e6] bg-white px-3 text-[0.7rem] font-semibold text-[#1a56db] hover:bg-[#e8eefb]">
+                                + Add
+                                <input
+                                  type="file"
+                                  accept="image/jpeg,image/png,image/webp,image/gif"
+                                  multiple
+                                  className="sr-only"
+                                  onChange={(e) => {
+                                    const remaining =
+                                      MAX_IMAGES - images.length;
+                                    void pickFiles(e.target.files, (urls) =>
+                                      uploadImage.mutate({
+                                        id: item.id,
+                                        dataUrls: urls.slice(0, remaining),
+                                      }),
+                                    );
+                                    e.target.value = "";
+                                  }}
+                                />
+                              </label>
+                            ) : null}
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                   ) : (
                     <div className="grid gap-3 rounded-xl border border-[#e8edf4] bg-[#f7f9fc] p-3 sm:grid-cols-2">
@@ -743,7 +929,8 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
             })}
             {!items.length && !products.isLoading ? (
               <li className="py-10 text-center text-sm text-[#5a6b7d]">
-                No products yet — add one with any category you create.
+                No products match this filter. Clear search or add a product in
+                this category.
               </li>
             ) : null}
           </ul>
@@ -756,12 +943,12 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
             Categories
           </h2>
           <p className="mt-0.5 text-[0.75rem] text-[#5a6b7d]">
-            Name groups for your products (you choose the names).
+            Organize products into groups. Counts include sale items only.
           </p>
 
           <div className="mt-4 flex max-w-md gap-2">
             <Input
-              placeholder="New category name"
+              placeholder="Category name"
               value={catName}
               onChange={(e) => setCatName(e.target.value)}
             />
@@ -829,7 +1016,8 @@ export function SaleStockPanel({ onAdded }: { onAdded?: () => void }) {
             ))}
             {!categoriesQ.data?.length && !categoriesQ.isLoading ? (
               <li className="py-8 text-center text-sm text-[#5a6b7d]">
-                No categories — add one above, then attach products.
+                No categories yet. Create a category above, then add products to
+                it.
               </li>
             ) : null}
           </ul>

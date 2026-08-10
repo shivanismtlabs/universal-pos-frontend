@@ -127,14 +127,14 @@ export default function RegisterPage() {
 
   return (
     <AuthShell
-      title="Join Universal POS"
-      subtitle="Create your shop in a minute — then sell from a clean counter."
+      title="Create your shop"
+      subtitle="Register your business, then add catalog items and open the counter."
     >
       <div className="mb-4 space-y-1.5">
         <Label htmlFor="tenantName">Shop name</Label>
         <Input
           id="tenantName"
-          placeholder="e.g. City Furniture"
+          placeholder="Your shop or trade name"
           autoComplete="organization"
           {...register("tenantName")}
         />

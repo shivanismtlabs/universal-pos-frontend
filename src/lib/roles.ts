@@ -26,6 +26,8 @@ export const ALL_ROLES: RoleCode[] = [
 /** Route prefixes → roles that may open them (keep aligned with backend RoleGroup) */
 export const ROUTE_ROLES: Record<string, RoleCode[]> = {
   "/dashboard": ALL_ROLES,
+  /** Sell terminal — shop language “Counter” (legacy /pos still maps in app redirects) */
+  "/counter": ["admin", "manager", "cashier"],
   "/pos": ["admin", "manager", "cashier"],
   "/returns": ["admin", "manager", "cashier", "inventory"],
   "/orders": ["admin", "manager", "cashier", "fitter", "inventory"],

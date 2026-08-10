@@ -52,24 +52,24 @@ type NavItem = {
 
 const NAV_CATALOG: NavItem[] = [
   {
-    href: "/catalog",
-    label: "Products",
-    icon: Box,
-    section: "Daily work",
-    module: "catalog",
-  },
-  {
     href: "/dashboard",
     label: "Dashboard",
     icon: LayoutDashboard,
     section: "Daily work",
   },
   {
-    href: "/pos",
+    href: "/counter",
     label: "Counter",
     icon: CreditCard,
     section: "Daily work",
     module: "pos",
+  },
+  {
+    href: "/catalog",
+    label: "Products",
+    icon: Box,
+    section: "Daily work",
+    module: "catalog",
   },
   {
     href: "/returns",
@@ -147,10 +147,10 @@ const NAV_CATALOG: NavItem[] = [
   },
   {
     href: "/settings",
-    label: "Shop branding",
+    label: "Settings",
     icon: Settings,
     section: "Shop setup",
-    module: "iam",
+    // Always available for admin/manager — not gated on optional modules
   },
   {
     href: "/plan",
@@ -379,7 +379,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   } = useBootstrap();
   const [open, setOpen] = useState(false);
   const [showSetPin, setShowSetPin] = useState(false);
-  const wide = pathname === "/pos" || pathname.startsWith("/pos/");
+  const wide =
+    pathname === "/counter" ||
+    pathname.startsWith("/counter/") ||
+    pathname === "/pos" ||
+    pathname.startsWith("/pos/");
   const roles = user?.roles ?? stationUser?.roles ?? [];
   const modeLabel = modeBadge(commerceModes) || "POS";
   const pinSwitchEnabled =
