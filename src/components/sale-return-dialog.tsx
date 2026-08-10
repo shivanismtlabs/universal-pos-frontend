@@ -114,12 +114,17 @@ export function SaleReturnDialog({
       });
     },
     onSuccess: (r) => {
+      const credit =
+        r.storeCreditBalance != null
+          ? ` · store credit bal ${money(r.storeCreditBalance)}`
+          : "";
       toast.success(
-        `Refund ${money(r.amount)} · restocked ${r.restocked?.length ?? 0} line(s)`,
+        `Refund ${money(r.amount)} · restocked ${r.restocked?.length ?? 0} line(s)${credit}`,
       );
       void qc.invalidateQueries({ queryKey: ["pos-sale-recent"] });
       void qc.invalidateQueries({ queryKey: ["pos-sale-catalog"] });
       void qc.invalidateQueries({ queryKey: ["order", orderId] });
+      void qc.invalidateQueries({ queryKey: ["customers"] });
       onClose();
     },
     onError: (e) =>

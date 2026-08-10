@@ -9,6 +9,8 @@ import { useAuthStore } from "@/lib/auth-store";
 import { useBootstrap } from "@/lib/bootstrap";
 import { PinPad } from "@/components/pin-pad";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
 type StationPinLockProps = {
@@ -63,12 +65,25 @@ export function StationPinLock({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fails, setFails] = useState(0);
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [otp, setOtp] = useState("");
+  const [newPin, setNewPin] = useState("");
+  const [forgotBusy, setForgotBusy] = useState(false);
+  const [devCode, setDevCode] = useState<string | null>(null);
+  const [maskedEmail, setMaskedEmail] = useState<string | null>(null);
+  const [otpSent, setOtpSent] = useState(false);
 
   useEffect(() => {
     if (open) {
       setSelectedId(preferredId);
       setError(null);
       setFails(0);
+      setForgotOpen(false);
+      setOtpSent(false);
+      setOtp("");
+      setNewPin("");
+      setDevCode(null);
+      setMaskedEmail(null);
     }
   }, [open, preferredId]);
 
@@ -110,6 +125,67 @@ export function StationPinLock({
     }
   }
 
+  async function sendPinOtp() {
+    if (!selectedId) {
+      toast.error("Select your name first");
+      return;
+    }
+    setForgotBusy(true);
+    try {
+      const res = await authApi.forgotPin(selectedId);
+      setOtpSent(true);
+      setDevCode(res.devCode ?? null);
+      setMaskedEmail(res.maskedEmail ?? null);
+      toast.success(res.message);
+      if (res.devCode) {
+        toast.message("Dev OTP", { description: res.devCode });
+      }
+    } catch (e) {
+      toast.error(
+        e instanceof ApiError ? e.messages.join(", ") : "Could not send OTP",
+      );
+    } finally {
+      setForgotBusy(false);
+    }
+  }
+
+  async function resetPinWithOtp(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selectedId) return;
+    const code = otp.trim();
+    const pin = newPin.trim();
+    if (!/^\d{6}$/.test(code)) {
+      toast.error("Enter the 6-digit OTP");
+      return;
+    }
+    if (!/^\d{4,6}$/.test(pin)) {
+      toast.error("New PIN must be 4–6 digits");
+      return;
+    }
+    setForgotBusy(true);
+    try {
+      const res = await authApi.resetPinOtp({
+        userId: selectedId,
+        otp: code,
+        newPin: pin,
+      });
+      toast.success(res.message);
+      setForgotOpen(false);
+      setOtpSent(false);
+      setOtp("");
+      setNewPin("");
+      setError(null);
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError
+          ? err.messages.join(", ")
+          : "Could not reset PIN",
+      );
+    } finally {
+      setForgotBusy(false);
+    }
+  }
+
   if (!open) return null;
 
   if (!pinEnabled) {
@@ -143,10 +219,12 @@ export function StationPinLock({
             Counter locked
           </p>
           <h2 className="mt-1 text-xl font-bold text-[#0b1f33]">
-            Switch staff
+            {forgotOpen ? "Forgot PIN" : "Switch staff"}
           </h2>
           <p className="mt-1 text-sm text-[#5a6b7d]">
-            Pick your name, then enter your PIN. Cart stays on screen.
+            {forgotOpen
+              ? "We’ll email a 6-digit OTP to your staff account email."
+              : "Pick your name, then enter your PIN. Cart stays on screen."}
           </p>
           {stationUser ? (
             <p className="mt-2 text-xs text-[#5a6b7d]">
@@ -177,6 +255,82 @@ export function StationPinLock({
               Full sign-in
             </Button>
           </div>
+        ) : forgotOpen ? (
+          <form onSubmit={resetPinWithOtp} className="space-y-3">
+            <div className="rounded-xl border border-[#d9e0ea] bg-white px-3 py-2.5">
+              <p className="text-xs text-[#5a6b7d]">Resetting PIN for</p>
+              <p className="font-semibold text-[#0b1f33]">
+                {selected?.fullName ?? "Select staff"}
+              </p>
+              {maskedEmail ? (
+                <p className="text-xs text-[#5a6b7d]">Email: {maskedEmail}</p>
+              ) : null}
+              {devCode ? (
+                <p className="text-xs text-[#1a56db]">Dev OTP: {devCode}</p>
+              ) : null}
+            </div>
+            {!otpSent ? (
+              <Button
+                type="button"
+                className="w-full"
+                disabled={forgotBusy || !selectedId}
+                onClick={() => void sendPinOtp()}
+              >
+                {forgotBusy ? "Sending…" : "Send OTP"}
+              </Button>
+            ) : (
+              <>
+                <div className="space-y-1">
+                  <Label htmlFor="pin-otp">6-digit OTP</Label>
+                  <Input
+                    id="pin-otp"
+                    inputMode="numeric"
+                    maxLength={6}
+                    value={otp}
+                    onChange={(ev) =>
+                      setOtp(ev.target.value.replace(/\D/g, "").slice(0, 6))
+                    }
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="pin-new">New PIN (4–6 digits)</Label>
+                  <Input
+                    id="pin-new"
+                    type="password"
+                    inputMode="numeric"
+                    maxLength={6}
+                    value={newPin}
+                    onChange={(ev) =>
+                      setNewPin(ev.target.value.replace(/\D/g, "").slice(0, 6))
+                    }
+                  />
+                </div>
+                <Button type="submit" className="w-full" disabled={forgotBusy}>
+                  {forgotBusy ? "Saving…" : "Set new PIN"}
+                </Button>
+                <button
+                  type="button"
+                  className="w-full text-center text-xs font-medium text-[#1a56db] hover:underline"
+                  disabled={forgotBusy}
+                  onClick={() => void sendPinOtp()}
+                >
+                  Resend OTP
+                </button>
+              </>
+            )}
+            <button
+              type="button"
+              className="w-full text-center text-xs font-medium text-[#5a6b7d] hover:underline"
+              onClick={() => {
+                setForgotOpen(false);
+                setOtpSent(false);
+                setOtp("");
+                setNewPin("");
+              }}
+            >
+              Back to PIN unlock
+            </button>
+          </form>
         ) : (
           <>
             <ul className="mb-4 max-h-40 space-y-1.5 overflow-y-auto">
@@ -224,6 +378,22 @@ export function StationPinLock({
                 onSubmit={onPin}
                 onCancel={dismissible ? onDismiss : undefined}
               />
+            </div>
+
+            <div className="mt-3 text-center">
+              <button
+                type="button"
+                className="text-xs font-medium text-[#1a56db] hover:underline"
+                onClick={() => {
+                  if (!selectedId) {
+                    toast.error("Select your name first");
+                    return;
+                  }
+                  setForgotOpen(true);
+                }}
+              >
+                Forgot PIN?
+              </button>
             </div>
           </>
         )}

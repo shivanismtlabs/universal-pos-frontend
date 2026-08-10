@@ -6,7 +6,6 @@ import { usePathname, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "motion/react";
 import {
-  LayoutDashboard,
   Users,
   ClipboardList,
   CreditCard,
@@ -24,6 +23,10 @@ import {
   Settings,
   Package,
   ArrowRightLeft,
+  Wallet,
+  TicketPercent,
+  ChevronDown,
+  Home,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -40,199 +43,220 @@ import {
   ROUTE_ROLES,
 } from "@/lib/roles";
 
-type NavItem = {
+type NavLeaf = {
   href: string;
   label: string;
   icon: LucideIcon;
-  section: string;
   module?: string;
-  /** Required commerce mode code (sale|rental|service|…) */
   commerce?: string;
 };
 
-const NAV_CATALOG: NavItem[] = [
+type NavGroup = {
+  id: string;
+  label: string;
+  icon: LucideIcon;
+  /** Single link when no children */
+  href?: string;
+  children?: NavLeaf[];
+};
+
+/** Zoho-style groups: Home · Inventory · Sales · Purchases · Customers · … */
+const NAV_GROUPS: NavGroup[] = [
   {
+    id: "home",
+    label: "Home",
+    icon: Home,
     href: "/dashboard",
-    label: "Dashboard",
-    icon: LayoutDashboard,
-    section: "Daily work",
   },
   {
-    href: "/counter",
-    label: "Counter",
+    id: "inventory",
+    label: "Inventory",
+    icon: Package,
+    children: [
+      {
+        href: "/catalog",
+        label: "Items",
+        icon: Box,
+        module: "catalog",
+      },
+      {
+        href: "/catalog?panel=categories",
+        label: "Categories",
+        icon: Box,
+        module: "catalog",
+      },
+      {
+        href: "/adjustments",
+        label: "Adjustments",
+        icon: PackageCheck,
+        module: "inventory",
+        commerce: "sale",
+      },
+      {
+        href: "/inventory",
+        label: "Stock levels",
+        icon: Package,
+        module: "inventory",
+        commerce: "sale",
+      },
+      {
+        href: "/transfers",
+        label: "Stock transfer",
+        icon: ArrowRightLeft,
+        module: "catalog",
+      },
+    ],
+  },
+  {
+    id: "sales",
+    label: "Sales",
     icon: CreditCard,
-    section: "Daily work",
-    module: "pos",
+    children: [
+      {
+        href: "/counter",
+        label: "Counter (POS)",
+        icon: CreditCard,
+        module: "pos",
+      },
+      {
+        href: "/orders",
+        label: "All orders",
+        icon: ClipboardList,
+        module: "orders",
+      },
+      {
+        href: "/returns",
+        label: "Returns desk",
+        icon: PackageCheck,
+        module: "orders",
+      },
+    ],
   },
   {
-    href: "/catalog",
-    label: "Products",
-    icon: Box,
-    section: "Daily work",
-    module: "catalog",
+    id: "purchases",
+    label: "Purchases",
+    icon: Truck,
+    children: [
+      {
+        href: "/suppliers",
+        label: "Suppliers & POs",
+        icon: Truck,
+        commerce: "sale",
+        module: "inventory",
+      },
+      {
+        href: "/expenses",
+        label: "Expenses",
+        icon: Wallet,
+      },
+    ],
   },
   {
-    href: "/returns",
-    label: "Returns desk",
-    icon: PackageCheck,
-    section: "Daily work",
-    module: "orders",
-    commerce: "rental",
-  },
-  {
-    href: "/orders",
-    label: "All orders",
-    icon: ClipboardList,
-    section: "Daily work",
-    module: "orders",
-  },
-  {
-    href: "/customers",
-    label: "Customers",
+    id: "customers",
+    label: "Customers & Perks",
     icon: Users,
-    section: "People",
-    module: "orders",
+    children: [
+      {
+        href: "/customers",
+        label: "Customers",
+        icon: Users,
+        module: "orders",
+      },
+      {
+        href: "/loyalty",
+        label: "Coupons",
+        icon: TicketPercent,
+      },
+      {
+        href: "/parties",
+        label: "Customer groups",
+        icon: UsersRound,
+        module: "rental",
+        commerce: "rental",
+      },
+      {
+        href: "/appointments",
+        label: "Appointments",
+        icon: CalendarDays,
+        module: "appointments",
+        commerce: "service",
+      },
+    ],
   },
   {
-    href: "/parties",
-    label: "Customer groups",
-    icon: UsersRound,
-    section: "People",
-    module: "rental",
-    commerce: "rental",
-  },
-  {
-    href: "/appointments",
-    label: "Appointments",
-    icon: CalendarDays,
-    section: "People",
-    module: "appointments",
-    commerce: "service",
-  },
-  {
-    href: "/staff",
-    label: "Staff accounts",
+    id: "people",
+    label: "Team",
     icon: UserCog,
-    section: "People",
-    module: "iam",
+    children: [
+      {
+        href: "/staff",
+        label: "Staff accounts",
+        icon: UserCog,
+        module: "iam",
+      },
+      {
+        href: "/notify",
+        label: "WhatsApp",
+        icon: MessageCircle,
+        module: "notify",
+      },
+    ],
   },
   {
-    href: "/notify",
-    label: "WhatsApp",
-    icon: MessageCircle,
-    section: "People",
-    module: "notify",
-  },
-  {
-    href: "/reports",
+    id: "docs",
     label: "Reports",
     icon: BarChart3,
-    section: "People",
-    module: "reports",
+    children: [
+      {
+        href: "/reports",
+        label: "Reports & CSV",
+        icon: BarChart3,
+        module: "reports",
+      },
+    ],
   },
   {
-    href: "/suppliers",
-    label: "Suppliers",
-    icon: Truck,
-    section: "Shop setup",
-    commerce: "sale" as const,
-    module: "inventory",
-  },
-  {
-    href: "/transfers",
-    label: "Stock transfer",
-    icon: ArrowRightLeft,
-    section: "Shop setup",
-    module: "catalog",
-  },
-  {
-    href: "/settings",
+    id: "setup",
     label: "Settings",
     icon: Settings,
-    section: "Shop setup",
-    // Always available for admin/manager — not gated on optional modules
-  },
-  {
-    href: "/plan",
-    label: "Subscription plan",
-    icon: CreditCard,
-    section: "Shop setup",
+    children: [
+      { href: "/settings", label: "Shop settings", icon: Settings },
+      { href: "/plan", label: "Software plan", icon: CreditCard },
+    ],
   },
 ];
 
-function filterNav(
-  items: NavItem[],
+function flatCatalog(): NavLeaf[] {
+  const out: NavLeaf[] = [];
+  for (const g of NAV_GROUPS) {
+    if (g.href) {
+      out.push({ href: g.href, label: g.label, icon: g.icon });
+    }
+    for (const c of g.children ?? []) out.push(c);
+  }
+  return out;
+}
+
+const NAV_CATALOG = flatCatalog();
+
+function leafAllowed(
+  item: NavLeaf,
   roles: string[],
   hasModule: (code: string) => boolean,
   hasMode: (code: string) => boolean,
 ) {
-  return items.filter((item) => {
-    if (item.module && !hasModule(item.module)) return false;
-    if (item.commerce && !hasMode(item.commerce)) return false;
-    const allowed = ROUTE_ROLES[item.href as keyof typeof ROUTE_ROLES];
-    if (!allowed) return true;
-    return allowed.some((r) => roles.includes(r));
-  });
+  if (item.module && !hasModule(item.module)) return false;
+  if (item.commerce && !hasMode(item.commerce)) return false;
+  const allowed = ROUTE_ROLES[item.href as keyof typeof ROUTE_ROLES];
+  if (!allowed) return true;
+  return allowed.some((r) => roles.includes(r));
 }
 
-function NavSection({
-  title,
-  items,
-  onNavigate,
-}: {
-  title: string;
-  items: NavItem[];
-  onNavigate?: () => void;
-}) {
-  const pathname = usePathname();
-  if (!items.length) return null;
-
-  return (
-    <div className="mt-5 first:mt-0">
-      <p className="px-3 pb-2 text-[0.62rem] font-semibold uppercase tracking-[0.14em] text-[#8b9bb0]">
-        {title}
-      </p>
-      <div className="flex flex-col gap-0.5">
-        {items.map((item) => {
-          const active =
-            pathname === item.href || pathname.startsWith(`${item.href}/`);
-          const Icon = item.icon;
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              onClick={onNavigate}
-              className={cn(
-                "group relative flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[0.8125rem] font-semibold tracking-[-0.01em] transition-colors",
-                active
-                  ? "text-white"
-                  : "text-[#2c3e50] hover:bg-[#eef3fb] hover:text-[#0b1f33]",
-              )}
-            >
-              {active ? (
-                <motion.span
-                  layoutId="nav-active"
-                  className="absolute inset-0 rounded-[10px] bg-[#1a56db] shadow-[0_1px_2px_rgba(26,86,219,0.25)]"
-                  transition={{ type: "spring", stiffness: 420, damping: 34 }}
-                />
-              ) : null}
-              <Icon
-                className={cn(
-                  "relative z-10 h-[1.05rem] w-[1.05rem] shrink-0",
-                  active ? "opacity-95" : "opacity-70 group-hover:opacity-90",
-                )}
-                strokeWidth={1.75}
-              />
-              <span className="relative z-10 truncate">{item.label}</span>
-            </Link>
-          );
-        })}
-      </div>
-    </div>
-  );
+function isPathActive(pathname: string, href: string) {
+  return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-function NavLinks({
+function ZohoNav({
   onNavigate,
   roles,
   hasModule,
@@ -243,25 +267,142 @@ function NavLinks({
   hasModule: (code: string) => boolean;
   hasMode: (code: string) => boolean;
 }) {
-  const sections = useMemo(() => {
-    const items = filterNav(NAV_CATALOG, roles, hasModule, hasMode);
-    const order = ["Daily work", "People", "Shop setup"];
-    return order.map((title) => ({
-      title,
-      items: items.filter((i) => i.section === title),
-    }));
+  const pathname = usePathname();
+
+  const groups = useMemo(() => {
+    return NAV_GROUPS.map((g) => {
+      const children = (g.children ?? []).filter((c) =>
+        leafAllowed(c, roles, hasModule, hasMode),
+      );
+      if (g.href) {
+        const leaf: NavLeaf = { href: g.href, label: g.label, icon: g.icon };
+        if (!leafAllowed(leaf, roles, hasModule, hasMode)) return null;
+        return { ...g, children: [] as NavLeaf[] };
+      }
+      if (!children.length) return null;
+      return { ...g, children };
+    }).filter(Boolean) as Array<NavGroup & { children: NavLeaf[] }>;
   }, [roles, hasModule, hasMode]);
 
+  const defaultOpen = useMemo(() => {
+    const open = new Set<string>();
+    for (const g of groups) {
+      if (g.href && isPathActive(pathname, g.href)) continue;
+      if (g.children.some((c) => isPathActive(pathname, c.href))) {
+        open.add(g.id);
+      }
+    }
+    // Expand first useful groups for new shops
+    if (open.size === 0) {
+      open.add("inventory");
+      open.add("sales");
+    }
+    return open;
+  }, [groups, pathname]);
+
+  const [openIds, setOpenIds] = useState<Set<string>>(defaultOpen);
+
+  useEffect(() => {
+    setOpenIds((prev) => {
+      const next = new Set(prev);
+      for (const id of defaultOpen) next.add(id);
+      return next;
+    });
+  }, [defaultOpen]);
+
+  function toggle(id: string) {
+    setOpenIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   return (
-    <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-1 [scrollbar-width:thin]">
-      {sections.map((s) => (
-        <NavSection
-          key={s.title}
-          title={s.title}
-          items={s.items}
-          onNavigate={onNavigate}
-        />
-      ))}
+    <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 py-2 [scrollbar-width:thin]">
+      <ul className="space-y-0.5">
+        {groups.map((g) => {
+          const Icon = g.icon;
+          const isLeaf = Boolean(g.href);
+          const childActive = g.children.some((c) =>
+            isPathActive(pathname, c.href),
+          );
+          const selfActive = g.href
+            ? isPathActive(pathname, g.href)
+            : childActive;
+          const expanded = openIds.has(g.id) || childActive;
+
+          if (isLeaf && g.href) {
+            return (
+              <li key={g.id}>
+                <Link
+                  href={g.href}
+                  onClick={onNavigate}
+                  className={cn(
+                    "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[0.8125rem] font-medium transition",
+                    selfActive
+                      ? "bg-[#212b36] text-white"
+                      : "text-[#c4ccd6] hover:bg-[#1e2733] hover:text-white",
+                  )}
+                >
+                  <Icon className="h-4 w-4 shrink-0 opacity-90" strokeWidth={1.75} />
+                  <span className="truncate">{g.label}</span>
+                </Link>
+              </li>
+            );
+          }
+
+          return (
+            <li key={g.id}>
+              <button
+                type="button"
+                onClick={() => toggle(g.id)}
+                className={cn(
+                  "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[0.8125rem] font-medium transition",
+                  selfActive
+                    ? "bg-[#212b36] text-white"
+                    : "text-[#c4ccd6] hover:bg-[#1e2733] hover:text-white",
+                )}
+              >
+                <Icon className="h-4 w-4 shrink-0 opacity-90" strokeWidth={1.75} />
+                <span className="min-w-0 flex-1 truncate">{g.label}</span>
+                <ChevronDown
+                  className={cn(
+                    "h-3.5 w-3.5 shrink-0 opacity-70 transition",
+                    expanded ? "rotate-0" : "-rotate-90",
+                  )}
+                />
+              </button>
+              {expanded ? (
+                <ul className="mt-0.5 ml-2 space-y-0.5 border-l border-white/10 pl-2">
+                  {g.children.map((c) => {
+                    const CIcon = c.icon;
+                    const active = isPathActive(pathname, c.href);
+                    return (
+                      <li key={c.href}>
+                        <Link
+                          href={c.href}
+                          onClick={onNavigate}
+                          className={cn(
+                            "flex items-center gap-2 rounded-md px-2 py-1.5 text-[0.78rem] transition",
+                            active
+                              ? "bg-[#1a56db] font-semibold text-white"
+                              : "text-[#9aa6b2] hover:bg-[#1e2733] hover:text-white",
+                          )}
+                        >
+                          <CIcon className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+                          <span className="truncate">{c.label}</span>
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
     </nav>
   );
 }
@@ -272,7 +413,7 @@ function modeBadge(modes: string[]) {
     sale: "Sale",
     rental: "Rent",
     service: "Service",
-    subscription: "Sub",
+    subscription: "Members",
   };
   return modes.map((m) => labels[m] ?? m).join(" + ");
 }
@@ -280,6 +421,7 @@ function modeBadge(modes: string[]) {
 function SidebarBody({
   onNavigate,
   onLogout,
+  onSwitchOrg,
   userName,
   userEmail,
   roles,
@@ -292,6 +434,7 @@ function SidebarBody({
 }: {
   onNavigate?: () => void;
   onLogout: () => void;
+  onSwitchOrg?: () => void;
   userName?: string;
   userEmail?: string;
   roles: string[];
@@ -304,55 +447,64 @@ function SidebarBody({
 }) {
   const initial = (productName.trim()[0] || "P").toUpperCase();
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="shrink-0 px-4 pb-4 pt-5">
-        <div className="flex items-center gap-3">
-          <div className="grid h-10 w-10 place-items-center rounded-[10px] bg-[#1a56db] text-sm font-semibold tracking-tight text-white shadow-[0_1px_2px_rgba(26,86,219,0.28)]">
+    <div className="flex h-full min-h-0 flex-col bg-[#131920] text-[#e8edf4]">
+      <div className="shrink-0 px-4 pb-3 pt-4">
+        <div className="flex items-center gap-2.5">
+          <div className="grid h-9 w-9 place-items-center rounded-md bg-[#1a56db] text-sm font-bold text-white">
             {initial}
           </div>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-[0.95rem] font-semibold tracking-tight text-[#0b1f33]">
-              {productName}
+          <div className="min-w-0">
+            <p className="text-[0.7rem] font-bold tracking-[0.14em] text-white uppercase">
+              POS
             </p>
-            <p className="mt-0.5 truncate text-[0.68rem] text-[#5a6b7d]">
-              {tagline || modeLabel}
+            <p className="truncate text-[0.78rem] text-[#9aa6b2]">
+              {productName}
             </p>
           </div>
         </div>
-        <div className="mt-3 inline-flex items-center rounded-md border border-[#d9e0ea] bg-[#f4f6fa] px-2 py-0.5 text-[0.62rem] font-bold tracking-[0.1em] text-[#5a6b7d] uppercase">
-          {modeBadge(commerceModes)}
-        </div>
+        <p className="mt-2 truncate text-[0.65rem] text-[#6b7785]">
+          {tagline || modeLabel} · {modeBadge(commerceModes)}
+        </p>
       </div>
 
-      <div className="mx-4 shrink-0 border-t border-[#e8ebf0]" />
+      <div className="mx-3 shrink-0 border-t border-white/10" />
 
-      <NavLinks
+      <ZohoNav
         onNavigate={onNavigate}
         roles={roles}
         hasModule={hasModule}
         hasMode={hasMode}
       />
 
-      <div className="shrink-0 border-t border-[#e8ebf0] bg-[#fafbfc] px-3 py-3">
-        <div className="rounded-lg border border-[#e8ebf0] bg-white px-3 py-2.5">
-          <p className="truncate text-[0.8125rem] font-semibold text-[#0b1f33]">
+      <div className="shrink-0 border-t border-white/10 px-3 py-3">
+        <div className="rounded-md bg-[#1a222c] px-3 py-2.5">
+          <p className="truncate text-[0.8rem] font-semibold text-white">
             {userName ?? "Staff"}
           </p>
-          <p className="truncate text-[0.68rem] text-[#5a6b7d]">{userEmail}</p>
+          <p className="truncate text-[0.68rem] text-[#8b9bb0]">{userEmail}</p>
           {roles.length ? (
-            <p className="mt-1 truncate text-[0.6rem] font-medium tracking-[0.08em] text-[#1a56db] uppercase">
+            <p className="mt-1 truncate text-[0.58rem] font-medium tracking-[0.08em] text-[#7aa2ff] uppercase">
               {roles.join(" · ")}
             </p>
           ) : null}
         </div>
-        <Button
-          variant="secondary"
-          className="mt-2.5 h-9 w-full text-[0.8125rem]"
+        {onSwitchOrg ? (
+          <button
+            type="button"
+            className="mt-2 w-full rounded-md border border-white/15 bg-transparent px-3 py-2 text-[0.78rem] font-medium text-[#c4ccd6] transition hover:bg-[#1e2733] hover:text-white"
+            onClick={onSwitchOrg}
+          >
+            Switch organization
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className="mt-2 flex w-full items-center justify-center gap-2 rounded-md border border-white/15 bg-transparent px-3 py-2 text-[0.78rem] font-medium text-[#c4ccd6] transition hover:bg-[#1e2733] hover:text-white"
           onClick={onLogout}
         >
           <LogOut className="h-3.5 w-3.5" />
           Sign out
-        </Button>
+        </button>
       </div>
     </div>
   );
@@ -366,6 +518,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const stationUser = useAuthStore((s) => s.stationUser);
   const pinLocked = useAuthStore((s) => s.pinLocked);
   const stationToken = useAuthStore((s) => s.stationToken);
+  const identityToken = useAuthStore((s) => s.identityToken);
   const clear = useAuthStore((s) => s.clear);
   const {
     productName,
@@ -424,7 +577,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [pathname, roles, router, hasModule, hasMode, isLoading, pinLocked]);
 
   useEffect(() => {
-    // App shell owns scrolling — keep document from scrolling under the fixed sidebar
     const html = document.documentElement;
     const prevHtml = html.style.overflow;
     const prevBody = document.body.style.overflow;
@@ -458,6 +610,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
   }
 
+  function switchOrganization() {
+    useAuthStore.getState().clearTenantSession();
+    router.replace("/organizations");
+  }
+
   if (isLoading) {
     return (
       <div className="grid h-dvh place-items-center bg-[#f4f6fa] text-sm text-[#5a6b7d]">
@@ -486,6 +643,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const acting = user ?? stationUser;
   const sidebarProps = {
     onLogout: () => void logout(),
+    onSwitchOrg: identityToken
+      ? () => switchOrganization()
+      : undefined,
     userName: acting?.fullName,
     userEmail: acting?.email,
     roles,
@@ -498,7 +658,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <div className="flex h-dvh overflow-hidden bg-[#f4f6fa] text-[#0b1f33]">
+    <div className="flex h-dvh overflow-hidden bg-[#eef1f5] text-[#0b1f33]">
       {pinLocked && stationToken ? (
         <StationPinLock open locationId={acting?.storeId} />
       ) : null}
@@ -518,16 +678,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           setShowSetPin(false);
         }}
       />
-      {/* Desktop sidebar — fixed to viewport, never scrolls with page */}
-      <aside className="hidden h-dvh w-[15.5rem] shrink-0 flex-col border-r border-[#d9e0ea] bg-white md:flex">
+      {/* Dark Zoho secondary nav */}
+      <aside className="hidden h-dvh w-[15.25rem] shrink-0 flex-col md:flex">
         <SidebarBody {...sidebarProps} />
       </aside>
 
-      {/* Right column: mobile header + scrollable content only */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="flex shrink-0 items-center justify-between border-b border-[#d9e0ea] bg-white/95 px-4 py-3 backdrop-blur md:hidden">
+        <header className="flex shrink-0 items-center justify-between border-b border-[#d9e0ea] bg-white px-4 py-3 md:hidden">
           <div className="flex min-w-0 items-center gap-2.5">
-            <div className="grid h-8 w-8 shrink-0 place-items-center rounded-[8px] bg-[#1a56db] text-xs font-semibold text-white">
+            <div className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-[#1a56db] text-xs font-semibold text-white">
               {initial}
             </div>
             <div className="min-w-0">
@@ -559,24 +718,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             >
               <button
                 type="button"
-                className="absolute inset-0 bg-[#0b1f33]/40"
+                className="absolute inset-0 bg-[#0b1f33]/50"
                 aria-label="Close menu"
                 onClick={() => setOpen(false)}
               />
               <motion.aside
-                className="absolute top-0 left-0 flex h-full w-[min(17rem,88vw)] flex-col border-r border-[#d9e0ea] bg-white shadow-xl"
+                className="absolute top-0 left-0 flex h-full w-[min(17rem,88vw)] flex-col shadow-xl"
                 initial={{ x: -28, opacity: 0.85 }}
                 animate={{ x: 0, opacity: 1 }}
                 exit={{ x: -20, opacity: 0 }}
               >
-                <div className="flex shrink-0 justify-end border-b border-[#e8ebf0] p-2.5">
+                <div className="absolute top-2 right-2 z-10">
                   <button
                     type="button"
-                    className="rounded-lg border border-[#d9e0ea] p-2"
+                    className="rounded-md border border-white/20 bg-[#1e2733] p-2 text-white"
                     onClick={() => setOpen(false)}
                     aria-label="Close"
                   >
-                    <X className="h-5 w-5" />
+                    <X className="h-4 w-4" />
                   </button>
                 </div>
                 <div className="min-h-0 flex-1">
@@ -592,14 +751,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <main
           className={cn(
-            "min-h-0 flex-1 overflow-y-auto overscroll-contain",
+            "min-h-0 flex-1 overflow-y-auto overscroll-contain bg-[#eef1f5]",
             "[scrollbar-gutter:stable]",
           )}
         >
           <div
             className={cn(
               "px-4 py-5 sm:px-6 sm:py-6 lg:px-8",
-              wide ? "max-w-none" : "mx-auto w-full max-w-6xl",
+              wide ? "max-w-none" : "mx-auto w-full max-w-[72rem]",
             )}
           >
             {canAccessPath(pathname, roles) ? children : null}

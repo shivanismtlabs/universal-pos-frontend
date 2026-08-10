@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { paymentsApi, posApi, tenantsApi } from "@/lib/api";
+import { loyaltyApi, paymentsApi, posApi, tenantsApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useBootstrap } from "@/lib/bootstrap";
 import { useAuthStore } from "@/lib/auth-store";
@@ -46,7 +46,7 @@ type CartLine = {
   image?: string | null;
 };
 
-type PayMethod = "cash" | "upi" | "card";
+type PayMethod = "cash" | "upi" | "card" | "store_credit";
 
 /**
  * Excellent retail Sale POS — scan/search, cart, cash change, atomic checkout.
@@ -120,6 +120,8 @@ export default function RetailPosWorkstation({
   const [customerId, setCustomerId] = useState("");
   const [cart, setCart] = useState<CartLine[]>([]);
   const [discountAmount, setDiscountAmount] = useState("");
+  const [couponCode, setCouponCode] = useState("");
+  const [couponApplied, setCouponApplied] = useState<string | null>(null);
   const [parkLabel, setParkLabel] = useState("");
   const [showParked, setShowParked] = useState(false);
   const [openingFloat, setOpeningFloat] = useState("0");
@@ -455,6 +457,10 @@ export default function RetailPosWorkstation({
       );
       return;
     }
+    if (payMethod === "store_credit" && !customerId) {
+      toast.error("Select a customer for store credit");
+      return;
+    }
 
     chargeLock.current = true;
     setBusy(true);
@@ -468,7 +474,17 @@ export default function RetailPosWorkstation({
           unitPrice: l.unitPrice,
         })),
         ...(discountNum > 0 ? { discountAmount: discountNum } : {}),
+        ...(couponApplied
+          ? { couponCode: couponApplied }
+          : couponCode.trim()
+            ? { couponCode: couponCode.trim() }
+            : {}),
       };
+
+      if (payMethod === "store_credit" && !customerId) {
+        toast.error("Select a customer to pay with store credit");
+        return;
+      }
 
       // Split cash + card/UPI: cash recorded, remainder collected via Stripe
       if (splitPay && payMethod === "cash") {
@@ -567,16 +583,20 @@ export default function RetailPosWorkstation({
         ...cartPayload,
         payments: [
           {
-            method: "cash",
+            method: payMethod === "store_credit" ? "store_credit" : "cash",
             amount: totalDue,
             idempotencyKey: newIdempotencyKey("sale"),
           },
         ],
-        cashTendered: tenderedNum > 0 ? tenderedNum : totalDue,
+        ...(payMethod === "cash"
+          ? { cashTendered: tenderedNum > 0 ? tenderedNum : totalDue }
+          : {}),
       });
 
       setCart([]);
       setDiscountAmount("");
+      setCouponCode("");
+      setCouponApplied(null);
       setCashTendered("");
       setSplitPay(false);
       setSplitCashAmount("");
@@ -590,6 +610,7 @@ export default function RetailPosWorkstation({
       void qc.invalidateQueries({ queryKey: ["retail-skus"] });
       void qc.invalidateQueries({ queryKey: ["pos-sale-parked"] });
       void qc.invalidateQueries({ queryKey: ["pos-sale-recent"] });
+      void qc.invalidateQueries({ queryKey: ["customers"] });
       toast.success(`Sale ${result.order.orderNumber} complete`);
       scanRef.current?.focus();
     } catch (e) {
@@ -1302,7 +1323,10 @@ export default function RetailPosWorkstation({
                   placeholder="0"
                   inputMode="decimal"
                   value={discountAmount}
-                  onChange={(e) => setDiscountAmount(e.target.value)}
+                  onChange={(e) => {
+                    setDiscountAmount(e.target.value);
+                    setCouponApplied(null);
+                  }}
                 />
                 <p
                   className={cn(
@@ -1319,19 +1343,68 @@ export default function RetailPosWorkstation({
               </div>
               <div className="field-shell">
                 <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
-                  Hold name
+                  Coupon
                 </Label>
-                <Input
-                  className="h-10"
-                  placeholder="e.g. Table 4"
-                  value={parkLabel}
-                  onChange={(e) => setParkLabel(e.target.value)}
-                  maxLength={80}
-                />
+                <div className="flex gap-1">
+                  <Input
+                    className="h-10 uppercase"
+                    placeholder="CODE"
+                    value={couponCode}
+                    onChange={(e) => {
+                      setCouponCode(e.target.value);
+                      setCouponApplied(null);
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="h-10 shrink-0"
+                    disabled={!couponCode.trim() || !cart.length}
+                    onClick={async () => {
+                      try {
+                        const v = await loyaltyApi.validateCoupon(
+                          couponCode.trim(),
+                          ticketBeforeDiscount,
+                        );
+                        setDiscountAmount(String(v.amountOff));
+                        setCouponApplied(v.code);
+                        toast.success(
+                          `Coupon ${v.code}: −${money(v.amountOff)}`,
+                        );
+                      } catch (e) {
+                        toast.error(
+                          e instanceof ApiError
+                            ? e.messages.join(", ")
+                            : "Invalid coupon",
+                        );
+                      }
+                    }}
+                  >
+                    Apply
+                  </Button>
+                </div>
                 <p className="text-[0.65rem] text-[#8b9bb0]">
-                  Optional name when parking a cart
+                  {couponApplied
+                    ? `Applied ${couponApplied}`
+                    : "From Coupons setup"}
                 </p>
               </div>
+            </div>
+            <div className="field-shell">
+              <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
+                Hold name
+              </Label>
+              <Input
+                className="h-10"
+                placeholder="e.g. Table 4"
+                value={parkLabel}
+                onChange={(e) => setParkLabel(e.target.value)}
+                maxLength={80}
+              />
+              <p className="text-[0.65rem] text-[#8b9bb0]">
+                Optional name when parking a cart
+              </p>
             </div>
 
             <div className="grid grid-cols-2 gap-2">
@@ -1427,24 +1500,32 @@ export default function RetailPosWorkstation({
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-1 rounded-[12px] bg-[#eef2f8] p-1">
-              {(["cash", "upi", "card"] as const).map((m) => (
+            <div className="grid grid-cols-4 gap-1 rounded-[12px] bg-[#eef2f8] p-1">
+              {(["cash", "upi", "card", "store_credit"] as const).map((m) => (
                 <button
                   key={m}
                   type="button"
                   data-active={payMethod === m ? "true" : "false"}
-                  onClick={() => setPayMethod(m)}
+                  onClick={() => {
+                    setPayMethod(m);
+                    if (m !== "cash") setSplitPay(false);
+                  }}
                   className={cn(
-                    "rounded-[9px] py-2.5 text-[0.7rem] font-bold tracking-[0.06em] uppercase transition",
+                    "rounded-[9px] py-2.5 text-[0.65rem] font-bold tracking-[0.04em] uppercase transition",
                     payMethod === m
                       ? "bg-[#1a56db] text-white shadow-[0_1px_3px_rgba(26,86,219,0.35)]"
                       : "text-[#5a6b7d] hover:bg-white/80 hover:text-[#0b1f33]",
                   )}
                 >
-                  {m}
+                  {m === "store_credit" ? "Credit" : m}
                 </button>
               ))}
             </div>
+            {payMethod === "store_credit" ? (
+              <p className="text-[0.7rem] text-[#5a6b7d]">
+                Debits customer store credit balance. Needs a linked customer.
+              </p>
+            ) : null}
 
             {payMethod === "cash" ? (
               <div className="space-y-2.5">

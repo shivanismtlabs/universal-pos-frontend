@@ -15,19 +15,20 @@ const MODE_COPY: Record<
 > = {
   sale: {
     title: "Sell products",
-    detail: "Qty stock, counter checkout, receipts",
+    detail: "Stock, counter checkout, and receipts for goods you sell",
   },
   rental: {
     title: "Rent items",
-    detail: "Barcode units, deposits, returns",
+    detail: "Barcode units, deposits, and returns",
   },
   service: {
     title: "Bookable services",
-    detail: "Appointments and timed services",
+    detail: "Appointments and timed services you bill",
   },
   subscription: {
-    title: "Subscriptions",
-    detail: "Recurring plans and memberships",
+    title: "Customer memberships",
+    detail:
+      "Plans you sell to your customers (gym, club, retainers) — enroll & renew. Not your Universal POS software fee.",
   },
 };
 
@@ -113,8 +114,14 @@ export function CommerceModeGate({ children }: { children: React.ReactNode }) {
           What does your business do?
         </h1>
         <p className="mt-1.5 text-sm text-[#5a6b7d]">
-          Pick one or more. You can change this later in settings — each mode
-          unlocks its counter and catalog.
+          Pick one or more. You can change this later in Settings — each mode
+          unlocks its counter and product catalogue.
+        </p>
+        <p className="mt-2 text-[0.75rem] leading-relaxed text-[#8b9aab]">
+          Tip: <span className="font-medium text-[#5a6b7d]">Customer memberships</span>{" "}
+          is for products you sell to buyers. Paying for{" "}
+          <span className="font-medium text-[#5a6b7d]">Universal POS itself</span>{" "}
+          is under Shop setup → Software plan.
         </p>
 
         <ul className="mt-6 space-y-2">

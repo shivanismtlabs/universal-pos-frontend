@@ -1,3 +1,5 @@
+"use client";
+
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
@@ -11,6 +13,21 @@ export type AuthSessionUser = {
   pinSet?: boolean;
 };
 
+export type PortalIdentity = {
+  id: string;
+  email: string;
+  fullName: string;
+  phone?: string | null;
+};
+
+export type PortalOrganization = {
+  tenantId: string;
+  name: string;
+  slug: string;
+  currencyCode: string;
+  role?: string;
+};
+
 type AuthState = {
   /** Full email/password (or Google) unlock of this counter browser */
   stationToken: string | null;
@@ -18,6 +35,10 @@ type AuthState = {
   accessToken: string | null;
   /** Refresh belongs to the station opener only */
   refreshToken: string | null;
+  /** Zoho identity session (before/while picking org) */
+  identityToken: string | null;
+  identityRefreshToken: string | null;
+  identity: PortalIdentity | null;
   /** Currently attributed staff (cleared on idle lock) */
   user: AuthSessionUser | null;
   /** Who unlocked the station (kept across idle lock) */
@@ -26,6 +47,11 @@ type AuthState = {
   /** Idle / switch-user lock — PinPad visible, station still trusted */
   pinLocked: boolean;
   lastPinUserId: string | null;
+  setIdentitySession: (payload: {
+    identityToken: string;
+    identityRefreshToken?: string | null;
+    identity: PortalIdentity;
+  }) => void;
   setSession: (payload: {
     accessToken: string;
     stationToken?: string | null;
@@ -45,6 +71,7 @@ type AuthState = {
   /** Clear acting user only — keep stationToken / refresh / stationUser */
   lockStation: () => void;
   clear: () => void;
+  clearTenantSession: () => void;
 };
 
 /** sessionStorage = safer on shared POS counters (clears when tab closes) */
@@ -54,11 +81,31 @@ export const useAuthStore = create<AuthState>()(
       stationToken: null,
       accessToken: null,
       refreshToken: null,
+      identityToken: null,
+      identityRefreshToken: null,
+      identity: null,
       user: null,
       stationUser: null,
       tenantSlug: null,
       pinLocked: false,
       lastPinUserId: null,
+      setIdentitySession: ({
+        identityToken,
+        identityRefreshToken,
+        identity,
+      }) =>
+        set({
+          identityToken,
+          identityRefreshToken: identityRefreshToken ?? null,
+          identity,
+          // Leave org until selected
+          accessToken: null,
+          stationToken: null,
+          refreshToken: null,
+          user: null,
+          stationUser: null,
+          pinLocked: false,
+        }),
       setSession: ({
         accessToken,
         stationToken,
@@ -97,7 +144,7 @@ export const useAuthStore = create<AuthState>()(
           user: null,
           pinLocked: true,
         }),
-      clear: () =>
+      clearTenantSession: () =>
         set({
           stationToken: null,
           accessToken: null,
@@ -106,7 +153,20 @@ export const useAuthStore = create<AuthState>()(
           stationUser: null,
           pinLocked: false,
           lastPinUserId: null,
-          // keep tenantSlug for faster re-login on same machine
+          tenantSlug: null,
+        }),
+      clear: () =>
+        set({
+          stationToken: null,
+          accessToken: null,
+          refreshToken: null,
+          identityToken: null,
+          identityRefreshToken: null,
+          identity: null,
+          user: null,
+          stationUser: null,
+          pinLocked: false,
+          lastPinUserId: null,
         }),
     }),
     {
@@ -116,6 +176,9 @@ export const useAuthStore = create<AuthState>()(
         stationToken: s.stationToken,
         accessToken: s.accessToken,
         refreshToken: s.refreshToken,
+        identityToken: s.identityToken,
+        identityRefreshToken: s.identityRefreshToken,
+        identity: s.identity,
         user: s.user,
         stationUser: s.stationUser,
         tenantSlug: s.tenantSlug,

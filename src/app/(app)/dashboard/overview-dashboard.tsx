@@ -202,36 +202,7 @@ export function OverviewDashboard({ embed = false }: { embed?: boolean }) {
             )}
           </div>
         </header>
-      ) : (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-[#5a6b7d]">
-            Welcome back{greetName ? `, ${greetName}` : ""}
-            {productName ? ` · ${productName}` : ""}
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <Button asChild size="sm" variant="secondary">
-              <Link href="/catalog">
-                <Package className="h-4 w-4" />
-                Products
-              </Link>
-            </Button>
-            <Button asChild size="sm" variant="secondary">
-              <Link href="/reports">
-                <Download className="h-4 w-4" />
-                Reports
-              </Link>
-            </Button>
-            {hasSale ? (
-              <Button asChild size="sm">
-                <Link href="/counter">
-                  <CreditCard className="h-4 w-4" />
-                  Counter
-                </Link>
-              </Button>
-            ) : null}
-          </div>
-        </div>
-      )}
+      ) : null}
 
       {hasSale && products === 0 ? (
         <section className="flex flex-wrap items-center justify-between gap-3 rounded-[14px] border border-[#bfd0f5] bg-[#eef4ff] px-4 py-3.5">

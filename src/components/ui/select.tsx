@@ -3,21 +3,24 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
-export type SelectProps = React.SelectHTMLAttributes<HTMLSelectElement>;
+export type SelectProps = React.SelectHTMLAttributes<HTMLSelectElement> & {
+  /** Width / shrink styles for the wrapper (select stays fluid inside). */
+  wrapperClassName?: string;
+};
 
 /**
  * Native select matched to Input — clean white field, subtle chevron.
  */
 export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
-  ({ className, children, ...props }, ref) => (
-    <div className="relative w-full">
+  ({ className, wrapperClassName, children, ...props }, ref) => (
+    <div className={cn("relative min-w-0", wrapperClassName ?? "w-full")}>
       <select
         ref={ref}
         className={cn(
           [
-            "flex h-10 w-full appearance-none rounded-lg",
+            "flex h-9 w-full appearance-none rounded-md",
             "border border-[#d9e0ea] bg-white",
-            "px-3 pr-9 text-[0.875rem] text-[#0b1f33]",
+            "px-3 pr-8 text-[0.8125rem] text-[#0b1f33]",
             "outline-none transition-[border-color,box-shadow] duration-150",
             "hover:border-[#c5d0e0]",
             "focus:border-[#1a56db]",

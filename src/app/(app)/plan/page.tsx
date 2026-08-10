@@ -1,15 +1,16 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Check,
   CreditCard,
   FileText,
+  Loader2,
   Rocket,
 } from "lucide-react";
-import { platformBillingApi } from "@/lib/api";
+import { paymentsApi, platformBillingApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
 import { cn, formatInr } from "@/lib/utils";
@@ -22,6 +23,17 @@ type PlanRow = {
   priceAmount?: string | number;
   limits?: Record<string, unknown> | null;
   features?: Record<string, unknown> | null;
+};
+
+type InvoiceRow = {
+  id: string;
+  sessionId: string | null;
+  createdAt: string;
+  planCode: string | null;
+  planName: string | null;
+  amount: number | string | null;
+  currency: string;
+  via: string;
 };
 
 function limitNumber(
@@ -37,6 +49,11 @@ function limitNumber(
     }
   }
   return null;
+}
+
+function planAmount(plan: PlanRow): number {
+  const n = Number(plan.priceInr ?? plan.priceAmount ?? 0);
+  return Number.isFinite(n) ? n : 0;
 }
 
 function planDescription(plan: PlanRow): string {
@@ -75,17 +92,13 @@ function planHighlights(plan: PlanRow): string[] {
   const code = plan.code.toLowerCase();
   if (code.includes("pro")) {
     return [
-      "Up to 10 staff seats",
-      "Unlimited locations",
+      "Up to 50 staff seats",
+      "Up to 10 locations",
       "Advanced analytics & export",
-      "Priority support 24/7",
+      "Priority support",
     ];
   }
-  return [
-    "Up to 2 staff seats",
-    "Up to 2 locations",
-    "Basic reporting",
-  ];
+  return ["Up to 10 staff seats", "Up to 2 locations", "Basic reporting"];
 }
 
 function UsageBar({
@@ -121,8 +134,20 @@ function UsageBar({
   );
 }
 
+function returnUrls() {
+  const origin = window.location.origin;
+  return {
+    successUrl: `${origin}/plan?checkout=success`,
+    cancelUrl: `${origin}/plan?checkout=cancel`,
+  };
+}
+
 export default function PlanPage() {
   const qc = useQueryClient();
+  const confirmedSession = useRef<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [payingPlanId, setPayingPlanId] = useState<string | null>(null);
+
   const plans = useQuery({
     queryKey: ["plans"],
     queryFn: () => platformBillingApi.listPlans(),
@@ -131,20 +156,114 @@ export default function PlanPage() {
     queryKey: ["subscription"],
     queryFn: () => platformBillingApi.subscription(),
   });
+  const stripeConfig = useQuery({
+    queryKey: ["stripe-config"],
+    queryFn: () => paymentsApi.stripeConfig(),
+  });
+  const invoices = useQuery({
+    queryKey: ["platform-invoices"],
+    queryFn: () => platformBillingApi.listInvoices(),
+    enabled: historyOpen,
+  });
 
-  const subscribe = useMutation({
-    mutationFn: (planId: string) => platformBillingApi.subscribe(planId),
-    onSuccess: () => {
-      toast.success("Plan updated");
+  const confirmCheckout = useMutation({
+    mutationFn: (sessionId: string) =>
+      platformBillingApi.confirmCheckout(sessionId),
+    onSuccess: (data) => {
+      toast.success(
+        data.alreadyApplied
+          ? "Payment already applied — plan is active"
+          : "Payment successful — plan activated",
+      );
       void qc.invalidateQueries({ queryKey: ["subscription"] });
       void qc.invalidateQueries({ queryKey: ["bootstrap"] });
       void qc.invalidateQueries({ queryKey: ["tenant-bootstrap"] });
+      void qc.invalidateQueries({ queryKey: ["platform-invoices"] });
+      const url = new URL(window.location.href);
+      url.searchParams.delete("checkout");
+      url.searchParams.delete("session_id");
+      window.history.replaceState({}, "", url.pathname + url.search);
     },
     onError: (e) =>
-      toast.error(e instanceof ApiError ? e.messages.join(", ") : "Failed"),
+      toast.error(
+        e instanceof ApiError
+          ? e.messages.join(", ")
+          : "Could not confirm payment",
+      ),
+  });
+
+  // After Stripe Hosted Checkout redirect
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const flag = params.get("checkout");
+    const sessionId = params.get("session_id");
+
+    if (flag === "cancel") {
+      toast.message("Checkout cancelled", {
+        description: "No charge was made. You can try again when ready.",
+      });
+      const url = new URL(window.location.href);
+      url.searchParams.delete("checkout");
+      window.history.replaceState({}, "", url.pathname + url.search);
+      return;
+    }
+
+    if (flag === "success" && sessionId) {
+      if (confirmedSession.current === sessionId) return;
+      confirmedSession.current = sessionId;
+      confirmCheckout.mutate(sessionId);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const checkout = useMutation({
+    mutationFn: async (planId: string) => {
+      setPayingPlanId(planId);
+      const { successUrl, cancelUrl } = returnUrls();
+      return platformBillingApi.createCheckout({
+        planId,
+        successUrl,
+        cancelUrl,
+      });
+    },
+    onSuccess: (data) => {
+      if (data.free) {
+        toast.success("Plan activated");
+        void qc.invalidateQueries({ queryKey: ["subscription"] });
+        void qc.invalidateQueries({ queryKey: ["bootstrap"] });
+        setPayingPlanId(null);
+        return;
+      }
+      if (data.url) {
+        toast.message("Redirecting to secure payment…");
+        window.location.assign(data.url);
+        return;
+      }
+      toast.error("Payment session could not be started");
+      setPayingPlanId(null);
+    },
+    onError: (e) => {
+      setPayingPlanId(null);
+      toast.error(
+        e instanceof ApiError ? e.messages.join(", ") : "Checkout failed",
+      );
+    },
+  });
+
+  const cancel = useMutation({
+    mutationFn: () => platformBillingApi.cancel(),
+    onSuccess: () => {
+      toast.success("Subscription cancelled");
+      void qc.invalidateQueries({ queryKey: ["subscription"] });
+    },
+    onError: (e) =>
+      toast.error(
+        e instanceof ApiError ? e.messages.join(", ") : "Cancel failed",
+      ),
   });
 
   const planList = (plans.data ?? []) as PlanRow[];
+  const stripeOn = Boolean(stripeConfig.data?.enabled);
 
   const currentPlan = useMemo(() => {
     if (!sub.data?.plan) return undefined;
@@ -176,27 +295,53 @@ export default function PlanPage() {
     p.code.toLowerCase().includes("pro"),
   )?.code;
 
-  const nextInvoiceDate = useMemo(() => {
+  const periodLabel = useMemo(() => {
+    if (sub.data?.currentPeriodEnd) {
+      return new Date(sub.data.currentPeriodEnd).toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+    }
     const d = new Date();
     d.setMonth(d.getMonth() + 1);
-    d.setDate(1);
     return d.toLocaleDateString(undefined, {
       month: "short",
       day: "numeric",
       year: "numeric",
     });
-  }, []);
+  }, [sub.data?.currentPeriodEnd]);
+
+  const busy =
+    checkout.isPending ||
+    confirmCheckout.isPending ||
+    cancel.isPending;
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       <header>
         <h1 className="text-2xl font-bold tracking-tight text-[#0b1f33] sm:text-[1.75rem]">
-          Manage your subscription
+          Your Universal POS software plan
         </h1>
         <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-[#5a6b7d]">
-          Scale your plan as your business grows. View your current usage and
-          explore options to unlock more features.
+          This is what you pay so your shop can use Universal POS — not the
+          membership plans you sell to your customers. Card payment via Stripe;
+          the plan activates only after payment succeeds.
         </p>
+        {!stripeOn && stripeConfig.isFetched ? (
+          <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            Stripe is not configured on the server. Paid upgrades will not work
+            until{" "}
+            <code className="text-xs">STRIPE_SECRET_KEY</code> and{" "}
+            <code className="text-xs">STRIPE_PUBLISHABLE_KEY</code> are set.
+          </p>
+        ) : null}
+        {confirmCheckout.isPending ? (
+          <p className="mt-2 inline-flex items-center gap-2 text-sm text-[#1a56db]">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Confirming payment with Stripe…
+          </p>
+        ) : null}
       </header>
 
       {/* Current plan + usage */}
@@ -211,16 +356,21 @@ export default function PlanPage() {
               <h2 className="text-[0.9375rem] font-semibold text-[#0b1f33]">
                 {sub.data?.plan?.name ?? "No plan"} Plan
               </h2>
-              {sub.data ? (
+              {sub.data && sub.data.status === "active" ? (
                 <span className="rounded-full bg-[#ecfdf5] px-2 py-0.5 text-[0.65rem] font-semibold tracking-wide text-[#166534] uppercase">
                   Active
+                </span>
+              ) : sub.data?.status === "cancelled" ? (
+                <span className="rounded-full bg-[#fef2f2] px-2 py-0.5 text-[0.65rem] font-semibold tracking-wide text-[#991b1b] uppercase">
+                  Cancelled
                 </span>
               ) : null}
             </div>
             <p className="mt-0.5 text-sm text-[#5a6b7d]">
               {currentPrice != null ? (
                 <>
-                  {formatInr(currentPrice)} / month, billed monthly
+                  {formatInr(currentPrice)} / month · current period ends{" "}
+                  {periodLabel}
                 </>
               ) : (
                 "Select a plan below to get started"
@@ -242,11 +392,16 @@ export default function PlanPage() {
             variant="secondary"
             size="sm"
             className="shrink-0"
-            onClick={() =>
-              toast.message("Cancel plan", {
-                description: "Contact support to cancel your subscription.",
-              })
-            }
+            disabled={busy || !sub.data || sub.data.status === "cancelled"}
+            onClick={() => {
+              if (
+                window.confirm(
+                  "Cancel this subscription? You can resubscribe later by paying again.",
+                )
+              ) {
+                cancel.mutate();
+              }
+            }}
           >
             Cancel plan
           </Button>
@@ -270,10 +425,13 @@ export default function PlanPage() {
                 currentPlan?.id === p.id ||
                 sub.data?.plan?.code === p.code ||
                 sub.data?.plan?.name === p.name;
-              const price = p.priceInr ?? p.priceAmount;
+              const price = planAmount(p);
               const highlights = planHighlights(p);
               const recommended =
-                !active && recommendedCode != null && p.code === recommendedCode;
+                !active &&
+                recommendedCode != null &&
+                p.code === recommendedCode;
+              const isPaying = payingPlanId === p.id && checkout.isPending;
 
               return (
                 <article
@@ -329,20 +487,26 @@ export default function PlanPage() {
                     type="button"
                     className="mt-6 w-full"
                     variant={active ? "secondary" : "default"}
-                    disabled={subscribe.isPending || active}
-                    onClick={() => subscribe.mutate(p.id)}
+                    disabled={busy || active || (price > 0 && !stripeOn)}
+                    onClick={() => checkout.mutate(p.id)}
                   >
                     {active
                       ? "Current plan"
-                      : subscribe.isPending
-                        ? "Updating…"
-                        : `Upgrade to ${p.name}`}
+                      : isPaying
+                        ? "Opening Stripe…"
+                        : price > 0
+                          ? `Pay ${formatInr(price)} · ${p.name}`
+                          : `Activate ${p.name}`}
                   </Button>
+                  {!active && price > 0 ? (
+                    <p className="mt-2 text-center text-[0.7rem] text-[#8b9aab]">
+                      Secure card payment · powered by Stripe
+                    </p>
+                  ) : null}
                 </article>
               );
             })}
 
-            {/* Enterprise — contact sales (not in seed plans) */}
             <article className="relative flex flex-col rounded-xl border border-[#d9e0ea] bg-white p-5">
               <h3 className="text-lg font-bold text-[#0b1f33]">Enterprise</h3>
               <p className="mt-1 text-sm leading-snug text-[#5a6b7d]">
@@ -376,11 +540,10 @@ export default function PlanPage() {
                 type="button"
                 variant="secondary"
                 className="mt-6 w-full"
-                onClick={() =>
-                  toast.message("Contact sales", {
-                    description: "Email sales@universalpos.com for Enterprise.",
-                  })
-                }
+                onClick={() => {
+                  window.location.href =
+                    "mailto:sales@walit.in?subject=Universal%20POS%20Enterprise";
+                }}
               >
                 Contact sales
               </Button>
@@ -390,48 +553,84 @@ export default function PlanPage() {
       </section>
 
       {/* Billing footer */}
-      <section className="flex flex-wrap items-center justify-between gap-4 border-t border-[#d9e0ea] pt-5">
-        <div>
-          <h2 className="text-[0.9375rem] font-semibold text-[#0b1f33]">
-            Billing & invoices
-          </h2>
-          <p className="mt-0.5 text-sm text-[#5a6b7d]">
-            {currentPrice != null ? (
-              <>
-                Next invoice for {formatInr(currentPrice)} will be issued on{" "}
-                {nextInvoiceDate}.
-              </>
+      <section className="space-y-4 border-t border-[#d9e0ea] pt-5">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h2 className="text-[0.9375rem] font-semibold text-[#0b1f33]">
+              Billing & invoices
+            </h2>
+            <p className="mt-0.5 text-sm text-[#5a6b7d]">
+              {currentPrice != null && sub.data?.status === "active" ? (
+                <>
+                  Current period through {periodLabel}. Renew by paying again
+                  before the period ends (auto-renew via webhooks can be added
+                  next).
+                </>
+              ) : (
+                "No active billing cycle — choose a plan and complete payment."
+              )}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-4 text-sm font-medium text-[#1a56db]">
+            <span className="inline-flex items-center gap-1.5 text-[#5a6b7d]">
+              <CreditCard className="h-4 w-4" strokeWidth={1.75} />
+              Card on Stripe Checkout
+            </span>
+            <button
+              type="button"
+              className="inline-flex items-center gap-1.5 hover:underline"
+              onClick={() => setHistoryOpen((v) => !v)}
+            >
+              <FileText className="h-4 w-4" strokeWidth={1.75} />
+              {historyOpen ? "Hide history" : "View history"}
+            </button>
+          </div>
+        </div>
+
+        {historyOpen ? (
+          <div className="overflow-hidden rounded-xl border border-[#d9e0ea] bg-white">
+            {invoices.isLoading ? (
+              <p className="px-4 py-8 text-center text-sm text-[#5a6b7d]">
+                Loading payments…
+              </p>
+            ) : !(invoices.data as InvoiceRow[] | undefined)?.length ? (
+              <p className="px-4 py-8 text-center text-sm text-[#5a6b7d]">
+                No paid invoices yet. Complete a plan payment to see history.
+              </p>
             ) : (
-              "No billing cycle yet — select a plan to start."
+              <table className="w-full text-left text-sm">
+                <thead className="border-b border-[#eef2f7] bg-[#f8fafc] text-[0.7rem] font-semibold tracking-wide text-[#5a6b7d] uppercase">
+                  <tr>
+                    <th className="px-4 py-2.5">Date</th>
+                    <th className="px-4 py-2.5">Plan</th>
+                    <th className="px-4 py-2.5 text-right">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(invoices.data as InvoiceRow[]).map((row) => (
+                    <tr
+                      key={row.id}
+                      className="border-b border-[#eef2f7] last:border-0"
+                    >
+                      <td className="px-4 py-2.5 text-[#5a6b7d]">
+                        {new Date(row.createdAt).toLocaleString()}
+                      </td>
+                      <td className="px-4 py-2.5 text-[#0b1f33]">
+                        {row.planName ?? row.planCode ?? "—"}
+                        <span className="ml-1.5 text-[0.7rem] text-[#8b9aab]">
+                          {row.via}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5 text-right font-medium tabular-nums text-[#0b1f33]">
+                        {formatInr(row.amount)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-4 text-sm font-medium text-[#1a56db]">
-          <button
-            type="button"
-            className="inline-flex items-center gap-1.5 hover:underline"
-            onClick={() =>
-              toast.message("Payment methods", {
-                description: "Card on file can be wired with Stripe later.",
-              })
-            }
-          >
-            <CreditCard className="h-4 w-4" strokeWidth={1.75} />
-            Payment methods
-          </button>
-          <button
-            type="button"
-            className="inline-flex items-center gap-1.5 hover:underline"
-            onClick={() =>
-              toast.message("Invoice history", {
-                description: "No invoices to show yet.",
-              })
-            }
-          >
-            <FileText className="h-4 w-4" strokeWidth={1.75} />
-            View history
-          </button>
-        </div>
+          </div>
+        ) : null}
       </section>
     </div>
   );

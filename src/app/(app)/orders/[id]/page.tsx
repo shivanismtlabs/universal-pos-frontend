@@ -43,6 +43,7 @@ import { canFinance, canRefund } from "@/lib/roles";
 import { useState } from "react";
 import { ModeBadge } from "@/components/mode-badge";
 import { PageBreadcrumb, PageSkeleton } from "@/components/page-header";
+import { ReceiptModal, type ReceiptData } from "@/components/receipt-modal";
 
 export default function OrderDetailPage() {
   const params = useParams<{ id: string }>();
@@ -57,6 +58,7 @@ export default function OrderDetailPage() {
   const [feeAmt, setFeeAmt] = useState("");
   const [extendDate, setExtendDate] = useState("");
   const [extendPay, setExtendPay] = useState(true);
+  const [receiptOpen, setReceiptOpen] = useState(false);
 
   const order = useQuery({
     queryKey: ["order", id],
@@ -94,6 +96,12 @@ export default function OrderDetailPage() {
   const tenant = useQuery({
     queryKey: ["tenant-me"],
     queryFn: () => tenantsApi.me(),
+  });
+
+  const receiptQ = useQuery({
+    queryKey: ["order-receipt", id],
+    queryFn: () => posApi.receipt(id),
+    enabled: Boolean(id) && receiptOpen,
   });
 
   const form = useForm<AddOrderItemInput>({
@@ -364,13 +372,23 @@ export default function OrderDetailPage() {
               : data.status.replaceAll("_", " ")}
           </p>
         </div>
-        <div className="text-right">
-          <p className="text-caption font-medium tracking-wide text-[var(--muted)] uppercase">
-            Balance
-          </p>
-          <p className="text-2xl font-semibold tabular-nums">
-            {formatInr(data.balanceDue)}
-          </p>
+        <div className="flex flex-wrap items-start gap-3">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => setReceiptOpen(true)}
+          >
+            Print receipt
+          </Button>
+          <div className="text-right">
+            <p className="text-caption font-medium tracking-wide text-[var(--muted)] uppercase">
+              Balance
+            </p>
+            <p className="text-2xl font-semibold tabular-nums">
+              {formatInr(data.balanceDue)}
+            </p>
+          </div>
         </div>
       </header>
 
@@ -805,6 +823,16 @@ export default function OrderDetailPage() {
           <p className="py-4 text-sm text-[#6b7280]">No payments</p>
         ) : null}
       </section>
+
+      {receiptOpen ? (
+        <ReceiptModal
+          data={(receiptQ.data as ReceiptData | undefined) ?? null}
+          loading={receiptQ.isLoading}
+          change={receiptQ.data?.change}
+          cashTendered={receiptQ.data?.cashTendered}
+          onClose={() => setReceiptOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

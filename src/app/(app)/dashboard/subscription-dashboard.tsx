@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { inventoryApi, subscriptionsApi } from "@/lib/api";
+import { inventoryApi, posApi, subscriptionsApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useBootstrap } from "@/lib/bootstrap";
 import { newIdempotencyKey } from "@/lib/utils";
@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { CustomerPicker } from "@/components/customer-picker";
+import { ReceiptModal, type ReceiptData } from "@/components/receipt-modal";
 import { canWriteCatalog } from "@/lib/roles";
 import { useAuthStore } from "@/lib/auth-store";
 
@@ -33,6 +34,13 @@ export function SubscriptionDashboard() {
   const roles = useAuthStore((s) => s.user?.roles);
   const canWrite = canWriteCatalog(roles);
   const [tab, setTab] = useState<Tab>("plans");
+  const [receiptOrderId, setReceiptOrderId] = useState<string | null>(null);
+
+  const receiptQ = useQuery({
+    queryKey: ["order-receipt", receiptOrderId],
+    queryFn: () => posApi.receipt(receiptOrderId!),
+    enabled: Boolean(receiptOrderId),
+  });
 
   const [planForm, setPlanForm] = useState({
     title: "",
@@ -132,6 +140,7 @@ export function SubscriptionDashboard() {
       void qc.invalidateQueries({ queryKey: ["subscriptions-members"] });
       void qc.invalidateQueries({ queryKey: ["subscriptions-summary"] });
       void qc.invalidateQueries({ queryKey: ["subscriptions-plans"] });
+      setReceiptOrderId(r.order.id);
       setTab("members");
     },
     onError: (e) => toast.error(errMsg(e)),
@@ -143,10 +152,12 @@ export function SubscriptionDashboard() {
         paymentMethod: "cash",
         idempotencyKey: newIdempotencyKey("sub-renew"),
       }),
-    onSuccess: () => {
+    onSuccess: (r) => {
       toast.success("Membership renewed");
       void qc.invalidateQueries({ queryKey: ["subscriptions-members"] });
       void qc.invalidateQueries({ queryKey: ["subscriptions-summary"] });
+      const orderId = (r as { order?: { id?: string } })?.order?.id;
+      if (orderId) setReceiptOrderId(orderId);
     },
     onError: (e) => toast.error(errMsg(e)),
   });
@@ -496,6 +507,16 @@ export function SubscriptionDashboard() {
             ) : null}
           </ul>
         </section>
+      ) : null}
+
+      {receiptOrderId ? (
+        <ReceiptModal
+          data={(receiptQ.data as ReceiptData | undefined) ?? null}
+          loading={receiptQ.isLoading}
+          change={receiptQ.data?.change}
+          cashTendered={receiptQ.data?.cashTendered}
+          onClose={() => setReceiptOrderId(null)}
+        />
       ) : null}
     </div>
   );

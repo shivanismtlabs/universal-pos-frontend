@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { inventoryApi, servicesCommerceApi } from "@/lib/api";
+import { inventoryApi, posApi, servicesCommerceApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useBootstrap } from "@/lib/bootstrap";
 import { newIdempotencyKey } from "@/lib/utils";
@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { CustomerPicker } from "@/components/customer-picker";
+import { ReceiptModal, type ReceiptData } from "@/components/receipt-modal";
 import { canWriteCatalog } from "@/lib/roles";
 import { useAuthStore } from "@/lib/auth-store";
 
@@ -47,6 +48,13 @@ export function ServiceDashboard() {
   const [billCustomerId, setBillCustomerId] = useState("");
   const [billServiceId, setBillServiceId] = useState("");
   const [payMethod, setPayMethod] = useState<"cash" | "card" | "upi">("cash");
+  const [receiptOrderId, setReceiptOrderId] = useState<string | null>(null);
+
+  const receiptQ = useQuery({
+    queryKey: ["order-receipt", receiptOrderId],
+    queryFn: () => posApi.receipt(receiptOrderId!),
+    enabled: Boolean(receiptOrderId),
+  });
 
   const summary = useQuery({
     queryKey: ["services-summary"],
@@ -119,6 +127,7 @@ export function ServiceDashboard() {
       toast.success(
         `Charged ${r.order.orderNumber} · ${money(r.payment.amount)}`,
       );
+      setReceiptOrderId(r.order.id);
     },
     onError: (e) => toast.error(errMsg(e)),
   });
@@ -375,6 +384,16 @@ export function ServiceDashboard() {
             </Button>
           </div>
         </section>
+      ) : null}
+
+      {receiptOrderId ? (
+        <ReceiptModal
+          data={(receiptQ.data as ReceiptData | undefined) ?? null}
+          loading={receiptQ.isLoading}
+          change={receiptQ.data?.change}
+          cashTendered={receiptQ.data?.cashTendered}
+          onClose={() => setReceiptOrderId(null)}
+        />
       ) : null}
     </div>
   );

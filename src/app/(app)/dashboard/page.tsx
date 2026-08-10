@@ -1,27 +1,27 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useBootstrap } from "@/lib/bootstrap";
-import { cn } from "@/lib/utils";
 import { EmptyState, PageSkeleton } from "@/components/page-header";
+import { HomeDashboard } from "@/components/home-dashboard";
+import { HomeGettingStarted } from "@/components/home-getting-started";
 import { OverviewDashboard } from "./overview-dashboard";
 import { SaleDashboard } from "./sale-dashboard";
 import { RentalDashboard } from "./rental-dashboard";
 import { SubscriptionDashboard } from "./subscription-dashboard";
 import { ServiceDashboard } from "./service-dashboard";
+import { cn } from "@/lib/utils";
 
-type View = "overview" | "sale" | "rent" | "service" | "subscription";
+type HomeTab = "dashboard" | "getting-started" | "floors";
+type FloorView = "sale" | "rent" | "service" | "subscription";
 
 /**
- * Dashboard — Overview first, then mode floors. Single page header + tabs.
+ * Home after login — Zoho-style Dashboard / Getting Started, plus mode floors.
  */
 export default function DashboardPage() {
-  const { isLoading, hasMode, productName } = useBootstrap();
-  const [view, setView] = useState<View>("overview");
-
-  if (isLoading) {
-    return <PageSkeleton rows={6} />;
-  }
+  const { isLoading, hasMode } = useBootstrap();
+  const [homeTab, setHomeTab] = useState<HomeTab>("getting-started");
+  const [floor, setFloor] = useState<FloorView>("sale");
 
   const hasSale = hasMode("sale");
   const hasRent = hasMode("rental");
@@ -29,67 +29,135 @@ export default function DashboardPage() {
   const hasSub = hasMode("subscription");
   const hasAnyMode = hasSale || hasRent || hasService || hasSub;
 
+  useEffect(() => {
+    try {
+      const seen = localStorage.getItem("upos-home-setup-seen");
+      if (seen === "1") setHomeTab("dashboard");
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (homeTab !== "getting-started") {
+      try {
+        localStorage.setItem("upos-home-setup-seen", "1");
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [homeTab]);
+
+  if (isLoading) {
+    return <PageSkeleton rows={6} />;
+  }
+
   if (!hasAnyMode) {
     return (
       <EmptyState
         title="Complete shop setup"
-        detail="Select the commerce modes your shop uses so the correct counters and catalogs are available."
+        detail="Select the commerce modes your shop uses so the correct counters and product catalogues are available."
       />
     );
   }
 
-  const tabs: Array<{ id: View; label: string; show: boolean }> = [
-    { id: "overview", label: "Overview", show: true },
-    { id: "sale", label: "Catalog & sell", show: hasSale },
-    { id: "rent", label: "Rental floor", show: hasRent },
-    { id: "service", label: "Services", show: hasService },
-    { id: "subscription", label: "Memberships", show: hasSub },
-  ];
+  const showFloors =
+    [hasSale, hasRent, hasService, hasSub].filter(Boolean).length > 0;
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="page-title">{productName || "Dashboard"}</h1>
-          <p className="page-subtitle mt-1">
-            Sales performance, inventory status, and quick actions for your shop.
-          </p>
-        </div>
-
+      {/* Zoho top tabs */}
+      <div className="border-b border-[#d9e0ea]">
         <div
           role="tablist"
-          aria-label="Dashboard views"
-          className="inline-flex w-full max-w-full flex-wrap gap-0.5 rounded-xl border border-[#d9e0ea] bg-[#eef2f7] p-1 sm:w-auto"
+          aria-label="Home"
+          className="flex flex-wrap gap-0"
         >
-          {tabs
-            .filter((t) => t.show)
-            .map((t) => (
+          {(
+            [
+              { id: "dashboard" as const, label: "Dashboard" },
+              { id: "getting-started" as const, label: "Getting Started" },
+              ...(showFloors
+                ? [{ id: "floors" as const, label: "Shop floors" }]
+                : []),
+            ] as const
+          ).map((t) => {
+            const active = homeTab === t.id;
+            return (
               <button
                 key={t.id}
                 type="button"
                 role="tab"
-                aria-selected={view === t.id}
-                onClick={() => setView(t.id)}
+                aria-selected={active}
+                onClick={() => setHomeTab(t.id)}
                 className={cn(
-                  "min-h-10 flex-1 rounded-lg px-3 py-2 text-[0.8125rem] font-semibold whitespace-nowrap transition sm:flex-none",
-                  view === t.id
-                    ? "bg-white text-[#1a56db] shadow-sm"
-                    : "text-[#5a6b7d] hover:text-[#0b1f33]",
+                  "-mb-px border-b-2 px-1 pb-2.5 pt-1 text-[0.9rem] font-medium transition sm:mr-6 sm:px-0",
+                  active
+                    ? "border-[#1a56db] font-semibold text-[#1a56db]"
+                    : "border-transparent text-[#5a6b7d] hover:text-[#0b1f33]",
                 )}
               >
                 {t.label}
               </button>
-            ))}
+            );
+          })}
         </div>
       </div>
 
-      <div className="min-w-0">
-        {view === "overview" ? <OverviewDashboard embed /> : null}
-        {view === "sale" ? <SaleDashboard embed /> : null}
-        {view === "rent" ? <RentalDashboard /> : null}
-        {view === "service" ? <ServiceDashboard /> : null}
-        {view === "subscription" ? <SubscriptionDashboard /> : null}
-      </div>
+      {homeTab === "dashboard" ? (
+        <div className="space-y-6">
+          <HomeDashboard />
+          {/* Detailed KPIs under Zoho-style invoice summary */}
+          <OverviewDashboard embed />
+        </div>
+      ) : null}
+
+      {homeTab === "getting-started" ? <HomeGettingStarted /> : null}
+
+      {homeTab === "floors" ? (
+        <div className="space-y-4">
+          <div className="flex flex-wrap gap-1.5">
+            {(
+              [
+                { id: "sale" as const, label: "Catalog & sell", show: hasSale },
+                { id: "rent" as const, label: "Rental floor", show: hasRent },
+                {
+                  id: "service" as const,
+                  label: "Services",
+                  show: hasService,
+                },
+                {
+                  id: "subscription" as const,
+                  label: "Memberships",
+                  show: hasSub,
+                },
+              ] as const
+            )
+              .filter((t) => t.show)
+              .map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setFloor(t.id)}
+                  className={cn(
+                    "rounded-full px-3.5 py-1.5 text-[0.8rem] font-semibold transition",
+                    floor === t.id
+                      ? "bg-[#1a56db] text-white"
+                      : "bg-white text-[#5a6b7d] ring-1 ring-[#d9e0ea]",
+                  )}
+                >
+                  {t.label}
+                </button>
+              ))}
+          </div>
+          {floor === "sale" && hasSale ? <SaleDashboard embed /> : null}
+          {floor === "rent" && hasRent ? <RentalDashboard /> : null}
+          {floor === "service" && hasService ? <ServiceDashboard /> : null}
+          {floor === "subscription" && hasSub ? (
+            <SubscriptionDashboard />
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -10,6 +10,10 @@ function stationToken() {
   return useAuthStore.getState().stationToken;
 }
 
+function identityToken() {
+  return useAuthStore.getState().identityToken;
+}
+
 type AuthUserPayload = {
   id: string;
   email: string;
@@ -20,19 +24,89 @@ type AuthUserPayload = {
   pinSet?: boolean;
 };
 
+export type PortalSessionResponse = {
+  stage?: "select_org" | "app";
+  requiresOrganizationSelection?: boolean;
+  identity?: {
+    id: string;
+    email: string;
+    fullName: string;
+    phone?: string | null;
+  };
+  organizations?: Array<{
+    tenantId: string;
+    name: string;
+    slug: string;
+    currencyCode: string;
+    role?: string;
+  }>;
+  identityToken?: string | null;
+  identityRefreshToken?: string | null;
+  user?: AuthUserPayload;
+  tenant?: { id: string; slug: string; name: string };
+  accessToken?: string | null;
+  stationToken?: string | null;
+  refreshToken?: string | null;
+};
+
 export const authApi = {
   login(body: {
     email: string;
     password: string;
     tenantSlug?: string;
   }) {
+    return apiRequest<PortalSessionResponse>("/auth/login", {
+      method: "POST",
+      body,
+    });
+  },
+
+  forgotPassword(body: { email: string }) {
     return apiRequest<{
-      user: AuthUserPayload;
-      tenant?: { id: string; slug: string; name: string };
-      accessToken: string;
-      stationToken: string;
-      refreshToken: string;
-    }>("/auth/login", { method: "POST", body });
+      ok: boolean;
+      message: string;
+      maskedEmail?: string;
+      devCode?: string;
+    }>("/auth/password/forgot", { method: "POST", body });
+  },
+
+  resetPassword(body: {
+    email: string;
+    otp: string;
+    newPassword: string;
+  }) {
+    return apiRequest<{ ok: boolean; message: string }>(
+      "/auth/password/reset",
+      { method: "POST", body },
+    );
+  },
+
+  forgotPin(body: { userId: string }) {
+    return apiRequest<{
+      ok: boolean;
+      message: string;
+      maskedEmail?: string;
+      devCode?: string;
+    }>("/auth/pin/forgot", { method: "POST", body });
+  },
+
+  resetPinOtp(body: { userId: string; otp: string; newPin: string }) {
+    return apiRequest<{ ok: boolean; message: string }>(
+      "/auth/pin/reset-otp",
+      { method: "POST", body },
+    );
+  },
+
+  signup(body: {
+    fullName: string;
+    email: string;
+    password: string;
+    phone?: string;
+  }) {
+    return apiRequest<PortalSessionResponse>("/auth/signup", {
+      method: "POST",
+      body,
+    });
   },
 
   registerTenant(body: Record<string, unknown>) {
@@ -54,16 +128,50 @@ export const authApi = {
 
   googleAuth(body: {
     idToken: string;
-    mode: "login" | "register";
+    mode?: "login" | "register";
     tenantName?: string;
   }) {
-    return apiRequest<{
-      user: AuthUserPayload;
-      tenant?: { id: string; slug: string; name: string };
-      accessToken: string;
-      stationToken: string;
-      refreshToken: string;
-    }>("/auth/google", { method: "POST", body });
+    return apiRequest<PortalSessionResponse>("/auth/google", {
+      method: "POST",
+      body,
+    });
+  },
+
+  listOrganizations() {
+    return apiRequest<PortalSessionResponse>("/auth/organizations", {
+      token: identityToken(),
+    });
+  },
+
+  createOrganization(body: {
+    organizationName: string;
+    phone?: string;
+    addressLine1?: string;
+    city?: string;
+    state?: string;
+    postalCode?: string;
+    countryCode?: string;
+    currencyCode?: string;
+    locale?: string;
+    fiscalYearStart?: string;
+    inventoryStartDate?: string;
+    taxId?: string;
+    storeName?: string;
+    tenantSlug?: string;
+  }) {
+    return apiRequest<PortalSessionResponse>("/auth/organizations", {
+      method: "POST",
+      body,
+      token: identityToken(),
+    });
+  },
+
+  selectOrganization(tenantId: string) {
+    return apiRequest<PortalSessionResponse>("/auth/select-organization", {
+      method: "POST",
+      body: { tenantId },
+      token: identityToken(),
+    });
   },
 
   registerUser(body: {
@@ -94,6 +202,44 @@ export const authApi = {
       pinSet?: boolean;
       pinSwitchEnabled?: boolean;
     }>("/auth/me", { token: token() });
+  },
+
+  forgotPassword(email: string) {
+    return apiRequest<{
+      ok: boolean;
+      message: string;
+      maskedEmail?: string;
+      devCode?: string;
+    }>("/auth/password/forgot", {
+      method: "POST",
+      body: { email },
+    });
+  },
+
+  resetPassword(body: { email: string; otp: string; newPassword: string }) {
+    return apiRequest<{ ok: boolean; message: string }>("/auth/password/reset", {
+      method: "POST",
+      body,
+    });
+  },
+
+  forgotPin(userId: string) {
+    return apiRequest<{
+      ok: boolean;
+      message: string;
+      maskedEmail?: string;
+      devCode?: string;
+    }>("/auth/pin/forgot", {
+      method: "POST",
+      body: { userId },
+    });
+  },
+
+  resetPinOtp(body: { userId: string; otp: string; newPin: string }) {
+    return apiRequest<{ ok: boolean; message: string }>("/auth/pin/reset-otp", {
+      method: "POST",
+      body,
+    });
   },
 
   logout() {
@@ -964,12 +1110,15 @@ export const posApi = {
       }>;
     }>(`/pos/sale/floor${qs}`, { token: token() });
   },
-  addSaleCategory(body: { name: string }) {
-    return apiRequest<{ id: string; name: string }>("/pos/sale/categories", {
-      method: "POST",
-      body,
-      token: token(),
-    });
+  addSaleCategory(body: { name: string; parentId?: string }) {
+    return apiRequest<{ id: string; name: string; parentId?: string | null }>(
+      "/pos/sale/categories",
+      {
+        method: "POST",
+        body,
+        token: token(),
+      },
+    );
   },
   addSaleProduct(body: {
     title: string;
@@ -982,6 +1131,12 @@ export const posApi = {
     locationId?: string;
     image?: string;
     photoUrl?: string;
+    manufacturer?: string;
+    barcode?: string;
+    costPrice?: number;
+    reorderPoint?: number;
+    hsnOrSac?: string;
+    trackInventory?: boolean;
   }) {
     return apiRequest<{
       mode: "sale";
@@ -1012,6 +1167,40 @@ export const posApi = {
         photoUrl?: string | null;
       };
     }>("/pos/sale/products", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  /** Bulk import items (CSV rows) — Universal POS sale catalog */
+  importSaleProducts(body: {
+    items: Array<{
+      title: string;
+      sku: string;
+      categoryName?: string;
+      categoryId?: string;
+      sellUnit?: "pcs" | "pack" | "kg" | "g" | "L" | "ml";
+      price: number;
+      qty?: number;
+      description?: string;
+      manufacturer?: string;
+      barcode?: string;
+      costPrice?: number;
+      reorderPoint?: number;
+      hsnOrSac?: string;
+      trackInventory?: boolean;
+    }>;
+    locationId?: string;
+    createCategories?: boolean;
+    defaultCategoryId?: string;
+  }) {
+    return apiRequest<{
+      mode: "sale";
+      imported: number;
+      failed: number;
+      created: Array<{ sku: string; title: string; id: string }>;
+      errors: Array<{ row: number; sku?: string; message: string }>;
+    }>("/pos/sale/products/import", {
       method: "POST",
       body,
       token: token(),
@@ -1142,22 +1331,49 @@ export const posApi = {
       token: token(),
     });
   },
-  adjustSaleStock(id: string, body: { delta: number }) {
+  adjustSaleStock(id: string, body: { delta: number; reason?: string }) {
     return apiRequest<{
       id: string;
       sku: string;
       qty: number;
       sellUnit?: string;
       delta: number;
+      beforeQty?: number;
+      reason?: string | null;
     }>(`/pos/sale/products/${id}/adjust-stock`, {
       method: "POST",
       body,
       token: token(),
     });
   },
+  /** Zoho Adjustments history — qty change audit */
+  listSaleStockAdjustments(limit?: number) {
+    const qs = limit ? `?limit=${limit}` : "";
+    return apiRequest<{
+      items: Array<{
+        id: string;
+        createdAt: string;
+        stockLevelId?: string | null;
+        actorName: string;
+        productName: string;
+        sku: string;
+        beforeQty: number;
+        afterQty: number;
+        delta: number;
+        sellUnit?: string;
+        reason?: string | null;
+        locationId?: string | null;
+      }>;
+    }>(`/pos/sale/stock-adjustments${qs}`, { token: token() });
+  },
   listSaleCategories() {
     return apiRequest<
-      Array<{ id: string; name: string; productCount: number }>
+      Array<{
+        id: string;
+        name: string;
+        parentId?: string | null;
+        productCount: number;
+      }>
     >("/pos/sale/categories", { token: token() });
   },
   renameSaleCategory(id: string, body: { name: string }) {
@@ -1253,6 +1469,7 @@ export const posApi = {
     cashTendered?: number;
     note?: string;
     discountAmount?: number;
+    couponCode?: string;
   }) {
     return apiRequest<{
       order: {
@@ -1414,6 +1631,7 @@ export const posApi = {
       orderNumber: string;
       refundPaymentId: string;
       amount: string | number;
+      storeCreditBalance?: number | null;
       restocked: Array<{ stockLevelId: string; quantity: number }>;
     }>("/pos/sale/returns", { method: "POST", body, token: token() });
   },
@@ -1714,12 +1932,22 @@ type ReceiptPayload = {
   orderNumber: string;
   status: string;
   kind?: string;
-  store: { name: string; code?: string | null; address?: string | null };
+  currencyCode?: string;
+  store: {
+    name: string;
+    code?: string | null;
+    address?: string | null;
+    shopName?: string | null;
+    taxId?: string | null;
+  };
   customer: {
     fullName: string;
     phone: string;
     email?: string | null;
   } | null;
+  cashier?: string | null;
+  branding?: { productName?: string; tagline?: string };
+  receiptFooter?: string;
   items: Array<{
     itemType: string;
     description?: string | null;
@@ -1733,6 +1961,7 @@ type ReceiptPayload = {
   totals: {
     subtotal: string | number;
     taxTotal: string | number;
+    discountTotal?: string | number;
     depositTotal: string | number;
     balanceDue: string | number;
   };
@@ -1743,6 +1972,8 @@ type ReceiptPayload = {
     paidAt?: string | null;
     createdAt?: string | null;
   }>;
+  cashTendered?: string | number | null;
+  change?: string | number | null;
   printedAt: string;
 };
 
@@ -2124,13 +2355,19 @@ export const servicesCommerceApi = {
 };
 
 export const reportsApi = {
-  salesSummary(from?: string, to?: string) {
+  salesSummary(from?: string, to?: string, locationId?: string) {
     const qs = new URLSearchParams();
     if (from) qs.set("from", from);
     if (to) qs.set("to", to);
+    if (locationId) qs.set("locationId", locationId);
     const q = qs.toString();
     return apiRequest<{
       byStatus?: Array<{ status: string; count: number }>;
+      byKind?: Array<{
+        kind: string;
+        count: number;
+        subtotal: string | number;
+      }>;
       totals?: {
         subtotal?: string | number;
         taxTotal?: string | number;
@@ -2140,10 +2377,11 @@ export const reportsApi = {
       [key: string]: unknown;
     }>(`/reports/sales-summary${q ? `?${q}` : ""}`, { token: token() });
   },
-  paymentsSummary(from?: string, to?: string) {
+  paymentsSummary(from?: string, to?: string, locationId?: string) {
     const qs = new URLSearchParams();
     if (from) qs.set("from", from);
     if (to) qs.set("to", to);
+    if (locationId) qs.set("locationId", locationId);
     const q = qs.toString();
     return apiRequest<{
       byMethod?: Array<{
@@ -2154,15 +2392,24 @@ export const reportsApi = {
       [key: string]: unknown;
     }>(`/reports/payments-summary${q ? `?${q}` : ""}`, { token: token() });
   },
-  inventoryUtilization() {
+  inventoryUtilization(locationId?: string) {
+    const qs = new URLSearchParams();
+    if (locationId) qs.set("locationId", locationId);
+    const q = qs.toString();
     return apiRequest<{
       byAvailabilityStatus: Array<{
         availabilityStatus: string;
         count: number;
       }>;
-    }>("/reports/inventory-utilization", { token: token() });
+      saleStock?: { skuCount: number; qtyOnHand: string | number };
+    }>(`/reports/inventory-utilization${q ? `?${q}` : ""}`, {
+      token: token(),
+    });
   },
-  balances() {
+  balances(locationId?: string) {
+    const qs = new URLSearchParams();
+    if (locationId) qs.set("locationId", locationId);
+    const q = qs.toString();
     return apiRequest<{
       items: Array<{
         id: string;
@@ -2173,7 +2420,186 @@ export const reportsApi = {
         returnDueDate?: string | null;
         customer?: { fullName: string; phone: string };
       }>;
-    }>("/reports/balances", { token: token() });
+    }>(`/reports/balances${q ? `?${q}` : ""}`, { token: token() });
+  },
+  productVelocity(from?: string, to?: string, locationId?: string) {
+    const qs = new URLSearchParams();
+    if (from) qs.set("from", from);
+    if (to) qs.set("to", to);
+    if (locationId) qs.set("locationId", locationId);
+    const q = qs.toString();
+    return apiRequest<{
+      topMovers: Array<{
+        name: string;
+        sku: string;
+        qty: number;
+        revenue: number;
+      }>;
+      slowMovers: Array<{
+        name: string;
+        sku: string;
+        qty: number;
+        revenue: number;
+      }>;
+    }>(`/reports/product-velocity${q ? `?${q}` : ""}`, { token: token() });
+  },
+  staffSales(from?: string, to?: string, locationId?: string) {
+    const qs = new URLSearchParams();
+    if (from) qs.set("from", from);
+    if (to) qs.set("to", to);
+    if (locationId) qs.set("locationId", locationId);
+    const q = qs.toString();
+    return apiRequest<{
+      staff: Array<{
+        userId: string;
+        name: string;
+        orderCount: number;
+        subtotal: number;
+        taxTotal: number;
+      }>;
+    }>(`/reports/staff-sales${q ? `?${q}` : ""}`, { token: token() });
+  },
+  taxSummary(from?: string, to?: string, locationId?: string) {
+    const qs = new URLSearchParams();
+    if (from) qs.set("from", from);
+    if (to) qs.set("to", to);
+    if (locationId) qs.set("locationId", locationId);
+    const q = qs.toString();
+    return apiRequest<{
+      orders: {
+        count: number;
+        subtotal: string | number;
+        taxTotal: string | number;
+      };
+      invoices: {
+        count: number;
+        cgst: string | number;
+        sgst: string | number;
+        igst: string | number;
+        grandTotal: string | number;
+      };
+    }>(`/reports/tax-summary${q ? `?${q}` : ""}`, { token: token() });
+  },
+};
+
+export const expensesApi = {
+  listCategories() {
+    return apiRequest<Array<{ id: string; name: string }>>(
+      "/expenses/categories",
+      { token: token() },
+    );
+  },
+  createCategory(name: string) {
+    return apiRequest("/expenses/categories", {
+      method: "POST",
+      body: { name },
+      token: token(),
+    });
+  },
+  seedCategories() {
+    return apiRequest("/expenses/categories/seed", {
+      method: "POST",
+      token: token(),
+    });
+  },
+  list(params?: {
+    from?: string;
+    to?: string;
+    locationId?: string;
+    categoryId?: string;
+  }) {
+    const qs = new URLSearchParams();
+    if (params?.from) qs.set("from", params.from);
+    if (params?.to) qs.set("to", params.to);
+    if (params?.locationId) qs.set("locationId", params.locationId);
+    if (params?.categoryId) qs.set("categoryId", params.categoryId);
+    const q = qs.toString();
+    return apiRequest<{
+      items: Array<{
+        id: string;
+        amount: string | number;
+        spentAt: string;
+        paymentMethod: string;
+        notes?: string | null;
+        isPettyCash: boolean;
+        category?: { id: string; name: string } | null;
+        location?: { id: string; name: string } | null;
+      }>;
+      total: number;
+      count: number;
+    }>(`/expenses${q ? `?${q}` : ""}`, { token: token() });
+  },
+  create(body: {
+    amount: number;
+    spentAt: string;
+    categoryId?: string;
+    locationId?: string;
+    paymentMethod?: string;
+    notes?: string;
+    isPettyCash?: boolean;
+  }) {
+    return apiRequest("/expenses", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  remove(id: string) {
+    return apiRequest(`/expenses/${id}`, {
+      method: "DELETE",
+      token: token(),
+    });
+  },
+};
+
+export const loyaltyApi = {
+  listCoupons() {
+    return apiRequest<
+      Array<{
+        id: string;
+        code: string;
+        description?: string | null;
+        discountType: string;
+        discountValue: string | number;
+        isActive: boolean;
+        redemptionCount: number;
+        maxRedemptions?: number | null;
+      }>
+    >("/loyalty/coupons", { token: token() });
+  },
+  createCoupon(body: {
+    code: string;
+    description?: string;
+    discountType: "percent" | "fixed";
+    discountValue: number;
+    minOrderAmount?: number;
+    maxRedemptions?: number;
+  }) {
+    return apiRequest("/loyalty/coupons", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  patchCoupon(id: string, body: { isActive?: boolean; description?: string }) {
+    return apiRequest(`/loyalty/coupons/${id}`, {
+      method: "PATCH",
+      body,
+      token: token(),
+    });
+  },
+  validateCoupon(code: string, orderSubtotal: number) {
+    return apiRequest<{
+      couponId: string;
+      code: string;
+      amountOff: number;
+      discountType: string;
+      discountValue: number;
+    }>("/loyalty/coupons/validate", {
+      method: "POST",
+      body: { code, orderSubtotal },
+      token: token(),
+    });
   },
 };
 
@@ -2414,6 +2840,16 @@ export const suppliersApi = {
   create(body: { name: string; contact?: string; phone?: string }) {
     return apiRequest("/suppliers", { method: "POST", body, token: token() });
   },
+  update(
+    id: string,
+    body: { name?: string; contact?: string; phone?: string },
+  ) {
+    return apiRequest(`/suppliers/${id}`, {
+      method: "PATCH",
+      body,
+      token: token(),
+    });
+  },
   listPos() {
     return apiRequest<
       Array<{
@@ -2480,6 +2916,27 @@ export const suppliersApi = {
       token: token(),
     });
   },
+  returnPo(
+    id: string,
+    body: {
+      lines: Array<{ stockLevelId: string; qty: number }>;
+      reason?: string;
+    },
+  ) {
+    return apiRequest<{
+      purchaseOrder: { id: string; status: string };
+      returned: Array<{
+        stockLevelId: string;
+        sku: string;
+        qtyReturned: number;
+        qtyOnHand: number;
+      }>;
+    }>(`/purchase-orders/${id}/return`, {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
 };
 
 export const syncApi = {
@@ -2534,12 +2991,67 @@ export const platformBillingApi = {
       plan?: { code: string; name: string; priceInr?: string | number };
       seatsUsed?: number;
       locationsUsed?: number;
+      currentPeriodEnd?: string | null;
+      stripeEnabled?: boolean;
     } | null>("/platform-billing/subscription", { token: token() });
   },
+  /** Free plans only — paid plans must use createCheckout */
   subscribe(planId: string) {
     return apiRequest("/platform-billing/subscription", {
       method: "POST",
       body: { planId },
+      token: token(),
+    });
+  },
+  createCheckout(body: {
+    planId: string;
+    successUrl: string;
+    cancelUrl: string;
+  }) {
+    return apiRequest<{
+      free: boolean;
+      sessionId: string | null;
+      url: string | null;
+      amountInr?: number;
+      currency?: string;
+      subscription?: Record<string, unknown>;
+    }>("/platform-billing/checkout", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  confirmCheckout(sessionId: string) {
+    return apiRequest<{
+      alreadyApplied: boolean;
+      subscription: {
+        id: string;
+        status: string;
+        plan?: { code: string; name: string };
+      } | null;
+    }>("/platform-billing/checkout/confirm", {
+      method: "POST",
+      body: { sessionId },
+      token: token(),
+    });
+  },
+  listInvoices() {
+    return apiRequest<
+      Array<{
+        id: string;
+        sessionId: string | null;
+        createdAt: string;
+        planCode: string | null;
+        planName: string | null;
+        amount: number | string | null;
+        currency: string;
+        via: string;
+      }>
+    >("/platform-billing/invoices", { token: token() });
+  },
+  cancel() {
+    return apiRequest("/platform-billing/subscription/cancel", {
+      method: "POST",
       token: token(),
     });
   },

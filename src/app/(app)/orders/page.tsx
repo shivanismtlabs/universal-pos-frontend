@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { ordersApi } from "@/lib/api";
+import { ordersApi, posApi } from "@/lib/api";
 import { useBootstrap } from "@/lib/bootstrap";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -13,17 +13,26 @@ import {
   PageHeader,
   PageSkeleton,
 } from "@/components/page-header";
+import { ReceiptModal, type ReceiptData } from "@/components/receipt-modal";
 
 /**
  * All orders — read-only history. Create tickets only at the counter.
+ * Print receipt available without leaving this page.
  */
 export default function OrdersPage() {
   const { money, commerceModes } = useBootstrap();
   const [kind, setKind] = useState<string>("all");
+  const [receiptOrderId, setReceiptOrderId] = useState<string | null>(null);
 
   const orders = useQuery({
     queryKey: ["orders"],
     queryFn: () => ordersApi.list({ limit: 80 }),
+  });
+
+  const receiptQ = useQuery({
+    queryKey: ["order-receipt", receiptOrderId],
+    queryFn: () => posApi.receipt(receiptOrderId!),
+    enabled: Boolean(receiptOrderId),
   });
 
   const kinds = useMemo(() => {
@@ -89,7 +98,7 @@ export default function OrdersPage() {
         />
       ) : (
         <section className="overflow-x-auto rounded-xl border border-[var(--line)] bg-white">
-          <table className="w-full min-w-[560px] text-left text-body">
+          <table className="w-full min-w-[640px] text-left text-body">
             <thead className="border-b border-[var(--line)] text-caption font-medium tracking-wide text-[var(--muted)] uppercase">
               <tr>
                 <th className="px-4 py-3">Order</th>
@@ -97,6 +106,7 @@ export default function OrdersPage() {
                 <th className="px-4 py-3">Customer</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Balance</th>
+                <th className="px-4 py-3 text-right">Receipt</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#f0f3f7]">
@@ -120,12 +130,32 @@ export default function OrdersPage() {
                   <td className="px-4 py-3 tabular-nums">
                     {money(o.balanceDue)}
                   </td>
+                  <td className="px-4 py-3 text-right">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => setReceiptOrderId(o.id)}
+                    >
+                      Print
+                    </Button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </section>
       )}
+
+      {receiptOrderId ? (
+        <ReceiptModal
+          data={(receiptQ.data as ReceiptData | undefined) ?? null}
+          loading={receiptQ.isLoading}
+          change={receiptQ.data?.change}
+          cashTendered={receiptQ.data?.cashTendered}
+          onClose={() => setReceiptOrderId(null)}
+        />
+      ) : null}
     </div>
   );
 }

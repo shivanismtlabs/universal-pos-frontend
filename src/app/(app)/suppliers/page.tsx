@@ -20,6 +20,13 @@ export default function SuppliersPage() {
   const [lineSkuId, setLineSkuId] = useState("");
   const [lineQty, setLineQty] = useState("10");
   const [receiveQty, setReceiveQty] = useState<Record<string, string>>({});
+  const [returnQty, setReturnQty] = useState<Record<string, string>>({});
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({
+    name: "",
+    contact: "",
+    phone: "",
+  });
 
   const suppliers = useQuery({
     queryKey: ["suppliers"],
@@ -131,6 +138,45 @@ export default function SuppliersPage() {
       toast.error(e instanceof ApiError ? e.messages.join(", ") : "Receive failed"),
   });
 
+  const returnPo = useMutation({
+    mutationFn: ({
+      id,
+      lines,
+      reason,
+    }: {
+      id: string;
+      lines: Array<{ stockLevelId: string; qty: number }>;
+      reason?: string;
+    }) => suppliersApi.returnPo(id, { lines, reason }),
+    onSuccess: (res) => {
+      const n = res.returned.reduce((s, r) => s + r.qtyReturned, 0);
+      toast.success(`Returned ${n} units to supplier`);
+      void qc.invalidateQueries({ queryKey: ["purchase-orders"] });
+      void qc.invalidateQueries({ queryKey: ["pos-sale-catalog"] });
+      void qc.invalidateQueries({ queryKey: ["pos-sale-catalog-for-po"] });
+    },
+    onError: (e) =>
+      toast.error(
+        e instanceof ApiError ? e.messages.join(", ") : "Return failed",
+      ),
+  });
+
+  const updateSupplier = useMutation({
+    mutationFn: () =>
+      suppliersApi.update(editId!, {
+        name: editForm.name.trim() || undefined,
+        contact: editForm.contact.trim() || undefined,
+        phone: editForm.phone.trim() || undefined,
+      }),
+    onSuccess: () => {
+      toast.success("Supplier updated");
+      setEditId(null);
+      void qc.invalidateQueries({ queryKey: ["suppliers"] });
+    },
+    onError: (e) =>
+      toast.error(e instanceof ApiError ? e.messages.join(", ") : "Failed"),
+  });
+
   return (
     <div className="mx-auto max-w-5xl space-y-5">
       <header>
@@ -149,14 +195,78 @@ export default function SuppliersPage() {
           <h2 className="text-sm font-semibold">Suppliers</h2>
           <ul className="mt-2 max-h-48 divide-y divide-[#eef2f8] overflow-y-auto text-sm">
             {(suppliers.data ?? []).map((s) => (
-              <li key={s.id} className="py-2">
-                <p className="font-medium">{s.name}</p>
-                <p className="text-xs text-[#5a6b7d]">
-                  {[s.contact, s.phone].filter(Boolean).join(" · ") || "—"}
-                </p>
+              <li
+                key={s.id}
+                className="flex items-start justify-between gap-2 py-2"
+              >
+                <div className="min-w-0">
+                  <p className="font-medium">{s.name}</p>
+                  <p className="text-xs text-[#5a6b7d]">
+                    {[s.contact, s.phone].filter(Boolean).join(" · ") || "—"}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setEditId(s.id);
+                    setEditForm({
+                      name: s.name,
+                      contact: s.contact ?? "",
+                      phone: s.phone ?? "",
+                    });
+                  }}
+                >
+                  Edit
+                </Button>
               </li>
             ))}
           </ul>
+          {editId ? (
+            <div className="mt-3 space-y-2 rounded-xl border border-[#e8edf4] bg-[#f8fafc] p-3">
+              <p className="text-xs font-semibold text-[#0b1f33]">Edit supplier</p>
+              <Input
+                placeholder="Name"
+                value={editForm.name}
+                onChange={(e) =>
+                  setEditForm((f) => ({ ...f, name: e.target.value }))
+                }
+              />
+              <Input
+                placeholder="Contact"
+                value={editForm.contact}
+                onChange={(e) =>
+                  setEditForm((f) => ({ ...f, contact: e.target.value }))
+                }
+              />
+              <Input
+                placeholder="Phone"
+                value={editForm.phone}
+                onChange={(e) =>
+                  setEditForm((f) => ({ ...f, phone: e.target.value }))
+                }
+              />
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={updateSupplier.isPending}
+                  onClick={() => updateSupplier.mutate()}
+                >
+                  Save
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setEditId(null)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          ) : null}
           <form
             className="mt-3 space-y-2 border-t border-[#d9e0ea] pt-3"
             onSubmit={supplierForm.handleSubmit((v) =>
@@ -386,6 +496,69 @@ export default function SuppliersPage() {
                         );
                       },
                     )}
+                  </div>
+                ) : null}
+
+                {(po.lines ?? []).some((l) => l.qtyReceived > 0) && hasSale ? (
+                  <div className="rounded-xl border border-[#fde68a] bg-[#fffbeb] p-3">
+                    <p className="text-xs font-semibold text-[#0b1f33]">
+                      Purchase return (RTV)
+                    </p>
+                    {(po.lines ?? [])
+                      .filter((l) => l.qtyReceived > 0)
+                      .map((l) => {
+                        const key = `ret:${po.id}:${l.stockLevelId}`;
+                        return (
+                          <div
+                            key={key}
+                            className="mt-2 flex flex-wrap items-end gap-2"
+                          >
+                            <p className="min-w-[10rem] flex-1 text-xs">
+                              {l.stockLevel?.product?.name ?? "SKU"} ·{" "}
+                              {l.stockLevel?.sku} (recv {l.qtyReceived})
+                            </p>
+                            <Input
+                              className="w-24"
+                              type="number"
+                              min={1}
+                              max={l.qtyReceived}
+                              placeholder="Qty"
+                              value={returnQty[key] ?? ""}
+                              onChange={(e) =>
+                                setReturnQty((m) => ({
+                                  ...m,
+                                  [key]: e.target.value,
+                                }))
+                              }
+                            />
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="secondary"
+                              disabled={returnPo.isPending}
+                              onClick={() => {
+                                const qty = Math.max(
+                                  1,
+                                  Number(returnQty[key]) || 0,
+                                );
+                                if (!l.stockLevelId || !qty) {
+                                  toast.error("Enter qty to return");
+                                  return;
+                                }
+                                returnPo.mutate({
+                                  id: po.id,
+                                  lines: [
+                                    { stockLevelId: l.stockLevelId, qty },
+                                  ],
+                                  reason: "Supplier return",
+                                });
+                              }}
+                            >
+                              Return
+                            </Button>
+                          </div>
+                        );
+                      })}
                   </div>
                 ) : null}
               </li>

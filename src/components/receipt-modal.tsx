@@ -8,9 +8,16 @@ import { useBootstrapOptional } from "@/lib/bootstrap";
 import { ModeBadge } from "@/components/mode-badge";
 
 export type ReceiptData = {
-  store: { name: string; address?: string | null };
+  store: {
+    name: string;
+    address?: string | null;
+    shopName?: string | null;
+    taxId?: string | null;
+  };
   orderNumber: string;
   kind?: string | null;
+  cashier?: string | null;
+  receiptFooter?: string | null;
   customer?: { fullName: string; phone?: string | null } | null;
   items: Array<{
     itemType: string;
@@ -61,6 +68,7 @@ export function ReceiptModal({
 }) {
   const boot = useBootstrapOptional();
   const shopName =
+    data?.store?.shopName?.trim() ||
     boot?.data?.tenant?.name?.trim() ||
     boot?.productName?.trim() ||
     "Store";
@@ -74,7 +82,11 @@ export function ReceiptModal({
   const settings = boot?.data?.tenant?.settings as
     | { tax?: { receiptFooter?: string } }
     | undefined;
-  const receiptFooter = settings?.tax?.receiptFooter?.trim() || "";
+  const receiptFooter =
+    data?.receiptFooter?.trim() ||
+    settings?.tax?.receiptFooter?.trim() ||
+    "";
+  const taxId = data?.store?.taxId?.trim() || "";
 
   const paidFromPayments = (data?.payments ?? []).reduce(
     (s, p) => s + moneyNumber(p.amount),
@@ -151,6 +163,16 @@ export function ReceiptModal({
                 {data.store.address ? (
                   <p className="mx-auto mt-1.5 max-w-[260px] text-[0.78rem] leading-snug text-[#5a6b7d]">
                     {data.store.address}
+                  </p>
+                ) : null}
+                {taxId ? (
+                  <p className="mt-1 text-[0.72rem] tabular-nums text-[#5a6b7d]">
+                    Tax ID: {taxId}
+                  </p>
+                ) : null}
+                {data.cashier ? (
+                  <p className="mt-1 text-[0.72rem] text-[#5a6b7d]">
+                    Cashier: {data.cashier}
                   </p>
                 ) : null}
                 <div className="mt-3.5 flex flex-wrap items-center justify-center gap-2">

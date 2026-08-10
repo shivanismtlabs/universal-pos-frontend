@@ -39,12 +39,15 @@ export const ROUTE_ROLES: Record<string, RoleCode[]> = {
   "/reports": ["admin", "manager"],
   "/staff": ["admin", "manager"],
   "/inventory": ["admin", "manager", "inventory"],
+  "/adjustments": ["admin", "manager", "inventory"],
   "/retail": ["admin", "manager", "inventory"],
   "/catalog": ["admin", "manager", "inventory", "cashier"],
   "/products": ["admin", "manager", "inventory", "cashier"],
   "/transfers": ["admin", "manager", "inventory"],
   "/settings": ["admin", "manager"],
   "/suppliers": ["admin", "manager", "inventory"],
+  "/expenses": ["admin", "manager"],
+  "/loyalty": ["admin", "manager"],
   "/plan": ["admin"],
 };
 
@@ -72,7 +75,7 @@ export function defaultHomeForRoles(userRoles: string[] | undefined | null) {
   if (hasAnyRole(userRoles, ["admin", "manager", "cashier"])) return "/dashboard";
   if (hasAnyRole(userRoles, ["fitter"])) return "/appointments";
   // /inventory redirects away — send stock staff to the live products page
-  if (hasAnyRole(userRoles, ["inventory"])) return "/catalog";
+  if (hasAnyRole(userRoles, ["inventory"])) return "/inventory";
   return "/dashboard";
 }
 

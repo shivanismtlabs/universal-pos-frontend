@@ -20,6 +20,7 @@ import { loginSchema, type LoginInput } from "@/lib/validations";
 import { appsApi, authApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useAuthStore } from "@/lib/auth-store";
+import { applyPortalResponse } from "@/lib/auth-portal";
 
 const FAIL_KEY = "universal-pos-login-fails";
 const LOCK_MS = 60_000;
@@ -44,8 +45,8 @@ export default function LoginForm() {
   const router = useRouter();
   const search = useSearchParams();
   const qc = useQueryClient();
-  const setSession = useAuthStore((s) => s.setSession);
-  const token = useAuthStore((s) => s.accessToken);
+  const accessToken = useAuthStore((s) => s.accessToken);
+  const identityToken = useAuthStore((s) => s.identityToken);
   const [ready, setReady] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [lockUntil, setLockUntil] = useState(0);
@@ -67,8 +68,10 @@ export default function LoginForm() {
   }, []);
 
   useEffect(() => {
-    if (ready && token) router.replace("/dashboard");
-  }, [ready, token, router]);
+    if (!ready) return;
+    if (accessToken) router.replace("/dashboard");
+    else if (identityToken) router.replace("/organizations");
+  }, [ready, accessToken, identityToken, router]);
 
   const locked = lockUntil > now;
   const lockSeconds = locked
@@ -100,24 +103,39 @@ export default function LoginForm() {
     },
   });
 
+  async function finishAuth(
+    data: Awaited<ReturnType<typeof authApi.login>>,
+  ) {
+    const dest = applyPortalResponse(data);
+    writeLock(0, 0);
+    setLockUntil(0);
+    if (dest === "orgs") {
+      toast.success("Signed in — select your organization");
+      router.replace("/organizations");
+      return;
+    }
+    try {
+      const boot = await appsApi.bootstrap();
+      qc.setQueryData(["tenant-bootstrap"], boot);
+    } catch {
+      /* AppShell retries */
+    }
+    toast.success("Welcome back");
+    router.replace("/dashboard");
+  }
+
   async function onSubmit(values: LoginInput) {
     if (Date.now() < readLock().until) {
       toast.error("Too many attempts. Wait a minute and try again.");
       return;
     }
 
-    const payload = {
-      email: values.email.trim().toLowerCase(),
-      password: values.password,
-    };
-
     try {
-      const data = await authApi.login(payload);
-      writeLock(0, 0);
-      setLockUntil(0);
-      await applySession(data);
-      toast.success("Welcome back");
-      router.replace("/dashboard");
+      const data = await authApi.login({
+        email: values.email.trim().toLowerCase(),
+        password: values.password,
+      });
+      await finishAuth(data);
     } catch (e) {
       const lock = readLock();
       const fails = lock.fails + 1;
@@ -135,65 +153,23 @@ export default function LoginForm() {
     }
   }
 
-  async function applySession(data: {
-    accessToken: string;
-    stationToken?: string;
-    refreshToken: string;
-    user: {
-      id: string;
-      email: string;
-      fullName: string;
-      roles?: string[];
-      storeId?: string | null;
-      tenantId: string;
-      pinSet?: boolean;
-    };
-    tenant?: { slug?: string };
-  }) {
-    setSession({
-      accessToken: data.accessToken,
-      stationToken: data.stationToken ?? data.accessToken,
-      refreshToken: data.refreshToken,
-      user: {
-        id: data.user.id,
-        email: data.user.email,
-        fullName: data.user.fullName,
-        roles: data.user.roles ?? ["admin"],
-        storeId: data.user.storeId,
-        tenantId: data.user.tenantId,
-        pinSet: data.user.pinSet,
-      },
-      tenantSlug: data.tenant?.slug ?? "",
-    });
-    try {
-      const boot = await appsApi.bootstrap();
-      qc.setQueryData(["tenant-bootstrap"], boot);
-    } catch {
-      /* AppShell will retry */
-    }
-  }
-
   async function onGoogle(idToken: string) {
     try {
       const data = await authApi.googleAuth({ idToken, mode: "login" });
-      writeLock(0, 0);
-      setLockUntil(0);
-      await applySession(data);
-      toast.success("Welcome back");
-      router.replace("/dashboard");
+      await finishAuth(data);
     } catch (e) {
       toast.error(
         e instanceof ApiError
           ? e.messages.join(", ")
-          : "Google sign-in failed. Create a shop first, or use email.",
+          : "Google sign-in failed",
       );
     }
   }
 
   return (
     <AuthShell
-      title="Welcome back"
-      subtitle="Sign in to access your shop dashboard, catalog, and counter."
+      title="Sign in"
+      subtitle="Access your Universal POS account. You’ll choose or create an organization next."
     >
       <AuthGoogleButton
         mode="login"
@@ -216,15 +192,23 @@ export default function LoginForm() {
         </div>
 
         <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <Label htmlFor="password">Password</Label>
-            <button
-              type="button"
-              className="text-[0.75rem] font-medium text-[#1a56db] hover:underline"
-              onClick={() => setShowPassword((v) => !v)}
-            >
-              {showPassword ? "Hide" : "Show"}
-            </button>
+            <div className="flex items-center gap-3">
+              <Link
+                href="/forgot-password"
+                className="text-[0.75rem] font-medium text-[#1a56db] hover:underline"
+              >
+                Forgot password?
+              </Link>
+              <button
+                type="button"
+                className="text-[0.75rem] font-medium text-[#5a6b7d] hover:underline"
+                onClick={() => setShowPassword((v) => !v)}
+              >
+                {showPassword ? "Hide" : "Show"}
+              </button>
+            </div>
           </div>
           <Input
             id="password"
@@ -250,10 +234,16 @@ export default function LoginForm() {
         <p className="text-center text-[0.8125rem] text-[#5a6b7d]">
           New here?{" "}
           <Link
-            href="/register"
+            href="/signup"
             className="font-semibold text-[#1a56db] underline-offset-2 hover:underline"
           >
-            Create a shop
+            Create an account
+          </Link>
+        </p>
+        <p className="text-center text-[0.75rem] text-[#8b9bb0]">
+          Staff joining an existing shop?{" "}
+          <Link href="/register-user" className="text-[#1a56db] hover:underline">
+            Join with invite slug
           </Link>
         </p>
       </form>

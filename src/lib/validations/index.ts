@@ -223,25 +223,25 @@ export const createCategorySchema = z.object({
 
 const sellUnitEnum = z.enum(["pcs", "pack", "kg", "g", "L", "ml"]);
 
-/** Sale / grocery product — unit-aware qty (kg/L decimals; pcs whole). */
+/** Sale product — Zoho-style inventory item create. */
 export const addSaleProductSchema = z
   .object({
-    title: z.string().trim().min(2, "Title needs at least 2 characters").max(255),
+    title: z.string().trim().min(2, "Name needs at least 2 characters").max(255),
     description: z.string().trim().max(2000).optional().or(z.literal("")),
     categoryId: z.string().uuid("Select a category"),
     sku: z
       .string()
       .trim()
-      .min(15, "SKU must be 15–18 characters")
-      .max(18, "SKU must be 15–18 characters")
+      .min(2, "SKU must be at least 2 characters")
+      .max(18, "SKU must be at most 18 characters")
       .regex(
         /^[A-Za-z0-9][A-Za-z0-9._\-/]*$/,
         "SKU: use letters, numbers, and . _ - / only",
       ),
     sellUnit: sellUnitEnum.default("pcs"),
     price: z.coerce
-      .number({ invalid_type_error: "Enter a valid price" })
-      .positive("Price must be greater than 0")
+      .number({ invalid_type_error: "Enter a valid selling price" })
+      .positive("Selling price must be greater than 0")
       .max(9_999_999.99, "Price is too large")
       .refine((n) => Math.round(n * 100) / 100 === n, {
         message: "Price can have at most 2 decimal places",
@@ -250,16 +250,39 @@ export const addSaleProductSchema = z
       .number({ invalid_type_error: "Enter a valid quantity" })
       .min(0, "Quantity cannot be negative")
       .max(99_999_999, "Quantity is too large"),
+    manufacturer: z.string().trim().max(120).optional().or(z.literal("")),
+    barcode: z.string().trim().max(32).optional().or(z.literal("")),
+    costPrice: z.coerce
+      .number({ invalid_type_error: "Enter a valid cost" })
+      .min(0)
+      .max(9_999_999.99)
+      .optional()
+      .or(z.nan())
+      .transform((v) => (typeof v === "number" && Number.isFinite(v) ? v : undefined)),
+    reorderPoint: z.coerce
+      .number({ invalid_type_error: "Enter a valid reorder point" })
+      .min(0)
+      .max(99_999_999)
+      .optional()
+      .or(z.nan())
+      .transform((v) => (typeof v === "number" && Number.isFinite(v) ? v : undefined)),
+    hsnOrSac: z.string().trim().max(16).optional().or(z.literal("")),
+    trackInventory: z.boolean().default(true),
   })
   .superRefine((v, ctx) => {
-    const whole = v.sellUnit === "pcs" || v.sellUnit === "pack" || v.sellUnit === "g" || v.sellUnit === "ml";
+    if (!v.trackInventory) return;
+    const whole =
+      v.sellUnit === "pcs" ||
+      v.sellUnit === "pack" ||
+      v.sellUnit === "g" ||
+      v.sellUnit === "ml";
     if (whole && !Number.isInteger(v.qty)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["qty"],
         message:
           v.sellUnit === "pcs" || v.sellUnit === "pack"
-            ? `Quantity for ${v.sellUnit} must be a whole number (no decimals)`
+            ? `Opening stock for ${v.sellUnit} must be a whole number`
             : `Quantity for ${v.sellUnit} must be a whole number`,
       });
       return;
@@ -270,7 +293,7 @@ export const addSaleProductSchema = z
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["qty"],
-          message: `Quantity for ${v.sellUnit} can have at most 3 decimal places (e.g. 1.250)`,
+          message: `Opening stock for ${v.sellUnit} can have at most 3 decimal places`,
         });
       }
     }
