@@ -61,42 +61,6 @@ export const authApi = {
     });
   },
 
-  forgotPassword(body: { email: string }) {
-    return apiRequest<{
-      ok: boolean;
-      message: string;
-      maskedEmail?: string;
-      devCode?: string;
-    }>("/auth/password/forgot", { method: "POST", body });
-  },
-
-  resetPassword(body: {
-    email: string;
-    otp: string;
-    newPassword: string;
-  }) {
-    return apiRequest<{ ok: boolean; message: string }>(
-      "/auth/password/reset",
-      { method: "POST", body },
-    );
-  },
-
-  forgotPin(body: { userId: string }) {
-    return apiRequest<{
-      ok: boolean;
-      message: string;
-      maskedEmail?: string;
-      devCode?: string;
-    }>("/auth/pin/forgot", { method: "POST", body });
-  },
-
-  resetPinOtp(body: { userId: string; otp: string; newPin: string }) {
-    return apiRequest<{ ok: boolean; message: string }>(
-      "/auth/pin/reset-otp",
-      { method: "POST", body },
-    );
-  },
-
   signup(body: {
     fullName: string;
     email: string;
