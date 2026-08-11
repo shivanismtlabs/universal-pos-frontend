@@ -10,6 +10,7 @@ import { ApiError } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { BarcodeScanInput } from "@/components/barcode-scan-input";
 
 const UNITS = [
   "pcs",
@@ -295,13 +296,16 @@ export default function NewCatalogProductPage() {
             </div>
           </div>
           <div>
-            <Label>Barcode</Label>
-            <Input
+            <BarcodeScanInput
               value={form.barcode}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, barcode: e.target.value }))
-              }
-              placeholder="Scan or type"
+              onChange={(barcode) => setForm((f) => ({ ...f, barcode }))}
+              onScan={(barcode) => {
+                setForm((f) => ({ ...f, barcode }));
+                toast.success("Barcode captured");
+              }}
+              label="Barcode"
+              placeholder="Scan or type barcode / UPC / EAN"
+              autoSubmitWedge
             />
           </div>
           <div>

@@ -33,6 +33,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ProductThumb } from "@/components/product-thumb";
+import { BarcodeScanInput } from "@/components/barcode-scan-input";
 import {
   enqueueOfflineEvent,
   flushOfflineQueue,
@@ -567,8 +568,8 @@ export default function PosWorkstation() {
     barcodeRef.current?.focus();
   }
 
-  async function scanBarcode() {
-    const sku = barcode.trim().toUpperCase();
+  async function scanBarcode(code?: string) {
+    const sku = (code ?? barcode).trim().toUpperCase();
     if (!sku) {
       toast.error("Enter or scan a barcode");
       barcodeRef.current?.focus();
@@ -766,20 +767,15 @@ export default function PosWorkstation() {
               }}
             />
           </div>
-          <div className="w-full sm:w-48">
-            <Label>Scan barcode</Label>
-            <Input
-              ref={barcodeRef}
-              className="mt-1.5 font-mono"
-              placeholder="Scan or type"
+          <div className="w-full sm:min-w-[16rem] sm:flex-1 sm:max-w-sm">
+            <BarcodeScanInput
               value={barcode}
-              onChange={(e) => setBarcode(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  void scanBarcode();
-                }
-              }}
+              onChange={setBarcode}
+              onScan={(code) => void scanBarcode(code)}
+              label="Scan barcode"
+              placeholder="Scan unit barcode"
+              inputRef={barcodeRef}
+              autoFocus
             />
           </div>
           <div className="flex gap-2 pb-0.5">
@@ -789,9 +785,6 @@ export default function PosWorkstation() {
               onClick={() => void findTicket()}
             >
               Load
-            </Button>
-            <Button type="button" onClick={() => void scanBarcode()}>
-              Add scan
             </Button>
           </div>
         </div>

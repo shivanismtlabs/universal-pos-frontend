@@ -1687,6 +1687,7 @@ export const posApi = {
         lowStock?: boolean;
         name: string;
         productSku?: string;
+        barcode?: string | null;
         description?: string | null;
         image?: string | null;
         photoUrl?: string | null;
@@ -1706,6 +1707,7 @@ export const posApi = {
       sellUnit?: string;
       name: string;
       productSku?: string;
+      barcode?: string | null;
       image?: string | null;
       photoUrl?: string | null;
       category?: { id: string; name: string } | null;

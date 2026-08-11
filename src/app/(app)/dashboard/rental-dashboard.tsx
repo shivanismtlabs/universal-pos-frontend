@@ -11,6 +11,7 @@ import { cn, formatDate, moneyNumber } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { BarcodeScanInput } from "@/components/barcode-scan-input";
 import { StripeCheckoutModal } from "@/components/stripe-checkout-modal";
 import { FloorTabs } from "@/components/getting-started";
 import { RentalStockPanel } from "./rental-stock-panel";
@@ -296,8 +297,8 @@ export function RentalDashboard() {
     onError: (e) => toast.error(errMsg(e)),
   });
 
-  async function scanReturnBarcode() {
-    const code = returnScan.trim().toUpperCase();
+  async function scanReturnBarcode(raw?: string) {
+    const code = (raw ?? returnScan).trim().toUpperCase();
     if (!code) return;
     const items = candidates.data?.items ?? [];
     for (const o of items) {
@@ -584,30 +585,13 @@ export function RentalDashboard() {
               Scan the unit barcode first — order fills in automatically.
             </p>
             <div className="mt-4 space-y-3">
-              <div>
-                <Label>Scan barcode</Label>
-                <div className="mt-1 flex gap-2">
-                  <Input
-                    className="font-mono"
-                    placeholder="Scan returning unit"
-                    value={returnScan}
-                    onChange={(e) => setReturnScan(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        void scanReturnBarcode();
-                      }
-                    }}
-                  />
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => void scanReturnBarcode()}
-                  >
-                    Find
-                  </Button>
-                </div>
-              </div>
+              <BarcodeScanInput
+                value={returnScan}
+                onChange={setReturnScan}
+                onScan={(code) => void scanReturnBarcode(code)}
+                label="Scan barcode"
+                placeholder="Scan returning unit"
+              />
               <div>
                 <Label>Order</Label>
                 <select

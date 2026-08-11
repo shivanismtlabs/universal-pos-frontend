@@ -19,6 +19,7 @@ import { ProductThumb } from "@/components/product-thumb";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { CustomerPicker } from "@/components/customer-picker";
 import { StationPinLock } from "@/components/station-pin-lock";
+import { BarcodeScanInput } from "@/components/barcode-scan-input";
 import {
   flushOfflineQueue,
   isOnline,
@@ -407,21 +408,30 @@ export default function RetailPosWorkstation({
     },
   });
 
-  function onScanSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    const code = scan.trim();
-    if (!code) return;
-    // Prefer local catalog hit for speed, else server lookup
-    const local = (catalog.data?.items ?? []).find(
-      (s) => s.sku.toLowerCase() === code.toLowerCase(),
-    );
+  function resolveScan(code: string) {
+    const trimmed = code.trim();
+    if (!trimmed) return;
+    const norm = trimmed.toLowerCase();
+    // Prefer local catalog hit for speed (SKU, product SKU, barcode)
+    const local = (catalog.data?.items ?? []).find((s) => {
+      const sku = s.sku?.toLowerCase();
+      const productSku = s.productSku?.toLowerCase();
+      const barcode = s.barcode?.toLowerCase();
+      return sku === norm || productSku === norm || barcode === norm;
+    });
     if (local) {
       upsertLine(local);
       setScan("");
+      toast.success(`Added ${local.name}`);
       scanRef.current?.focus();
       return;
     }
-    lookup.mutate(code);
+    lookup.mutate(trimmed);
+  }
+
+  function onScanSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    resolveScan(scan);
   }
 
   async function checkout() {
@@ -888,38 +898,19 @@ export default function RetailPosWorkstation({
       >
         <section className="flex min-h-0 flex-col overflow-hidden rounded-[16px] border border-[#d9e0ea] bg-white shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
           <div className="space-y-3 border-b border-[#e8edf4] bg-[#f8fafc] p-3.5 sm:p-4">
-            <form onSubmit={onScanSubmit} className="flex gap-2">
-              <div className="relative min-w-0 flex-1">
-                <span
-                  aria-hidden
-                  className="pointer-events-none absolute top-1/2 left-3.5 -translate-y-1/2 text-[#8b9bb0]"
-                >
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                    <path
-                      d="M2 4h2M2 8h3M2 12h2M7 4h7M10 8h4M7 12h7"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                </span>
-                <Input
-                  ref={scanRef}
-                  value={scan}
-                  onChange={(e) => setScan(e.target.value)}
-                  placeholder="Scan or type SKU"
-                  className="h-12 pl-10 font-mono text-[0.95rem]"
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-              </div>
-              <Button
-                type="submit"
-                className="h-12 min-w-[5.75rem] px-5"
-                disabled={lookup.isPending || !scan.trim()}
-              >
-                Add
-              </Button>
+            <BarcodeScanInput
+              value={scan}
+              onChange={setScan}
+              onScan={resolveScan}
+              label="Scan barcode / SKU"
+              placeholder="Scan barcode or type SKU"
+              disabled={lookup.isPending}
+              autoFocus
+              inputRef={scanRef}
+            />
+            {/* keep form handler for keyboard Submit key accessibility without double UI */}
+            <form onSubmit={onScanSubmit} className="hidden" aria-hidden>
+              <button type="submit" tabIndex={-1} />
             </form>
 
             <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center">

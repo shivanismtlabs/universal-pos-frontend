@@ -1,30 +1,32 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
-import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { FieldError } from "@/components/ui/form";
-import { AuthShell } from "@/components/auth-shell";
+import { applyPortalResponse } from "@/lib/auth-portal";
+import {
+  biometricLogin,
+  canUseBiometrics,
+  readRememberedBioEmail,
+  rememberBioEmail,
+} from "@/lib/webauthn";
+import { appsApi, authApi } from "@/lib/api";
+import { ApiError } from "@/lib/api/client";
+import { useAuthStore } from "@/lib/auth-store";
+import { loginSchema, type LoginInput } from "@/lib/validations";
 import {
   AuthDivider,
   AuthGoogleButton,
 } from "@/components/auth-google-button";
-import { loginSchema, type LoginInput } from "@/lib/validations";
-import { appsApi, authApi, iamApi } from "@/lib/api";
-import { ApiError } from "@/lib/api/client";
-import { useAuthStore } from "@/lib/auth-store";
-import { applyPortalResponse } from "@/lib/auth-portal";
-import {
-  startAuthentication,
-  browserSupportsWebAuthn,
-} from "@simplewebauthn/browser";
+import { AuthShell } from "@/components/auth-shell";
+import { FieldError } from "@/components/ui/form";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { toast } from "sonner";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 
 const FAIL_KEY = "universal-pos-login-fails";
 const LOCK_MS = 60_000;
@@ -99,6 +101,7 @@ export default function LoginForm() {
     register,
     handleSubmit,
     getValues,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<LoginInput>({
     resolver: zodResolver(loginSchema),
@@ -108,7 +111,14 @@ export default function LoginForm() {
     },
   });
 
+  useEffect(() => {
+    const remembered = readRememberedBioEmail();
+    if (remembered) setValue("email", remembered);
+  }, [setValue]);
+
   const [bioBusy, setBioBusy] = useState(false);
+  const [bioSupported, setBioSupported] = useState(false);
+  useEffect(() => setBioSupported(canUseBiometrics()), []);
 
   async function finishAuth(
     data: Awaited<ReturnType<typeof authApi.login>>,
@@ -142,6 +152,7 @@ export default function LoginForm() {
         email: values.email.trim().toLowerCase(),
         password: values.password,
       });
+      rememberBioEmail(values.email);
       await finishAuth(data);
     } catch (e) {
       const lock = readLock();
@@ -179,25 +190,24 @@ export default function LoginForm() {
       toast.error("Enter your email first");
       return;
     }
-    if (!browserSupportsWebAuthn()) {
-      toast.error("This browser does not support biometrics / passkeys");
+    if (!canUseBiometrics()) {
+      toast.error(
+        "Biometrics need a secure context (HTTPS or localhost) and a supported browser",
+      );
       return;
     }
     setBioBusy(true);
     try {
-      const options = await iamApi.webauthnLoginOptions(email);
-      const assertion = await startAuthentication({
-        optionsJSON: options as unknown as Parameters<
-          typeof startAuthentication
-        >[0]["optionsJSON"],
-      });
-      const data = await iamApi.webauthnLoginVerify(email, assertion);
+      const data = await biometricLogin(email);
+      rememberBioEmail(email);
       await finishAuth(data as Awaited<ReturnType<typeof authApi.login>>);
     } catch (e) {
       toast.error(
         e instanceof ApiError
           ? e.messages.join(", ")
-          : "Biometric sign-in failed or cancelled",
+          : e instanceof Error
+            ? e.message
+            : "Biometric sign-in failed or cancelled",
       );
     } finally {
       setBioBusy(false);
@@ -222,7 +232,7 @@ export default function LoginForm() {
           <Input
             id="email"
             type="email"
-            autoComplete="username"
+            autoComplete="username webauthn"
             placeholder="you@business.com"
             {...register("email")}
           />
@@ -269,15 +279,23 @@ export default function LoginForm() {
               : "Sign in"}
         </Button>
 
-        <Button
-          type="button"
-          variant="secondary"
-          className="w-full"
-          disabled={locked || bioBusy || isSubmitting}
-          onClick={() => void onBiometric()}
-        >
-          {bioBusy ? "Waiting for device…" : "Sign in with biometrics"}
-        </Button>
+        {bioSupported ? (
+          <Button
+            type="button"
+            variant="secondary"
+            className="w-full"
+            disabled={locked || bioBusy || isSubmitting}
+            onClick={() => void onBiometric()}
+          >
+            {bioBusy
+              ? "Waiting for device…"
+              : "Sign in with biometrics / passkey"}
+          </Button>
+        ) : (
+          <p className="text-center text-[0.72rem] text-[#8b9bb0]">
+            Biometric login available on HTTPS with a supporting browser
+          </p>
+        )}
 
         <p className="text-center text-[0.8125rem] text-[#5a6b7d]">
           New here?{" "}

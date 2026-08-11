@@ -13,10 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/page-header";
-import {
-  startRegistration,
-  browserSupportsWebAuthn,
-} from "@simplewebauthn/browser";
+import { canUseBiometrics, registerDeviceBiometric } from "@/lib/webauthn";
 
 type Tab = "branding" | "tax" | "receipt" | "counter";
 
@@ -559,29 +556,18 @@ export default function SettingsPage() {
 
 function BiometricSetup() {
   const qc = useQueryClient();
+  const [supported, setSupported] = useState(false);
+  useEffect(() => setSupported(canUseBiometrics()), []);
+
   const creds = useQuery({
     queryKey: ["webauthn-creds"],
     queryFn: () => iamApi.webauthnCredentials(),
   });
 
   const registerBio = useMutation({
-    mutationFn: async () => {
-      if (!browserSupportsWebAuthn()) {
-        throw new Error("Browser does not support WebAuthn");
-      }
-      const options = await iamApi.webauthnRegisterOptions();
-      const att = await startRegistration({
-        optionsJSON: options as unknown as Parameters<
-          typeof startRegistration
-        >[0]["optionsJSON"],
-      });
-      return iamApi.webauthnRegisterVerify({
-        response: att,
-        label: "This device",
-      });
-    },
+    mutationFn: async () => registerDeviceBiometric("This device"),
     onSuccess: () => {
-      toast.success("Biometric credential registered");
+      toast.success("Biometric credential registered — use it on the sign-in page");
       void qc.invalidateQueries({ queryKey: ["webauthn-creds"] });
     },
     onError: (e) =>
@@ -604,13 +590,21 @@ function BiometricSetup() {
 
   return (
     <div className="mt-3 space-y-2">
+      {!supported ? (
+        <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900 ring-1 ring-amber-100">
+          Open Universal POS over HTTPS (or localhost) on a browser that supports
+          passkeys / Windows Hello / Touch ID.
+        </p>
+      ) : null}
       <Button
         type="button"
         variant="secondary"
-        disabled={registerBio.isPending}
+        disabled={registerBio.isPending || !supported}
         onClick={() => registerBio.mutate()}
       >
-        {registerBio.isPending ? "Follow device prompt…" : "Register biometrics"}
+        {registerBio.isPending
+          ? "Follow device prompt…"
+          : "Register biometrics on this device"}
       </Button>
       <ul className="space-y-1 text-sm text-[#5a6b7d]">
         {(creds.data ?? []).map((c) => (
@@ -631,6 +625,9 @@ function BiometricSetup() {
             </button>
           </li>
         ))}
+        {!creds.isLoading && !(creds.data ?? []).length ? (
+          <li className="text-xs text-[#8b9bb0]">No devices registered yet.</li>
+        ) : null}
       </ul>
     </div>
   );
