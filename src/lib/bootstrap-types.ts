@@ -65,13 +65,18 @@ export type TenantBootstrap = {
   };
   commerce?: {
     setupComplete?: boolean;
-    modes: Array<"sale" | "rental">;
-    schemas: {
-      sale: CommerceSchema;
-      rental: CommerceSchema;
-    };
+    modes: string[];
+    registeredModes?: string[];
+    modeCatalog?: Array<{
+      mode: string;
+      label: string;
+      description: string;
+    }>;
+    schemas?: Record<string, CommerceSchema>;
     rentalLifecycle?: string[];
   };
+  /** Vertical profile — config-driven meta fields + billing (not industry forks) */
+  business?: import("./business-config").BootstrapBusiness;
 };
 
 export type CommerceField = {

@@ -1,12 +1,24 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ComponentType } from "react";
 import { useForm } from "react-hook-form";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
-import { Building2, Plus, LogOut } from "lucide-react";
+import {
+  Building2,
+  Plus,
+  LogOut,
+  ShoppingBag,
+  Wheat,
+  UtensilsCrossed,
+  Scissors,
+  Wrench,
+  LayoutGrid,
+  Check,
+  Trash2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -49,7 +61,58 @@ const INDIAN_STATES = [
   "West Bengal",
 ];
 
+type IconType = ComponentType<{ className?: string }>;
+
+/**
+ * Retail vs Grocery stay separate — genuinely different item extras:
+ * retail: brand / size / colour · grocery: packSize / expiryTracked
+ */
+const BUSINESS_TYPES: Array<{
+  id: string;
+  label: string;
+  detail: string;
+  Icon: IconType;
+}> = [
+  {
+    id: "retail",
+    label: "Retail",
+    detail: "Brand, size & colour on items · apparel / gift / electronics",
+    Icon: ShoppingBag,
+  },
+  {
+    id: "grocery",
+    label: "Grocery / F&B retail",
+    detail: "Pack size, expiry track · kg / L units & bulk stock",
+    Icon: Wheat,
+  },
+  {
+    id: "restaurant",
+    label: "Restaurant / café",
+    detail: "Menu items · table meta on orders",
+    Icon: UtensilsCrossed,
+  },
+  {
+    id: "salon",
+    label: "Salon & spa",
+    detail: "Duration, appointments, services + retail",
+    Icon: Scissors,
+  },
+  {
+    id: "service",
+    label: "Service business",
+    detail: "Billable services (gym, repair, consultancy…)",
+    Icon: Wrench,
+  },
+  {
+    id: "other",
+    label: "Other / general",
+    detail: "Universal blank slate — add your own item fields",
+    Icon: LayoutGrid,
+  },
+];
+
 type CreateForm = {
+  businessType: string;
   organizationName: string;
   phone: string;
   addressLine1: string;
@@ -70,6 +133,8 @@ export default function OrganizationsPage() {
   const identity = useAuthStore((s) => s.identity);
   const accessToken = useAuthStore((s) => s.accessToken);
   const clear = useAuthStore((s) => s.clear);
+  /** Wait for client + zustand rehydrate before using tokens (prevents crash/redirect thrash) */
+  const [hydrated, setHydrated] = useState(false);
   const [orgs, setOrgs] = useState<
     NonNullable<PortalSessionResponse["organizations"]>
   >([]);
@@ -77,11 +142,14 @@ export default function OrganizationsPage() {
   const [creating, setCreating] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [entering, setEntering] = useState<string | null>(null);
+  const [showCustomFields, setShowCustomFields] = useState(false);
+  const [customFields, setCustomFields] = useState<string[]>([""]);
 
   const form = useForm<CreateForm>({
     defaultValues: {
+      businessType: "retail",
       organizationName: "",
-      phone: identity?.phone ?? "",
+      phone: "",
       addressLine1: "",
       city: "",
       state: "",
@@ -94,7 +162,22 @@ export default function OrganizationsPage() {
     },
   });
 
+  const selectedBusinessType = form.watch("businessType");
+  const isOther = selectedBusinessType === "other";
+
   useEffect(() => {
+    setHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    if (identity?.phone) {
+      form.setValue("phone", identity.phone);
+    }
+  }, [hydrated, identity?.phone, form]);
+
+  useEffect(() => {
+    if (!hydrated) return;
     if (accessToken) {
       router.replace("/dashboard");
       return;
@@ -104,8 +187,14 @@ export default function OrganizationsPage() {
       return;
     }
     void refreshList();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount once for portal
-  }, [identityToken, accessToken]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount once after hydrate
+  }, [hydrated, identityToken, accessToken]);
+
+  useEffect(() => {
+    if (!isOther) {
+      setShowCustomFields(false);
+    }
+  }, [isOther]);
 
   async function refreshList() {
     setLoading(true);
@@ -157,8 +246,21 @@ export default function OrganizationsPage() {
   async function onCreate(values: CreateForm) {
     setCreating(true);
     try {
+      const customItemFields =
+        values.businessType === "other"
+          ? customFields
+              .map((label) => label.trim())
+              .filter(Boolean)
+              .map((label) => ({ label }))
+          : undefined;
+
       const data = await authApi.createOrganization({
         organizationName: values.organizationName.trim(),
+        businessType: values.businessType,
+        customItemFields:
+          customItemFields && customItemFields.length
+            ? customItemFields
+            : undefined,
         phone: values.phone.trim() || undefined,
         addressLine1: values.addressLine1.trim() || undefined,
         city: values.city.trim() || undefined,
@@ -182,6 +284,14 @@ export default function OrganizationsPage() {
     } finally {
       setCreating(false);
     }
+  }
+
+  if (!hydrated) {
+    return (
+      <div className="grid min-h-dvh place-items-center bg-[#eef2f7] text-sm text-[#5a6b7d]">
+        Loading…
+      </div>
+    );
   }
 
   return (
@@ -283,9 +393,9 @@ export default function OrganizationsPage() {
                       Set up your organization
                     </h2>
                     <p className="mt-1 text-sm text-[#5a6b7d]">
-                      Same profile details you&apos;d enter on a modern retail
-                      POS: legal name, address, tax id, currency, and inventory
-                      start.
+                      Choose your business type first — it configures item extra
+                      fields and billing style. Then enter legal / address
+                      details.
                     </p>
 
                     <form
@@ -293,6 +403,143 @@ export default function OrganizationsPage() {
                       onSubmit={form.handleSubmit(onCreate)}
                       noValidate
                     >
+                      <div className="sm:col-span-2">
+                        <Label>Business type *</Label>
+                        <p className="mt-0.5 mb-2 text-[0.72rem] text-[#8b9bb0]">
+                          One Universal POS — each type only changes config
+                          extras, not a separate app.
+                        </p>
+                        <input
+                          type="hidden"
+                          {...form.register("businessType", {
+                            required: true,
+                          })}
+                        />
+                        <ul className="grid gap-2 sm:grid-cols-2">
+                          {BUSINESS_TYPES.map((bt) => {
+                            const on = selectedBusinessType === bt.id;
+                            const Icon = bt.Icon;
+                            return (
+                              <li key={bt.id}>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    form.setValue("businessType", bt.id, {
+                                      shouldValidate: true,
+                                      shouldDirty: true,
+                                    })
+                                  }
+                                  className={cn(
+                                    "relative flex h-full w-full flex-col rounded-lg border px-3 py-2.5 pr-9 text-left transition",
+                                    on
+                                      ? "border-[#1a56db] bg-[#e8eefb] shadow-[0_0_0_1px_#1a56db]"
+                                      : "border-[#d9e0ea] bg-white hover:border-[#c5d0e0]",
+                                  )}
+                                >
+                                  <span
+                                    className={cn(
+                                      "absolute top-2 right-2 grid h-5 w-5 place-items-center rounded-full border text-white",
+                                      on
+                                        ? "border-[#1a56db] bg-[#1a56db]"
+                                        : "border-[#cfd8e6] bg-white",
+                                    )}
+                                    aria-hidden
+                                  >
+                                    {on ? (
+                                      <Check
+                                        className="h-3 w-3"
+                                        strokeWidth={3}
+                                      />
+                                    ) : null}
+                                  </span>
+                                  <span
+                                    className={cn(
+                                      "mb-1.5 grid h-8 w-8 place-items-center rounded-md",
+                                      on
+                                        ? "bg-white text-[#1a56db]"
+                                        : "bg-[#f4f6fa] text-[#5a6b7d]",
+                                    )}
+                                  >
+                                    <Icon className="h-4 w-4" />
+                                  </span>
+                                  <span className="text-sm font-semibold text-[#0b1f33]">
+                                    {bt.label}
+                                  </span>
+                                  <span className="mt-0.5 text-[0.72rem] leading-snug text-[#5a6b7d]">
+                                    {bt.detail}
+                                  </span>
+                                </button>
+                              </li>
+                            );
+                          })}
+                        </ul>
+
+                        {isOther ? (
+                          <div className="mt-3 rounded-lg border border-dashed border-[#c5d0e0] bg-[#fafbfc] px-3 py-2.5">
+                            <button
+                              type="button"
+                              className="text-sm font-semibold text-[#1a56db] hover:underline"
+                              onClick={() =>
+                                setShowCustomFields((v) => !v)
+                              }
+                            >
+                              {showCustomFields
+                                ? "− Hide custom fields"
+                                : "+ Add custom field"}
+                            </button>
+                            <p className="mt-0.5 text-[0.72rem] text-[#8b9bb0]">
+                              Optional — e.g. Membership tier, Session mins.
+                              Shown on New Item as extras.
+                            </p>
+                            {showCustomFields ? (
+                              <ul className="mt-2 space-y-2">
+                                {customFields.map((val, idx) => (
+                                  <li
+                                    key={idx}
+                                    className="flex items-center gap-2"
+                                  >
+                                    <Input
+                                      placeholder={`Custom field ${idx + 1}`}
+                                      value={val}
+                                      onChange={(e) => {
+                                        const next = [...customFields];
+                                        next[idx] = e.target.value;
+                                        setCustomFields(next);
+                                      }}
+                                    />
+                                    {customFields.length > 1 ? (
+                                      <button
+                                        type="button"
+                                        className="shrink-0 rounded-md p-2 text-[#8b9bb0] hover:bg-white hover:text-[#c81e1e]"
+                                        onClick={() =>
+                                          setCustomFields((rows) =>
+                                            rows.filter((_, i) => i !== idx),
+                                          )
+                                        }
+                                        aria-label="Remove field"
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </button>
+                                    ) : null}
+                                  </li>
+                                ))}
+                                {customFields.length < 8 ? (
+                                  <button
+                                    type="button"
+                                    className="text-xs font-semibold text-[#1a56db]"
+                                    onClick={() =>
+                                      setCustomFields((rows) => [...rows, ""])
+                                    }
+                                  >
+                                    + Another field
+                                  </button>
+                                ) : null}
+                              </ul>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+
                       <div className="sm:col-span-2">
                         <Label>Organization name *</Label>
                         <Input
@@ -380,12 +627,7 @@ export default function OrganizationsPage() {
                           className="mt-1"
                           {...form.register("fiscalYearStart")}
                         >
-                          {[
-                            "January",
-                            "April",
-                            "July",
-                            "October",
-                          ].map((m) => (
+                          {["January", "April", "July", "October"].map((m) => (
                             <option key={m} value={m}>
                               {m}
                             </option>

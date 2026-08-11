@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { posApi } from "@/lib/api";
@@ -27,6 +27,8 @@ import {
   StockAdjustDialog,
   type StockAdjustTarget,
 } from "@/components/stock-adjust-dialog";
+import { useBootstrap } from "@/lib/bootstrap";
+import type { MetaFieldDef } from "@/lib/business-config";
 import { ItemsImportDialog } from "@/components/items-import-dialog";
 import { AddCategoryModal } from "@/components/add-category-modal";
 import {
@@ -36,21 +38,49 @@ import {
   qtyStep,
   type SellUnit,
 } from "@/lib/sell-units";
+import { cn } from "@/lib/utils";
 
 const EMPTY = {
   title: "",
   description: "",
   categoryId: "",
   sku: "",
-  sellUnit: "pcs",
+  sellUnit: "pcs" as SellUnit | string,
   price: "",
   qty: "0",
   manufacturer: "",
+  brand: "",
   barcode: "",
+  upc: "",
+  ean: "",
+  mpn: "",
+  isbn: "",
   costPrice: "",
   reorderPoint: "",
   hsnOrSac: "",
   trackInventory: true,
+  itemType: "goods" as "goods" | "service",
+  itemStructure: "single" as "single" | "variants",
+  taxPreference: "taxable" as "taxable" | "non_taxable",
+  taxRatePercent: "",
+  openingStockValue: "",
+  returnable: true,
+  batchTracking: false,
+  serialTracking: false,
+  dimLength: "",
+  dimWidth: "",
+  dimHeight: "",
+  dimUnit: "cm",
+  weight: "",
+  weightUnit: "kg",
+  isComposite: false,
+  multiUnitBaseQty: "",
+  multiUnitBaseUnit: "pcs",
+  loyaltyPoints: "",
+  perishable: false,
+  expiryAutoDiscountDays: "",
+  expiryAutoDiscountPercent: "",
+  modifiersText: "",
 };
 
 const MAX_IMAGES = 8;
@@ -94,6 +124,80 @@ function invalidateSale(qc: ReturnType<typeof useQueryClient>) {
   void qc.invalidateQueries({ queryKey: ["categories"] });
 }
 
+/** Renders one BusinessConfig item meta field in Zoho label|control rows */
+function ItemMetaFieldRow({
+  field,
+  value,
+  onChange,
+}: {
+  field: MetaFieldDef;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const label = (
+    <Label className="sm:pt-2.5">
+      {field.label}
+      {field.required ? " *" : ""}
+    </Label>
+  );
+  let control: ReactNode;
+  if (field.type === "boolean") {
+    control = (
+      <label className="flex items-center gap-2 pt-2 text-sm text-[#21263c]">
+        <input
+          type="checkbox"
+          className="h-4 w-4 accent-[#1a56db]"
+          checked={value === "true" || value === "1"}
+          onChange={(e) => onChange(e.target.checked ? "true" : "false")}
+        />
+        {field.hint ?? "Yes"}
+      </label>
+    );
+  } else if (field.type === "select" && field.options?.length) {
+    control = (
+      <Select value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">Select</option>
+        {field.options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </Select>
+    );
+  } else if (field.type === "text") {
+    control = (
+      <textarea
+        className={textareaClass}
+        rows={2}
+        placeholder={field.hint}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    );
+  } else {
+    control = (
+      <Input
+        inputMode={field.type === "number" ? "decimal" : undefined}
+        type={field.type === "datetime" ? "datetime-local" : "text"}
+        placeholder={field.hint}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    );
+  }
+  return (
+    <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
+      {label}
+      <div>
+        {control}
+        {field.hint && field.type !== "boolean" && field.type !== "text" ? (
+          <p className="mt-1 text-[0.65rem] text-[#8b9bb0]">{field.hint}</p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 /**
  * Universal product manager — any user-named category,
  * fixed keys: title · description · category · sku · price · qty · image
@@ -108,6 +212,7 @@ export function SaleStockPanel({
   const qc = useQueryClient();
   const roles = useAuthStore((s) => s.user?.roles);
   const canWrite = canWriteCatalog(roles);
+  const { itemMetaFields, businessConfig, businessType } = useBootstrap();
 
   const [panel, setPanel] = useState<"add" | "products" | "categories">(
     initialPanel ?? "products",
@@ -122,6 +227,8 @@ export function SaleStockPanel({
     }
   }, []);
   const [form, setForm] = useState(EMPTY);
+  /** Zoho-style extra item fields from BusinessConfig (size, brand, duration…) */
+  const [extraFields, setExtraFields] = useState<Record<string, string>>({});
   const [formErrors, setFormErrors] = useState<
     Partial<Record<string, string>>
   >({});
@@ -202,6 +309,8 @@ export function SaleStockPanel({
     mutationFn: async () => {
       const rawCost = form.costPrice.trim();
       const rawReorder = form.reorderPoint.trim();
+      const isService = form.itemType === "service";
+      const trackInventory = isService ? false : form.trackInventory;
       const parsed = addSaleProductSchema.safeParse({
         title: form.title,
         description: form.description,
@@ -209,13 +318,13 @@ export function SaleStockPanel({
         sku: form.sku,
         sellUnit: form.sellUnit || "pcs",
         price: form.price,
-        qty: form.trackInventory ? form.qty : "0",
+        qty: trackInventory ? form.qty : "0",
         manufacturer: form.manufacturer,
-        barcode: form.barcode,
+        barcode: form.barcode || form.upc,
         ...(rawCost !== "" ? { costPrice: Number(rawCost) } : {}),
         ...(rawReorder !== "" ? { reorderPoint: Number(rawReorder) } : {}),
         hsnOrSac: form.hsnOrSac,
-        trackInventory: form.trackInventory,
+        trackInventory,
       });
       if (!parsed.success) {
         const next: Partial<Record<string, string>> = {};
@@ -227,6 +336,19 @@ export function SaleStockPanel({
         throw new Error(parsed.error.issues[0]?.message ?? "Check the form");
       }
       setFormErrors({});
+
+      const num = (s: string) => {
+        const t = s.trim();
+        if (!t) return undefined;
+        const n = Number(t);
+        return Number.isFinite(n) ? n : undefined;
+      };
+
+      const modifiers = form.modifiersText
+        .split(/[\n,]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+
       const res = await posApi.addSaleProduct({
         title: parsed.data.title,
         description: parsed.data.description || undefined,
@@ -242,6 +364,49 @@ export function SaleStockPanel({
         reorderPoint: parsed.data.reorderPoint,
         hsnOrSac: parsed.data.hsnOrSac || undefined,
         trackInventory: parsed.data.trackInventory,
+        itemType: form.itemType,
+        itemStructure: form.itemStructure,
+        brand: form.brand.trim() || undefined,
+        upc: form.upc.trim() || undefined,
+        ean: form.ean.trim() || undefined,
+        mpn: form.mpn.trim() || undefined,
+        isbn: form.isbn.trim() || undefined,
+        taxPreference: form.taxPreference,
+        taxRatePercent: num(form.taxRatePercent),
+        openingStockValue: num(form.openingStockValue),
+        returnable: form.returnable,
+        batchTracking: form.batchTracking && !isService,
+        serialTracking: form.serialTracking && !isService,
+        dimLength: num(form.dimLength),
+        dimWidth: num(form.dimWidth),
+        dimHeight: num(form.dimHeight),
+        dimUnit: form.dimUnit || undefined,
+        weight: num(form.weight),
+        weightUnit: form.weightUnit || undefined,
+        isComposite: form.isComposite,
+        multiUnitBaseQty: num(form.multiUnitBaseQty),
+        multiUnitBaseUnit: form.multiUnitBaseUnit || undefined,
+        loyaltyPoints: num(form.loyaltyPoints),
+        perishable: form.perishable,
+        expiryAutoDiscountDays: num(form.expiryAutoDiscountDays),
+        expiryAutoDiscountPercent: num(form.expiryAutoDiscountPercent),
+        modifiers: modifiers.length ? modifiers : undefined,
+        extraFields: (() => {
+          const out: Record<string, unknown> = {};
+          for (const [k, raw] of Object.entries(extraFields)) {
+            if (raw === "" || raw == null) continue;
+            const def = itemMetaFields.find((f) => f.key === k);
+            if (def?.type === "boolean") {
+              out[k] = raw === "true" || raw === "1";
+            } else if (def?.type === "number") {
+              const n = Number(raw);
+              if (Number.isFinite(n)) out[k] = n;
+            } else {
+              out[k] = String(raw).trim();
+            }
+          }
+          return out;
+        })(),
       });
       for (const dataUrl of imagePickerRef.current?.getUploadDataUrls() ?? []) {
         await posApi.uploadSaleProductImage(res.stockLevel.id, dataUrl);
@@ -255,7 +420,9 @@ export function SaleStockPanel({
         categoryId: f.categoryId,
         sellUnit: f.sellUnit,
         trackInventory: f.trackInventory,
+        itemType: f.itemType,
       }));
+      setExtraFields({});
       imagePickerRef.current?.clear();
       setFormErrors({});
       invalidateSale(qc);
@@ -436,20 +603,21 @@ export function SaleStockPanel({
   return (
     <div className="space-y-4">
       {panel === "add" ? (
-        <div className="overflow-hidden rounded-xl border border-[#d9e0ea] bg-white shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
-          {/* Zoho-style page header */}
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#eef1f4] bg-[#fafbfc] px-4 py-3.5 sm:px-5">
-            <div>
-              <p className="text-[0.65rem] font-bold tracking-[0.12em] text-[#1a56db] uppercase">
-                Inventory · Items
-              </p>
-              <h2 className="mt-0.5 text-lg font-semibold text-[#0b1f33]">
-                New product
+        <div className="overflow-hidden rounded-md border border-[#d9e0ea] bg-white shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
+          {/* Zoho product-creation header: New Item · Cancel / Save */}
+          <div className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 border-b border-[#eef1f4] bg-white px-4 py-3 sm:px-6">
+            <div className="min-w-0">
+              <h2 className="text-[1.15rem] font-semibold tracking-tight text-[#21263c]">
+                New Item
               </h2>
-              <p className="mt-0.5 text-[0.75rem] text-[#5a6b7d]">
-                Create an item with pricing, stock, and barcode — same flow as
-                modern retail POS product creation.
-              </p>
+              {businessConfig?.label || businessType ? (
+                <p className="mt-0.5 text-[0.72rem] text-[#6b7c93]">
+                  {businessConfig?.label ?? businessType}
+                  {itemMetaFields.length
+                    ? ` · ${itemMetaFields.length} extra field${itemMetaFields.length === 1 ? "" : "s"} from profile`
+                    : null}
+                </p>
+              ) : null}
             </div>
             <div className="flex flex-wrap gap-2">
               <Button
@@ -466,7 +634,7 @@ export function SaleStockPanel({
               <Button
                 type="button"
                 size="sm"
-                disabled={addProduct.isPending}
+                disabled={addProduct.isPending || !categories.length}
                 onClick={() => addProduct.mutate()}
               >
                 {addProduct.isPending ? "Saving…" : "Save"}
@@ -475,72 +643,105 @@ export function SaleStockPanel({
           </div>
 
           {!categories.length ? (
-            <div className="mx-4 mt-4 rounded-xl border border-[#fde68a] bg-[#fffbeb] px-3 py-2.5 text-sm text-[#92400e] sm:mx-5">
-              Create a category first (right panel / Categories tab), then assign
-              it below. Category is required for every item.
+            <div className="mx-4 mt-4 rounded-md border border-[#fde68a] bg-[#fffbeb] px-3 py-2.5 text-sm text-[#92400e] sm:mx-6">
+              Add a category first (rail on the right or Categories tab). Category
+              is required on every item.
             </div>
           ) : null}
 
-          <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_280px]">
-            <div className="space-y-0 divide-y divide-[#eef1f4] p-4 sm:p-5">
-              {/* Basic details */}
-              <section className="pb-6">
-                <h3 className="text-[0.8rem] font-semibold tracking-wide text-[#0b1f33]">
-                  Primary information
+          {/* Zoho: main form left · images / categories right */}
+          <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_300px]">
+            <div className="space-y-0 divide-y divide-[#eef1f4] px-4 py-5 sm:px-6">
+              {/* —— 1. Primary details —— */}
+              <section className="pb-7">
+                <h3 className="text-[0.78rem] font-bold tracking-[0.04em] text-[#21263c] uppercase">
+                  Primary details
                 </h3>
-                <p className="mt-0.5 text-[0.72rem] text-[#8b9bb0]">
-                  Name, category, SKU / barcode, and unit — shown at the
-                  counter.
-                </p>
-                <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  <div className="sm:col-span-2">
-                    <Label>Name *</Label>
-                    <Input
-                      className="mt-1"
-                      placeholder="e.g. Organic Almond Milk 1L"
-                      value={form.title}
-                      onChange={(e) => {
-                        setForm((f) => ({ ...f, title: e.target.value }));
-                        setFormErrors((er) => {
-                          if (!er.title) return er;
-                          const n = { ...er };
-                          delete n.title;
-                          return n;
-                        });
-                      }}
-                    />
-                    {formErrors.title ? (
-                      <p className="mt-1 text-xs text-[#c81e1e]">
-                        {formErrors.title}
-                      </p>
-                    ) : null}
-                  </div>
-                  <div>
-                    <Label>Category *</Label>
-                    <Select
-                      className="mt-1"
-                      value={form.categoryId}
-                      onChange={(e) =>
-                        setForm((f) => ({ ...f, categoryId: e.target.value }))
-                      }
-                    >
-                      <option value="">Select category</option>
-                      {categoryOptions.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
+                <div className="mt-4 space-y-3.5">
+                  <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
+                    <Label className="sm:pt-1">Type *</Label>
+                    <div className="flex flex-wrap gap-2">
+                      {(
+                        [
+                          ["goods", "Goods"],
+                          ["service", "Service"],
+                        ] as const
+                      ).map(([id, label]) => (
+                        <button
+                          key={id}
+                          type="button"
+                          onClick={() =>
+                            setForm((f) => ({
+                              ...f,
+                              itemType: id,
+                              trackInventory:
+                                id === "service" ? false : f.trackInventory,
+                            }))
+                          }
+                          className={cn(
+                            "rounded-md border px-3 py-1.5 text-sm font-medium transition",
+                            form.itemType === id
+                              ? "border-[#1a56db] bg-[#e8eefb] text-[#1a56db]"
+                              : "border-[#d9e0ea] bg-white text-[#5a6b7d]",
+                          )}
+                        >
+                          {label}
+                        </button>
                       ))}
-                    </Select>
-                    {formErrors.categoryId ? (
-                      <p className="mt-1 text-xs text-[#c81e1e]">
-                        {formErrors.categoryId}
-                      </p>
-                    ) : null}
+                    </div>
                   </div>
-                  <div>
-                    <Label>Unit *</Label>
+
+                  <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
+                    <Label className="sm:pt-2.5">Name *</Label>
+                    <div>
+                      <Input
+                        placeholder="Item name"
+                        value={form.title}
+                        onChange={(e) => {
+                          setForm((f) => ({ ...f, title: e.target.value }));
+                          setFormErrors((er) => {
+                            if (!er.title) return er;
+                            const n = { ...er };
+                            delete n.title;
+                            return n;
+                          });
+                        }}
+                      />
+                      {formErrors.title ? (
+                        <p className="mt-1 text-xs text-[#c81e1e]">
+                          {formErrors.title}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
+                    <Label className="sm:pt-2.5">SKU *</Label>
+                    <div>
+                      <Input
+                        className="font-mono uppercase"
+                        placeholder="SKU"
+                        value={form.sku}
+                        onChange={(e) =>
+                          setForm((f) => ({ ...f, sku: e.target.value }))
+                        }
+                        maxLength={18}
+                      />
+                      {formErrors.sku ? (
+                        <p className="mt-1 text-xs text-[#c81e1e]">
+                          {formErrors.sku}
+                        </p>
+                      ) : (
+                        <p className="mt-1 text-[0.65rem] text-[#8b9bb0]">
+                          Unique stock keeping unit (2–18 characters)
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
+                    <Label className="sm:pt-2.5">Unit / UOM *</Label>
                     <Select
-                      className="mt-1"
                       value={form.sellUnit}
                       onChange={(e) =>
                         setForm((f) => ({
@@ -549,39 +750,137 @@ export function SaleStockPanel({
                         }))
                       }
                     >
-                      <option value="pcs">Piece (pcs)</option>
-                      <option value="pack">Pack / box</option>
-                      <option value="kg">Kilogram (kg)</option>
-                      <option value="g">Gram (g)</option>
-                      <option value="L">Litre (L)</option>
-                      <option value="ml">Millilitre (ml)</option>
+                      <option value="pcs">pcs</option>
+                      <option value="pack">box / pack</option>
+                      <option value="kg">kg</option>
+                      <option value="g">g</option>
+                      <option value="L">L</option>
+                      <option value="ml">ml</option>
                     </Select>
                   </div>
-                  <div>
-                    <Label>SKU *</Label>
-                    <Input
-                      className="mt-1 font-mono uppercase"
-                      placeholder="e.g. ALM-MILK-1L"
-                      value={form.sku}
-                      onChange={(e) =>
-                        setForm((f) => ({ ...f, sku: e.target.value }))
-                      }
-                      maxLength={18}
-                    />
-                    {formErrors.sku ? (
-                      <p className="mt-1 text-xs text-[#c81e1e]">
-                        {formErrors.sku}
-                      </p>
-                    ) : (
-                      <p className="mt-1 text-[0.65rem] text-[#8b9bb0]">
-                        2–18 characters · unique stock code
-                      </p>
-                    )}
+
+                  {(form.sellUnit === "pack") && (
+                    <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
+                      <Label className="sm:pt-2.5">Multi-unit</Label>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs text-[#8b9bb0]">1 pack =</span>
+                        <Input
+                          className="w-24"
+                          inputMode="decimal"
+                          placeholder="12"
+                          value={form.multiUnitBaseQty}
+                          onChange={(e) =>
+                            setForm((f) => ({
+                              ...f,
+                              multiUnitBaseQty: e.target.value,
+                            }))
+                          }
+                        />
+                        <Select
+                          className="w-28"
+                          value={form.multiUnitBaseUnit}
+                          onChange={(e) =>
+                            setForm((f) => ({
+                              ...f,
+                              multiUnitBaseUnit: e.target.value,
+                            }))
+                          }
+                        >
+                          <option value="pcs">pcs</option>
+                          <option value="g">g</option>
+                          <option value="ml">ml</option>
+                        </Select>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
+                    <Label className="sm:pt-2.5">Category *</Label>
+                    <div>
+                      <Select
+                        value={form.categoryId}
+                        onChange={(e) =>
+                          setForm((f) => ({
+                            ...f,
+                            categoryId: e.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">Select a category</option>
+                        {categoryOptions.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </Select>
+                      {formErrors.categoryId ? (
+                        <p className="mt-1 text-xs text-[#c81e1e]">
+                          {formErrors.categoryId}
+                        </p>
+                      ) : null}
+                    </div>
                   </div>
-                  <div>
-                    <Label>Barcode (UPC / EAN)</Label>
+
+                  <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
+                    <Label className="sm:pt-1">Item structure</Label>
+                    <div>
+                      <div className="flex flex-wrap gap-2">
+                        {(
+                          [
+                            ["single", "Single item"],
+                            ["variants", "Contains variants"],
+                          ] as const
+                        ).map(([id, label]) => (
+                          <button
+                            key={id}
+                            type="button"
+                            onClick={() =>
+                              setForm((f) => ({ ...f, itemStructure: id }))
+                            }
+                            className={cn(
+                              "rounded-md border px-3 py-1.5 text-sm font-medium transition",
+                              form.itemStructure === id
+                                ? "border-[#1a56db] bg-[#e8eefb] text-[#1a56db]"
+                                : "border-[#d9e0ea] bg-white text-[#5a6b7d]",
+                            )}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                      {form.itemStructure === "variants" ? (
+                        <p className="mt-1 text-[0.65rem] text-[#8b9bb0]">
+                          Parent flag saved — full size/colour matrix ships in
+                          the variants pack.
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              {/* —— 2. Identification & codes —— */}
+              <section className="py-7">
+                <h3 className="text-[0.78rem] font-bold tracking-[0.04em] text-[#21263c] uppercase">
+                  Identification &amp; codes
+                </h3>
+                <div className="mt-4 space-y-3.5">
+                  <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
+                    <Label className="sm:pt-2.5">HSN / SAC</Label>
                     <Input
-                      className="mt-1 font-mono"
+                      className="font-mono"
+                      placeholder="e.g. 1001"
+                      value={form.hsnOrSac}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, hsnOrSac: e.target.value }))
+                      }
+                      maxLength={16}
+                    />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
+                    <Label className="sm:pt-2.5">Barcode</Label>
+                    <Input
+                      className="font-mono"
                       placeholder="Scan or type barcode"
                       value={form.barcode}
                       onChange={(e) =>
@@ -590,11 +889,60 @@ export function SaleStockPanel({
                       maxLength={32}
                     />
                   </div>
-                  <div className="sm:col-span-2">
-                    <Label>Manufacturer / brand</Label>
+                  <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
+                    <Label className="sm:pt-2.5">UPC</Label>
                     <Input
-                      className="mt-1"
-                      placeholder="Optional"
+                      className="font-mono"
+                      value={form.upc}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, upc: e.target.value }))
+                      }
+                      maxLength={32}
+                    />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
+                    <Label className="sm:pt-2.5">EAN</Label>
+                    <Input
+                      className="font-mono"
+                      value={form.ean}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, ean: e.target.value }))
+                      }
+                      maxLength={32}
+                    />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
+                    <Label className="sm:pt-2.5">MPN</Label>
+                    <Input
+                      value={form.mpn}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, mpn: e.target.value }))
+                      }
+                      maxLength={64}
+                    />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
+                    <Label className="sm:pt-2.5">ISBN</Label>
+                    <Input
+                      value={form.isbn}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, isbn: e.target.value }))
+                      }
+                      maxLength={32}
+                    />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
+                    <Label className="sm:pt-2.5">Brand</Label>
+                    <Input
+                      value={form.brand}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, brand: e.target.value }))
+                      }
+                    />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
+                    <Label className="sm:pt-2.5">Manufacturer</Label>
+                    <Input
                       value={form.manufacturer}
                       onChange={(e) =>
                         setForm((f) => ({
@@ -604,61 +952,43 @@ export function SaleStockPanel({
                       }
                     />
                   </div>
-                  <div className="sm:col-span-2">
-                    <Label>Description / sales notes</Label>
-                    <textarea
-                      className={textareaClass}
-                      rows={3}
-                      placeholder="Optional product details for staff"
-                      value={form.description}
-                      onChange={(e) =>
-                        setForm((f) => ({
-                          ...f,
-                          description: e.target.value,
-                        }))
-                      }
-                    />
-                  </div>
                 </div>
               </section>
 
-              {/* Pricing */}
-              <section className="py-6">
-                <h3 className="text-[0.8rem] font-semibold tracking-wide text-[#0b1f33]">
+              {/* —— 3. Pricing —— */}
+              <section className="py-7">
+                <h3 className="text-[0.78rem] font-bold tracking-[0.04em] text-[#21263c] uppercase">
                   Pricing
                 </h3>
-                <p className="mt-0.5 text-[0.72rem] text-[#8b9bb0]">
-                  Selling price is charged at checkout. Cost is for margin
-                  reports.
-                </p>
-                <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  <div>
-                    <Label>Selling price *</Label>
+                <div className="mt-4 space-y-3.5">
+                  <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
+                    <Label className="sm:pt-2.5">Selling Price *</Label>
+                    <div>
+                      <Input
+                        inputMode="decimal"
+                        placeholder="0.00"
+                        value={form.price}
+                        onChange={(e) =>
+                          setForm((f) => ({ ...f, price: e.target.value }))
+                        }
+                      />
+                      {formErrors.price ? (
+                        <p className="mt-1 text-xs text-[#c81e1e]">
+                          {formErrors.price}
+                        </p>
+                      ) : (
+                        <p className="mt-1 text-[0.65rem] text-[#8b9bb0]">
+                          Rate per{" "}
+                          {priceUnitLabel(normalizeSellUnit(form.sellUnit))}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
+                    <Label className="sm:pt-2.5">Cost Price</Label>
                     <Input
-                      className="mt-1"
                       inputMode="decimal"
                       placeholder="0.00"
-                      value={form.price}
-                      onChange={(e) =>
-                        setForm((f) => ({ ...f, price: e.target.value }))
-                      }
-                    />
-                    {formErrors.price ? (
-                      <p className="mt-1 text-xs text-[#c81e1e]">
-                        {formErrors.price}
-                      </p>
-                    ) : (
-                      <p className="mt-1 text-[0.65rem] text-[#8b9bb0]">
-                        Per {priceUnitLabel(normalizeSellUnit(form.sellUnit))}
-                      </p>
-                    )}
-                  </div>
-                  <div>
-                    <Label>Cost price</Label>
-                    <Input
-                      className="mt-1"
-                      inputMode="decimal"
-                      placeholder="Optional"
                       value={form.costPrice}
                       onChange={(e) =>
                         setForm((f) => ({
@@ -668,114 +998,439 @@ export function SaleStockPanel({
                       }
                     />
                   </div>
-                  <div>
-                    <Label>HSN / SAC</Label>
-                    <Input
-                      className="mt-1 font-mono"
-                      placeholder="Tax classification (India)"
-                      value={form.hsnOrSac}
+                  <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
+                    <Label className="sm:pt-1">Tax preference</Label>
+                    <div className="flex flex-wrap gap-2">
+                      {(
+                        [
+                          ["taxable", "Taxable"],
+                          ["non_taxable", "Non-taxable"],
+                        ] as const
+                      ).map(([id, label]) => (
+                        <button
+                          key={id}
+                          type="button"
+                          onClick={() =>
+                            setForm((f) => ({ ...f, taxPreference: id }))
+                          }
+                          className={cn(
+                            "rounded-md border px-3 py-1.5 text-sm font-medium",
+                            form.taxPreference === id
+                              ? "border-[#1a56db] bg-[#e8eefb] text-[#1a56db]"
+                              : "border-[#d9e0ea] text-[#5a6b7d]",
+                          )}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {form.taxPreference === "taxable" ? (
+                    <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
+                      <Label className="sm:pt-2.5">Tax rate %</Label>
+                      <Input
+                        inputMode="decimal"
+                        placeholder="e.g. 5 or 18"
+                        value={form.taxRatePercent}
+                        onChange={(e) =>
+                          setForm((f) => ({
+                            ...f,
+                            taxRatePercent: e.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                  ) : null}
+                  <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
+                    <Label className="sm:pt-2.5">Sales Description</Label>
+                    <textarea
+                      className={textareaClass}
+                      rows={3}
+                      placeholder="Shown on catalog / receipts"
+                      value={form.description}
                       onChange={(e) =>
-                        setForm((f) => ({ ...f, hsnOrSac: e.target.value }))
+                        setForm((f) => ({
+                          ...f,
+                          description: e.target.value,
+                        }))
                       }
-                      maxLength={16}
+                    />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
+                    <Label className="sm:pt-2.5">Loyalty points</Label>
+                    <Input
+                      inputMode="decimal"
+                      placeholder="Optional points weight"
+                      value={form.loyaltyPoints}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          loyaltyPoints: e.target.value,
+                        }))
+                      }
                     />
                   </div>
                 </div>
               </section>
 
-              {/* Inventory */}
-              <section className="py-6">
-                <h3 className="text-[0.8rem] font-semibold tracking-wide text-[#0b1f33]">
-                  Inventory tracking
+              {/* —— 4. Stock & tracking —— */}
+              <section className="py-7">
+                <h3 className="text-[0.78rem] font-bold tracking-[0.04em] text-[#21263c] uppercase">
+                  Stock &amp; tracking
                 </h3>
-                <p className="mt-0.5 text-[0.72rem] text-[#8b9bb0]">
-                  When tracking is on, stock decreases with each sale.
-                </p>
-                <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-lg border border-[#e8edf4] bg-[#f8fafc] px-3 py-3">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5 h-4 w-4 accent-[#1a56db]"
-                    checked={form.trackInventory}
-                    onChange={(e) =>
-                      setForm((f) => ({
-                        ...f,
-                        trackInventory: e.target.checked,
-                      }))
-                    }
-                  />
-                  <span>
-                    <span className="block text-sm font-semibold text-[#0b1f33]">
-                      Track inventory for this item
-                    </span>
-                    <span className="mt-0.5 block text-[0.72rem] text-[#5a6b7d]">
-                      Opening stock and low-stock reorder alerts apply when
-                      enabled.
-                    </span>
-                  </span>
-                </label>
-                {form.trackInventory ? (
-                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                    <div>
-                      <Label>Opening stock *</Label>
-                      <Input
-                        className="mt-1"
-                        inputMode="decimal"
-                        value={form.qty}
-                        onChange={(e) =>
-                          setForm((f) => ({ ...f, qty: e.target.value }))
-                        }
-                      />
-                      {formErrors.qty ? (
-                        <p className="mt-1 text-xs text-[#c81e1e]">
-                          {formErrors.qty}
-                        </p>
-                      ) : (
-                        <p className="mt-1 text-[0.65rem] text-[#8b9bb0]">
-                          {qtyStep(normalizeSellUnit(form.sellUnit)) < 1
-                            ? "Decimals allowed (e.g. 2.500)"
-                            : "Whole units preferred"}
-                        </p>
-                      )}
-                    </div>
-                    <div>
-                      <Label>Reorder point</Label>
-                      <Input
-                        className="mt-1"
-                        inputMode="decimal"
-                        placeholder="Low-stock alert"
-                        value={form.reorderPoint}
+                {form.itemType === "service" ? (
+                  <p className="mt-3 text-sm text-[#6b7c93]">
+                    Service items do not track inventory (like Zoho service
+                    items).
+                  </p>
+                ) : (
+                  <>
+                    <label className="mt-4 flex max-w-xl cursor-pointer items-start gap-3">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5 h-4 w-4 accent-[#1a56db]"
+                        checked={form.trackInventory}
                         onChange={(e) =>
                           setForm((f) => ({
                             ...f,
-                            reorderPoint: e.target.value,
+                            trackInventory: e.target.checked,
                           }))
                         }
                       />
-                    </div>
-                  </div>
-                ) : null}
-              </section>
-
-              {/* Images */}
-              <section className="pt-6">
-                <h3 className="text-[0.8rem] font-semibold tracking-wide text-[#0b1f33]">
-                  Product images
-                </h3>
-                <p className="mt-0.5 text-[0.72rem] text-[#8b9bb0]">
-                  First image is the cover on the counter and catalog.
-                </p>
-                <div className="mt-4">
-                  <ProductImagePicker ref={imagePickerRef} />
+                      <span className="text-sm text-[#21263c]">
+                        Track Inventory for this item
+                      </span>
+                    </label>
+                    {form.trackInventory ? (
+                      <div className="mt-4 space-y-3.5">
+                        <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
+                          <Label className="sm:pt-2.5">Opening Stock *</Label>
+                          <div>
+                            <Input
+                              inputMode="decimal"
+                              value={form.qty}
+                              onChange={(e) =>
+                                setForm((f) => ({
+                                  ...f,
+                                  qty: e.target.value,
+                                }))
+                              }
+                            />
+                            {formErrors.qty ? (
+                              <p className="mt-1 text-xs text-[#c81e1e]">
+                                {formErrors.qty}
+                              </p>
+                            ) : (
+                              <p className="mt-1 text-[0.65rem] text-[#8b9bb0]">
+                                Stock on Hand after save (current location)
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
+                          <Label className="sm:pt-2.5">
+                            Opening stock value
+                          </Label>
+                          <Input
+                            inputMode="decimal"
+                            placeholder="Optional total value"
+                            value={form.openingStockValue}
+                            onChange={(e) =>
+                              setForm((f) => ({
+                                ...f,
+                                openingStockValue: e.target.value,
+                              }))
+                            }
+                          />
+                        </div>
+                        <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
+                          <Label className="sm:pt-2.5">Reorder Point</Label>
+                          <Input
+                            inputMode="decimal"
+                            placeholder="Low stock alert qty"
+                            value={form.reorderPoint}
+                            onChange={(e) =>
+                              setForm((f) => ({
+                                ...f,
+                                reorderPoint: e.target.value,
+                              }))
+                            }
+                          />
+                        </div>
+                      </div>
+                    ) : null}
+                  </>
+                )}
+                <div className="mt-4 space-y-2">
+                  <label className="flex cursor-pointer items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-[#1a56db]"
+                      checked={form.returnable}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          returnable: e.target.checked,
+                        }))
+                      }
+                    />
+                    Returnable item
+                  </label>
+                  {form.itemType === "goods" ? (
+                    <>
+                      <label className="flex cursor-pointer items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 accent-[#1a56db]"
+                          checked={form.batchTracking}
+                          onChange={(e) =>
+                            setForm((f) => ({
+                              ...f,
+                              batchTracking: e.target.checked,
+                            }))
+                          }
+                        />
+                        Batch tracking
+                        <span className="text-[0.65rem] text-[#8b9bb0]">
+                          (flag saved · full batches pack later)
+                        </span>
+                      </label>
+                      <label className="flex cursor-pointer items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 accent-[#1a56db]"
+                          checked={form.serialTracking}
+                          onChange={(e) =>
+                            setForm((f) => ({
+                              ...f,
+                              serialTracking: e.target.checked,
+                            }))
+                          }
+                        />
+                        Serial tracking
+                      </label>
+                      <label className="flex cursor-pointer items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 accent-[#1a56db]"
+                          checked={form.isComposite}
+                          onChange={(e) =>
+                            setForm((f) => ({
+                              ...f,
+                              isComposite: e.target.checked,
+                            }))
+                          }
+                        />
+                        Composite item (kit / bundle)
+                      </label>
+                      <label className="flex cursor-pointer items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 accent-[#1a56db]"
+                          checked={form.perishable}
+                          onChange={(e) =>
+                            setForm((f) => ({
+                              ...f,
+                              perishable: e.target.checked,
+                            }))
+                          }
+                        />
+                        Perishable
+                      </label>
+                      {form.perishable ? (
+                        <div className="ml-6 grid max-w-md gap-2 sm:grid-cols-2">
+                          <div>
+                            <Label className="text-[0.7rem]">
+                              Auto-discount days before expiry
+                            </Label>
+                            <Input
+                              className="mt-1"
+                              inputMode="numeric"
+                              value={form.expiryAutoDiscountDays}
+                              onChange={(e) =>
+                                setForm((f) => ({
+                                  ...f,
+                                  expiryAutoDiscountDays: e.target.value,
+                                }))
+                              }
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-[0.7rem]">Discount %</Label>
+                            <Input
+                              className="mt-1"
+                              inputMode="decimal"
+                              value={form.expiryAutoDiscountPercent}
+                              onChange={(e) =>
+                                setForm((f) => ({
+                                  ...f,
+                                  expiryAutoDiscountPercent: e.target.value,
+                                }))
+                              }
+                            />
+                          </div>
+                        </div>
+                      ) : null}
+                    </>
+                  ) : null}
                 </div>
               </section>
 
-              <div className="flex flex-wrap gap-2 border-t border-[#eef1f4] pt-5">
+              {/* —— 5. Physical details —— */}
+              {form.itemType === "goods" ? (
+                <section className="py-7">
+                  <h3 className="text-[0.78rem] font-bold tracking-[0.04em] text-[#21263c] uppercase">
+                    Physical details
+                  </h3>
+                  <div className="mt-4 space-y-3.5">
+                    <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
+                      <Label className="sm:pt-2.5">Dimensions (L×W×H)</Label>
+                      <div className="flex flex-wrap gap-2">
+                        <Input
+                          className="w-20"
+                          placeholder="L"
+                          inputMode="decimal"
+                          value={form.dimLength}
+                          onChange={(e) =>
+                            setForm((f) => ({
+                              ...f,
+                              dimLength: e.target.value,
+                            }))
+                          }
+                        />
+                        <Input
+                          className="w-20"
+                          placeholder="W"
+                          inputMode="decimal"
+                          value={form.dimWidth}
+                          onChange={(e) =>
+                            setForm((f) => ({
+                              ...f,
+                              dimWidth: e.target.value,
+                            }))
+                          }
+                        />
+                        <Input
+                          className="w-20"
+                          placeholder="H"
+                          inputMode="decimal"
+                          value={form.dimHeight}
+                          onChange={(e) =>
+                            setForm((f) => ({
+                              ...f,
+                              dimHeight: e.target.value,
+                            }))
+                          }
+                        />
+                        <Select
+                          className="w-24"
+                          value={form.dimUnit}
+                          onChange={(e) =>
+                            setForm((f) => ({
+                              ...f,
+                              dimUnit: e.target.value,
+                            }))
+                          }
+                        >
+                          <option value="cm">cm</option>
+                          <option value="in">in</option>
+                          <option value="mm">mm</option>
+                        </Select>
+                      </div>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
+                      <Label className="sm:pt-2.5">Weight</Label>
+                      <div className="flex flex-wrap gap-2">
+                        <Input
+                          className="w-28"
+                          inputMode="decimal"
+                          value={form.weight}
+                          onChange={(e) =>
+                            setForm((f) => ({
+                              ...f,
+                              weight: e.target.value,
+                            }))
+                          }
+                        />
+                        <Select
+                          className="w-24"
+                          value={form.weightUnit}
+                          onChange={(e) =>
+                            setForm((f) => ({
+                              ...f,
+                              weightUnit: e.target.value,
+                            }))
+                          }
+                        >
+                          <option value="kg">kg</option>
+                          <option value="g">g</option>
+                          <option value="lb">lb</option>
+                        </Select>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              ) : null}
+
+              {/* —— 6. Modifiers (restaurant / café style) —— */}
+              <section className="py-7">
+                <h3 className="text-[0.78rem] font-bold tracking-[0.04em] text-[#21263c] uppercase">
+                  Modifiers / add-ons
+                </h3>
+                <p className="mt-1 text-[0.72rem] text-[#6b7c93]">
+                  Optional labels (e.g. Extra cheese, No onion). Full modifier
+                  pricing pack later — saved on item for now.
+                </p>
+                <textarea
+                  className={`${textareaClass} mt-3`}
+                  rows={2}
+                  placeholder="Comma or line-separated"
+                  value={form.modifiersText}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      modifiersText: e.target.value,
+                    }))
+                  }
+                />
+              </section>
+
+              {/* —— 7. BusinessConfig + extra —— */}
+              {itemMetaFields.length ? (
+                <section className="py-7">
+                  <h3 className="text-[0.78rem] font-bold tracking-[0.04em] text-[#21263c] uppercase">
+                    Profile extras
+                  </h3>
+                  <p className="mt-1 text-[0.72rem] text-[#6b7c93]">
+                    From business type config →{" "}
+                    <code className="text-[0.7rem]">products.meta</code>{" "}
+                    (extra_fields).
+                  </p>
+                  <div className="mt-4 space-y-3.5">
+                    {itemMetaFields.map((field) => (
+                      <ItemMetaFieldRow
+                        key={field.key}
+                        field={field}
+                        value={extraFields[field.key] ?? ""}
+                        onChange={(v) =>
+                          setExtraFields((prev) => ({
+                            ...prev,
+                            [field.key]: v,
+                          }))
+                        }
+                      />
+                    ))}
+                  </div>
+                </section>
+              ) : null}
+
+              <div className="flex flex-wrap gap-2 pt-6">
                 <Button
                   type="button"
-                  disabled={addProduct.isPending}
+                  disabled={addProduct.isPending || !categories.length}
                   onClick={() => addProduct.mutate()}
                 >
-                  {addProduct.isPending ? "Saving…" : "Save product"}
+                  {addProduct.isPending ? "Saving…" : "Save"}
                 </Button>
                 <Button
                   type="button"
@@ -787,89 +1442,118 @@ export function SaleStockPanel({
               </div>
             </div>
 
-            {/* Sticky category rail like Zoho sidebar context */}
-            <aside className="border-t border-[#eef1f4] bg-[#fafbfc] p-4 lg:border-t-0 lg:border-l">
-              <h3 className="text-[0.8rem] font-semibold text-[#0b1f33]">
-                Categories
-              </h3>
-              <p className="mt-0.5 text-[0.72rem] text-[#5a6b7d]">
-                Create a group, then select it on the form.
-              </p>
-              {canWrite ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  className="mt-3 w-full"
-                  onClick={() => setAddCatOpen(true)}
-                >
-                  + Add Category
-                </Button>
-              ) : null}
-              <ul className="mt-3 max-h-64 space-y-1 overflow-y-auto text-sm">
-                {categories.map((c) => (
-                  <li key={c.id}>
-                    <button
-                      type="button"
-                      className={`w-full rounded-md px-2 py-1.5 text-left transition ${
-                        form.categoryId === c.id
-                          ? "bg-[#e8eefb] font-semibold text-[#1a56db]"
-                          : "text-[#5a6b7d] hover:bg-white"
-                      }`}
-                      onClick={() =>
-                        setForm((f) => ({ ...f, categoryId: c.id }))
-                      }
-                    >
-                      {c.name}
-                    </button>
-                  </li>
-                ))}
-                {!categories.length ? (
-                  <li className="px-2 py-2 text-xs text-[#8b9bb0]">
-                    No categories yet
-                  </li>
+            {/* Right: images + categories (Zoho layout) */}
+            <aside className="space-y-6 border-t border-[#eef1f4] bg-[#fafbfc] p-4 lg:border-t-0 lg:border-l sm:p-5">
+              <div>
+                <h3 className="text-[0.78rem] font-bold tracking-[0.04em] text-[#21263c] uppercase">
+                  Images
+                </h3>
+                <p className="mt-1 text-[0.72rem] text-[#6b7c93]">
+                  First image is used as the item thumbnail.
+                </p>
+                <div className="mt-3">
+                  <ProductImagePicker ref={imagePickerRef} />
+                </div>
+              </div>
+
+              <div>
+                <h3 className="text-[0.78rem] font-bold tracking-[0.04em] text-[#21263c] uppercase">
+                  Categories
+                </h3>
+                <p className="mt-1 text-[0.72rem] text-[#6b7c93]">
+                  Select on the form or tap a name below.
+                </p>
+                {canWrite ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="mt-3 w-full"
+                    onClick={() => setAddCatOpen(true)}
+                  >
+                    + Add Category
+                  </Button>
                 ) : null}
-              </ul>
+                <ul className="mt-3 max-h-56 space-y-0.5 overflow-y-auto text-sm">
+                  {categories.map((c) => (
+                    <li key={c.id}>
+                      <button
+                        type="button"
+                        className={`w-full rounded-md px-2 py-1.5 text-left transition ${
+                          form.categoryId === c.id
+                            ? "bg-[#e8eefb] font-semibold text-[#1a56db]"
+                            : "text-[#5a6b7d] hover:bg-white"
+                        }`}
+                        onClick={() =>
+                          setForm((f) => ({ ...f, categoryId: c.id }))
+                        }
+                      >
+                        {c.name}
+                      </button>
+                    </li>
+                  ))}
+                  {!categories.length ? (
+                    <li className="px-2 py-2 text-xs text-[#8b9bb0]">
+                      No categories yet
+                    </li>
+                  ) : null}
+                </ul>
+              </div>
             </aside>
           </div>
         </div>
       ) : null}
 
       {panel === "products" ? (
-        <section className="overflow-hidden rounded-xl border border-[#d9e0ea] bg-white shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
-          {/* Single module chrome — actions only, no second tab row */}
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#eef1f4] px-4 py-3 sm:px-5">
+        <section className="overflow-hidden rounded-md border border-[#d9e0ea] bg-white shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
+          {/* Zoho-style module bar: count left · Import Items + New Item right */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#eef1f4] px-4 py-2.5 sm:px-5">
             <div className="min-w-0">
-              <p className="text-[0.8rem] font-medium text-[#5a6b7d]">
+              <p className="text-[0.8rem] font-medium text-[#0b1f33]">
                 {items.length} item{items.length === 1 ? "" : "s"}
-                {products.isLoading ? " · loading…" : ""}
+                {products.isLoading ? (
+                  <span className="font-normal text-[#8b9bb0]"> · loading…</span>
+                ) : null}
+              </p>
+              <p className="text-[0.7rem] text-[#8b9bb0]">
+                Filter: Status.
+                {statusFilter === "all"
+                  ? "All"
+                  : statusFilter === "low"
+                    ? "Low stock"
+                    : statusFilter === "active"
+                      ? "Active"
+                      : "Inactive"}
+                {filterCat
+                  ? ` · Category · ${
+                      categoryOptions.find((c) => c.id === filterCat)?.name ??
+                      "—"
+                    }`
+                  : ""}
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setPanel("categories")}
-              >
-                Categories
-              </Button>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => setImportOpen(true)}
-              >
-                Import
-              </Button>
-              <Button size="sm" onClick={() => setPanel("add")}>
-                + New
-              </Button>
+              {canWrite ? (
+                <>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setImportOpen(true)}
+                  >
+                    Import Items
+                  </Button>
+                  <Button size="sm" onClick={() => setPanel("add")}>
+                    + New Item
+                  </Button>
+                </>
+              ) : null}
             </div>
           </div>
 
-          {/* Filter toolbar — horizontal chips + compact fields */}
-          <div className="flex flex-col gap-2.5 border-b border-[#eef1f4] px-4 py-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3 sm:px-5">
+          {/* Status chips · category · search (Zoho filter_by=Status.*) */}
+          <div className="flex flex-col gap-2.5 border-b border-[#eef1f4] bg-[#fafbfc] px-4 py-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3 sm:px-5">
             <div
               role="tablist"
-              aria-label="Item status"
+              aria-label="Status filter"
               className="inline-flex flex-wrap gap-0.5 rounded-md border border-[#e2e8f0] bg-[#f1f5f9] p-0.5"
             >
               {(
@@ -920,7 +1604,7 @@ export function SaleStockPanel({
                 strokeWidth={2}
               />
               <Input
-                className="h-9 pl-8 text-[0.8125rem]"
+                className="h-9 bg-white pl-8 text-[0.8125rem]"
                 placeholder="Search name or SKU"
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
@@ -932,7 +1616,7 @@ export function SaleStockPanel({
           <div className="overflow-x-auto">
             <table className="w-full min-w-[52rem] border-collapse text-left text-[0.8125rem]">
               <thead>
-                <tr className="border-b border-[#eef1f4] bg-[#f8fafc] text-[0.7rem] font-semibold tracking-wide text-[#5a6b7d] uppercase">
+                <tr className="border-b border-[#e2e8f0] bg-[#f4f6fa] text-[0.68rem] font-semibold tracking-wide text-[#5a6b7d] uppercase">
                   <th className="px-4 py-2.5 font-semibold sm:px-5">
                     <button
                       type="button"

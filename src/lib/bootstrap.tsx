@@ -12,6 +12,13 @@ import { appsApi } from "@/lib/api";
 import { useAuthStore } from "@/lib/auth-store";
 import type { TenantBootstrap } from "@/lib/bootstrap-types";
 import { formatMoney } from "@/lib/utils";
+import type { BusinessConfig, MetaFieldDef } from "@/lib/business-config";
+import {
+  billingAllowsPark,
+  billingRequiresCustomer,
+  fieldsForEntity,
+  screenEnabled,
+} from "@/lib/business-config";
 
 type BootstrapContextValue = {
   data: TenantBootstrap | undefined;
@@ -33,6 +40,14 @@ type BootstrapContextValue = {
   /** @deprecated prefer hasMode('rental') */
   hasRentalMode: boolean;
   commerceSetupComplete: boolean;
+  /** Resolved vertical BusinessConfig (config-driven — not industry ifs) */
+  businessType: string;
+  businessConfig: BusinessConfig | null;
+  itemMetaFields: MetaFieldDef[];
+  orderMetaFields: MetaFieldDef[];
+  hasScreen: (screen: string) => boolean;
+  requireCustomerOnBill: boolean;
+  allowParkCart: boolean;
 };
 
 const BootstrapContext = createContext<BootstrapContextValue | null>(null);
@@ -96,6 +111,21 @@ export function BootstrapProvider({ children }: { children: ReactNode }) {
   const hasSale = hasMode("sale");
   const hasRentalMode = hasMode("rental");
 
+  const businessConfig = data?.business?.config ?? null;
+  const businessType = data?.business?.type ?? "general";
+  const itemMetaFields =
+    data?.business?.itemMetaFields ??
+    fieldsForEntity(businessConfig, "item");
+  const orderMetaFields =
+    data?.business?.orderMetaFields ??
+    fieldsForEntity(businessConfig, "order");
+  const hasScreen = useCallback(
+    (screen: string) => screenEnabled(businessConfig, screen),
+    [businessConfig],
+  );
+  const requireCustomerOnBill = billingRequiresCustomer(businessConfig);
+  const allowParkCart = billingAllowsPark(businessConfig);
+
   const value = useMemo<BootstrapContextValue>(
     () => ({
       data,
@@ -116,6 +146,13 @@ export function BootstrapProvider({ children }: { children: ReactNode }) {
       hasSale,
       hasRentalMode,
       commerceSetupComplete,
+      businessType,
+      businessConfig,
+      itemMetaFields,
+      orderMetaFields,
+      hasScreen,
+      requireCustomerOnBill,
+      allowParkCart,
     }),
     [
       data,
@@ -134,6 +171,13 @@ export function BootstrapProvider({ children }: { children: ReactNode }) {
       hasSale,
       hasRentalMode,
       commerceSetupComplete,
+      businessType,
+      businessConfig,
+      itemMetaFields,
+      orderMetaFields,
+      hasScreen,
+      requireCustomerOnBill,
+      allowParkCart,
     ],
   );
 

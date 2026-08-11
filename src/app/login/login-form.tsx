@@ -240,12 +240,6 @@ export default function LoginForm() {
             Create an account
           </Link>
         </p>
-        <p className="text-center text-[0.75rem] text-[#8b9bb0]">
-          Staff joining an existing shop?{" "}
-          <Link href="/register-user" className="text-[#1a56db] hover:underline">
-            Join with invite slug
-          </Link>
-        </p>
       </form>
     </AuthShell>
   );

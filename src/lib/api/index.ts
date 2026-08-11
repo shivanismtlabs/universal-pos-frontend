@@ -109,6 +109,10 @@ export const authApi = {
 
   createOrganization(body: {
     organizationName: string;
+    /** Universal profile: retail | grocery | restaurant | salon | service | other | general */
+    businessType: string;
+    /** Other profile: custom item field labels → business_configs.item_fields */
+    customItemFields?: Array<{ label: string }>;
     phone?: string;
     addressLine1?: string;
     city?: string;
@@ -1101,6 +1105,35 @@ export const posApi = {
     reorderPoint?: number;
     hsnOrSac?: string;
     trackInventory?: boolean;
+    itemType?: "goods" | "service";
+    itemStructure?: "single" | "variants";
+    brand?: string;
+    upc?: string;
+    ean?: string;
+    mpn?: string;
+    isbn?: string;
+    taxPreference?: "taxable" | "non_taxable";
+    taxRatePercent?: number;
+    openingStockValue?: number;
+    returnable?: boolean;
+    batchTracking?: boolean;
+    serialTracking?: boolean;
+    dimLength?: number;
+    dimWidth?: number;
+    dimHeight?: number;
+    dimUnit?: string;
+    weight?: number;
+    weightUnit?: string;
+    isComposite?: boolean;
+    multiUnitBaseQty?: number;
+    multiUnitBaseUnit?: string;
+    loyaltyPoints?: number;
+    perishable?: boolean;
+    expiryAutoDiscountDays?: number;
+    expiryAutoDiscountPercent?: number;
+    modifiers?: string[];
+    /** BusinessConfig item_fields → product.meta (ERD extra_fields) */
+    extraFields?: Record<string, unknown>;
   }) {
     return apiRequest<{
       mode: "sale";
@@ -2053,6 +2086,33 @@ export const appsApi = {
       registeredModes?: string[];
       rentalLifecycle?: string[];
     }>("/tenants/me/commerce-modes", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  listBusinessConfigs() {
+    return apiRequest<{
+      catalog: Array<{
+        id: string;
+        label: string;
+        description: string;
+        defaultCommerceModes: string[];
+        billingStyle: string;
+        screens: string[];
+      }>;
+      coreEntities: string[];
+    }>("/commerce/business-configs", { token: token() });
+  },
+  setBusinessConfig(body: {
+    businessType: string;
+    applyDefaultModes?: boolean;
+  }) {
+    return apiRequest<{
+      businessType: string;
+      config: Record<string, unknown>;
+      commerceModes: string[];
+    }>("/tenants/me/business-config", {
       method: "POST",
       body,
       token: token(),

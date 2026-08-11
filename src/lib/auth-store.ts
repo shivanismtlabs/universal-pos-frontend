@@ -171,7 +171,17 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: "universal-pos-auth",
-      storage: createJSONStorage(() => sessionStorage),
+      // Avoid SSR crash: sessionStorage is browser-only (Next still pre-renders client components)
+      storage: createJSONStorage(() => {
+        if (typeof window === "undefined") {
+          return {
+            getItem: () => null,
+            setItem: () => {},
+            removeItem: () => {},
+          };
+        }
+        return sessionStorage;
+      }),
       partialize: (s) => ({
         stationToken: s.stationToken,
         accessToken: s.accessToken,

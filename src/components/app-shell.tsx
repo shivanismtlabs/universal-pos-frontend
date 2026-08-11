@@ -26,7 +26,14 @@ import {
   Wallet,
   TicketPercent,
   ChevronDown,
+  ChevronRight,
+  ChevronLeft,
   Home,
+  Building2,
+  Search,
+  Bell,
+  LayoutGrid,
+  Folder,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -49,6 +56,8 @@ type NavLeaf = {
   icon: LucideIcon;
   module?: string;
   commerce?: string;
+  /** Zoho nested folder under secondary panel (e.g. Business → Profile) */
+  folder?: string;
 };
 
 type NavGroup = {
@@ -58,20 +67,26 @@ type NavGroup = {
   /** Single link when no children */
   href?: string;
   children?: NavLeaf[];
+  /** Zoho secondary section subtitle */
+  section?: string;
+  /** Short rail caption (default: first word of label) */
+  railLabel?: string;
 };
 
-/** Zoho-style groups: Home · Inventory · Sales · Purchases · Customers · … */
+/** Zoho dual-nav groups — rail icons + secondary panel lists */
 const NAV_GROUPS: NavGroup[] = [
   {
     id: "home",
     label: "Home",
     icon: Home,
     href: "/dashboard",
+    section: "Workspace",
   },
   {
     id: "inventory",
     label: "Inventory",
     icon: Package,
+    section: "Catalog",
     children: [
       {
         href: "/catalog",
@@ -110,7 +125,9 @@ const NAV_GROUPS: NavGroup[] = [
   {
     id: "sales",
     label: "Sales",
+    railLabel: "Sales",
     icon: CreditCard,
+    section: "Commerce",
     children: [
       {
         href: "/counter",
@@ -136,6 +153,7 @@ const NAV_GROUPS: NavGroup[] = [
     id: "purchases",
     label: "Purchases",
     icon: Truck,
+    section: "Commerce",
     children: [
       {
         href: "/suppliers",
@@ -153,8 +171,9 @@ const NAV_GROUPS: NavGroup[] = [
   },
   {
     id: "customers",
-    label: "Customers & Perks",
+    label: "Customers",
     icon: Users,
+    section: "People",
     children: [
       {
         href: "/customers",
@@ -187,6 +206,7 @@ const NAV_GROUPS: NavGroup[] = [
     id: "people",
     label: "Team",
     icon: UserCog,
+    section: "People",
     children: [
       {
         href: "/staff",
@@ -206,6 +226,7 @@ const NAV_GROUPS: NavGroup[] = [
     id: "docs",
     label: "Reports",
     icon: BarChart3,
+    section: "Insights",
     children: [
       {
         href: "/reports",
@@ -218,10 +239,29 @@ const NAV_GROUPS: NavGroup[] = [
   {
     id: "setup",
     label: "Settings",
+    railLabel: "Settings",
     icon: Settings,
+    section: "Business settings",
     children: [
-      { href: "/settings", label: "Shop settings", icon: Settings },
-      { href: "/plan", label: "Software plan", icon: CreditCard },
+      {
+        href: "/settings",
+        label: "Profile",
+        icon: Building2,
+        folder: "Business",
+      },
+      {
+        href: "/plan",
+        label: "Subscription",
+        icon: CreditCard,
+        folder: "Business",
+      },
+      {
+        href: "/staff",
+        label: "Staff accounts",
+        icon: UserCog,
+        folder: "Users & Roles",
+        module: "iam",
+      },
     ],
   },
 ];
@@ -253,21 +293,64 @@ function leafAllowed(
 }
 
 function isPathActive(pathname: string, href: string) {
-  return pathname === href || pathname.startsWith(`${href}/`);
+  const base = href.split("?")[0] ?? href;
+  return pathname === base || pathname.startsWith(`${base}/`);
 }
 
-function ZohoNav({
+function groupActiveFromPath(
+  pathname: string,
+  groups: Array<NavGroup & { children: NavLeaf[] }>,
+): string {
+  for (const g of groups) {
+    if (g.href && isPathActive(pathname, g.href)) return g.id;
+    if (g.children.some((c) => isPathActive(pathname, c.href))) return g.id;
+  }
+  return groups[0]?.id ?? "home";
+}
+
+function modeBadge(modes: string[]) {
+  if (!modes.length) return "Setup";
+  const labels: Record<string, string> = {
+    sale: "Sale",
+    rental: "Rent",
+    service: "Service",
+    subscription: "Members",
+  };
+  return modes.map((m) => labels[m] ?? m).join(" + ");
+}
+
+/**
+ * Zoho-style dual sidebar:
+ *  - narrow icon rail (primary modules)
+ *  - secondary panel (group title + search + nested links)
+ */
+function SidebarBody({
   onNavigate,
+  onLogout,
+  onSwitchOrg,
+  userName,
+  userEmail,
   roles,
+  productName,
   hasModule,
   hasMode,
 }: {
   onNavigate?: () => void;
+  onLogout: () => void;
+  onSwitchOrg?: () => void;
+  userName?: string;
+  userEmail?: string;
   roles: string[];
+  productName: string;
+  tagline: string;
   hasModule: (code: string) => boolean;
   hasMode: (code: string) => boolean;
+  commerceModes: string[];
+  modeLabel: string;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const [navQuery, setNavQuery] = useState("");
 
   const groups = useMemo(() => {
     return NAV_GROUPS.map((g) => {
@@ -284,227 +367,381 @@ function ZohoNav({
     }).filter(Boolean) as Array<NavGroup & { children: NavLeaf[] }>;
   }, [roles, hasModule, hasMode]);
 
-  const defaultOpen = useMemo(() => {
-    const open = new Set<string>();
-    for (const g of groups) {
-      if (g.href && isPathActive(pathname, g.href)) continue;
-      if (g.children.some((c) => isPathActive(pathname, c.href))) {
-        open.add(g.id);
-      }
-    }
-    // Expand first useful groups for new shops
-    if (open.size === 0) {
-      open.add("inventory");
-      open.add("sales");
-    }
-    return open;
-  }, [groups, pathname]);
+  const pathGroupId = useMemo(
+    () => groupActiveFromPath(pathname, groups),
+    [pathname, groups],
+  );
 
-  const [openIds, setOpenIds] = useState<Set<string>>(defaultOpen);
+  const [railId, setRailId] = useState(pathGroupId);
+  const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    setOpenIds((prev) => {
-      const next = new Set(prev);
-      for (const id of defaultOpen) next.add(id);
-      return next;
-    });
-  }, [defaultOpen]);
+    setRailId(pathGroupId);
+  }, [pathGroupId]);
 
-  function toggle(id: string) {
-    setOpenIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  const activeGroup =
+    groups.find((g) => g.id === railId) ?? groups[0] ?? null;
+
+  const q = navQuery.trim().toLowerCase();
+  const panelLinks = useMemo(() => {
+    if (!activeGroup) return [] as NavLeaf[];
+    if (activeGroup.href) {
+      return [
+        {
+          href: activeGroup.href,
+          label: activeGroup.label,
+          icon: activeGroup.icon,
+        },
+      ];
+    }
+    let list = activeGroup.children;
+    if (q) {
+      list = list.filter((c) => c.label.toLowerCase().includes(q));
+    }
+    return list;
+  }, [activeGroup, q]);
+
+  // Expand folder that contains the current route
+  useEffect(() => {
+    if (!activeGroup) return;
+    const next: Record<string, boolean> = {};
+    for (const c of activeGroup.children) {
+      if (c.folder && isPathActive(pathname, c.href)) {
+        next[c.folder] = true;
+      }
+    }
+    if (Object.keys(next).length) {
+      setOpenFolders((prev) => ({ ...prev, ...next }));
+    }
+  }, [pathname, activeGroup]);
+
+  const folderOrder = useMemo(() => {
+    const order: string[] = [];
+    for (const c of panelLinks) {
+      const f = c.folder ?? "";
+      if (f && !order.includes(f)) order.push(f);
+    }
+    return order;
+  }, [panelLinks]);
+
+  const unfoldered = panelLinks.filter((c) => !c.folder);
+  const hasFolders = folderOrder.length > 0;
+
+  const railTop = groups.filter((g) =>
+    ["home", "inventory", "sales", "purchases", "customers", "people", "docs"].includes(
+      g.id,
+    ),
+  );
+  const railBottom = groups.filter((g) => g.id === "setup");
+
+  function onRailClick(g: NavGroup & { children: NavLeaf[] }) {
+    setRailId(g.id);
+    setNavQuery("");
+    if (g.href) {
+      router.push(g.href);
+      onNavigate?.();
+    } else if (g.children[0]?.href) {
+      // Stay on panel; optional first nav only for home-less groups — skip auto-nav
+    }
   }
 
+  function toggleFolder(name: string) {
+    setOpenFolders((prev) => ({ ...prev, [name]: !prev[name] }));
+  }
+
+  const railCaption = (g: NavGroup) =>
+    g.railLabel ?? g.label.split(" ")[0] ?? g.label;
+
   return (
-    <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 py-2 [scrollbar-width:thin]">
-      <ul className="space-y-0.5">
-        {groups.map((g) => {
-          const Icon = g.icon;
-          const isLeaf = Boolean(g.href);
-          const childActive = g.children.some((c) =>
-            isPathActive(pathname, c.href),
-          );
-          const selfActive = g.href
-            ? isPathActive(pathname, g.href)
-            : childActive;
-          const expanded = openIds.has(g.id) || childActive;
-
-          if (isLeaf && g.href) {
-            return (
-              <li key={g.id}>
-                <Link
-                  href={g.href}
-                  onClick={onNavigate}
-                  className={cn(
-                    "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[0.8125rem] font-medium transition",
-                    selfActive
-                      ? "bg-[#212b36] text-white"
-                      : "text-[#c4ccd6] hover:bg-[#1e2733] hover:text-white",
-                  )}
-                >
-                  <Icon className="h-4 w-4 shrink-0 opacity-90" strokeWidth={1.75} />
-                  <span className="truncate">{g.label}</span>
-                </Link>
-              </li>
-            );
-          }
-
-          return (
-            <li key={g.id}>
-              <button
-                type="button"
-                onClick={() => toggle(g.id)}
-                className={cn(
-                  "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[0.8125rem] font-medium transition",
-                  selfActive
-                    ? "bg-[#212b36] text-white"
-                    : "text-[#c4ccd6] hover:bg-[#1e2733] hover:text-white",
-                )}
-              >
-                <Icon className="h-4 w-4 shrink-0 opacity-90" strokeWidth={1.75} />
-                <span className="min-w-0 flex-1 truncate">{g.label}</span>
-                <ChevronDown
-                  className={cn(
-                    "h-3.5 w-3.5 shrink-0 opacity-70 transition",
-                    expanded ? "rotate-0" : "-rotate-90",
-                  )}
-                />
-              </button>
-              {expanded ? (
-                <ul className="mt-0.5 ml-2 space-y-0.5 border-l border-white/10 pl-2">
-                  {g.children.map((c) => {
-                    const CIcon = c.icon;
-                    const active = isPathActive(pathname, c.href);
-                    return (
-                      <li key={c.href}>
-                        <Link
-                          href={c.href}
-                          onClick={onNavigate}
-                          className={cn(
-                            "flex items-center gap-2 rounded-md px-2 py-1.5 text-[0.78rem] transition",
-                            active
-                              ? "bg-[#1a56db] font-semibold text-white"
-                              : "text-[#9aa6b2] hover:bg-[#1e2733] hover:text-white",
-                          )}
-                        >
-                          <CIcon className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
-                          <span className="truncate">{c.label}</span>
-                        </Link>
-                      </li>
-                    );
-                  })}
-                </ul>
-              ) : null}
-            </li>
-          );
-        })}
-      </ul>
-    </nav>
-  );
-}
-
-function modeBadge(modes: string[]) {
-  if (!modes.length) return "Setup";
-  const labels: Record<string, string> = {
-    sale: "Sale",
-    rental: "Rent",
-    service: "Service",
-    subscription: "Members",
-  };
-  return modes.map((m) => labels[m] ?? m).join(" + ");
-}
-
-function SidebarBody({
-  onNavigate,
-  onLogout,
-  onSwitchOrg,
-  userName,
-  userEmail,
-  roles,
-  productName,
-  tagline,
-  hasModule,
-  hasMode,
-  commerceModes,
-  modeLabel,
-}: {
-  onNavigate?: () => void;
-  onLogout: () => void;
-  onSwitchOrg?: () => void;
-  userName?: string;
-  userEmail?: string;
-  roles: string[];
-  productName: string;
-  tagline: string;
-  hasModule: (code: string) => boolean;
-  hasMode: (code: string) => boolean;
-  commerceModes: string[];
-  modeLabel: string;
-}) {
-  const initial = (productName.trim()[0] || "P").toUpperCase();
-  return (
-    <div className="flex h-full min-h-0 flex-col bg-[#131920] text-[#e8edf4]">
-      <div className="shrink-0 px-4 pb-3 pt-4">
-        <div className="flex items-center gap-2.5">
-          <div className="grid h-9 w-9 place-items-center rounded-md bg-[#1a56db] text-sm font-bold text-white">
-            {initial}
-          </div>
-          <div className="min-w-0">
-            <p className="text-[0.7rem] font-bold tracking-[0.14em] text-white uppercase">
-              POS
-            </p>
-            <p className="truncate text-[0.78rem] text-[#9aa6b2]">
-              {productName}
-            </p>
-          </div>
-        </div>
-        <p className="mt-2 truncate text-[0.65rem] text-[#6b7785]">
-          {tagline || modeLabel} · {modeBadge(commerceModes)}
-        </p>
-      </div>
-
-      <div className="mx-3 shrink-0 border-t border-white/10" />
-
-      <ZohoNav
-        onNavigate={onNavigate}
-        roles={roles}
-        hasModule={hasModule}
-        hasMode={hasMode}
-      />
-
-      <div className="shrink-0 border-t border-white/10 px-3 py-3">
-        <div className="rounded-md bg-[#1a222c] px-3 py-2.5">
-          <p className="truncate text-[0.8rem] font-semibold text-white">
-            {userName ?? "Staff"}
-          </p>
-          <p className="truncate text-[0.68rem] text-[#8b9bb0]">{userEmail}</p>
-          {roles.length ? (
-            <p className="mt-1 truncate text-[0.58rem] font-medium tracking-[0.08em] text-[#7aa2ff] uppercase">
-              {roles.join(" · ")}
-            </p>
-          ) : null}
-        </div>
-        {onSwitchOrg ? (
+    <div className="flex h-full min-h-0 w-full bg-[#0b1016] text-[#e8edf4]">
+      {/* —— Zoho icon rail —— */}
+      <div className="flex w-[4.35rem] shrink-0 flex-col border-r border-white/[0.06] bg-[#06090e]">
+        <div className="flex justify-center pt-2.5 pb-1">
           <button
             type="button"
-            className="mt-2 w-full rounded-md border border-white/15 bg-transparent px-3 py-2 text-[0.78rem] font-medium text-[#c4ccd6] transition hover:bg-[#1e2733] hover:text-white"
-            onClick={onSwitchOrg}
+            className="grid h-8 w-8 place-items-center rounded-md text-[#8b96a5] transition hover:bg-white/[0.06] hover:text-white"
+            title="Collapse"
+            aria-label="Collapse navigation"
+            onClick={() => onNavigate?.()}
           >
-            Switch organization
+            <ChevronLeft className="h-4 w-4" strokeWidth={1.75} />
           </button>
-        ) : null}
-        <button
-          type="button"
-          className="mt-2 flex w-full items-center justify-center gap-2 rounded-md border border-white/15 bg-transparent px-3 py-2 text-[0.78rem] font-medium text-[#c4ccd6] transition hover:bg-[#1e2733] hover:text-white"
-          onClick={onLogout}
-        >
-          <LogOut className="h-3.5 w-3.5" />
-          Sign out
-        </button>
+        </div>
+
+        <nav className="flex min-h-0 flex-1 flex-col items-center gap-0.5 overflow-y-auto px-1 py-1 [scrollbar-width:none]">
+          {railTop.map((g) => {
+            const Icon = g.icon;
+            const on = g.id === railId;
+            return (
+              <button
+                key={g.id}
+                type="button"
+                title={g.label}
+                onClick={() => onRailClick(g)}
+                className={cn(
+                  "relative flex w-full flex-col items-center gap-0.5 rounded-md px-0.5 py-2 transition",
+                  on
+                    ? "bg-[#152238] text-white"
+                    : "text-[#8b96a5] hover:bg-white/[0.06] hover:text-white",
+                )}
+              >
+                {on ? (
+                  <span className="absolute top-1 bottom-1 left-0 w-[3px] rounded-r-full bg-[#1a56db]" />
+                ) : null}
+                <Icon className="h-[1.15rem] w-[1.15rem]" strokeWidth={1.75} />
+                <span className="max-w-full px-0.5 text-center text-[0.55rem] leading-tight font-medium">
+                  {railCaption(g)}
+                </span>
+              </button>
+            );
+          })}
+
+          <div className="my-2 w-7 border-t border-white/10" />
+
+          <button
+            type="button"
+            title="Search"
+            className="flex w-full flex-col items-center gap-0.5 rounded-md px-0.5 py-2 text-[#8b96a5] transition hover:bg-white/[0.06] hover:text-white"
+            onClick={() => {
+              document.getElementById("shell-nav-search")?.focus();
+            }}
+          >
+            <Search className="h-[1.15rem] w-[1.15rem]" strokeWidth={1.75} />
+            <span className="text-[0.55rem] font-medium">Search</span>
+          </button>
+
+          <div className="min-h-2 flex-1" />
+
+          <div
+            className="flex w-full flex-col items-center gap-0.5 rounded-md px-0.5 py-2 text-[#8b96a5] opacity-40"
+            title="Notifications (soon)"
+          >
+            <Bell className="h-[1.15rem] w-[1.15rem]" strokeWidth={1.75} />
+          </div>
+
+          {railBottom.map((g) => {
+            const Icon = g.icon;
+            const on = g.id === railId;
+            return (
+              <button
+                key={g.id}
+                type="button"
+                title={g.label}
+                onClick={() => onRailClick(g)}
+                className={cn(
+                  "relative flex w-full flex-col items-center gap-0.5 rounded-md px-0.5 py-2 transition",
+                  on
+                    ? "bg-[#152238] text-white"
+                    : "text-[#8b96a5] hover:bg-white/[0.06] hover:text-white",
+                )}
+              >
+                {on ? (
+                  <span className="absolute top-1 bottom-1 left-0 w-[3px] rounded-r-full bg-[#1a56db]" />
+                ) : null}
+                <Icon className="h-[1.15rem] w-[1.15rem]" strokeWidth={1.75} />
+                <span className="text-[0.55rem] font-medium">{railCaption(g)}</span>
+              </button>
+            );
+          })}
+        </nav>
+
+        <div className="flex justify-center border-t border-white/[0.06] py-3">
+          <div
+            className="grid h-8 w-8 place-items-center rounded-full bg-[#1e2733] text-[0.7rem] font-semibold text-white ring-1 ring-white/10"
+            title={userName ?? "Staff"}
+          >
+            {(userName?.trim()?.[0] || "U").toUpperCase()}
+          </div>
+        </div>
+      </div>
+
+      {/* —— Secondary panel —— */}
+      <div className="flex min-w-0 flex-1 flex-col bg-[#11161e]">
+        <div className="shrink-0 px-3.5 pt-3.5 pb-2">
+          <div className="flex items-center gap-2">
+            <LayoutGrid className="h-4 w-4 text-[#7aa2ff]" strokeWidth={1.75} />
+            <p className="text-[0.72rem] font-bold tracking-[0.14em] text-white uppercase">
+              POS
+            </p>
+          </div>
+          <p className="mt-0.5 truncate text-[0.65rem] text-[#7a8796]">{productName}</p>
+
+          <div className="mt-3 border-b border-white/10">
+            <h2 className="inline-block border-b-2 border-[#1a56db] pb-1.5 text-[0.95rem] font-semibold text-white">
+              {activeGroup?.label ?? "Menu"}
+            </h2>
+          </div>
+
+          <div className="relative mt-3">
+            <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-[#6b7785]" />
+            <input
+              id="shell-nav-search"
+              type="search"
+              placeholder="Search"
+              value={navQuery}
+              onChange={(e) => setNavQuery(e.target.value)}
+              className="h-8 w-full rounded-lg border-0 bg-[#0a0e14] pr-2 pl-8 text-[0.78rem] text-[#e8edf4] outline-none ring-1 ring-white/10 placeholder:text-[#5a6573] focus:ring-[#1a56db]/50"
+            />
+          </div>
+
+          {activeGroup?.id === "setup" ? (
+            <Link
+              href="/settings"
+              onClick={onNavigate}
+              className="mt-2.5 flex items-center gap-2 rounded-md px-2 py-2 text-[0.8rem] text-[#a8b3c0] transition hover:bg-white/[0.05] hover:text-white"
+            >
+              <Settings className="h-3.5 w-3.5 shrink-0 opacity-80" strokeWidth={1.75} />
+              All Settings
+            </Link>
+          ) : null}
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-2 [scrollbar-width:thin]">
+          {activeGroup?.section ? (
+            <p className="px-2 pt-1 pb-1.5 text-[0.62rem] font-semibold tracking-[0.14em] text-[#6b8ab8] uppercase">
+              {activeGroup.section}
+            </p>
+          ) : null}
+
+          {/* Zoho nested folders (Settings Business → Profile…) */}
+          {hasFolders
+            ? folderOrder.map((folder) => {
+                const kids = panelLinks.filter((c) => c.folder === folder);
+                const expanded =
+                  openFolders[folder] !== undefined
+                    ? openFolders[folder]
+                    : kids.some((c) => isPathActive(pathname, c.href)) ||
+                      folder === folderOrder[0];
+                const FolderIcon = Folder;
+                return (
+                  <div key={folder} className="mb-0.5">
+                    <button
+                      type="button"
+                      onClick={() => toggleFolder(folder)}
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-[0.8125rem] text-[#c5cdd8] transition hover:bg-white/[0.05] hover:text-white"
+                    >
+                      <FolderIcon className="h-3.5 w-3.5 shrink-0 opacity-80" strokeWidth={1.75} />
+                      <span className="min-w-0 flex-1 truncate text-left font-medium">
+                        {folder}
+                      </span>
+                      {expanded ? (
+                        <ChevronDown className="h-3.5 w-3.5 shrink-0 text-[#7a8796]" />
+                      ) : (
+                        <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[#7a8796]" />
+                      )}
+                    </button>
+                    {expanded ? (
+                      <ul className="mb-1 ml-2 border-l border-white/10 pl-2">
+                        {kids.map((c) => {
+                          const active = isPathActive(pathname, c.href);
+                          return (
+                            <li key={c.href}>
+                              <Link
+                                href={c.href}
+                                onClick={onNavigate}
+                                className={cn(
+                                  "block rounded-md px-2.5 py-1.5 text-[0.8rem] transition",
+                                  active
+                                    ? "bg-[#2a3444] font-semibold text-white"
+                                    : "text-[#9aa6b5] hover:bg-white/[0.05] hover:text-white",
+                                )}
+                              >
+                                {c.label}
+                              </Link>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    ) : null}
+                  </div>
+                );
+              })
+            : null}
+
+          <ul className="space-y-0.5">
+            {(hasFolders ? unfoldered : panelLinks).map((c) => {
+              const CIcon = c.icon;
+              const active = isPathActive(pathname, c.href);
+              return (
+                <li key={c.href}>
+                  <Link
+                    href={c.href}
+                    onClick={onNavigate}
+                    className={cn(
+                      "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[0.8125rem] transition",
+                      active
+                        ? "bg-[#2a3444] font-semibold text-white"
+                        : "text-[#a8b3c0] hover:bg-white/[0.05] hover:text-white",
+                    )}
+                  >
+                    <CIcon
+                      className={cn(
+                        "h-3.5 w-3.5 shrink-0",
+                        active ? "text-[#7aa2ff]" : "opacity-80",
+                      )}
+                      strokeWidth={1.75}
+                    />
+                    <span className="min-w-0 flex-1 truncate">{c.label}</span>
+                  </Link>
+                </li>
+              );
+            })}
+            {!panelLinks.length ? (
+              <li className="px-2.5 py-3 text-[0.75rem] text-[#6b7785]">
+                No items match
+              </li>
+            ) : null}
+          </ul>
+        </div>
+
+        <div className="shrink-0 space-y-2 border-t border-white/[0.06] px-2.5 py-2.5">
+          <div className="rounded-lg bg-gradient-to-br from-[#5b21b6] via-[#3730a3] to-[#1a56db] px-3 py-2.5">
+            <p className="text-[0.72rem] leading-snug font-medium text-white/95">
+              You&apos;re currently on our Premium Trial
+            </p>
+            <div className="mt-2 flex items-center gap-0 text-[0.72rem] font-semibold text-white">
+              <Link
+                href="/plan"
+                onClick={onNavigate}
+                className="pr-2.5 transition hover:underline"
+              >
+                Upgrade
+              </Link>
+              <span className="h-3 w-px bg-white/35" />
+              <Link
+                href="/plan"
+                onClick={onNavigate}
+                className="pl-2.5 transition hover:underline"
+              >
+                Switch Trial
+              </Link>
+            </div>
+          </div>
+
+          <div className="px-0.5">
+            <p className="truncate text-[0.72rem] font-semibold text-white">
+              {userName ?? "Staff"}
+            </p>
+            <p className="truncate text-[0.62rem] text-[#8b9bb0]">{userEmail}</p>
+          </div>
+          {onSwitchOrg ? (
+            <button
+              type="button"
+              className="w-full rounded-md px-2 py-1.5 text-left text-[0.72rem] font-medium text-[#a8b3c0] transition hover:bg-white/[0.05] hover:text-white"
+              onClick={onSwitchOrg}
+            >
+              Switch organization
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[0.72rem] font-medium text-[#a8b3c0] transition hover:bg-white/[0.05] hover:text-white"
+            onClick={onLogout}
+          >
+            <LogOut className="h-3.5 w-3.5" />
+            Sign out
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -678,8 +915,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           setShowSetPin(false);
         }}
       />
-      {/* Dark Zoho secondary nav */}
-      <aside className="hidden h-dvh w-[15.25rem] shrink-0 flex-col md:flex">
+      {/* Zoho dual dark nav: icon rail + secondary */}
+      <aside className="hidden h-dvh w-[17.5rem] shrink-0 flex-col md:flex">
         <SidebarBody {...sidebarProps} />
       </aside>
 
@@ -723,7 +960,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 onClick={() => setOpen(false)}
               />
               <motion.aside
-                className="absolute top-0 left-0 flex h-full w-[min(17rem,88vw)] flex-col shadow-xl"
+                className="absolute top-0 left-0 flex h-full w-[min(19rem,92vw)] flex-col shadow-xl"
                 initial={{ x: -28, opacity: 0.85 }}
                 animate={{ x: 0, opacity: 1 }}
                 exit={{ x: -20, opacity: 0 }}

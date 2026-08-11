@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { tenantsApi } from "@/lib/api";
+import { tenantsApi, appsApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useBootstrap } from "@/lib/bootstrap";
 import { useAuthStore } from "@/lib/auth-store";
@@ -16,6 +16,15 @@ import { PageHeader } from "@/components/page-header";
 
 type Tab = "branding" | "tax" | "receipt" | "counter";
 
+const BUSINESS_TYPES = [
+  { id: "retail", label: "Retail" },
+  { id: "grocery", label: "Grocery / F&B" },
+  { id: "restaurant", label: "Restaurant / café" },
+  { id: "salon", label: "Salon & spa" },
+  { id: "service", label: "Service business" },
+  { id: "other", label: "Other / general" },
+] as const;
+
 /**
  * Shop settings — branding, tax, receipt, counter policies.
  * Backend: PATCH /tenants/me
@@ -24,8 +33,9 @@ export default function SettingsPage() {
   const qc = useQueryClient();
   const roles = useAuthStore((s) => s.user?.roles);
   const canEdit = canManageStaff(roles);
-  const { data: boot, refetch, productName } = useBootstrap();
+  const { data: boot, refetch, productName, businessType } = useBootstrap();
   const [tab, setTab] = useState<Tab>("branding");
+  const [selectedBusinessType, setSelectedBusinessType] = useState("retail");
 
   const locationsQ = useQuery({
     queryKey: ["tenant-locations"],
@@ -65,6 +75,13 @@ export default function SettingsPage() {
         ? (settings.pos as Record<string, unknown>)
         : undefined;
 
+    const bt =
+      (typeof settings.businessType === "string" && settings.businessType) ||
+      boot.business?.type ||
+      businessType ||
+      "general";
+    setSelectedBusinessType(bt);
+
     setBranding({
       productName: t.branding?.productName ?? t.name ?? "",
       tagline: t.branding?.tagline ?? "",
@@ -95,7 +112,7 @@ export default function SettingsPage() {
       ),
     );
     setPinSwitchEnabled(settingsPos?.pinSwitchEnabled !== false);
-  }, [boot?.tenant]);
+  }, [boot?.tenant, boot?.business?.type, businessType]);
 
   const invalidate = () => {
     void refetch();
@@ -126,6 +143,19 @@ export default function SettingsPage() {
     },
     onSuccess: () => {
       toast.success("Branding saved");
+      invalidate();
+    },
+    onError: (e) => toast.error(errMsg(e)),
+  });
+
+  const saveBusinessType = useMutation({
+    mutationFn: () =>
+      appsApi.setBusinessConfig({
+        businessType: selectedBusinessType,
+        applyDefaultModes: false,
+      }),
+    onSuccess: () => {
+      toast.success("Business type saved — item extras follow this profile");
       invalidate();
     },
     onError: (e) => toast.error(errMsg(e)),
@@ -236,6 +266,44 @@ export default function SettingsPage() {
 
       {tab === "branding" ? (
         <section className="space-y-3 rounded-2xl border border-[#e5e7eb] bg-white p-5">
+          <div className="rounded-xl border border-[#d9e0ea] bg-[#f8fafc] p-3.5">
+            <Label>Business type *</Label>
+            <p className="mt-0.5 text-[0.72rem] text-[#6b7280]">
+              Universal profile — drives New Item extras (duration, pack size…)
+              and default billing style. Not a separate app per industry.
+            </p>
+            <ul className="mt-3 grid grid-cols-2 gap-2">
+              {BUSINESS_TYPES.map((bt) => {
+                const on = selectedBusinessType === bt.id;
+                return (
+                  <li key={bt.id}>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedBusinessType(bt.id)}
+                      className={cn(
+                        "w-full rounded-lg border px-2.5 py-2 text-left text-sm font-medium transition",
+                        on
+                          ? "border-[#1a56db] bg-[#e8eefb] text-[#1a56db]"
+                          : "border-[#e5e7eb] bg-white text-[#0b1f33] hover:border-[#c5d0e0]",
+                      )}
+                    >
+                      {bt.label}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+            <Button
+              type="button"
+              size="sm"
+              className="mt-3"
+              disabled={saveBusinessType.isPending}
+              onClick={() => saveBusinessType.mutate()}
+            >
+              {saveBusinessType.isPending ? "Saving…" : "Save business type"}
+            </Button>
+          </div>
+
           <p className="text-xs text-[#6b7280]">
             Display name and currency used across the app, counter, and receipts.
           </p>
