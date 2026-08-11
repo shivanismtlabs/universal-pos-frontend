@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
-import { tenantsApi, usersApi } from "@/lib/api";
+import { tenantsApi, usersApi, iamApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,7 +37,7 @@ export default function StaffPage() {
     {
       value: "cashier",
       label: "Cashier",
-      hint: "Counter charge, customers, enroll/bill — no staff/settings/plan",
+      hint: "Counter charge, customers — no staff/settings/plan",
     },
     {
       value: "fitter",
@@ -46,12 +46,17 @@ export default function StaffPage() {
     },
     {
       value: "inventory",
-      label: "Inventory",
+      label: "Inventory Manager",
       hint: "Products, stock, suppliers — no charge/settings",
     },
     {
+      value: "accountant",
+      label: "Accountant",
+      hint: "Reports, expenses, order view — no counter or catalog write",
+    },
+    {
       value: "manager",
-      label: "Manager",
+      label: "Store Manager",
       hint: "Day ops, reports, returns, staff (not plan / not grant admin)",
     },
     ...(isOwner
@@ -63,6 +68,23 @@ export default function StaffPage() {
           },
         ]
       : []),
+  ];
+
+  const customRoles = useQuery({
+    queryKey: ["iam-roles"],
+    queryFn: () => iamApi.listRoles(),
+    enabled: canManage,
+  });
+
+  const allRoleOptions = [
+    ...roleOptions,
+    ...(customRoles.data ?? [])
+      .filter((r) => !r.isSystem)
+      .map((r) => ({
+        value: r.code,
+        label: r.name,
+        hint: "Custom role",
+      })),
   ];
 
   const list = useQuery({ queryKey: ["users"], queryFn: () => usersApi.list() });
@@ -275,14 +297,14 @@ export default function StaffPage() {
               <div>
                 <Label>Role</Label>
                 <select className="mt-1.5 select-field" {...form.register("roleCode")}>
-                  {roleOptions.map((r) => (
+                  {allRoleOptions.map((r) => (
                     <option key={r.value} value={r.value}>
                       {r.label}
                     </option>
                   ))}
                 </select>
                 <p className="mt-1 text-[0.7rem] text-[#6b7280]">
-                  {roleOptions.find((r) => r.value === form.watch("roleCode"))
+                  {allRoleOptions.find((r) => r.value === form.watch("roleCode"))
                     ?.hint ?? ""}
                 </p>
               </div>

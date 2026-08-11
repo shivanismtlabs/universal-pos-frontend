@@ -8,6 +8,7 @@ export type AuthSessionUser = {
   email: string;
   fullName: string;
   roles: string[];
+  permissions?: string[];
   storeId?: string | null;
   tenantId: string;
   pinSet?: boolean;

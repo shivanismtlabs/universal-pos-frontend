@@ -2822,6 +2822,209 @@ export const usersApi = {
   },
 };
 
+export const iamApi = {
+  listPermissions() {
+    return apiRequest<
+      Array<{ id: string; code: string; description?: string | null }>
+    >("/iam/permissions", { token: token() });
+  },
+  listRoles() {
+    return apiRequest<
+      Array<{
+        id: string;
+        code: string;
+        name: string;
+        isSystem: boolean;
+        userCount: number;
+        permissions: string[];
+      }>
+    >("/iam/roles", { token: token() });
+  },
+  createRole(body: { name: string; code?: string; permissions?: string[] }) {
+    return apiRequest("/iam/roles", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  updateRole(
+    id: string,
+    body: { name?: string; permissions?: string[] },
+  ) {
+    return apiRequest(`/iam/roles/${id}`, {
+      method: "PATCH",
+      body,
+      token: token(),
+    });
+  },
+  deleteRole(id: string) {
+    return apiRequest(`/iam/roles/${id}`, {
+      method: "DELETE",
+      token: token(),
+    });
+  },
+  clockIn(body?: { method?: string; notes?: string }) {
+    return apiRequest("/iam/attendance/clock-in", {
+      method: "POST",
+      body: body ?? {},
+      token: token(),
+    });
+  },
+  clockOut(body?: { method?: string; notes?: string }) {
+    return apiRequest("/iam/attendance/clock-out", {
+      method: "POST",
+      body: body ?? {},
+      token: token(),
+    });
+  },
+  openAttendance() {
+    return apiRequest<{
+      id: string;
+      clockInAt: string;
+      clockOutAt?: string | null;
+    } | null>("/iam/attendance/open", { token: token() });
+  },
+  listAttendance(params?: { from?: string; to?: string; userId?: string }) {
+    const qs = new URLSearchParams();
+    if (params?.from) qs.set("from", params.from);
+    if (params?.to) qs.set("to", params.to);
+    if (params?.userId) qs.set("userId", params.userId);
+    const q = qs.toString();
+    return apiRequest<
+      Array<{
+        id: string;
+        userId: string;
+        fullName: string;
+        email: string;
+        clockInAt: string;
+        clockOutAt?: string | null;
+        method: string;
+        minutes: number | null;
+      }>
+    >(`/iam/attendance${q ? `?${q}` : ""}`, { token: token() });
+  },
+  listShifts() {
+    return apiRequest<
+      Array<{
+        id: string;
+        name: string;
+        startTime: string;
+        endTime: string;
+        daysOfWeek: number[];
+        isActive: boolean;
+        color?: string | null;
+      }>
+    >("/iam/shifts", { token: token() });
+  },
+  createShift(body: {
+    name: string;
+    startTime: string;
+    endTime: string;
+    daysOfWeek?: number[];
+    color?: string;
+  }) {
+    return apiRequest("/iam/shifts", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  updateShift(
+    id: string,
+    body: {
+      name?: string;
+      startTime?: string;
+      endTime?: string;
+      isActive?: boolean;
+    },
+  ) {
+    return apiRequest(`/iam/shifts/${id}`, {
+      method: "PATCH",
+      body,
+      token: token(),
+    });
+  },
+  deleteShift(id: string) {
+    return apiRequest(`/iam/shifts/${id}`, {
+      method: "DELETE",
+      token: token(),
+    });
+  },
+  listAssignments(params?: { from?: string; to?: string }) {
+    const qs = new URLSearchParams();
+    if (params?.from) qs.set("from", params.from);
+    if (params?.to) qs.set("to", params.to);
+    const q = qs.toString();
+    return apiRequest<
+      Array<{
+        id: string;
+        workDate: string;
+        user: { id: string; fullName: string };
+        shift: { id: string; name: string; startTime: string; endTime: string };
+      }>
+    >(`/iam/shift-assignments${q ? `?${q}` : ""}`, { token: token() });
+  },
+  assignShift(body: {
+    shiftId: string;
+    userId: string;
+    workDate: string;
+    notes?: string;
+  }) {
+    return apiRequest("/iam/shift-assignments", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  removeAssignment(id: string) {
+    return apiRequest(`/iam/shift-assignments/${id}`, {
+      method: "DELETE",
+      token: token(),
+    });
+  },
+  webauthnRegisterOptions() {
+    return apiRequest<Record<string, unknown>>(
+      "/iam/webauthn/register/options",
+      { method: "POST", body: {}, token: token() },
+    );
+  },
+  webauthnRegisterVerify(body: { response: unknown; label?: string }) {
+    return apiRequest("/iam/webauthn/register/verify", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  webauthnCredentials() {
+    return apiRequest<
+      Array<{
+        id: string;
+        label?: string | null;
+        deviceType?: string | null;
+        createdAt: string;
+      }>
+    >("/iam/webauthn/credentials", { token: token() });
+  },
+  webauthnDeleteCredential(id: string) {
+    return apiRequest(`/iam/webauthn/credentials/${id}`, {
+      method: "DELETE",
+      token: token(),
+    });
+  },
+  webauthnLoginOptions(email: string) {
+    return apiRequest<Record<string, unknown>>(
+      "/iam/webauthn/login/options",
+      { method: "POST", body: { email } },
+    );
+  },
+  webauthnLoginVerify(email: string, response: unknown) {
+    return apiRequest("/iam/webauthn/login/verify", {
+      method: "POST",
+      body: { email, response },
+    });
+  },
+};
+
 export const documentsApi = {
   list(params?: { orderId?: string; customerId?: string }) {
     const qs = new URLSearchParams();

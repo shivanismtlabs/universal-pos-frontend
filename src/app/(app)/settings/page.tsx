@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { tenantsApi, appsApi } from "@/lib/api";
+import { tenantsApi, appsApi, iamApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useBootstrap } from "@/lib/bootstrap";
 import { useAuthStore } from "@/lib/auth-store";
@@ -13,6 +13,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/page-header";
+import {
+  startRegistration,
+  browserSupportsWebAuthn,
+} from "@simplewebauthn/browser";
 
 type Tab = "branding" | "tax" | "receipt" | "counter";
 
@@ -535,8 +539,99 @@ export default function SettingsPage() {
           >
             {saveCounter.isPending ? "Saving…" : "Save counter settings"}
           </Button>
+
+          <div className="mt-6 border-t border-[#eef1f4] pt-4">
+            <p className="text-sm font-semibold text-[#0b1f33]">
+              Biometric login (optional)
+            </p>
+            <p className="mt-1 text-xs text-[#6b7280]">
+              Register this device&apos;s fingerprint / face / Windows Hello to
+              sign in without typing a password. Works only on supporting
+              browsers over HTTPS (or localhost).
+            </p>
+            <BiometricSetup />
+          </div>
         </section>
       ) : null}
+    </div>
+  );
+}
+
+function BiometricSetup() {
+  const qc = useQueryClient();
+  const creds = useQuery({
+    queryKey: ["webauthn-creds"],
+    queryFn: () => iamApi.webauthnCredentials(),
+  });
+
+  const registerBio = useMutation({
+    mutationFn: async () => {
+      if (!browserSupportsWebAuthn()) {
+        throw new Error("Browser does not support WebAuthn");
+      }
+      const options = await iamApi.webauthnRegisterOptions();
+      const att = await startRegistration({
+        optionsJSON: options as Parameters<
+          typeof startRegistration
+        >[0]["optionsJSON"],
+      });
+      return iamApi.webauthnRegisterVerify({
+        response: att,
+        label: "This device",
+      });
+    },
+    onSuccess: () => {
+      toast.success("Biometric credential registered");
+      void qc.invalidateQueries({ queryKey: ["webauthn-creds"] });
+    },
+    onError: (e) =>
+      toast.error(
+        e instanceof ApiError
+          ? e.messages.join(", ")
+          : e instanceof Error
+            ? e.message
+            : "Registration failed",
+      ),
+  });
+
+  const del = useMutation({
+    mutationFn: (id: string) => iamApi.webauthnDeleteCredential(id),
+    onSuccess: () => {
+      toast.success("Removed");
+      void qc.invalidateQueries({ queryKey: ["webauthn-creds"] });
+    },
+  });
+
+  return (
+    <div className="mt-3 space-y-2">
+      <Button
+        type="button"
+        variant="secondary"
+        disabled={registerBio.isPending}
+        onClick={() => registerBio.mutate()}
+      >
+        {registerBio.isPending ? "Follow device prompt…" : "Register biometrics"}
+      </Button>
+      <ul className="space-y-1 text-sm text-[#5a6b7d]">
+        {(creds.data ?? []).map((c) => (
+          <li
+            key={c.id}
+            className="flex items-center justify-between gap-2 rounded-md bg-white px-2 py-1.5 ring-1 ring-[#e5e7eb]"
+          >
+            <span>
+              {c.label || "Credential"} ·{" "}
+              {new Date(c.createdAt).toLocaleDateString()}
+            </span>
+            <button
+              type="button"
+              className="text-xs font-medium text-red-600"
+              onClick={() => del.mutate(c.id)}
+            >
+              Remove
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

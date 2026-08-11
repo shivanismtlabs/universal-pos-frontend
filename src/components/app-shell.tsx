@@ -215,6 +215,24 @@ const NAV_GROUPS: NavGroup[] = [
         module: "iam",
       },
       {
+        href: "/roles",
+        label: "Roles & permissions",
+        icon: Settings,
+        module: "iam",
+      },
+      {
+        href: "/attendance",
+        label: "Attendance",
+        icon: CalendarDays,
+        module: "iam",
+      },
+      {
+        href: "/shifts",
+        label: "Shift management",
+        icon: ClipboardList,
+        module: "iam",
+      },
+      {
         href: "/notify",
         label: "WhatsApp",
         icon: MessageCircle,
@@ -259,6 +277,13 @@ const NAV_GROUPS: NavGroup[] = [
         href: "/staff",
         label: "Staff accounts",
         icon: UserCog,
+        folder: "Users & Roles",
+        module: "iam",
+      },
+      {
+        href: "/roles",
+        label: "Roles & permissions",
+        icon: Settings,
         folder: "Users & Roles",
         module: "iam",
       },
@@ -775,6 +800,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     pathname === "/pos" ||
     pathname.startsWith("/pos/");
   const roles = user?.roles ?? stationUser?.roles ?? [];
+  const permissions = user?.permissions ?? stationUser?.permissions ?? [];
   const modeLabel = modeBadge(commerceModes) || "POS";
   const pinSwitchEnabled =
     (boot?.tenant?.settings as { pos?: { pinSwitchEnabled?: boolean } } | null)
@@ -793,7 +819,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (pinLocked || !roles.length || isLoading) return;
-    if (!canAccessPath(pathname, roles)) {
+    if (!canAccessPath(pathname, roles, permissions)) {
       const home = defaultHomeForRoles(roles);
       toast.error("You don’t have access to that page");
       router.replace(home);
@@ -811,7 +837,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       toast.message("Not enabled for this shop’s commerce modes");
       router.replace("/dashboard");
     }
-  }, [pathname, roles, router, hasModule, hasMode, isLoading, pinLocked]);
+  }, [pathname, roles, permissions, router, hasModule, hasMode, isLoading, pinLocked]);
 
   useEffect(() => {
     const html = document.documentElement;
@@ -998,7 +1024,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               wide ? "max-w-none" : "mx-auto w-full max-w-[72rem]",
             )}
           >
-            {canAccessPath(pathname, roles) ? children : null}
+            {canAccessPath(pathname, roles, permissions) ? children : null}
           </div>
         </main>
       </div>

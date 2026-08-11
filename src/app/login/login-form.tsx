@@ -17,10 +17,14 @@ import {
   AuthGoogleButton,
 } from "@/components/auth-google-button";
 import { loginSchema, type LoginInput } from "@/lib/validations";
-import { appsApi, authApi } from "@/lib/api";
+import { appsApi, authApi, iamApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useAuthStore } from "@/lib/auth-store";
 import { applyPortalResponse } from "@/lib/auth-portal";
+import {
+  startAuthentication,
+  browserSupportsWebAuthn,
+} from "@simplewebauthn/browser";
 
 const FAIL_KEY = "universal-pos-login-fails";
 const LOCK_MS = 60_000;
@@ -94,6 +98,7 @@ export default function LoginForm() {
   const {
     register,
     handleSubmit,
+    getValues,
     formState: { errors, isSubmitting },
   } = useForm<LoginInput>({
     resolver: zodResolver(loginSchema),
@@ -102,6 +107,8 @@ export default function LoginForm() {
       password: "",
     },
   });
+
+  const [bioBusy, setBioBusy] = useState(false);
 
   async function finishAuth(
     data: Awaited<ReturnType<typeof authApi.login>>,
@@ -163,6 +170,37 @@ export default function LoginForm() {
           ? e.messages.join(", ")
           : "Google sign-in failed",
       );
+    }
+  }
+
+  async function onBiometric() {
+    const email = getValues("email")?.trim().toLowerCase();
+    if (!email) {
+      toast.error("Enter your email first");
+      return;
+    }
+    if (!browserSupportsWebAuthn()) {
+      toast.error("This browser does not support biometrics / passkeys");
+      return;
+    }
+    setBioBusy(true);
+    try {
+      const options = await iamApi.webauthnLoginOptions(email);
+      const assertion = await startAuthentication({
+        optionsJSON: options as Parameters<
+          typeof startAuthentication
+        >[0]["optionsJSON"],
+      });
+      const data = await iamApi.webauthnLoginVerify(email, assertion);
+      await finishAuth(data as Awaited<ReturnType<typeof authApi.login>>);
+    } catch (e) {
+      toast.error(
+        e instanceof ApiError
+          ? e.messages.join(", ")
+          : "Biometric sign-in failed or cancelled",
+      );
+    } finally {
+      setBioBusy(false);
     }
   }
 
@@ -229,6 +267,16 @@ export default function LoginForm() {
             : isSubmitting
               ? "Signing in…"
               : "Sign in"}
+        </Button>
+
+        <Button
+          type="button"
+          variant="secondary"
+          className="w-full"
+          disabled={locked || bioBusy || isSubmitting}
+          onClick={() => void onBiometric()}
+        >
+          {bioBusy ? "Waiting for device…" : "Sign in with biometrics"}
         </Button>
 
         <p className="text-center text-[0.8125rem] text-[#5a6b7d]">
