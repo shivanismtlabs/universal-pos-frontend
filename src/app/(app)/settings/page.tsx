@@ -571,7 +571,7 @@ function BiometricSetup() {
       }
       const options = await iamApi.webauthnRegisterOptions();
       const att = await startRegistration({
-        optionsJSON: options as Parameters<
+        optionsJSON: options as unknown as Parameters<
           typeof startRegistration
         >[0]["optionsJSON"],
       });

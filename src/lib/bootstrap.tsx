@@ -97,11 +97,13 @@ export function BootstrapProvider({ children }: { children: ReactNode }) {
   );
 
   const commerceSetupComplete = Boolean(data?.commerce?.setupComplete);
-  const commerceModes = (
-    commerceSetupComplete && data?.commerce?.modes?.length
-      ? data.commerce.modes
-      : []
-  ) as string[];
+  const commerceModes = useMemo(
+    () =>
+      (commerceSetupComplete && data?.commerce?.modes?.length
+        ? data.commerce.modes
+        : []) as string[],
+    [commerceSetupComplete, data?.commerce?.modes],
+  );
 
   const hasMode = useCallback(
     (code: string) => commerceModes.includes(code),
@@ -126,14 +128,18 @@ export function BootstrapProvider({ children }: { children: ReactNode }) {
   const requireCustomerOnBill = billingRequiresCustomer(businessConfig);
   const allowParkCart = billingAllowsPark(businessConfig);
 
+  const isLoading = query.isLoading && !data;
+  const isError = query.isError;
+  const refetch = useCallback(() => {
+    void query.refetch();
+  }, [query]);
+
   const value = useMemo<BootstrapContextValue>(
     () => ({
       data,
-      isLoading: query.isLoading && !data,
-      isError: query.isError,
-      refetch: () => {
-        void query.refetch();
-      },
+      isLoading,
+      isError,
+      refetch,
       hasModule,
       hasMode,
       flag,
@@ -156,9 +162,9 @@ export function BootstrapProvider({ children }: { children: ReactNode }) {
     }),
     [
       data,
-      query.isLoading,
-      query.isError,
-      query.refetch,
+      isLoading,
+      isError,
+      refetch,
       hasModule,
       hasMode,
       flag,

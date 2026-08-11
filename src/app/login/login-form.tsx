@@ -187,7 +187,7 @@ export default function LoginForm() {
     try {
       const options = await iamApi.webauthnLoginOptions(email);
       const assertion = await startAuthentication({
-        optionsJSON: options as Parameters<
+        optionsJSON: options as unknown as Parameters<
           typeof startAuthentication
         >[0]["optionsJSON"],
       });

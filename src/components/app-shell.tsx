@@ -799,8 +799,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     pathname.startsWith("/counter/") ||
     pathname === "/pos" ||
     pathname.startsWith("/pos/");
-  const roles = user?.roles ?? stationUser?.roles ?? [];
-  const permissions = user?.permissions ?? stationUser?.permissions ?? [];
+  const roles = useMemo(
+    () => user?.roles ?? stationUser?.roles ?? [],
+    [user?.roles, stationUser?.roles],
+  );
+  const permissions = useMemo(
+    () => user?.permissions ?? stationUser?.permissions ?? [],
+    [user?.permissions, stationUser?.permissions],
+  );
   const modeLabel = modeBadge(commerceModes) || "POS";
   const pinSwitchEnabled =
     (boot?.tenant?.settings as { pos?: { pinSwitchEnabled?: boolean } } | null)
