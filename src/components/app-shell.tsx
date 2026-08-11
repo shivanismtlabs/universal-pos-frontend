@@ -37,8 +37,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useAuthStore } from "@/lib/auth-store";
 import { authApi } from "@/lib/api";
+import { useAuthStore } from "@/lib/auth-store";
 import { useBootstrap } from "@/lib/bootstrap";
 import { Button } from "@/components/ui/button";
 import { StationPinLock } from "@/components/station-pin-lock";
@@ -95,8 +95,20 @@ const NAV_GROUPS: NavGroup[] = [
         module: "catalog",
       },
       {
-        href: "/catalog?panel=categories",
+        href: "/catalog/new",
+        label: "New Item",
+        icon: Package,
+        module: "catalog",
+      },
+      {
+        href: "/catalog",
         label: "Categories",
+        icon: Box,
+        module: "catalog",
+      },
+      {
+        href: "/catalog",
+        label: "Brands",
         icon: Box,
         module: "catalog",
       },
@@ -812,9 +824,49 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     (boot?.tenant?.settings as { pos?: { pinSwitchEnabled?: boolean } } | null)
       ?.pos?.pinSwitchEnabled !== false;
 
+  const accessToken = useAuthStore((s) => s.accessToken);
+
   useEffect(() => {
     setOpen(false);
   }, [pathname]);
+
+  /** Refresh roles + permissions matrix after login / soft switch */
+  useEffect(() => {
+    if (!accessToken || pinLocked) return;
+    void authApi
+      .me()
+      .then((me) => {
+        if (!me?.id) return;
+        const next = {
+          id: me.id,
+          email: me.email,
+          fullName: me.fullName,
+          roles: me.roles ?? [],
+          permissions: me.permissions,
+          storeId: me.storeId ?? me.locationId ?? me.primaryStoreId,
+          tenantId:
+            me.tenantId ??
+            me.tenant?.id ??
+            useAuthStore.getState().user?.tenantId ??
+            "",
+          pinSet: me.pinSet,
+        };
+        const s = useAuthStore.getState();
+        if (s.user) {
+          useAuthStore.setState({
+            user: { ...s.user, ...next },
+          });
+        }
+        if (s.stationUser && s.stationUser.id === me.id) {
+          useAuthStore.setState({
+            stationUser: { ...s.stationUser, ...next },
+          });
+        }
+      })
+      .catch(() => {
+        /* offline / lock — ignore */
+      });
+  }, [accessToken, pinLocked]);
 
   useEffect(() => {
     if (pinLocked || !user || !pinSwitchEnabled) return;

@@ -1,9 +1,18 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
+import {
+  Users,
+  Shield,
+  Clock,
+  CalendarDays,
+  Fingerprint,
+  KeyRound,
+} from "lucide-react";
 import { tenantsApi, usersApi, iamApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
@@ -13,6 +22,7 @@ import { useAuthStore } from "@/lib/auth-store";
 import { passwordStrength } from "@/lib/validations";
 import { PageHeader } from "@/components/page-header";
 import { SetPinDialog } from "@/components/set-pin-dialog";
+import { cn } from "@/lib/utils";
 
 type Form = {
   fullName: string;
@@ -22,6 +32,20 @@ type Form = {
   roleCode: string;
   primaryStoreId: string;
 };
+
+const ROLE_LABELS: Record<string, string> = {
+  admin: "Admin",
+  manager: "Store Manager",
+  cashier: "Cashier",
+  inventory: "Inventory Manager",
+  accountant: "Accountant",
+  fitter: "Fitter",
+  staff: "Staff",
+};
+
+function roleLabel(code: string) {
+  return ROLE_LABELS[code] ?? code;
+}
 
 export default function StaffPage() {
   const qc = useQueryClient();
@@ -33,38 +57,39 @@ export default function StaffPage() {
     id?: string;
     name: string;
   } | null>(null);
+
   const roleOptions = [
     {
       value: "cashier",
       label: "Cashier",
-      hint: "Counter charge, customers — no staff/settings/plan",
-    },
-    {
-      value: "fitter",
-      label: "Fitter",
-      hint: "Appointments, customers, view orders — no counter charge",
+      hint: "Counter, customers, returns — no staff/settings",
     },
     {
       value: "inventory",
       label: "Inventory Manager",
-      hint: "Products, stock, suppliers — no charge/settings",
+      hint: "Items, stock, suppliers, transfers",
     },
     {
       value: "accountant",
       label: "Accountant",
-      hint: "Reports, expenses, order view — no counter or catalog write",
+      hint: "Reports, expenses, order view",
+    },
+    {
+      value: "fitter",
+      label: "Fitter",
+      hint: "Appointments and customers (service/rental)",
     },
     {
       value: "manager",
       label: "Store Manager",
-      hint: "Day ops, reports, returns, staff (not plan / not grant admin)",
+      hint: "Full day ops, staff, reports (not plan)",
     },
     ...(isOwner
       ? [
           {
             value: "admin",
-            label: "Admin (owner)",
-            hint: "Full shop control — only you can grant this",
+            label: "Admin",
+            hint: "Owner — full shop including plan",
           },
         ]
       : []),
@@ -83,7 +108,7 @@ export default function StaffPage() {
       .map((r) => ({
         value: r.code,
         label: r.name,
-        hint: "Custom role",
+        hint: "Custom role (permission matrix)",
       })),
   ];
 
@@ -91,6 +116,10 @@ export default function StaffPage() {
   const stores = useQuery({
     queryKey: ["stores"],
     queryFn: () => tenantsApi.listStores(),
+  });
+  const attendanceOpen = useQuery({
+    queryKey: ["attendance-open"],
+    queryFn: () => iamApi.openAttendance(),
   });
 
   const form = useForm<Form>({
@@ -143,44 +172,136 @@ export default function StaffPage() {
       toast.error(e instanceof ApiError ? e.messages.join(", ") : "Failed"),
   });
 
+  const team = list.data ?? [];
+  const roleCounts = team.reduce<Record<string, number>>((acc, u) => {
+    for (const r of u.roles ?? []) {
+      acc[r] = (acc[r] ?? 0) + 1;
+    }
+    return acc;
+  }, {});
+
+  const hubLinks = [
+    {
+      href: "/roles",
+      title: "Roles & permissions",
+      desc: "System + custom roles matrix",
+      icon: Shield,
+      show: canManage,
+    },
+    {
+      href: "/attendance",
+      title: "Attendance",
+      desc: attendanceOpen.data
+        ? "You are clocked in"
+        : "Clock in / out & team log",
+      icon: Clock,
+      show: true,
+    },
+    {
+      href: "/shifts",
+      title: "Shift management",
+      desc: "Templates and roster",
+      icon: CalendarDays,
+      show: canManage,
+    },
+    {
+      href: "/settings",
+      title: "PIN & biometrics",
+      desc: "Counter PIN switch · register device biometrics",
+      icon: Fingerprint,
+      show: true,
+    },
+  ].filter((x) => x.show);
+
   return (
-    <div className="mx-auto max-w-5xl space-y-5">
+    <div className="mx-auto max-w-6xl space-y-5">
       <PageHeader
-        title="Staff accounts"
-        subtitle="Manage staff accounts and roles. Invite with email and password, and set a counter PIN for shared terminals."
+        title="User & role management"
+        subtitle="Admin, Store Manager, Cashier, Inventory Manager, Accountant · custom roles · attendance · shifts · PIN · biometrics"
       />
+
+      {/* Role coverage strip */}
+      <section className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+        {(
+          [
+            ["admin", "Admin"],
+            ["manager", "Store Manager"],
+            ["cashier", "Cashier"],
+            ["inventory", "Inventory Mgr"],
+            ["accountant", "Accountant"],
+          ] as const
+        ).map(([code, label]) => (
+          <div
+            key={code}
+            className="rounded-xl border border-[#e5e7eb] bg-white px-3 py-2.5"
+          >
+            <p className="text-[0.65rem] font-semibold tracking-wide text-[#6b7280] uppercase">
+              {label}
+            </p>
+            <p className="mt-0.5 text-lg font-semibold text-[#111827]">
+              {roleCounts[code] ?? 0}
+            </p>
+          </div>
+        ))}
+      </section>
+
+      {/* Hub links */}
+      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {hubLinks.map((item) => {
+          const Icon = item.icon;
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className="flex gap-3 rounded-xl border border-[#e5e7eb] bg-white p-4 transition hover:border-[#1a56db]/35 hover:shadow-sm"
+            >
+              <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#eef2ff] text-[#1a56db]">
+                <Icon className="h-4 w-4" strokeWidth={1.75} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-[#111827]">
+                  {item.title}
+                </p>
+                <p className="mt-0.5 text-xs text-[#6b7280]">{item.desc}</p>
+              </div>
+            </Link>
+          );
+        })}
+      </section>
 
       <SetPinDialog
         open={Boolean(pinTarget)}
         title={
-          pinTarget?.id
-            ? `Set PIN · ${pinTarget.name}`
-            : "Change my PIN"
+          pinTarget?.id ? `Set PIN · ${pinTarget.name}` : "Change my PIN"
         }
         userId={pinTarget?.id}
         onClose={() => setPinTarget(null)}
         onSaved={() => void qc.invalidateQueries({ queryKey: ["users"] })}
       />
 
-      <div className="grid gap-5 lg:grid-cols-[1.2fr_0.9fr]">
+      <div className="grid gap-5 lg:grid-cols-[1.25fr_0.95fr]">
         <section className="overflow-hidden rounded-2xl border border-[#e5e7eb] bg-white">
-          <div className="flex items-center justify-between border-b border-[#f3f4f6] px-4 py-3">
-            <p className="text-sm text-[#6b7280]">Team</p>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#f3f4f6] px-4 py-3">
+            <div className="flex items-center gap-2">
+              <Users className="h-4 w-4 text-[#1a56db]" />
+              <p className="text-sm font-medium text-[#374151]">
+                Team ({team.length})
+              </p>
+            </div>
             {me ? (
               <Button
                 type="button"
                 size="sm"
                 variant="secondary"
-                onClick={() =>
-                  setPinTarget({ name: me.fullName })
-                }
+                onClick={() => setPinTarget({ name: me.fullName })}
               >
-                Change my PIN
+                <KeyRound className="mr-1.5 h-3.5 w-3.5" />
+                My PIN
               </Button>
             ) : null}
           </div>
           <ul className="divide-y divide-[#f3f4f6]">
-            {(list.data ?? []).map((u) => (
+            {team.map((u) => (
               <li
                 key={u.id}
                 className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"
@@ -188,11 +309,28 @@ export default function StaffPage() {
                 <div className="min-w-0">
                   <p className="font-semibold text-[#111827]">{u.fullName}</p>
                   <p className="text-sm text-[#6b7280]">{u.email}</p>
-                  <p className="mt-0.5 text-xs text-[#9ca3af]">
-                    {(u.roles ?? []).join(", ") || "no role"}
-                    {u.isActive ? "" : " · inactive"}
-                    {u.pinSet ? " · PIN set" : " · no PIN"}
-                  </p>
+                  <div className="mt-1.5 flex flex-wrap gap-1">
+                    {(u.roles ?? []).map((r) => (
+                      <span
+                        key={r}
+                        className={cn(
+                          "rounded-md px-1.5 py-0.5 text-[0.65rem] font-medium",
+                          r === "admin"
+                            ? "bg-[#1a56db]/10 text-[#1a56db]"
+                            : "bg-[#f3f4f6] text-[#4b5563]",
+                        )}
+                      >
+                        {roleLabel(r)}
+                      </span>
+                    ))}
+                    {!u.roles?.length ? (
+                      <span className="text-xs text-[#9ca3af]">no role</span>
+                    ) : null}
+                    <span className="text-[0.65rem] text-[#9ca3af]">
+                      {u.isActive ? "" : "· inactive "}
+                      {u.pinSet ? "· PIN set" : "· no PIN"}
+                    </span>
+                  </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {canManage && u.isActive ? (
@@ -227,13 +365,19 @@ export default function StaffPage() {
           {list.isLoading ? (
             <p className="px-4 py-8 text-sm text-[#6b7280]">Loading…</p>
           ) : null}
+          {!list.isLoading && !team.length ? (
+            <p className="px-4 py-8 text-sm text-[#6b7280]">No staff yet</p>
+          ) : null}
         </section>
 
         <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5">
-          <h2 className="display text-xl">Add staff</h2>
+          <h2 className="text-lg font-semibold text-[#111827]">Add staff</h2>
+          <p className="mt-1 text-xs text-[#6b7280]">
+            Choose a system role or a custom role from Roles & permissions.
+          </p>
           {!canManage ? (
-            <p className="mt-2 text-sm text-[#6b7280]">
-              Only admin/manager can invite staff.
+            <p className="mt-3 text-sm text-[#6b7280]">
+              Only Admin / Store Manager can invite staff.
             </p>
           ) : (
             <form
@@ -242,7 +386,10 @@ export default function StaffPage() {
             >
               <div>
                 <Label>Full name</Label>
-                <Input className="mt-1.5" {...form.register("fullName", { required: true })} />
+                <Input
+                  className="mt-1.5"
+                  {...form.register("fullName", { required: true })}
+                />
               </div>
               <div>
                 <Label>Email</Label>
@@ -296,7 +443,10 @@ export default function StaffPage() {
               </div>
               <div>
                 <Label>Role</Label>
-                <select className="mt-1.5 select-field" {...form.register("roleCode")}>
+                <select
+                  className="mt-1.5 select-field w-full"
+                  {...form.register("roleCode")}
+                >
                   {allRoleOptions.map((r) => (
                     <option key={r.value} value={r.value}>
                       {r.label}
@@ -304,14 +454,15 @@ export default function StaffPage() {
                   ))}
                 </select>
                 <p className="mt-1 text-[0.7rem] text-[#6b7280]">
-                  {allRoleOptions.find((r) => r.value === form.watch("roleCode"))
-                    ?.hint ?? ""}
+                  {allRoleOptions.find(
+                    (r) => r.value === form.watch("roleCode"),
+                  )?.hint ?? ""}
                 </p>
               </div>
               <div>
-                <Label>Store</Label>
+                <Label>Location / store</Label>
                 <select
-                  className="mt-1.5 select-field"
+                  className="mt-1.5 select-field w-full"
                   {...form.register("primaryStoreId")}
                 >
                   <option value="">Optional</option>
@@ -322,8 +473,12 @@ export default function StaffPage() {
                   ))}
                 </select>
               </div>
-              <Button type="submit" className="w-full" disabled={create.isPending}>
-                {create.isPending ? "Saving…" : "Create"}
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={create.isPending}
+              >
+                {create.isPending ? "Saving…" : "Create staff"}
               </Button>
             </form>
           )}

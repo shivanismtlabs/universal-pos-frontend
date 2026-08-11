@@ -21,6 +21,7 @@ type AuthUserPayload = {
   roles: string[];
   permissions?: string[];
   storeId?: string | null;
+  locationId?: string | null;
   tenantId: string;
   pinSet?: boolean;
 };
@@ -166,8 +167,12 @@ export const authApi = {
       email: string;
       fullName: string;
       roles: string[];
+      permissions?: string[];
       primaryStoreId?: string | null;
-      tenantId: string;
+      locationId?: string | null;
+      storeId?: string | null;
+      tenantId?: string;
+      tenant?: { id: string; slug: string; name: string };
       pinSet?: boolean;
       pinSwitchEnabled?: boolean;
     }>("/auth/me", { token: token() });
@@ -3282,5 +3287,308 @@ export const platformBillingApi = {
       method: "POST",
       token: token(),
     });
+  },
+};
+
+/** Product Catalog master (definition layer — not location inventory) */
+export type CatalogProductKind =
+  | "physical"
+  | "service"
+  | "digital"
+  | "bundle"
+  | "rental";
+export type CatalogProductStatus =
+  | "active"
+  | "inactive"
+  | "draft"
+  | "archived";
+
+export type CatalogProductListItem = {
+  id: string;
+  name: string;
+  shortName?: string | null;
+  skuCode: string;
+  sku?: string;
+  barcode?: string | null;
+  kind: CatalogProductKind;
+  status: CatalogProductStatus;
+  photoUrl?: string | null;
+  images?: string[];
+  basePrice: number;
+  sellingPrice?: number;
+  costPrice?: number | null;
+  mrp?: number | null;
+  unitOfMeasure?: string;
+  trackInventory?: boolean;
+  trackSerial?: boolean;
+  trackBatch?: boolean;
+  canSell?: boolean;
+  canPurchase?: boolean;
+  availableInPos?: boolean;
+  category?: { id: string; name: string; parentId?: string | null } | null;
+  brand?: { id: string; name: string } | null;
+  counts?: { variants: number; batches: number; bundleLines: number };
+};
+
+export const catalogApi = {
+  listProducts(params?: {
+    q?: string;
+    categoryId?: string;
+    brandId?: string;
+    kind?: CatalogProductKind;
+    status?: CatalogProductStatus;
+    availableInPos?: boolean;
+  }) {
+    const qs = new URLSearchParams();
+    if (params?.q) qs.set("q", params.q);
+    if (params?.categoryId) qs.set("categoryId", params.categoryId);
+    if (params?.brandId) qs.set("brandId", params.brandId);
+    if (params?.kind) qs.set("kind", params.kind);
+    if (params?.status) qs.set("status", params.status);
+    if (params?.availableInPos != null)
+      qs.set("availableInPos", String(params.availableInPos));
+    const q = qs.toString();
+    return apiRequest<{ items: CatalogProductListItem[] }>(
+      `/catalog/products${q ? `?${q}` : ""}`,
+      { token: token() },
+    );
+  },
+  getProduct(id: string) {
+    return apiRequest<
+      CatalogProductListItem & {
+        shortDescription?: string | null;
+        description?: string | null;
+        taxCode?: string | null;
+        internalCode?: string | null;
+        qrCode?: string | null;
+        category?: {
+          id: string;
+          name: string;
+          parentId?: string | null;
+          parent?: { id: string; name: string } | null;
+        } | null;
+        variants: Array<{
+          id: string;
+          name: string;
+          skuCode: string;
+          barcode?: string | null;
+          attributes?: Record<string, unknown>;
+          basePrice?: number | null;
+          isActive: boolean;
+        }>;
+        bundleLines: Array<{
+          id: string;
+          componentProductId: string;
+          quantity: number;
+          component: { id: string; name: string; skuCode: string };
+        }>;
+        batches: Array<{
+          id: string;
+          batchCode: string;
+          locationId: string;
+          location?: { id: string; name: string };
+          expiresAt?: string | null;
+          qtyOnHand: number;
+          isActive: boolean;
+        }>;
+        serials: Array<{
+          id: string;
+          serial: string;
+          status: string;
+          location?: { id: string; name: string };
+        }>;
+        inventoryByLocation: Array<{
+          stockLevelId: string;
+          locationId: string;
+          location?: { id: string; name: string };
+          qtyOnHand: number;
+          sellPrice: number;
+          sellUnit: string;
+        }>;
+        qr: { payload: string; display: string; chartUrl: string };
+      }
+    >(`/catalog/products/${id}`, { token: token() });
+  },
+  createProduct(body: Record<string, unknown>) {
+    return apiRequest(`/catalog/products`, {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  updateProduct(id: string, body: Record<string, unknown>) {
+    return apiRequest(`/catalog/products/${id}`, {
+      method: "PATCH",
+      body,
+      token: token(),
+    });
+  },
+  setStatus(id: string, status: CatalogProductStatus) {
+    return apiRequest(`/catalog/products/${id}/status`, {
+      method: "POST",
+      body: { status },
+      token: token(),
+    });
+  },
+  duplicate(id: string) {
+    return apiRequest(`/catalog/products/${id}/duplicate`, {
+      method: "POST",
+      token: token(),
+    });
+  },
+  remove(id: string) {
+    return apiRequest(`/catalog/products/${id}`, {
+      method: "DELETE",
+      token: token(),
+    });
+  },
+  generateSku(body?: { name?: string; kind?: string; prefix?: string }) {
+    return apiRequest<{ sku: string; skuCode: string }>("/catalog/sku/generate", {
+      method: "POST",
+      body: body ?? {},
+      token: token(),
+    });
+  },
+  listBrands(q?: string) {
+    return apiRequest<
+      Array<{
+        id: string;
+        name: string;
+        description?: string | null;
+        isActive: boolean;
+      }>
+    >(`/catalog/brands${q ? `?q=${encodeURIComponent(q)}` : ""}`, {
+      token: token(),
+    });
+  },
+  createBrand(body: { name: string; description?: string }) {
+    return apiRequest("/catalog/brands", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  updateBrand(
+    id: string,
+    body: { name?: string; description?: string | null; isActive?: boolean },
+  ) {
+    return apiRequest(`/catalog/brands/${id}`, {
+      method: "PATCH",
+      body,
+      token: token(),
+    });
+  },
+  listCategories() {
+    return apiRequest<
+      Array<{
+        id: string;
+        name: string;
+        description?: string | null;
+        parentId?: string | null;
+        parent?: { id: string; name: string } | null;
+        isActive: boolean;
+        sortOrder: number;
+        _count?: { products: number; children: number };
+      }>
+    >("/catalog/categories", { token: token() });
+  },
+  createCategory(body: {
+    name: string;
+    description?: string;
+    parentId?: string;
+    sortOrder?: number;
+  }) {
+    return apiRequest("/catalog/categories", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  updateCategory(
+    id: string,
+    body: {
+      name?: string;
+      description?: string | null;
+      parentId?: string | null;
+      isActive?: boolean;
+      sortOrder?: number;
+    },
+  ) {
+    return apiRequest(`/catalog/categories/${id}`, {
+      method: "PATCH",
+      body,
+      token: token(),
+    });
+  },
+  createVariant(
+    productId: string,
+    body: {
+      name: string;
+      skuCode?: string;
+      barcode?: string;
+      attributes?: Record<string, string>;
+      basePrice?: number;
+    },
+  ) {
+    return apiRequest(`/catalog/products/${productId}/variants`, {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  deleteVariant(productId: string, variantId: string) {
+    return apiRequest(`/catalog/products/${productId}/variants/${variantId}`, {
+      method: "DELETE",
+      token: token(),
+    });
+  },
+  setBundleLines(
+    productId: string,
+    lines: Array<{ componentProductId: string; quantity?: number }>,
+  ) {
+    return apiRequest(`/catalog/products/${productId}/bundle-lines`, {
+      method: "PUT",
+      body: { lines },
+      token: token(),
+    });
+  },
+  createBatch(
+    productId: string,
+    body: {
+      batchCode: string;
+      locationId: string;
+      expiresAt?: string;
+      manufacturedAt?: string;
+      qtyOnHand?: number;
+      notes?: string;
+    },
+  ) {
+    return apiRequest(`/catalog/products/${productId}/batches`, {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  createSerial(
+    productId: string,
+    body: { serial: string; locationId?: string; label?: string },
+  ) {
+    return apiRequest(`/catalog/products/${productId}/serials`, {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  listExpiringBatches(days = 30) {
+    return apiRequest<{
+      items: Array<{
+        id: string;
+        batchCode: string;
+        expiresAt: string | null;
+        qtyOnHand: number;
+        product: { id: string; name: string; skuCode: string };
+        location: { id: string; name: string };
+      }>;
+    }>(`/catalog/batches/expiring?days=${days}`, { token: token() });
   },
 };

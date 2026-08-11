@@ -1,0 +1,597 @@
+"use client";
+
+import { useState } from "react";
+import Link from "next/link";
+import { useParams, useRouter } from "next/navigation";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { catalogApi, tenantsApi } from "@/lib/api";
+import { ApiError } from "@/lib/api/client";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+
+export default function CatalogProductDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  const router = useRouter();
+  const qc = useQueryClient();
+  const [tab, setTab] = useState<
+    "overview" | "variants" | "bundle" | "batches" | "serials" | "inventory"
+  >("overview");
+
+  const product = useQuery({
+    queryKey: ["catalog-product", id],
+    queryFn: () => catalogApi.getProduct(id),
+    enabled: Boolean(id),
+  });
+  const locations = useQuery({
+    queryKey: ["locations"],
+    queryFn: () => tenantsApi.listLocations(),
+  });
+
+  const p = product.data;
+
+  const invalidate = () => {
+    void qc.invalidateQueries({ queryKey: ["catalog-product", id] });
+    void qc.invalidateQueries({ queryKey: ["catalog-products"] });
+  };
+
+  const setStatus = useMutation({
+    mutationFn: (status: "active" | "inactive" | "draft" | "archived") =>
+      catalogApi.setStatus(id, status),
+    onSuccess: () => {
+      invalidate();
+      toast.success("Status updated");
+    },
+    onError: (e: Error) =>
+      toast.error(e instanceof ApiError ? e.message : "Failed"),
+  });
+
+  const dup = useMutation({
+    mutationFn: () => catalogApi.duplicate(id),
+    onSuccess: (row: { id?: string }) => {
+      toast.success("Duplicated");
+      if (row?.id) router.push(`/catalog/${row.id}`);
+    },
+  });
+
+  /** Variant form */
+  const [vName, setVName] = useState("");
+  const [vSize, setVSize] = useState("");
+  const [vColor, setVColor] = useState("");
+  const [vWeight, setVWeight] = useState("");
+  const addVariant = useMutation({
+    mutationFn: () =>
+      catalogApi.createVariant(id, {
+        name: vName.trim(),
+        attributes: {
+          ...(vSize ? { size: vSize } : {}),
+          ...(vColor ? { color: vColor } : {}),
+          ...(vWeight ? { weight: vWeight } : {}),
+        },
+      }),
+    onSuccess: () => {
+      setVName("");
+      setVSize("");
+      setVColor("");
+      setVWeight("");
+      invalidate();
+      toast.success("Variant added");
+    },
+    onError: (e: Error) =>
+      toast.error(e instanceof ApiError ? e.message : "Failed"),
+  });
+
+  const delVariant = useMutation({
+    mutationFn: (vid: string) => catalogApi.deleteVariant(id, vid),
+    onSuccess: () => {
+      invalidate();
+      toast.success("Variant removed");
+    },
+  });
+
+  /** Bundle */
+  const allProducts = useQuery({
+    queryKey: ["catalog-products-all"],
+    queryFn: () => catalogApi.listProducts({}),
+    enabled: tab === "bundle",
+  });
+  const [compId, setCompId] = useState("");
+  const [compQty, setCompQty] = useState("1");
+  const saveBundle = useMutation({
+    mutationFn: () => {
+      const existing = (p?.bundleLines ?? []).map((l) => ({
+        componentProductId: l.componentProductId,
+        quantity: l.quantity,
+      }));
+      if (compId) {
+        existing.push({
+          componentProductId: compId,
+          quantity: Number(compQty) || 1,
+        });
+      }
+      return catalogApi.setBundleLines(id, existing);
+    },
+    onSuccess: () => {
+      setCompId("");
+      invalidate();
+      toast.success("Bundle updated");
+    },
+    onError: (e: Error) =>
+      toast.error(e instanceof ApiError ? e.message : "Failed"),
+  });
+
+  /** Batch */
+  const [batchCode, setBatchCode] = useState("");
+  const [batchLoc, setBatchLoc] = useState("");
+  const [batchExp, setBatchExp] = useState("");
+  const [batchQty, setBatchQty] = useState("0");
+  const addBatch = useMutation({
+    mutationFn: () =>
+      catalogApi.createBatch(id, {
+        batchCode: batchCode.trim(),
+        locationId: batchLoc,
+        expiresAt: batchExp || undefined,
+        qtyOnHand: Number(batchQty) || 0,
+      }),
+    onSuccess: () => {
+      setBatchCode("");
+      invalidate();
+      toast.success("Batch created");
+    },
+    onError: (e: Error) =>
+      toast.error(e instanceof ApiError ? e.message : "Failed"),
+  });
+
+  /** Serial */
+  const [serial, setSerial] = useState("");
+  const addSerial = useMutation({
+    mutationFn: () => catalogApi.createSerial(id, { serial: serial.trim() }),
+    onSuccess: () => {
+      setSerial("");
+      invalidate();
+      toast.success("Serial registered");
+    },
+    onError: (e: Error) =>
+      toast.error(e instanceof ApiError ? e.message : "Failed"),
+  });
+
+  if (product.isLoading) {
+    return <p className="p-8 text-sm text-[#5a6b7d]">Loading product…</p>;
+  }
+  if (!p) {
+    return (
+      <p className="p-8 text-sm text-rose-600">
+        Product not found.{" "}
+        <Link href="/catalog" className="underline">
+          Back
+        </Link>
+      </p>
+    );
+  }
+
+  const locs =
+    (locations.data as Array<{ id: string; name: string }> | undefined) ??
+    p.inventoryByLocation?.map((i) => ({
+      id: i.locationId,
+      name: i.location?.name ?? i.locationId,
+    })) ??
+    [];
+
+  return (
+    <div className="space-y-4 pb-12">
+      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-[#eef1f4] pb-3">
+        <div className="flex gap-3">
+          <div className="flex size-16 items-center justify-center overflow-hidden rounded border bg-[#f7f9fb]">
+            {p.photoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={p.photoUrl} alt="" className="size-full object-cover" />
+            ) : null}
+          </div>
+          <div>
+            <p className="text-[0.65rem] font-bold tracking-wide text-[#1a56db] uppercase">
+              {p.kind} · {p.status}
+            </p>
+            <h1 className="text-xl font-semibold text-[#0b1f33]">{p.name}</h1>
+            <p className="font-mono text-sm text-[#5a6b7d]">
+              SKU {p.skuCode}
+              {p.barcode ? ` · Barcode ${p.barcode}` : ""}
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" asChild>
+            <Link href="/catalog">Back</Link>
+          </Button>
+          <Button variant="secondary" onClick={() => dup.mutate()}>
+            Duplicate
+          </Button>
+          {p.status === "active" ? (
+            <Button
+              variant="secondary"
+              onClick={() => setStatus.mutate("inactive")}
+            >
+              Deactivate
+            </Button>
+          ) : p.status !== "archived" ? (
+            <Button
+              variant="secondary"
+              onClick={() => setStatus.mutate("active")}
+            >
+              Activate
+            </Button>
+          ) : null}
+          <Button
+            variant="secondary"
+            onClick={() => setStatus.mutate("archived")}
+          >
+            Archive
+          </Button>
+        </div>
+      </header>
+
+      <div className="flex flex-wrap gap-1 border-b border-[#eef1f4]">
+        {(
+          [
+            ["overview", "Overview"],
+            ["variants", "Variants"],
+            ["bundle", "Bundle"],
+            ["batches", "Batch & expiry"],
+            ["serials", "Serials"],
+            ["inventory", "Inventory (read)"],
+          ] as const
+        ).map(([k, label]) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => setTab(k)}
+            className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px ${
+              tab === k
+                ? "border-[#1a56db] text-[#1a56db]"
+                : "border-transparent text-[#5a6b7d]"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "overview" ? (
+        <div className="grid gap-4 lg:grid-cols-[1fr_200px]">
+          <div className="space-y-3 rounded-md border border-[#e4e9f0] bg-white p-4 text-sm">
+            <Row label="Category" value={p.category?.name} />
+            <Row
+              label="Subcategory path"
+              value={
+                p.category?.parent
+                  ? `${p.category.parent.name} › ${p.category.name}`
+                  : p.category?.name
+              }
+            />
+            <Row label="Brand" value={p.brand?.name ?? "—"} />
+            <Row label="Selling price" value={String(p.basePrice)} />
+            <Row
+              label="Cost / MRP"
+              value={`${p.costPrice ?? "—"} / ${p.mrp ?? "—"}`}
+            />
+            <Row label="Tax ref" value={p.taxCode ?? "—"} />
+            <Row label="UOM" value={p.unitOfMeasure} />
+            <Row
+              label="Track inventory"
+              value={p.trackInventory ? "Yes" : "No"}
+            />
+            <Row label="Serial" value={p.trackSerial ? "Yes" : "No"} />
+            <Row label="Batch" value={p.trackBatch ? "Yes" : "No"} />
+            <Row
+              label="Sell / Purchase / POS"
+              value={`${p.canSell ? "Sell" : "—"} · ${p.canPurchase ? "Buy" : "—"} · ${p.availableInPos ? "POS" : "hidden"}`}
+            />
+            <Row label="Short" value={p.shortDescription ?? "—"} />
+            <div>
+              <p className="text-[0.7rem] font-semibold text-[#5a6b7d] uppercase">
+                Description
+              </p>
+              <p className="mt-1 whitespace-pre-wrap text-[#0b1f33]">
+                {p.description || "—"}
+              </p>
+            </div>
+          </div>
+          <div className="rounded-md border border-[#e4e9f0] bg-white p-3 text-center">
+            <p className="mb-2 text-[0.7rem] font-semibold text-[#5a6b7d] uppercase">
+              QR code
+            </p>
+            {p.qr?.chartUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={p.qr.chartUrl}
+                alt="Product QR"
+                className="mx-auto size-[160px]"
+              />
+            ) : null}
+            <p className="mt-2 break-all font-mono text-[0.65rem] text-[#8a9bb0]">
+              {p.qr?.display}
+            </p>
+          </div>
+        </div>
+      ) : null}
+
+      {tab === "variants" ? (
+        <div className="space-y-3">
+          <div className="grid gap-2 rounded-md border bg-white p-4 sm:grid-cols-4">
+            <div>
+              <Label>Variant name</Label>
+              <Input
+                value={vName}
+                onChange={(e) => setVName(e.target.value)}
+                placeholder="Black / 42"
+              />
+            </div>
+            <div>
+              <Label>Size</Label>
+              <Input value={vSize} onChange={(e) => setVSize(e.target.value)} />
+            </div>
+            <div>
+              <Label>Color</Label>
+              <Input
+                value={vColor}
+                onChange={(e) => setVColor(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label>Weight</Label>
+              <Input
+                value={vWeight}
+                onChange={(e) => setVWeight(e.target.value)}
+              />
+            </div>
+            <Button
+              className="sm:col-span-4 w-fit"
+              disabled={!vName.trim()}
+              onClick={() => addVariant.mutate()}
+            >
+              Add variant (auto SKU)
+            </Button>
+          </div>
+          <table className="w-full text-sm border rounded-md bg-white">
+            <thead className="bg-[#f7f9fb] text-left text-[0.7rem] uppercase text-[#5a6b7d]">
+              <tr>
+                <th className="px-3 py-2">Name</th>
+                <th className="px-3 py-2">SKU</th>
+                <th className="px-3 py-2">Attributes</th>
+                <th className="px-3 py-2" />
+              </tr>
+            </thead>
+            <tbody>
+              {(p.variants ?? []).map((v) => (
+                <tr key={v.id} className="border-t">
+                  <td className="px-3 py-2">{v.name}</td>
+                  <td className="px-3 py-2 font-mono text-xs">{v.skuCode}</td>
+                  <td className="px-3 py-2 text-[#5a6b7d]">
+                    {JSON.stringify(v.attributes ?? {})}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => delVariant.mutate(v.id)}
+                    >
+                      Remove
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
+      {tab === "bundle" ? (
+        <div className="space-y-3 rounded-md border bg-white p-4">
+          {p.kind !== "bundle" ? (
+            <p className="text-sm text-amber-700">
+              Set product type to Bundle to manage combo components.
+            </p>
+          ) : (
+            <>
+              <div className="flex flex-wrap gap-2 items-end">
+                <div className="min-w-[200px] flex-1">
+                  <Label>Component product</Label>
+                  <select
+                    className="h-9 w-full rounded-md border px-2 text-sm"
+                    value={compId}
+                    onChange={(e) => setCompId(e.target.value)}
+                  >
+                    <option value="">Select…</option>
+                    {(allProducts.data?.items ?? [])
+                      .filter((x) => x.id !== id)
+                      .map((x) => (
+                        <option key={x.id} value={x.id}>
+                          {x.name} ({x.skuCode})
+                        </option>
+                      ))}
+                  </select>
+                </div>
+                <div className="w-24">
+                  <Label>Qty</Label>
+                  <Input
+                    value={compQty}
+                    onChange={(e) => setCompQty(e.target.value)}
+                  />
+                </div>
+                <Button onClick={() => saveBundle.mutate()}>Add line</Button>
+              </div>
+              <ul className="text-sm space-y-1">
+                {(p.bundleLines ?? []).map((l) => (
+                  <li key={l.id}>
+                    {l.quantity} × {l.component.name}{" "}
+                    <span className="font-mono text-xs text-[#8a9bb0]">
+                      {l.component.skuCode}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      ) : null}
+
+      {tab === "batches" ? (
+        <div className="space-y-3">
+          <div className="grid gap-2 rounded-md border bg-white p-4 sm:grid-cols-4">
+            <div>
+              <Label>Batch code</Label>
+              <Input
+                value={batchCode}
+                onChange={(e) => setBatchCode(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label>Location</Label>
+              <select
+                className="h-9 w-full rounded-md border px-2 text-sm"
+                value={batchLoc}
+                onChange={(e) => setBatchLoc(e.target.value)}
+              >
+                <option value="">Select…</option>
+                {locs.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label>Expiry</Label>
+              <Input
+                type="date"
+                value={batchExp}
+                onChange={(e) => setBatchExp(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label>Qty</Label>
+              <Input
+                value={batchQty}
+                onChange={(e) => setBatchQty(e.target.value)}
+              />
+            </div>
+            <Button
+              className="sm:col-span-4 w-fit"
+              disabled={!batchCode.trim() || !batchLoc}
+              onClick={() => addBatch.mutate()}
+            >
+              Add batch
+            </Button>
+          </div>
+          <table className="w-full text-sm border rounded-md bg-white">
+            <thead className="bg-[#f7f9fb] text-left text-[0.7rem] uppercase text-[#5a6b7d]">
+              <tr>
+                <th className="px-3 py-2">Code</th>
+                <th className="px-3 py-2">Location</th>
+                <th className="px-3 py-2">Expiry</th>
+                <th className="px-3 py-2 text-right">Qty</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(p.batches ?? []).map((b) => (
+                <tr key={b.id} className="border-t">
+                  <td className="px-3 py-2 font-mono text-xs">{b.batchCode}</td>
+                  <td className="px-3 py-2">{b.location?.name}</td>
+                  <td className="px-3 py-2">
+                    {b.expiresAt
+                      ? new Date(b.expiresAt).toLocaleDateString()
+                      : "—"}
+                  </td>
+                  <td className="px-3 py-2 text-right">{b.qtyOnHand}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
+      {tab === "serials" ? (
+        <div className="space-y-3">
+          <div className="flex flex-wrap gap-2 rounded-md border bg-white p-4">
+            <div className="min-w-[220px] flex-1">
+              <Label>Serial / unit barcode</Label>
+              <Input
+                value={serial}
+                onChange={(e) => setSerial(e.target.value)}
+              />
+            </div>
+            <Button
+              className="self-end"
+              disabled={!serial.trim() || !p.trackSerial}
+              onClick={() => addSerial.mutate()}
+            >
+              Register serial
+            </Button>
+          </div>
+          {!p.trackSerial ? (
+            <p className="text-sm text-amber-700">
+              Enable serial tracking on this product to register units.
+            </p>
+          ) : null}
+          <ul className="text-sm rounded-md border bg-white divide-y">
+            {(p.serials ?? []).map((s) => (
+              <li key={s.id} className="px-3 py-2 flex justify-between">
+                <span className="font-mono">{s.serial}</span>
+                <span className="text-[#5a6b7d]">
+                  {s.status} · {s.location?.name}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {tab === "inventory" ? (
+        <div className="rounded-md border bg-white p-4">
+          <p className="mb-3 text-sm text-[#5a6b7d]">
+            Location quantities are Inventory — not editable here. Use Stock
+            levels / Adjustments for movements.
+          </p>
+          <table className="w-full text-sm">
+            <thead className="text-left text-[0.7rem] uppercase text-[#5a6b7d]">
+              <tr>
+                <th className="py-1">Location</th>
+                <th className="py-1 text-right">Qty on hand</th>
+                <th className="py-1 text-right">Sell price</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(p.inventoryByLocation ?? []).map((row) => (
+                <tr key={row.stockLevelId} className="border-t">
+                  <td className="py-2">{row.location?.name ?? row.locationId}</td>
+                  <td className="py-2 text-right tabular-nums">
+                    {row.qtyOnHand} {row.sellUnit}
+                  </td>
+                  <td className="py-2 text-right">{row.sellPrice}</td>
+                </tr>
+              ))}
+              {!p.inventoryByLocation?.length ? (
+                <tr>
+                  <td colSpan={3} className="py-4 text-[#5a6b7d]">
+                    No stock levels yet
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function Row({ label, value }: { label: string; value?: string | null }) {
+  return (
+    <div className="grid grid-cols-[140px_1fr] gap-2 border-b border-[#f3f5f8] py-1.5">
+      <span className="text-[0.7rem] font-semibold uppercase text-[#5a6b7d]">
+        {label}
+      </span>
+      <span className="text-[#0b1f33]">{value || "—"}</span>
+    </div>
+  );
+}
