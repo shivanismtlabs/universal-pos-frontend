@@ -135,7 +135,7 @@ function ProductsPanel() {
 
   const dup = useMutation({
     mutationFn: (id: string) => catalogApi.duplicate(id),
-    onSuccess: (p: { id?: string }) => {
+    onSuccess: (p) => {
       void qc.invalidateQueries({ queryKey: ["catalog-products"] });
       toast.success("Product duplicated as draft");
       if (p?.id) router.push(`/catalog/${p.id}`);

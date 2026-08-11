@@ -114,7 +114,7 @@ export default function NewCatalogProductPage() {
         availableInPos: form.availableInPos,
         openingQty: form.trackInventory ? Number(form.openingQty) || 0 : 0,
       }),
-    onSuccess: (p: { id?: string }) => {
+    onSuccess: (p) => {
       toast.success("Product created");
       router.push(p?.id ? `/catalog/${p.id}` : "/catalog");
     },

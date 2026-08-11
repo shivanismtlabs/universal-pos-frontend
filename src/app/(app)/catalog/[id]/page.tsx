@@ -49,7 +49,7 @@ export default function CatalogProductDetailPage() {
 
   const dup = useMutation({
     mutationFn: () => catalogApi.duplicate(id),
-    onSuccess: (row: { id?: string }) => {
+    onSuccess: (row) => {
       toast.success("Duplicated");
       if (row?.id) router.push(`/catalog/${row.id}`);
     },

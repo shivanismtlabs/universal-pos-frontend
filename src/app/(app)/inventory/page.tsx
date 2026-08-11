@@ -574,7 +574,7 @@ function AuditTab({
 
   const create = useMutation({
     mutationFn: () => inventoryApi.createCount({ locationId }),
-    onSuccess: (s: { id?: string }) => {
+    onSuccess: (s) => {
       toast.success("Count session started");
       void qc.invalidateQueries({ queryKey: ["inv-counts"] });
       if (s?.id) setActiveId(s.id);

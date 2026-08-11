@@ -692,11 +692,14 @@ export const inventoryApi = {
       reason?: string;
     }>;
   }) {
-    return apiRequest("/inventory/stock-in", {
-      method: "POST",
-      body,
-      token: token(),
-    });
+    return apiRequest<{ locationId: string; lines: unknown[] }>(
+      "/inventory/stock-in",
+      {
+        method: "POST",
+        body,
+        token: token(),
+      },
+    );
   },
 
   stockOut(body: {
@@ -709,11 +712,14 @@ export const inventoryApi = {
       reason?: string;
     }>;
   }) {
-    return apiRequest("/inventory/stock-out", {
-      method: "POST",
-      body,
-      token: token(),
-    });
+    return apiRequest<{ locationId: string; lines: unknown[] }>(
+      "/inventory/stock-out",
+      {
+        method: "POST",
+        body,
+        token: token(),
+      },
+    );
   },
 
   adjust(body: {
@@ -723,11 +729,14 @@ export const inventoryApi = {
     delta: number;
     reason?: string;
   }) {
-    return apiRequest("/inventory/adjust", {
-      method: "POST",
-      body,
-      token: token(),
-    });
+    return apiRequest<{ stockLevelId: string; qtyOnHand: number }>(
+      "/inventory/adjust",
+      {
+        method: "POST",
+        body,
+        token: token(),
+      },
+    );
   },
 
   markDamaged(body: {
@@ -737,11 +746,14 @@ export const inventoryApi = {
     qty: number;
     reason?: string;
   }) {
-    return apiRequest("/inventory/damage", {
-      method: "POST",
-      body,
-      token: token(),
-    });
+    return apiRequest<{ stockLevelId: string; qtyDamaged: number }>(
+      "/inventory/damage",
+      {
+        method: "POST",
+        body,
+        token: token(),
+      },
+    );
   },
 
   restoreDamaged(body: {
@@ -751,11 +763,14 @@ export const inventoryApi = {
     qty: number;
     reason?: string;
   }) {
-    return apiRequest("/inventory/damage/restore", {
-      method: "POST",
-      body,
-      token: token(),
-    });
+    return apiRequest<{ stockLevelId: string; qtyDamaged: number }>(
+      "/inventory/damage/restore",
+      {
+        method: "POST",
+        body,
+        token: token(),
+      },
+    );
   },
 
   setReorder(body: {
@@ -765,11 +780,14 @@ export const inventoryApi = {
     reorderPoint?: number;
     reorderQty?: number;
   }) {
-    return apiRequest("/inventory/reorder", {
-      method: "PATCH",
-      body,
-      token: token(),
-    });
+    return apiRequest<{ stockLevelId: string; reorderPoint: number | null }>(
+      "/inventory/reorder",
+      {
+        method: "PATCH",
+        body,
+        token: token(),
+      },
+    );
   },
 
   listLedger(params?: {
@@ -801,7 +819,12 @@ export const inventoryApi = {
   },
 
   createCount(body: { locationId: string; notes?: string }) {
-    return apiRequest("/inventory/counts", {
+    return apiRequest<{
+      id: string;
+      status: string;
+      locationId: string;
+      notes?: string | null;
+    }>("/inventory/counts", {
       method: "POST",
       body,
       token: token(),
@@ -845,19 +868,25 @@ export const inventoryApi = {
     id: string,
     lines: Array<{ stockLevelId: string; countedQty: number; notes?: string }>,
   ) {
-    return apiRequest(`/inventory/counts/${id}/lines`, {
-      method: "POST",
-      body: { lines },
-      token: token(),
-    });
+    return apiRequest<{ id: string; status: string }>(
+      `/inventory/counts/${id}/lines`,
+      {
+        method: "POST",
+        body: { lines },
+        token: token(),
+      },
+    );
   },
 
   completeCount(id: string, apply = true) {
-    return apiRequest(`/inventory/counts/${id}/complete`, {
-      method: "POST",
-      body: { apply },
-      token: token(),
-    });
+    return apiRequest<{ id: string; status: string }>(
+      `/inventory/counts/${id}/complete`,
+      {
+        method: "POST",
+        body: { apply },
+        token: token(),
+      },
+    );
   },
 };
 
@@ -3666,37 +3695,43 @@ export const catalogApi = {
     >(`/catalog/products/${id}`, { token: token() });
   },
   createProduct(body: Record<string, unknown>) {
-    return apiRequest(`/catalog/products`, {
+    return apiRequest<CatalogProductListItem>(`/catalog/products`, {
       method: "POST",
       body,
       token: token(),
     });
   },
   updateProduct(id: string, body: Record<string, unknown>) {
-    return apiRequest(`/catalog/products/${id}`, {
+    return apiRequest<CatalogProductListItem>(`/catalog/products/${id}`, {
       method: "PATCH",
       body,
       token: token(),
     });
   },
   setStatus(id: string, status: CatalogProductStatus) {
-    return apiRequest(`/catalog/products/${id}/status`, {
+    return apiRequest<CatalogProductListItem>(`/catalog/products/${id}/status`, {
       method: "POST",
       body: { status },
       token: token(),
     });
   },
   duplicate(id: string) {
-    return apiRequest(`/catalog/products/${id}/duplicate`, {
-      method: "POST",
-      token: token(),
-    });
+    return apiRequest<CatalogProductListItem>(
+      `/catalog/products/${id}/duplicate`,
+      {
+        method: "POST",
+        token: token(),
+      },
+    );
   },
   remove(id: string) {
-    return apiRequest(`/catalog/products/${id}`, {
-      method: "DELETE",
-      token: token(),
-    });
+    return apiRequest<{ ok: boolean; deleted?: boolean }>(
+      `/catalog/products/${id}`,
+      {
+        method: "DELETE",
+        token: token(),
+      },
+    );
   },
   generateSku(body?: { name?: string; kind?: string; prefix?: string }) {
     return apiRequest<{ sku: string; skuCode: string }>("/catalog/sku/generate", {
