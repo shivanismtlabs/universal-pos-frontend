@@ -28,6 +28,7 @@ export function applyPortalResponse(data: PortalSessionResponse): "orgs" | "app"
         email: data.user.email,
         fullName: data.user.fullName,
         roles: data.user.roles ?? ["admin"],
+        permissions: data.user.permissions,
         storeId: data.user.storeId,
         tenantId: data.user.tenantId,
         pinSet: data.user.pinSet,
