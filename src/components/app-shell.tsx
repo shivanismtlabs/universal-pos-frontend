@@ -89,6 +89,13 @@ const NAV_GROUPS: NavGroup[] = [
     section: "Catalog",
     children: [
       {
+        href: "/inventory",
+        label: "Inventory hub",
+        icon: Package,
+        module: "inventory",
+        commerce: "sale",
+      },
+      {
         href: "/catalog",
         label: "Items",
         icon: Box,
@@ -120,17 +127,17 @@ const NAV_GROUPS: NavGroup[] = [
         commerce: "sale",
       },
       {
-        href: "/inventory",
-        label: "Stock levels",
-        icon: Package,
-        module: "inventory",
-        commerce: "sale",
-      },
-      {
         href: "/transfers",
         label: "Stock transfer",
         icon: ArrowRightLeft,
         module: "catalog",
+      },
+      {
+        href: "/suppliers",
+        label: "Suppliers & purchases",
+        icon: Truck,
+        commerce: "sale",
+        module: "inventory",
       },
     ],
   },

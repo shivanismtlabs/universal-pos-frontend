@@ -632,6 +632,233 @@ export const inventoryApi = {
       }>;
     }>("/stock-transfers", { method: "POST", body, token: token() });
   },
+
+  listLevels(params?: {
+    locationId?: string;
+    q?: string;
+    lowStock?: boolean;
+    includeZero?: boolean;
+  }) {
+    const qs = new URLSearchParams();
+    if (params?.locationId) qs.set("locationId", params.locationId);
+    if (params?.q) qs.set("q", params.q);
+    if (params?.lowStock) qs.set("lowStock", "true");
+    if (params?.includeZero) qs.set("includeZero", "true");
+    const q = qs.toString();
+    return apiRequest<{
+      items: Array<{
+        stockLevelId: string;
+        productId: string;
+        locationId: string;
+        sku: string;
+        name: string;
+        productSku: string;
+        sellUnit: string;
+        qtyOnHand: number;
+        qtyDamaged: number;
+        sellableQty: number;
+        reorderPoint: number | null;
+        reorderQty: number | null;
+        isLowStock: boolean;
+        sellPrice: number;
+        location?: { id: string; name: string; type?: string };
+        photoUrl?: string | null;
+      }>;
+    }>(`/inventory/levels${q ? `?${q}` : ""}`, { token: token() });
+  },
+
+  lowStock(locationId?: string) {
+    const qs = locationId ? `?locationId=${locationId}` : "";
+    return apiRequest<{
+      count: number;
+      items: Array<{
+        stockLevelId: string;
+        name: string;
+        sku: string;
+        qtyOnHand: number;
+        reorderPoint: number | null;
+        location?: { name: string };
+      }>;
+    }>(`/inventory/low-stock${qs}`, { token: token() });
+  },
+
+  stockIn(body: {
+    locationId: string;
+    reason?: string;
+    lines: Array<{
+      stockLevelId?: string;
+      productId?: string;
+      qty: number;
+      reason?: string;
+    }>;
+  }) {
+    return apiRequest("/inventory/stock-in", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+
+  stockOut(body: {
+    locationId: string;
+    reason?: string;
+    lines: Array<{
+      stockLevelId?: string;
+      productId?: string;
+      qty: number;
+      reason?: string;
+    }>;
+  }) {
+    return apiRequest("/inventory/stock-out", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+
+  adjust(body: {
+    locationId: string;
+    stockLevelId?: string;
+    productId?: string;
+    delta: number;
+    reason?: string;
+  }) {
+    return apiRequest("/inventory/adjust", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+
+  markDamaged(body: {
+    locationId: string;
+    stockLevelId?: string;
+    productId?: string;
+    qty: number;
+    reason?: string;
+  }) {
+    return apiRequest("/inventory/damage", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+
+  restoreDamaged(body: {
+    locationId: string;
+    stockLevelId?: string;
+    productId?: string;
+    qty: number;
+    reason?: string;
+  }) {
+    return apiRequest("/inventory/damage/restore", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+
+  setReorder(body: {
+    locationId: string;
+    stockLevelId?: string;
+    productId?: string;
+    reorderPoint?: number;
+    reorderQty?: number;
+  }) {
+    return apiRequest("/inventory/reorder", {
+      method: "PATCH",
+      body,
+      token: token(),
+    });
+  },
+
+  listLedger(params?: {
+    locationId?: string;
+    productId?: string;
+    type?: string;
+    limit?: number;
+  }) {
+    const qs = new URLSearchParams();
+    if (params?.locationId) qs.set("locationId", params.locationId);
+    if (params?.productId) qs.set("productId", params.productId);
+    if (params?.type) qs.set("type", params.type);
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const q = qs.toString();
+    return apiRequest<{
+      items: Array<{
+        id: string;
+        type: string;
+        qtyDelta: number;
+        qtyAfter: number;
+        damageDelta: number;
+        reason?: string | null;
+        createdAt: string;
+        product?: { name: string; skuCode: string };
+        location?: { name: string };
+        actor?: { fullName: string } | null;
+      }>;
+    }>(`/inventory/ledger${q ? `?${q}` : ""}`, { token: token() });
+  },
+
+  createCount(body: { locationId: string; notes?: string }) {
+    return apiRequest("/inventory/counts", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+
+  listCounts(locationId?: string) {
+    const qs = locationId ? `?locationId=${locationId}` : "";
+    return apiRequest<
+      Array<{
+        id: string;
+        status: string;
+        notes?: string | null;
+        createdAt: string;
+        completedAt?: string | null;
+        location?: { name: string };
+        lineCount: number;
+      }>
+    >(`/inventory/counts${qs}`, { token: token() });
+  },
+
+  getCount(id: string) {
+    return apiRequest<{
+      id: string;
+      status: string;
+      locationId: string;
+      lines: Array<{
+        id: string;
+        stockLevelId: string;
+        productId: string;
+        systemQty: number;
+        countedQty: number | null;
+        variance: number | null;
+        product?: { name: string; skuCode: string };
+        sellUnit: string;
+      }>;
+    }>(`/inventory/counts/${id}`, { token: token() });
+  },
+
+  saveCountLines(
+    id: string,
+    lines: Array<{ stockLevelId: string; countedQty: number; notes?: string }>,
+  ) {
+    return apiRequest(`/inventory/counts/${id}/lines`, {
+      method: "POST",
+      body: { lines },
+      token: token(),
+    });
+  },
+
+  completeCount(id: string, apply = true) {
+    return apiRequest(`/inventory/counts/${id}/complete`, {
+      method: "POST",
+      body: { apply },
+      token: token(),
+    });
+  },
 };
 
 export const ordersApi = {
@@ -2006,8 +2233,37 @@ export const tenantsApi = {
         code?: string | null;
         type?: string;
         isActive?: boolean;
+        address?: string | null;
       }>
     >("/locations", { token: token() });
+  },
+  createLocation(body: {
+    name: string;
+    code?: string;
+    type?: string;
+    address?: string;
+  }) {
+    return apiRequest("/locations", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  updateLocation(
+    id: string,
+    body: {
+      name?: string;
+      code?: string;
+      type?: string;
+      address?: string | null;
+      isActive?: boolean;
+    },
+  ) {
+    return apiRequest(`/locations/${id}`, {
+      method: "PATCH",
+      body,
+      token: token(),
+    });
   },
   updateMe(body: {
     name?: string;
