@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { posApi } from "@/lib/api";
@@ -8,21 +9,20 @@ import { Button } from "@/components/ui/button";
 import { FloorTabs } from "@/components/getting-started";
 import { SaleReturnDialog } from "@/components/sale-return-dialog";
 import RetailPosWorkstation from "@/app/(app)/counter/retail-pos-workstation";
-import { SaleStockPanel } from "./sale-stock-panel";
 import { canRefund } from "@/lib/roles";
 import { useAuthStore } from "@/lib/auth-store";
 
 type Tab = "stock" | "sell" | "recent";
 
 /**
- * Sale floor: Products / Sell / Sales tabs.
- * @param embed omit large title when nested under Dashboard tabs
+ * Sale floor: Catalog link / Sell / Sales.
+ * Catalog editing lives under Inventory → Items (not duplicated on Home).
  */
 export function SaleDashboard({ embed = false }: { embed?: boolean }) {
   const { productName, money } = useBootstrap();
   const userRoles = useAuthStore((s) => s.user?.roles);
   const allowReturn = canRefund(userRoles);
-  const [tab, setTab] = useState<Tab>("stock");
+  const [tab, setTab] = useState<Tab>("sell");
   const [posKey, setPosKey] = useState(0);
   const [tabTouched, setTabTouched] = useState(false);
   const [returnTarget, setReturnTarget] = useState<{
@@ -47,7 +47,6 @@ export function SaleDashboard({ embed = false }: { embed?: boolean }) {
 
   useEffect(() => {
     if (tabTouched || floor.isLoading) return;
-    // Prefer product manager when catalog is empty
     setTab(hasStock || hasProducts ? "sell" : "stock");
   }, [tabTouched, floor.isLoading, hasStock, hasProducts]);
 
@@ -58,7 +57,7 @@ export function SaleDashboard({ embed = false }: { embed?: boolean }) {
 
   const tabHint =
     tab === "stock"
-      ? "Maintain product catalog and stock levels"
+      ? "Catalog is under Inventory → Items"
       : tab === "sell"
         ? "Process sales at the counter"
         : "Recent closed sales";
@@ -80,7 +79,7 @@ export function SaleDashboard({ embed = false }: { embed?: boolean }) {
         value={tab}
         onChange={goTab}
         tabs={[
-          { id: "stock", label: "Products" },
+          { id: "stock", label: "Catalog" },
           { id: "sell", label: "Sell" },
           { id: "recent", label: "Sales" },
         ]}
@@ -91,11 +90,36 @@ export function SaleDashboard({ embed = false }: { embed?: boolean }) {
       ) : null}
 
       {tab === "stock" ? (
-        <SaleStockPanel
-          onAdded={() => {
-            setPosKey((k) => k + 1);
-          }}
-        />
+        <div className="rounded-xl border border-[#d9e0ea] bg-white p-6">
+          <h2 className="text-base font-semibold text-[#0b1f33]">
+            Product catalog
+          </h2>
+          <p className="mt-1 max-w-xl text-sm text-[#5a6b7d]">
+            Items, categories, and brands are managed once under Inventory —
+            not repeated on Home. Use Sell to take payments.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button asChild>
+              <Link href="/catalog">Open Items</Link>
+            </Button>
+            <Button variant="secondary" asChild>
+              <Link href="/catalog/new">New Item</Link>
+            </Button>
+            <Button variant="secondary" asChild>
+              <Link href="/catalog?tab=categories">Categories</Link>
+            </Button>
+            <Button
+              type="button"
+              variant="soft"
+              onClick={() => {
+                setPosKey((k) => k + 1);
+                goTab("sell");
+              }}
+            >
+              Go to Sell
+            </Button>
+          </div>
+        </div>
       ) : null}
 
       {tab === "recent" ? (
@@ -117,38 +141,33 @@ export function SaleDashboard({ embed = false }: { embed?: boolean }) {
                 className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm"
               >
                 <div>
-                  <p className="font-medium text-[#0b1f33]">{o.orderNumber}</p>
+                  <p className="font-semibold text-[#0b1f33]">{o.orderNumber}</p>
                   <p className="text-[0.75rem] text-[#5a6b7d]">
-                    {o.customerName} · {o.itemCount} item
-                    {o.itemCount === 1 ? "" : "s"} ·{" "}
-                    {new Date(o.createdAt).toLocaleString()}
+                    {money(
+                      (o as { total?: string | number }).total ??
+                        o.balanceDue,
+                    )}
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold tabular-nums text-[#0b1f33]">
-                    {money(o.subtotal)}
-                  </span>
-                  {allowReturn ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="secondary"
-                      onClick={() =>
-                        setReturnTarget({
-                          id: o.id,
-                          orderNumber: o.orderNumber,
-                        })
-                      }
-                    >
-                      Return
-                    </Button>
-                  ) : null}
-                </div>
+                {allowReturn ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() =>
+                      setReturnTarget({
+                        id: o.id,
+                        orderNumber: o.orderNumber,
+                      })
+                    }
+                  >
+                    Return
+                  </Button>
+                ) : null}
               </li>
             ))}
-            {!recent.data?.items?.length && !recent.isLoading ? (
-              <li className="px-4 py-10 text-center text-sm text-[#5a6b7d]">
-                No sales yet. Open the Sell tab to charge.
+            {!recent.data?.items?.length ? (
+              <li className="px-4 py-8 text-center text-sm text-[#8b9bb0]">
+                No recent sales
               </li>
             ) : null}
           </ul>

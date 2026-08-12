@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, Suspense } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "motion/react";
 import {
@@ -34,6 +34,7 @@ import {
   Bell,
   LayoutGrid,
   Folder,
+  Tag,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -89,13 +90,6 @@ const NAV_GROUPS: NavGroup[] = [
     section: "Catalog",
     children: [
       {
-        href: "/inventory",
-        label: "Inventory hub",
-        icon: Package,
-        module: "inventory",
-        commerce: "sale",
-      },
-      {
         href: "/catalog",
         label: "Items",
         icon: Box,
@@ -108,16 +102,23 @@ const NAV_GROUPS: NavGroup[] = [
         module: "catalog",
       },
       {
-        href: "/catalog",
+        href: "/catalog?tab=categories",
         label: "Categories",
-        icon: Box,
+        icon: Folder,
         module: "catalog",
       },
       {
-        href: "/catalog",
+        href: "/catalog?tab=brands",
         label: "Brands",
-        icon: Box,
+        icon: Tag,
         module: "catalog",
+      },
+      {
+        href: "/inventory",
+        label: "Stock levels",
+        icon: Package,
+        module: "inventory",
+        commerce: "sale",
       },
       {
         href: "/adjustments",
@@ -331,13 +332,46 @@ function leafAllowed(
 ) {
   if (item.module && !hasModule(item.module)) return false;
   if (item.commerce && !hasMode(item.commerce)) return false;
-  const allowed = ROUTE_ROLES[item.href as keyof typeof ROUTE_ROLES];
+  const path = hrefPath(item.href);
+  const allowed = ROUTE_ROLES[path as keyof typeof ROUTE_ROLES];
   if (!allowed) return true;
   return allowed.some((r) => roles.includes(r));
 }
 
+function hrefPath(href: string) {
+  return href.split("?")[0] ?? href;
+}
+
+function hrefTab(href: string) {
+  const qs = href.includes("?") ? href.slice(href.indexOf("?") + 1) : "";
+  return new URLSearchParams(qs).get("tab");
+}
+
+/** Active state — catalog tabs use ?tab= so Items/Categories/Brands stay distinct */
+function isLeafActive(pathname: string, search: string, href: string) {
+  const base = hrefPath(href);
+  const wantTab = hrefTab(href);
+  const haveTab = new URLSearchParams(
+    search.startsWith("?") ? search.slice(1) : search,
+  ).get("tab");
+
+  if (base === "/catalog") {
+    if (pathname !== "/catalog") return false;
+    if (!wantTab || wantTab === "products") {
+      return !haveTab || haveTab === "products";
+    }
+    return haveTab === wantTab;
+  }
+
+  return pathname === base || pathname.startsWith(`${base}/`);
+}
+
 function isPathActive(pathname: string, href: string) {
-  const base = href.split("?")[0] ?? href;
+  // Backward-compatible path-only check (group selection)
+  const base = hrefPath(href);
+  if (base === "/catalog") {
+    return pathname === "/catalog" || pathname.startsWith("/catalog/");
+  }
   return pathname === base || pathname.startsWith(`${base}/`);
 }
 
@@ -393,6 +427,8 @@ function SidebarBody({
   modeLabel: string;
 }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const search = searchParams?.toString() ? `?${searchParams.toString()}` : "";
   const router = useRouter();
   const [navQuery, setNavQuery] = useState("");
 
@@ -450,14 +486,14 @@ function SidebarBody({
     if (!activeGroup) return;
     const next: Record<string, boolean> = {};
     for (const c of activeGroup.children) {
-      if (c.folder && isPathActive(pathname, c.href)) {
+      if (c.folder && isLeafActive(pathname, search, c.href)) {
         next[c.folder] = true;
       }
     }
     if (Object.keys(next).length) {
       setOpenFolders((prev) => ({ ...prev, ...next }));
     }
-  }, [pathname, activeGroup]);
+  }, [pathname, search, activeGroup]);
 
   const folderOrder = useMemo(() => {
     const order: string[] = [];
@@ -654,7 +690,7 @@ function SidebarBody({
                 const expanded =
                   openFolders[folder] !== undefined
                     ? openFolders[folder]
-                    : kids.some((c) => isPathActive(pathname, c.href)) ||
+                    : kids.some((c) => isLeafActive(pathname, search, c.href)) ||
                       folder === folderOrder[0];
                 const FolderIcon = Folder;
                 return (
@@ -677,9 +713,9 @@ function SidebarBody({
                     {expanded ? (
                       <ul className="mb-1 ml-2 border-l border-white/10 pl-2">
                         {kids.map((c) => {
-                          const active = isPathActive(pathname, c.href);
+                          const active = isLeafActive(pathname, search, c.href);
                           return (
-                            <li key={c.href}>
+                            <li key={`${c.href}:${c.label}`}>
                               <Link
                                 href={c.href}
                                 onClick={onNavigate}
@@ -705,9 +741,9 @@ function SidebarBody({
           <ul className="space-y-0.5">
             {(hasFolders ? unfoldered : panelLinks).map((c) => {
               const CIcon = c.icon;
-              const active = isPathActive(pathname, c.href);
+              const active = isLeafActive(pathname, search, c.href);
               return (
-                <li key={c.href}>
+                <li key={`${c.href}:${c.label}`}>
                   <Link
                     href={c.href}
                     onClick={onNavigate}
@@ -1008,7 +1044,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       />
       {/* Zoho dual dark nav: icon rail + secondary */}
       <aside className="hidden h-dvh w-[17.5rem] shrink-0 flex-col md:flex">
-        <SidebarBody {...sidebarProps} />
+        <Suspense fallback={<div className="h-full bg-[#0a0e14]" />}>
+          <SidebarBody {...sidebarProps} />
+        </Suspense>
       </aside>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
@@ -1067,10 +1105,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   </button>
                 </div>
                 <div className="min-h-0 flex-1">
-                  <SidebarBody
-                    {...sidebarProps}
-                    onNavigate={() => setOpen(false)}
-                  />
+                  <Suspense fallback={<div className="h-full bg-[#0a0e14]" />}>
+                    <SidebarBody
+                      {...sidebarProps}
+                      onNavigate={() => setOpen(false)}
+                    />
+                  </Suspense>
                 </div>
               </motion.aside>
             </motion.div>

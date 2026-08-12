@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { catalogApi, tenantsApi } from "@/lib/api";
@@ -10,9 +10,21 @@ import { ApiError } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ProductThumb } from "@/components/product-thumb";
 
-export default function CatalogProductDetailPage() {
-  const { id } = useParams<{ id: string }>();
+export default function CatalogProductViewRoute() {
+  return (
+    <Suspense
+      fallback={<p className="p-8 text-sm text-[#5a6b7d]">Loading product…</p>}
+    >
+      <CatalogProductDetailPage />
+    </Suspense>
+  );
+}
+
+function CatalogProductDetailPage() {
+  const search = useSearchParams();
+  const id = search.get("id")?.trim() || "";
   const router = useRouter();
   const qc = useQueryClient();
   const [tab, setTab] = useState<
@@ -51,7 +63,7 @@ export default function CatalogProductDetailPage() {
     mutationFn: () => catalogApi.duplicate(id),
     onSuccess: (row) => {
       toast.success("Duplicated");
-      if (row?.id) router.push(`/catalog/${row.id}`);
+      if (row?.id) router.push(`/catalog/view?id=${row.id}`);
     },
   });
 
@@ -156,6 +168,17 @@ export default function CatalogProductDetailPage() {
       toast.error(e instanceof ApiError ? e.message : "Failed"),
   });
 
+  if (!id) {
+    return (
+      <p className="p-8 text-sm text-rose-600">
+        Missing product id.{" "}
+        <Link href="/catalog" className="underline">
+          Back
+        </Link>
+      </p>
+    );
+  }
+
   if (product.isLoading) {
     return <p className="p-8 text-sm text-[#5a6b7d]">Loading product…</p>;
   }
@@ -182,12 +205,13 @@ export default function CatalogProductDetailPage() {
     <div className="space-y-4 pb-12">
       <header className="flex flex-wrap items-start justify-between gap-3 border-b border-[#eef1f4] pb-3">
         <div className="flex gap-3">
-          <div className="flex size-16 items-center justify-center overflow-hidden rounded border bg-[#f7f9fb]">
-            {p.photoUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={p.photoUrl} alt="" className="size-full object-cover" />
-            ) : null}
-          </div>
+          <ProductThumb
+            src={p.photoUrl || p.images?.[0]}
+            label={p.name}
+            size="xl"
+            className="rounded border border-[#eef1f4]"
+            count={p.images?.length}
+          />
           <div>
             <p className="text-[0.65rem] font-bold tracking-wide text-[#1a56db] uppercase">
               {p.kind} · {p.status}

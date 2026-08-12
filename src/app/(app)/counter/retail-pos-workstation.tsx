@@ -47,7 +47,9 @@ type CartLine = {
   image?: string | null;
 };
 
-type PayMethod = "cash" | "upi" | "card" | "store_credit";
+type PayMethod = "cash" | "upi" | "card" | "store_credit" | "gift_card";
+
+const TOUCH_KEY = "upos-counter-touch-mode";
 
 /**
  * Excellent retail Sale POS — scan/search, cart, cash change, atomic checkout.
@@ -132,6 +134,17 @@ export default function RetailPosWorkstation({
   const [splitPay, setSplitPay] = useState(false);
   const [splitCashAmount, setSplitCashAmount] = useState("");
   const [cashTendered, setCashTendered] = useState("");
+  const [allowPartial, setAllowPartial] = useState(false);
+  const [payAmount, setPayAmount] = useState("");
+  const [giftCardCode, setGiftCardCode] = useState("");
+  const [giftCardBalance, setGiftCardBalance] = useState<number | null>(null);
+  const [loyaltyPointsInput, setLoyaltyPointsInput] = useState("");
+  const [loyaltyQuote, setLoyaltyQuote] = useState<{
+    points: number;
+    amountOff: number;
+  } | null>(null);
+  const [sendReceipt, setSendReceipt] = useState(false);
+  const [touchMode, setTouchMode] = useState(false);
   const [busy, setBusy] = useState(false);
   const [offlinePending, setOfflinePending] = useState(0);
   const [online, setOnline] = useState(true);
@@ -308,12 +321,27 @@ export default function RetailPosWorkstation({
   );
   const discountCapped =
     discountEntered > discountNum + 0.001 && !canOverrideDiscount;
-  const totalDue = Math.max(0, ticketBeforeDiscount - discountNum);
+  const loyaltyOff = loyaltyQuote?.amountOff ?? 0;
+  const totalDue = Math.max(0, ticketBeforeDiscount - discountNum - loyaltyOff);
+  const chargeAmount = (() => {
+    if (!allowPartial) return totalDue;
+    const entered = moneyNumber(payAmount || 0);
+    if (entered <= 0) return totalDue;
+    return Math.min(totalDue, entered);
+  })();
   const tenderedNum = moneyNumber(cashTendered || 0);
   const changeDue =
     payMethod === "cash" && tenderedNum > 0
-      ? Math.max(0, tenderedNum - totalDue)
+      ? Math.max(0, tenderedNum - chargeAmount)
       : 0;
+
+  useEffect(() => {
+    try {
+      setTouchMode(localStorage.getItem(TOUCH_KEY) === "1");
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   useEffect(() => {
     scanRef.current?.focus();
@@ -452,8 +480,8 @@ export default function RetailPosWorkstation({
       toast.error("Cart is empty");
       return;
     }
-    if (payMethod === "cash" && tenderedNum > 0 && tenderedNum < totalDue) {
-      toast.error("Cash tendered is less than total");
+    if (payMethod === "cash" && tenderedNum > 0 && tenderedNum < chargeAmount) {
+      toast.error("Cash tendered is less than payment amount");
       return;
     }
     if (discountCapped) {
@@ -461,7 +489,11 @@ export default function RetailPosWorkstation({
         `Discount capped at ${money(maxDiscountAmount)} (${maxCashierDiscountPercent}% cashier max)`,
       );
     }
-    if (totalDue < 60 && (payMethod === "card" || payMethod === "upi")) {
+    if (
+      chargeAmount < 60 &&
+      (payMethod === "card" || payMethod === "upi") &&
+      !allowPartial
+    ) {
       toast.error(
         `Card/UPI minimum is ${money(60)} — use cash for smaller sales`,
       );
@@ -469,6 +501,14 @@ export default function RetailPosWorkstation({
     }
     if (payMethod === "store_credit" && !customerId) {
       toast.error("Select a customer for store credit");
+      return;
+    }
+    if (payMethod === "gift_card" && !giftCardCode.trim()) {
+      toast.error("Enter gift card code");
+      return;
+    }
+    if (loyaltyPointsInput && !customerId) {
+      toast.error("Select a customer to redeem loyalty points");
       return;
     }
 
@@ -489,6 +529,20 @@ export default function RetailPosWorkstation({
           : couponCode.trim()
             ? { couponCode: couponCode.trim() }
             : {}),
+        ...(loyaltyQuote && loyaltyQuote.points > 0
+          ? { loyaltyPointsToRedeem: loyaltyQuote.points }
+          : {}),
+        ...(allowPartial && chargeAmount < totalDue - 0.001
+          ? { allowPartial: true }
+          : {}),
+        ...(sendReceipt && customerId
+          ? {
+              sendReceipt: true,
+              sendReceiptChannels: ["email", "sms"] as Array<
+                "email" | "sms" | "whatsapp"
+              >,
+            }
+          : {}),
       };
 
       if (payMethod === "store_credit" && !customerId) {
@@ -589,17 +643,26 @@ export default function RetailPosWorkstation({
         return;
       }
 
+      const payAmt = chargeAmount;
       const result = await posApi.saleCheckout({
         ...cartPayload,
         payments: [
           {
-            method: payMethod === "store_credit" ? "store_credit" : "cash",
-            amount: totalDue,
+            method:
+              payMethod === "store_credit"
+                ? "store_credit"
+                : payMethod === "gift_card"
+                  ? "gift_card"
+                  : "cash",
+            amount: payAmt,
             idempotencyKey: newIdempotencyKey("sale"),
+            ...(payMethod === "gift_card"
+              ? { giftCardCode: giftCardCode.trim() }
+              : {}),
           },
         ],
         ...(payMethod === "cash"
-          ? { cashTendered: tenderedNum > 0 ? tenderedNum : totalDue }
+          ? { cashTendered: tenderedNum > 0 ? tenderedNum : payAmt }
           : {}),
       });
 
@@ -610,6 +673,12 @@ export default function RetailPosWorkstation({
       setCashTendered("");
       setSplitPay(false);
       setSplitCashAmount("");
+      setAllowPartial(false);
+      setPayAmount("");
+      setGiftCardCode("");
+      setGiftCardBalance(null);
+      setLoyaltyPointsInput("");
+      setLoyaltyQuote(null);
       setReceipt({
         data: result.receipt as ReceiptData,
         change: result.change,
@@ -621,7 +690,17 @@ export default function RetailPosWorkstation({
       void qc.invalidateQueries({ queryKey: ["pos-sale-parked"] });
       void qc.invalidateQueries({ queryKey: ["pos-sale-recent"] });
       void qc.invalidateQueries({ queryKey: ["customers"] });
-      toast.success(`Sale ${result.order.orderNumber} complete`);
+      if (result.partial) {
+        toast.success(
+          `Sale ${result.order.orderNumber} · partial pay · balance ${money(result.balanceDue ?? result.order.balanceDue)}`,
+        );
+      } else {
+        toast.success(
+          `Sale ${result.order.orderNumber} complete${
+            result.pointsEarned ? ` · +${result.pointsEarned} pts` : ""
+          }`,
+        );
+      }
       scanRef.current?.focus();
     } catch (e) {
       toast.error(
@@ -654,7 +733,7 @@ export default function RetailPosWorkstation({
       setCart([]);
       setDiscountAmount("");
       setParkLabel("");
-      toast.success(`Parked ${parkedSale.orderNumber}`);
+      toast.success(`Draft saved ${parkedSale.orderNumber}`);
       void qc.invalidateQueries({ queryKey: ["pos-sale-parked"] });
       setShowParked(true);
     } catch (e) {
@@ -1388,13 +1467,13 @@ export default function RetailPosWorkstation({
               </Label>
               <Input
                 className="h-10"
-                placeholder="e.g. Table 4"
+                placeholder="e.g. Table 4 · Walk-in draft"
                 value={parkLabel}
                 onChange={(e) => setParkLabel(e.target.value)}
                 maxLength={80}
               />
               <p className="text-[0.65rem] text-[#8b9bb0]">
-                Optional name when parking a cart
+                Save cart as draft without stock or payment — resume anytime
               </p>
             </div>
 
@@ -1403,21 +1482,21 @@ export default function RetailPosWorkstation({
                 type="button"
                 variant="secondary"
                 size="sm"
-                className="h-10"
+                className={cn("h-10", touchMode && "h-14 text-base")}
                 disabled={busy || !cart.length}
                 onClick={() => void parkCart()}
-                title="Save this cart as a hold without taking stock or payment — resume later"
+                title="Save this cart as a draft/hold without taking stock or payment"
               >
-                Park sale
+                Save draft
               </Button>
               <Button
                 type="button"
                 variant="soft"
                 size="sm"
-                className="h-10"
+                className={cn("h-10", touchMode && "h-14 text-base")}
                 onClick={() => setShowParked((v) => !v)}
               >
-                {showParked ? "Hide holds" : "View holds"}
+                {showParked ? "Hide drafts" : "View drafts"}
               </Button>
             </div>
 
@@ -1443,7 +1522,7 @@ export default function RetailPosWorkstation({
                 ))}
                 {!parked.data?.items?.length ? (
                   <li className="py-3 text-center text-[#8b9bb0]">
-                    No parked sales
+                    No draft bills
                   </li>
                 ) : null}
               </ul>
@@ -1481,6 +1560,12 @@ export default function RetailPosWorkstation({
                   <span className="tabular-nums">−{money(discountNum)}</span>
                 </div>
               ) : null}
+              {loyaltyOff > 0 ? (
+                <div className="mt-1 flex items-baseline justify-between text-sm text-[#0b1f33]">
+                  <span>Loyalty points</span>
+                  <span className="tabular-nums">−{money(loyaltyOff)}</span>
+                </div>
+              ) : null}
               <div className="mt-2 flex items-baseline justify-between border-t border-[#eef2f8] pt-2.5">
                 <span className="text-sm font-semibold text-[#0b1f33]">
                   Due (pay this)
@@ -1491,8 +1576,21 @@ export default function RetailPosWorkstation({
               </div>
             </div>
 
-            <div className="grid grid-cols-4 gap-1 rounded-[12px] bg-[#eef2f8] p-1">
-              {(["cash", "upi", "card", "store_credit"] as const).map((m) => (
+            <div
+              className={cn(
+                "grid gap-1 rounded-[12px] bg-[#eef2f8] p-1",
+                touchMode ? "grid-cols-3" : "grid-cols-5",
+              )}
+            >
+              {(
+                [
+                  "cash",
+                  "upi",
+                  "card",
+                  "store_credit",
+                  "gift_card",
+                ] as const
+              ).map((m) => (
                 <button
                   key={m}
                   type="button"
@@ -1502,13 +1600,18 @@ export default function RetailPosWorkstation({
                     if (m !== "cash") setSplitPay(false);
                   }}
                   className={cn(
-                    "rounded-[9px] py-2.5 text-[0.65rem] font-bold tracking-[0.04em] uppercase transition",
+                    "rounded-[9px] font-bold tracking-[0.04em] uppercase transition",
+                    touchMode ? "py-4 text-xs" : "py-2.5 text-[0.65rem]",
                     payMethod === m
                       ? "bg-[#1a56db] text-white shadow-[0_1px_3px_rgba(26,86,219,0.35)]"
                       : "text-[#5a6b7d] hover:bg-white/80 hover:text-[#0b1f33]",
                   )}
                 >
-                  {m === "store_credit" ? "Credit" : m}
+                  {m === "store_credit"
+                    ? "Credit"
+                    : m === "gift_card"
+                      ? "Gift"
+                      : m}
                 </button>
               ))}
             </div>
@@ -1516,6 +1619,147 @@ export default function RetailPosWorkstation({
               <p className="text-[0.7rem] text-[#5a6b7d]">
                 Debits customer store credit balance. Needs a linked customer.
               </p>
+            ) : null}
+            {payMethod === "gift_card" ? (
+              <div className="flex gap-2">
+                <Input
+                  className="uppercase"
+                  placeholder="Gift card code"
+                  value={giftCardCode}
+                  onChange={(e) => {
+                    setGiftCardCode(e.target.value);
+                    setGiftCardBalance(null);
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={!giftCardCode.trim()}
+                  onClick={async () => {
+                    try {
+                      const card = await loyaltyApi.lookupGiftCard(
+                        giftCardCode.trim(),
+                      );
+                      setGiftCardBalance(moneyNumber(card.balance));
+                      toast.success(`Balance ${money(card.balance)}`);
+                    } catch (e) {
+                      toast.error(
+                        e instanceof ApiError
+                          ? e.messages.join(", ")
+                          : "Gift card not found",
+                      );
+                    }
+                  }}
+                >
+                  Check
+                </Button>
+              </div>
+            ) : null}
+            {giftCardBalance != null && payMethod === "gift_card" ? (
+              <p className="text-[0.7rem] text-[#5a6b7d]">
+                Available {money(giftCardBalance)}
+              </p>
+            ) : null}
+
+            <div className="flex flex-wrap gap-3 text-xs">
+              <label className="flex items-center gap-2 font-medium text-[#0b1f33]">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-[#1a56db]"
+                  checked={allowPartial}
+                  onChange={(e) => setAllowPartial(e.target.checked)}
+                />
+                Partial payment
+              </label>
+              <label className="flex items-center gap-2 font-medium text-[#0b1f33]">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-[#1a56db]"
+                  checked={sendReceipt}
+                  onChange={(e) => setSendReceipt(e.target.checked)}
+                />
+                Email / SMS receipt
+              </label>
+              <label className="flex items-center gap-2 font-medium text-[#0b1f33]">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-[#1a56db]"
+                  checked={touchMode}
+                  onChange={(e) => {
+                    const on = e.target.checked;
+                    setTouchMode(on);
+                    try {
+                      localStorage.setItem(TOUCH_KEY, on ? "1" : "0");
+                    } catch {
+                      /* ignore */
+                    }
+                  }}
+                />
+                Touch mode
+              </label>
+            </div>
+            {allowPartial ? (
+              <div className="field-shell">
+                <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
+                  Amount to collect now
+                </Label>
+                <Input
+                  className="text-base tabular-nums"
+                  inputMode="decimal"
+                  value={payAmount}
+                  onChange={(e) => setPayAmount(e.target.value)}
+                  placeholder={String(totalDue || "")}
+                />
+                <p className="text-xs text-[#5a6b7d]">
+                  Balance left{" "}
+                  {money(Math.max(0, totalDue - chargeAmount))}
+                </p>
+              </div>
+            ) : null}
+
+            {customerId ? (
+              <div className="flex gap-2">
+                <Input
+                  inputMode="numeric"
+                  placeholder="Loyalty points to redeem"
+                  value={loyaltyPointsInput}
+                  onChange={(e) => {
+                    setLoyaltyPointsInput(e.target.value);
+                    setLoyaltyQuote(null);
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={!loyaltyPointsInput.trim()}
+                  onClick={async () => {
+                    try {
+                      const q = await loyaltyApi.quotePoints(
+                        customerId,
+                        Number(loyaltyPointsInput),
+                        totalDue + loyaltyOff,
+                      );
+                      setLoyaltyQuote({
+                        points: q.points,
+                        amountOff: q.amountOff,
+                      });
+                      toast.success(
+                        `Redeem ${q.points} pts → −${money(q.amountOff)}`,
+                      );
+                    } catch (e) {
+                      toast.error(
+                        e instanceof ApiError
+                          ? e.messages.join(", ")
+                          : "Points quote failed",
+                      );
+                    }
+                  }}
+                >
+                  Apply pts
+                </Button>
+              </div>
             ) : null}
 
             {payMethod === "cash" ? (
@@ -1559,7 +1803,7 @@ export default function RetailPosWorkstation({
                     <Input
                       className="text-base tabular-nums"
                       inputMode="decimal"
-                      placeholder={String(totalDue || "")}
+                      placeholder={String(chargeAmount || "")}
                       value={cashTendered}
                       onChange={(e) => setCashTendered(e.target.value)}
                     />
@@ -1570,20 +1814,23 @@ export default function RetailPosWorkstation({
                     ) : (
                       <div className="flex flex-wrap gap-1.5 pt-0.5">
                         {(currencyCode === "INR"
-                          ? [totalDue, 500, 1000, 2000]
+                          ? [chargeAmount, 500, 1000, 2000]
                           : currencyCode === "USD"
-                            ? [totalDue, 20, 50, 100]
-                            : [totalDue]
+                            ? [chargeAmount, 20, 50, 100]
+                            : [chargeAmount]
                         )
                           .filter((n, i, a) => n > 0 && a.indexOf(n) === i)
                           .map((n) => (
                             <button
                               key={n}
                               type="button"
-                              className="rounded-lg border border-[#cfd8e6] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#5a6b7d] transition hover:border-[#1a56db]/45 hover:bg-[#e8eefb] hover:text-[#0b1f33]"
+                              className={cn(
+                                "rounded-lg border border-[#cfd8e6] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#5a6b7d] transition hover:border-[#1a56db]/45 hover:bg-[#e8eefb] hover:text-[#0b1f33]",
+                                touchMode && "px-3 py-2.5 text-sm",
+                              )}
                               onClick={() => setCashTendered(String(n))}
                             >
-                              {n === totalDue ? "Exact" : money(n)}
+                              {n === chargeAmount ? "Exact" : money(n)}
                             </button>
                           ))}
                       </div>
@@ -1591,17 +1838,20 @@ export default function RetailPosWorkstation({
                   </div>
                 )}
               </div>
-            ) : (
+            ) : payMethod === "card" || payMethod === "upi" ? (
               <p className="rounded-[10px] border border-[#d9e0ea] bg-white px-3 py-2 text-xs text-[#5a6b7d]">
                 {stripeConfig.data?.enabled
                   ? `Stripe ${stripeConfig.data.mode} · ${payMethod.toUpperCase()}`
                   : "Stripe keys not set — card/UPI unavailable"}
               </p>
-            )}
+            ) : null}
 
             <Button
               size="lg"
-              className="h-12 w-full text-[0.95rem]"
+              className={cn(
+                "h-12 w-full text-[0.95rem]",
+                touchMode && "h-16 text-lg",
+              )}
               disabled={
                 busy ||
                 stripeBusy ||
@@ -1614,12 +1864,16 @@ export default function RetailPosWorkstation({
               onClick={() => void checkout()}
             >
               {busy || stripeBusy
-                ? payMethod === "cash"
+                ? payMethod === "cash" ||
+                  payMethod === "store_credit" ||
+                  payMethod === "gift_card"
                   ? "Processing…"
                   : "Opening Stripe…"
                 : !registerSession
                   ? "Open register to charge"
-                  : `Charge ${money(totalDue)}`}
+                  : allowPartial && chargeAmount < totalDue - 0.001
+                    ? `Collect ${money(chargeAmount)}`
+                    : `Charge ${money(chargeAmount)}`}
             </Button>
           </div>
         </aside>

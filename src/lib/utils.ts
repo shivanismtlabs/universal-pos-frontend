@@ -68,16 +68,25 @@ export function newIdempotencyKey(prefix = "pos") {
 /** Resolve product image path from API (`/v1/uploads/…`) or absolute URL */
 export function mediaUrl(path?: string | null) {
   if (!path) return null;
+  const trimmed = path.trim();
+  if (!trimmed) return null;
+  // Dead demo hosts used in older smoke data — treat as missing
   if (
-    path.startsWith("http://") ||
-    path.startsWith("https://") ||
-    path.startsWith("data:") ||
-    path.startsWith("blob:")
+    /via\.placeholder\.com/i.test(trimmed) ||
+    /placeholder\.com\/\d/i.test(trimmed)
   ) {
-    return path;
+    return null;
+  }
+  if (
+    trimmed.startsWith("http://") ||
+    trimmed.startsWith("https://") ||
+    trimmed.startsWith("data:") ||
+    trimmed.startsWith("blob:")
+  ) {
+    return trimmed;
   }
   const origin = getApiOrigin();
-  return `${origin}${path.startsWith("/") ? path : `/${path}`}`;
+  return `${origin}${trimmed.startsWith("/") ? trimmed : `/${trimmed}`}`;
 }
 
 export function readFileAsDataUrl(file: File): Promise<string> {

@@ -8,6 +8,7 @@ import {
   useState,
   type FormEvent,
   type KeyboardEvent,
+  type MutableRefObject,
   type Ref,
 } from "react";
 import { cn } from "@/lib/utils";
@@ -93,9 +94,7 @@ export function BarcodeScanInput({
       innerRef.current = node;
       if (!inputRef) return;
       if (typeof inputRef === "function") inputRef(node);
-      else
-        (inputRef as React.MutableRefObject<HTMLInputElement | null>).current =
-          node;
+      else (inputRef as MutableRefObject<HTMLInputElement | null>).current = node;
     },
     [inputRef],
   );

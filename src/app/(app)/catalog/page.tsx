@@ -5,9 +5,9 @@
  * Universal: physical · service · digital · bundle · rental.
  */
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import {
   Archive,
@@ -15,7 +15,6 @@ import {
   Plus,
   Search,
   Tag,
-  Package,
   Layers,
 } from "lucide-react";
 import {
@@ -29,7 +28,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { ModeBadge } from "@/components/mode-badge";
-import { SaleStockPanel } from "@/app/(app)/dashboard/sale-stock-panel";
+import { ProductThumb } from "@/components/product-thumb";
 
 const KINDS: { value: CatalogProductKind | ""; label: string }[] = [
   { value: "", label: "All types" },
@@ -50,8 +49,36 @@ const STATUSES: { value: CatalogProductStatus | ""; label: string }[] = [
 
 type Tab = "products" | "brands" | "categories" | "stock";
 
+function parseTab(raw: string | null): Tab {
+  if (raw === "brands" || raw === "categories" || raw === "stock") return raw;
+  return "products";
+}
+
 export default function CatalogPage() {
-  const [tab, setTab] = useState<Tab>("products");
+  return (
+    <Suspense
+      fallback={<p className="p-6 text-sm text-[#5a6b7d]">Loading catalog…</p>}
+    >
+      <CatalogPageInner />
+    </Suspense>
+  );
+}
+
+function CatalogPageInner() {
+  const search = useSearchParams();
+  const router = useRouter();
+  const [tab, setTab] = useState<Tab>(() => parseTab(search.get("tab")));
+
+  useEffect(() => {
+    setTab(parseTab(search.get("tab")));
+  }, [search]);
+
+  function goTab(id: Tab) {
+    setTab(id);
+    const qs =
+      id === "products" ? "/catalog" : `/catalog?tab=${id}`;
+    router.replace(qs);
+  }
 
   return (
     <div className="space-y-3">
@@ -77,13 +104,13 @@ export default function CatalogPage() {
             ["products", "Items"],
             ["categories", "Categories"],
             ["brands", "Brands"],
-            ["stock", "Opening / stock tools"],
+            ["stock", "Stock levels"],
           ] as const
         ).map(([id, label]) => (
           <button
             key={id}
             type="button"
-            onClick={() => setTab(id)}
+            onClick={() => goTab(id)}
             className={cn(
               "px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
               tab === id
@@ -99,7 +126,28 @@ export default function CatalogPage() {
       {tab === "products" ? <ProductsPanel /> : null}
       {tab === "brands" ? <BrandsPanel /> : null}
       {tab === "categories" ? <CategoriesPanel /> : null}
-      {tab === "stock" ? <SaleStockPanel /> : null}
+      {tab === "stock" ? (
+        <div className="rounded-xl border border-[#d9e0ea] bg-white p-6">
+          <h2 className="text-base font-semibold text-[#0b1f33]">
+            Location stock
+          </h2>
+          <p className="mt-1 text-sm text-[#5a6b7d]">
+            Quantities, transfers, and adjustments are managed in Inventory —
+            not on the product master.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button asChild>
+              <Link href="/inventory">Open stock levels</Link>
+            </Button>
+            <Button variant="secondary" asChild>
+              <Link href="/adjustments">Adjustments</Link>
+            </Button>
+            <Button variant="secondary" asChild>
+              <Link href="/transfers">Stock transfer</Link>
+            </Button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -138,7 +186,7 @@ function ProductsPanel() {
     onSuccess: (p) => {
       void qc.invalidateQueries({ queryKey: ["catalog-products"] });
       toast.success("Product duplicated as draft");
-      if (p?.id) router.push(`/catalog/${p.id}`);
+      if (p?.id) router.push(`/catalog/view?id=${p.id}`);
     },
     onError: (e: Error) =>
       toast.error(e instanceof ApiError ? e.message : "Duplicate failed"),
@@ -259,22 +307,16 @@ function ProductsPanel() {
                   className="border-b border-[#f0f3f7] hover:bg-[#fafcfe]"
                 >
                   <td className="px-3 py-2">
-                    <div className="flex size-9 items-center justify-center overflow-hidden rounded border border-[#eef1f4] bg-[#f7f9fb]">
-                      {p.photoUrl || p.images?.[0] ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={p.photoUrl || p.images?.[0] || ""}
-                          alt=""
-                          className="size-full object-cover"
-                        />
-                      ) : (
-                        <Package className="size-4 text-[#b0bcc9]" />
-                      )}
-                    </div>
+                    <ProductThumb
+                      src={p.photoUrl || p.images?.[0]}
+                      label={p.name}
+                      size="sm"
+                      className="rounded border border-[#eef1f4]"
+                    />
                   </td>
                   <td className="px-3 py-2">
                     <Link
-                      href={`/catalog/${p.id}`}
+                      href={`/catalog/view?id=${p.id}`}
                       className="font-medium text-[#0b1f33] hover:text-[#1a56db]"
                     >
                       {p.name}
@@ -305,7 +347,7 @@ function ProductsPanel() {
                       <Button
                         size="sm"
                         variant="secondary"
-                        onClick={() => router.push(`/catalog/${p.id}`)}
+                        onClick={() => router.push(`/catalog/view?id=${p.id}`)}
                       >
                         View
                       </Button>

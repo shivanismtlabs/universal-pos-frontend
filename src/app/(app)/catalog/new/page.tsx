@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -11,6 +11,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { BarcodeScanInput } from "@/components/barcode-scan-input";
+import {
+  ProductImagePicker,
+  type ProductImagePickerHandle,
+} from "@/components/product-image-picker";
 
 const UNITS = [
   "pcs",
@@ -28,6 +32,7 @@ const UNITS = [
 
 export default function NewCatalogProductPage() {
   const router = useRouter();
+  const imagePickerRef = useRef<ProductImagePickerHandle>(null);
   const cats = useQuery({
     queryKey: ["catalog-categories"],
     queryFn: () => catalogApi.listCategories(),
@@ -88,8 +93,13 @@ export default function NewCatalogProductPage() {
   });
 
   const save = useMutation({
-    mutationFn: () =>
-      catalogApi.createProduct({
+    mutationFn: () => {
+      const uploaded = imagePickerRef.current?.getUploadDataUrls() ?? [];
+      const photos = [
+        ...uploaded,
+        ...(form.photoUrl.trim() ? [form.photoUrl.trim()] : []),
+      ];
+      return catalogApi.createProduct({
         name: form.name.trim(),
         shortName: form.shortName.trim() || undefined,
         kind: form.kind,
@@ -106,18 +116,20 @@ export default function NewCatalogProductPage() {
         mrp: form.mrp ? Number(form.mrp) : undefined,
         taxCode: form.taxCode.trim() || undefined,
         unitOfMeasure: form.unitOfMeasure,
-        photoUrl: form.photoUrl.trim() || undefined,
+        photoUrl: photos[0],
+        images: photos.length ? photos : undefined,
         trackInventory: form.trackInventory,
         trackSerial: form.trackSerial,
         trackBatch: form.trackBatch,
         canSell: form.canSell,
         canPurchase: form.canPurchase,
         availableInPos: form.availableInPos,
-        openingQty: form.trackInventory ? Number(form.openingQty) || 0 : 0,
-      }),
+        openingQty: form.trackInventory ? Number(form.openingQty) || 0 : undefined,
+      });
+    },
     onSuccess: (p) => {
       toast.success("Product created");
-      router.push(p?.id ? `/catalog/${p.id}` : "/catalog");
+      router.push(p?.id ? `/catalog/view?id=${p.id}` : "/catalog");
     },
     onError: (e: Error) =>
       toast.error(e instanceof ApiError ? e.message : "Save failed"),
@@ -201,14 +213,17 @@ export default function NewCatalogProductPage() {
             />
           </div>
           <div>
-            <Label>Image URL</Label>
+            <Label>Image URL (optional)</Label>
             <Input
               value={form.photoUrl}
               onChange={(e) =>
                 setForm((f) => ({ ...f, photoUrl: e.target.value }))
               }
-              placeholder="https://… or /v1/uploads/…"
+              placeholder="https://… or leave blank and upload below"
             />
+          </div>
+          <div className="sm:col-span-2">
+            <ProductImagePicker ref={imagePickerRef} />
           </div>
           <div className="sm:col-span-2">
             <Label>Short description</Label>

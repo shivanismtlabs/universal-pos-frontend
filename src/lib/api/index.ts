@@ -1726,11 +1726,16 @@ export const posApi = {
       amount: number;
       idempotencyKey: string;
       type?: string;
+      giftCardCode?: string;
     }>;
     cashTendered?: number;
     note?: string;
     discountAmount?: number;
     couponCode?: string;
+    loyaltyPointsToRedeem?: number;
+    allowPartial?: boolean;
+    sendReceipt?: boolean;
+    sendReceiptChannels?: Array<"email" | "sms" | "whatsapp">;
   }) {
     return apiRequest<{
       order: {
@@ -1743,6 +1748,10 @@ export const posApi = {
       cashTendered: string | number | null;
       receipt: ReceiptPayload;
       replayed?: boolean;
+      partial?: boolean;
+      balanceDue?: string | number;
+      loyaltyPointsRedeemed?: number;
+      pointsEarned?: number;
     }>("/pos/sale/checkout", {
       method: "POST",
       body,
@@ -2918,6 +2927,83 @@ export const loyaltyApi = {
       token: token(),
     });
   },
+  getSettings() {
+    return apiRequest<{
+      enabled: boolean;
+      earnPerCurrency: number;
+      currencyPerPoint: number;
+    }>("/loyalty/settings", { token: token() });
+  },
+  patchSettings(body: {
+    enabled?: boolean;
+    earnPerCurrency?: number;
+    currencyPerPoint?: number;
+  }) {
+    return apiRequest("/loyalty/settings", {
+      method: "PATCH",
+      body,
+      token: token(),
+    });
+  },
+  quotePoints(customerId: string, points: number, maxAmount?: number) {
+    return apiRequest<{
+      customerId: string;
+      pointsAvailable: number;
+      points: number;
+      amountOff: number;
+      currencyPerPoint: number;
+    }>("/loyalty/points/quote", {
+      method: "POST",
+      body: { customerId, points, maxAmount },
+      token: token(),
+    });
+  },
+  listGiftCards() {
+    return apiRequest<
+      Array<{
+        id: string;
+        code: string;
+        initialValue: string | number;
+        balance: string | number;
+        status: string;
+        expiresAt?: string | null;
+        customer?: { id: string; fullName: string; phone: string } | null;
+      }>
+    >("/loyalty/gift-cards", { token: token() });
+  },
+  issueGiftCard(body: {
+    code?: string;
+    initialValue: number;
+    customerId?: string;
+    expiresAt?: string;
+    note?: string;
+  }) {
+    return apiRequest("/loyalty/gift-cards", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  lookupGiftCard(code: string) {
+    return apiRequest<{
+      id: string;
+      code: string;
+      balance: string | number;
+      status: string;
+      expiresAt?: string | null;
+    }>("/loyalty/gift-cards/lookup", {
+      method: "POST",
+      body: { code },
+      token: token(),
+    });
+  },
+  patchGiftCard(id: string, body: { status?: "active" | "disabled"; note?: string }) {
+    return apiRequest(`/loyalty/gift-cards/${id}`, {
+      method: "PATCH",
+      body,
+      token: token(),
+    });
+  },
 };
 
 export const healthApi = {
@@ -2941,6 +3027,7 @@ export const notifyApi = {
   send(body: {
     customerId?: string;
     phone?: string;
+    email?: string;
     channel: "whatsapp" | "sms" | "email";
     templateKey: string;
     payload?: Record<string, unknown>;

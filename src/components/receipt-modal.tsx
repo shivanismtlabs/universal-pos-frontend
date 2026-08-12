@@ -1,11 +1,14 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { formatMoney, moneyNumber } from "@/lib/utils";
 import { useBootstrapOptional } from "@/lib/bootstrap";
 import { ModeBadge } from "@/components/mode-badge";
+import { notifyApi } from "@/lib/api";
+import { ApiError } from "@/lib/api/client";
 
 export type ReceiptData = {
   store: {
@@ -115,6 +118,40 @@ export function ReceiptModal({
   const tenderedAmt = cashTendered ?? data?.cashTendered;
   const balanceDue = moneyNumber(data?.totals.balanceDue);
   const isPaid = balanceDue <= 0;
+  const [invoiceMode, setInvoiceMode] = useState(false);
+  const [sending, setSending] = useState(false);
+
+  async function sendChannels(channels: Array<"email" | "sms">) {
+    if (!data?.customer) {
+      toast.error("Attach a customer to send receipt");
+      return;
+    }
+    setSending(true);
+    try {
+      for (const channel of channels) {
+        await notifyApi.send({
+          channel,
+          templateKey: "sale_receipt",
+          payload: {
+            orderNumber: data.orderNumber,
+            total: String(paidTotal),
+            balanceDue: String(balanceDue),
+            storeName: shopName,
+            customerName: data.customer.fullName,
+          },
+          // customerId unknown on receipt payload — phone/email from customer if API supports lookup by phone later
+          phone: data.customer.phone ?? undefined,
+        });
+      }
+      toast.success("Receipt queued");
+    } catch (e) {
+      toast.error(
+        e instanceof ApiError ? e.messages.join(", ") : "Send failed",
+      );
+    } finally {
+      setSending(false);
+    }
+  }
 
   const content = (
     <div className="receipt-print-root fixed inset-0 z-[100] flex items-center justify-center bg-[#0b1f33]/45 p-4 print:static print:block print:bg-white print:p-0">
@@ -122,13 +159,43 @@ export function ReceiptModal({
         <div className="flex items-center justify-between border-b border-[#e8ebf0] px-5 py-3 print:hidden">
           <div>
             <p className="text-[0.65rem] font-semibold tracking-[0.14em] text-[#5a6b7d] uppercase">
-              Receipt
+              {invoiceMode ? "Tax invoice" : "Receipt"}
             </p>
             <p className="text-lg font-semibold tracking-tight text-[#0b1f33]">
-              Print slip
+              {invoiceMode ? "Print invoice" : "Print slip"}
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => setInvoiceMode((v) => !v)}
+            >
+              {invoiceMode ? "Receipt view" : "Invoice view"}
+            </Button>
+            {data?.customer?.phone || data?.customer ? (
+              <>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  disabled={sending}
+                  onClick={() => void sendChannels(["email"])}
+                >
+                  Email
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  disabled={sending}
+                  onClick={() => void sendChannels(["sms"])}
+                >
+                  SMS
+                </Button>
+              </>
+            ) : null}
             <Button type="button" size="sm" onClick={() => window.print()}>
               Print
             </Button>
