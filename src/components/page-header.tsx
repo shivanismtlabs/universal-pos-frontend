@@ -76,7 +76,7 @@ export function EmptyState({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="rounded-xl border border-[var(--line)] bg-white px-6 py-10 text-center">
+    <div className="rounded-xl border border-[#e4e9f0] bg-white px-6 py-10 text-center">
       <p className="section-title">{title}</p>
       {detail ? <p className="mt-2 text-body text-[var(--muted)]">{detail}</p> : null}
       {action ? <div className="mt-5 flex justify-center">{action}</div> : null}

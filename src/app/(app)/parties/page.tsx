@@ -18,7 +18,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FieldError } from "@/components/ui/form";
 import { formatDate } from "@/lib/utils";
-import { RequireCommerceMode } from "@/components/require-commerce-mode";
 
 type PartyMember = {
   customerId: string;
@@ -126,8 +125,8 @@ function PartiesDesk() {
         </p>
         <h1 className="display mt-2 text-2xl sm:text-4xl">Customer groups</h1>
         <p className="mt-1 text-sm text-[#6b7280]">
-          Optional groups for shared rentals — event parties, crews,
-          corporate bookings, tour groups, etc.
+          Group customers for events, crews, households, or shared accounts —
+          usable in any shop mode.
         </p>
       </header>
 
@@ -289,9 +288,5 @@ function PartiesDesk() {
 }
 
 export default function PartiesPage() {
-  return (
-    <RequireCommerceMode modes={["rental"]} label="Customer groups need rental mode">
-      <PartiesDesk />
-    </RequireCommerceMode>
-  );
+  return <PartiesDesk />;
 }

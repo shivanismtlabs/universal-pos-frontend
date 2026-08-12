@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -40,14 +40,22 @@ import {
 } from "@/lib/utils";
 import { useAuthStore } from "@/lib/auth-store";
 import { canFinance, canRefund } from "@/lib/roles";
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { ModeBadge } from "@/components/mode-badge";
 import { PageBreadcrumb, PageSkeleton } from "@/components/page-header";
 import { ReceiptModal, type ReceiptData } from "@/components/receipt-modal";
 
 export default function OrderDetailPage() {
-  const params = useParams<{ id: string }>();
-  const id = params.id;
+  return (
+    <Suspense fallback={<PageSkeleton />}>
+      <OrderDetailInner />
+    </Suspense>
+  );
+}
+
+function OrderDetailInner() {
+  const search = useSearchParams();
+  const id = search.get("id") ?? "";
   const qc = useQueryClient();
   const roles = useAuthStore((s) => s.user?.roles ?? []);
   const allowRefund = canRefund(roles);

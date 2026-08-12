@@ -23,6 +23,8 @@ import { FadeIn } from "@/components/motion";
 import { cn } from "@/lib/utils";
 import { useBootstrap } from "@/lib/bootstrap";
 import { PageHeader } from "@/components/page-header";
+import { EntityRowActions } from "@/components/entity-row-actions";
+import { CustomerCrmPanel } from "@/components/customer-crm-panel";
 
 function numOrUndef(v: unknown) {
   if (v === "" || v === undefined || v === null) return undefined;
@@ -52,6 +54,7 @@ export default function CustomersPage() {
   const [debouncedQ, setDebouncedQ] = useState("");
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const qc = useQueryClient();
   const { hasModule } = useBootstrap();
   const rental = hasModule("rental");
@@ -155,6 +158,74 @@ export default function CustomersPage() {
       ),
   });
 
+  const update = useMutation({
+    mutationFn: (values: CreateCustomerInput) => {
+      if (!editingId) throw new Error("No customer");
+      return customersApi.update(editingId, {
+        fullName: values.fullName,
+        phone: values.phone,
+        email: values.email || undefined,
+        eventDate: values.eventDate || undefined,
+        notes: values.notes || undefined,
+        marketingOptIn: values.marketingOptIn,
+      });
+    },
+    onSuccess: () => {
+      toast.success("Customer updated");
+      setEditingId(null);
+      form.reset({
+        fullName: "",
+        phone: "",
+        email: "",
+        eventDate: "",
+        notes: "",
+        marketingOptIn: false,
+      });
+      void qc.invalidateQueries({ queryKey: ["customers"] });
+      void qc.invalidateQueries({ queryKey: ["customer", selectedId] });
+    },
+    onError: (e) =>
+      toast.error(
+        e instanceof ApiError ? e.messages.join(", ") : "Update failed",
+      ),
+  });
+
+  const softDelete = useMutation({
+    mutationFn: (id: string) => customersApi.softDelete(id),
+    onSuccess: (_res, id) => {
+      toast.success("Customer removed");
+      if (selectedId === id) setSelectedId(null);
+      if (editingId === id) setEditingId(null);
+      void qc.invalidateQueries({ queryKey: ["customers"] });
+    },
+    onError: (e) =>
+      toast.error(
+        e instanceof ApiError ? e.messages.join(", ") : "Remove failed",
+      ),
+  });
+
+  function startEdit(c: {
+    id: string;
+    fullName: string;
+    phone: string;
+    email?: string | null;
+    eventDate?: string | null;
+    notes?: string | null;
+  }) {
+    setSelectedId(c.id);
+    setEditingId(c.id);
+    form.reset({
+      fullName: c.fullName,
+      phone: c.phone,
+      email: c.email ?? "",
+      eventDate: c.eventDate
+        ? String(c.eventDate).slice(0, 10)
+        : "",
+      notes: c.notes ?? "",
+      marketingOptIn: false,
+    });
+  }
+
   const addMeasurement = useMutation({
     mutationFn: (values: CreateMeasurementInput) => {
       if (!selectedId) throw new Error("Select a customer");
@@ -221,44 +292,76 @@ export default function CustomersPage() {
                 const active = selectedId === c.id;
                 return (
                   <li key={c.id}>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedId(c.id)}
+                    <div
                       className={cn(
-                        "flex w-full flex-col gap-1 px-4 py-3.5 text-left transition sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-5",
-                        active
-                          ? "bg-[#e8eefb]"
-                          : "bg-white hover:bg-[#f9fafb]",
+                        "flex w-full items-stretch gap-1 px-2 py-1 sm:px-3",
+                        active ? "bg-[#e8eefb]" : "bg-white hover:bg-[#f9fafb]",
                       )}
                     >
-                      <div className="min-w-0">
-                        <p
-                          className={cn(
-                            "truncate text-[0.95rem] font-semibold",
-                            active ? "text-[#0b1f33]" : "text-[#111827]",
+                      <button
+                        type="button"
+                        onClick={() => setSelectedId(c.id)}
+                        className="flex min-w-0 flex-1 flex-col gap-1 px-2 py-2.5 text-left transition sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+                      >
+                        <div className="min-w-0">
+                          <p
+                            className={cn(
+                              "truncate text-[0.95rem] font-semibold",
+                              active ? "text-[#0b1f33]" : "text-[#111827]",
+                            )}
+                          >
+                            {c.fullName}
+                          </p>
+                          <p className="mt-0.5 text-sm tabular-nums text-[#4b5563]">
+                            {c.phone}
+                          </p>
+                        </div>
+                        <div className="shrink-0 text-left sm:text-right">
+                          {rental ? (
+                            <>
+                              <p className="text-[0.65rem] font-semibold tracking-wide text-[#9ca3af] uppercase">
+                                Event
+                              </p>
+                              <p className="text-sm text-[#374151]">
+                                {c.eventDate ? formatDate(c.eventDate) : "—"}
+                              </p>
+                            </>
+                          ) : (
+                            <p className="text-sm text-[#6b7280]">
+                              {c.email ?? "—"}
+                            </p>
                           )}
-                        >
-                          {c.fullName}
-                        </p>
-                        <p className="mt-0.5 text-sm tabular-nums text-[#4b5563]">
-                          {c.phone}
-                        </p>
+                          <p className="mt-1 text-[0.7rem] tabular-nums text-[#6b7280]">
+                            {typeof c.loyaltyPoints === "number"
+                              ? `${c.loyaltyPoints} pts`
+                              : null}
+                            {typeof c.loyaltyPoints === "number" &&
+                            c.storeCreditBalance != null
+                              ? " · "
+                              : null}
+                            {c.storeCreditBalance != null
+                              ? `Wallet ${Number(c.storeCreditBalance).toFixed(2)}`
+                              : null}
+                          </p>
+                        </div>
+                      </button>
+                      <div className="flex shrink-0 items-center pr-1">
+                        <EntityRowActions
+                          onEdit={() => startEdit(c)}
+                          onSoftDelete={() => {
+                            if (
+                              confirm(
+                                `Remove customer “${c.fullName}”? This is a soft delete.`,
+                              )
+                            ) {
+                              softDelete.mutate(c.id);
+                            }
+                          }}
+                          softDeleteTitle="Soft delete"
+                          deleteHidden
+                        />
                       </div>
-                      <div className="shrink-0 text-left sm:text-right">
-                        {rental ? (
-                          <>
-                            <p className="text-[0.65rem] font-semibold tracking-wide text-[#9ca3af] uppercase">
-                              Event
-                            </p>
-                            <p className="text-sm text-[#374151]">
-                              {c.eventDate ? formatDate(c.eventDate) : "—"}
-                            </p>
-                          </>
-                        ) : (
-                          <p className="text-sm text-[#6b7280]">{c.email ?? "—"}</p>
-                        )}
-                      </div>
-                    </button>
+                    </div>
                   </li>
                 );
               })}
@@ -304,13 +407,17 @@ export default function CustomersPage() {
         {/* Add customer */}
         <FadeIn delay={0.08}>
           <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5 sm:p-6">
-            <h2 className="display text-2xl text-[#111827]">Add customer</h2>
+            <h2 className="display text-2xl text-[#111827]">
+              {editingId ? "Edit customer" : "Add customer"}
+            </h2>
             <p className="mt-1 text-sm text-[#6b7280]">
               Name and phone are required
             </p>
             <form
               className="mt-5 space-y-4"
-              onSubmit={form.handleSubmit((v) => create.mutate(v))}
+              onSubmit={form.handleSubmit((v) =>
+                editingId ? update.mutate(v) : create.mutate(v),
+              )}
               noValidate
             >
               <div>
@@ -360,20 +467,65 @@ export default function CustomersPage() {
                 <Label>Notes</Label>
                 <Input className="mt-1.5" {...form.register("notes")} />
               </div>
-              <Button
-                type="submit"
-                disabled={create.isPending}
-                className="w-full"
-              >
-                {create.isPending ? "Saving…" : "Create customer"}
-              </Button>
+              <div className="flex gap-2">
+                {editingId ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="w-full"
+                    onClick={() => {
+                      setEditingId(null);
+                      form.reset({
+                        fullName: "",
+                        phone: "",
+                        email: "",
+                        eventDate: "",
+                        notes: "",
+                        marketingOptIn: false,
+                      });
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                ) : null}
+                <Button
+                  type="submit"
+                  disabled={create.isPending || update.isPending}
+                  className="w-full"
+                >
+                  {create.isPending || update.isPending
+                    ? "Saving…"
+                    : editingId
+                      ? "Save changes"
+                      : "Create customer"}
+                </Button>
+              </div>
             </form>
           </section>
         </FadeIn>
       </div>
 
+      {selectedId ? (
+        <FadeIn delay={0.08}>
+          <CustomerCrmPanel customerId={selectedId} />
+        </FadeIn>
+      ) : (
+        <FadeIn delay={0.08}>
+          <section className="rounded-2xl border border-dashed border-[#e5e7eb] bg-white px-5 py-10 text-center">
+            <p className="eyebrow text-[#0b1f33]">Customer profile</p>
+            <h2 className="display mt-2 text-2xl text-[#111827]">
+              Select a customer
+            </h2>
+            <p className="mx-auto mt-2 max-w-sm text-sm text-[#6b7280]">
+              Click a name in the list to open purchases, dues, loyalty, wallet,
+              and notes.
+            </p>
+          </section>
+        </FadeIn>
+      )}
+
       {/* Measurements — rental module only */}
-      {rental ? (
+      {rental && selectedId ? (
       <FadeIn delay={0.1}>
         <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5 sm:p-6">
           {!selected ? (

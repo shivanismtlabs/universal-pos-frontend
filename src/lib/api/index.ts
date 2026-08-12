@@ -290,6 +290,8 @@ export const customersApi = {
         email?: string | null;
         eventDate?: string | null;
         notes?: string | null;
+        loyaltyPoints?: number;
+        storeCreditBalance?: string | number;
       }>;
       meta: { page: number; limit: number; total: number; totalPages: number };
     }>(`/customers${q ? `?${q}` : ""}`, { token: token() });
@@ -304,14 +306,149 @@ export const customersApi = {
   },
 
   get(id: string) {
-    return apiRequest<Record<string, unknown>>(`/customers/${id}`, {
+    return apiRequest<{
+      id: string;
+      fullName: string;
+      phone: string;
+      email?: string | null;
+      notes?: string | null;
+      eventDate?: string | null;
+      loyaltyPoints?: number;
+      storeCreditBalance?: string | number;
+      summary?: {
+        orderCount: number;
+        openDueCount: number;
+        openDueTotal: number;
+        loyaltyPoints: number;
+        storeCreditBalance: number;
+        noteCount: number;
+      };
+      partyMemberships?: Array<{
+        roleLabel?: string | null;
+        party: { id: string; name: string; eventDate?: string | null };
+      }>;
+    }>(`/customers/${id}`, {
+      token: token(),
+    });
+  },
+
+  listOrders(customerId: string, limit = 50) {
+    return apiRequest<{
+      items: Array<{
+        id: string;
+        orderNumber: string;
+        kind: string;
+        status: string;
+        subtotal: number;
+        taxTotal: number;
+        discountTotal: number;
+        balanceDue: number;
+        grandTotal: number;
+        currencyCode: string;
+        createdAt: string;
+      }>;
+    }>(`/customers/${customerId}/orders?limit=${limit}`, { token: token() });
+  },
+
+  listDues(customerId: string, limit = 50) {
+    return apiRequest<{
+      totalDue: number;
+      items: Array<{
+        id: string;
+        orderNumber: string;
+        kind: string;
+        status: string;
+        balanceDue: number;
+        currencyCode: string;
+        createdAt: string;
+      }>;
+    }>(`/customers/${customerId}/dues?limit=${limit}`, { token: token() });
+  },
+
+  listLoyaltyLedger(customerId: string, limit = 50) {
+    return apiRequest<{
+      items: Array<{
+        id: string;
+        kind: string;
+        points: number;
+        balanceAfter: number;
+        note?: string | null;
+        orderId?: string | null;
+        createdAt: string;
+      }>;
+    }>(`/customers/${customerId}/loyalty-ledger?limit=${limit}`, {
+      token: token(),
+    });
+  },
+
+  listStoreCredit(customerId: string, limit = 50) {
+    return apiRequest<{
+      items: Array<{
+        id: string;
+        kind: string;
+        amount: number;
+        balanceAfter: number;
+        note?: string | null;
+        orderId?: string | null;
+        createdAt: string;
+        actorName?: string | null;
+      }>;
+    }>(`/customers/${customerId}/store-credit?limit=${limit}`, {
+      token: token(),
+    });
+  },
+
+  adjustStoreCredit(
+    customerId: string,
+    body: { amount: number; note?: string },
+  ) {
+    return apiRequest<{
+      customerId: string;
+      storeCreditBalance: number;
+      amount: number;
+      kind: string;
+    }>(`/customers/${customerId}/store-credit`, {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+
+  listNotes(customerId: string, limit = 50) {
+    return apiRequest<{
+      items: Array<{
+        id: string;
+        body: string;
+        createdAt: string;
+        createdByName?: string | null;
+      }>;
+    }>(`/customers/${customerId}/notes?limit=${limit}`, { token: token() });
+  },
+
+  addNote(customerId: string, body: string) {
+    return apiRequest<{
+      id: string;
+      body: string;
+      createdAt: string;
+      createdByName?: string | null;
+    }>(`/customers/${customerId}/notes`, {
+      method: "POST",
+      body: { body },
       token: token(),
     });
   },
 
   softDelete(id: string) {
-    return apiRequest<null>(`/customers/${id}`, {
+    return apiRequest<{ id: string; deleted: boolean }>(`/customers/${id}`, {
       method: "DELETE",
+      token: token(),
+    });
+  },
+
+  update(id: string, body: Record<string, unknown>) {
+    return apiRequest<Record<string, unknown>>(`/customers/${id}`, {
+      method: "PATCH",
+      body,
       token: token(),
     });
   },
@@ -619,6 +756,7 @@ export const inventoryApi = {
     lines: Array<{ productId: string; qty: number }>;
   }) {
     return apiRequest<{
+      id?: string;
       fromLocationId: string;
       toLocationId: string;
       notes: string | null;
@@ -631,6 +769,29 @@ export const inventoryApi = {
         toQtyOnHand: number;
       }>;
     }>("/stock-transfers", { method: "POST", body, token: token() });
+  },
+
+  listStockTransfers(limit = 100) {
+    return apiRequest<{
+      items: Array<{
+        id: string;
+        createdAt: string;
+        notes?: string | null;
+        fromLocationId?: string | null;
+        toLocationId?: string | null;
+        fromLocationName: string;
+        toLocationName: string;
+        lineCount: number;
+        totalQty: number;
+        lines: Array<{
+          productId?: string | null;
+          productName: string;
+          sku: string;
+          qty: number;
+        }>;
+        actorName: string;
+      }>;
+    }>(`/stock-transfers?limit=${limit}`, { token: token() });
   },
 
   listLevels(params?: {
@@ -1664,6 +1825,7 @@ export const posApi = {
     locationId?: string;
     q?: string;
     limit?: number;
+    page?: number;
     lowStock?: boolean;
     maxQty?: number;
   }) {
@@ -1671,6 +1833,7 @@ export const posApi = {
     if (params?.locationId) qs.set("locationId", params.locationId);
     if (params?.q) qs.set("q", params.q);
     if (params?.limit) qs.set("limit", String(params.limit));
+    if (params?.page) qs.set("page", String(params.page));
     if (params?.lowStock) qs.set("lowStock", "1");
     if (params?.maxQty) qs.set("maxQty", String(params.maxQty));
     const q = qs.toString();
@@ -1678,6 +1841,10 @@ export const posApi = {
       locationId: string;
       lowStock?: boolean;
       maxQty?: number;
+      page?: number;
+      limit?: number;
+      total?: number;
+      totalPages?: number;
       items: Array<{
         id: string;
         sku: string;
@@ -1692,6 +1859,8 @@ export const posApi = {
         image?: string | null;
         photoUrl?: string | null;
         images?: string[];
+        taxCode?: string | null;
+        taxRatePercent?: number | null;
         category?: { id: string; name: string } | null;
       }>;
     }>(`/pos/sale/catalog${q ? `?${q}` : ""}`, { token: token() });
@@ -1710,6 +1879,9 @@ export const posApi = {
       barcode?: string | null;
       image?: string | null;
       photoUrl?: string | null;
+      images?: string[];
+      taxCode?: string | null;
+      taxRatePercent?: number | null;
       category?: { id: string; name: string } | null;
     }>(`/pos/sale/lookup?${qs}`, { token: token() });
   },
@@ -2958,6 +3130,28 @@ export const loyaltyApi = {
       token: token(),
     });
   },
+  listLedger(params?: { kind?: "earn" | "redeem" | "adjust"; limit?: number }) {
+    const qs = new URLSearchParams();
+    if (params?.kind) qs.set("kind", params.kind);
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const q = qs.toString();
+    return apiRequest<{
+      items: Array<{
+        id: string;
+        kind: string;
+        points: number;
+        balanceAfter: number;
+        orderId?: string | null;
+        note?: string | null;
+        createdAt: string;
+        customer: {
+          id: string;
+          fullName: string;
+          phone?: string | null;
+        };
+      }>;
+    }>(`/loyalty/ledger${q ? `?${q}` : ""}`, { token: token() });
+  },
   listGiftCards() {
     return apiRequest<
       Array<{
@@ -3202,6 +3396,31 @@ export const usersApi = {
   },
 };
 
+export type AttendanceRow = {
+  id: string;
+  userId: string;
+  fullName: string;
+  email: string;
+  workDate?: string | null;
+  shiftId?: string | null;
+  shift?: {
+    id: string;
+    name: string;
+    startTime: string;
+    endTime: string;
+  } | null;
+  clockInAt?: string | null;
+  clockOutAt?: string | null;
+  clockIn?: string | null;
+  clockOut?: string | null;
+  breakMinutes: number;
+  status: string;
+  method: string;
+  notes?: string | null;
+  minutes: number | null;
+  workingHours?: string | null;
+};
+
 export const iamApi = {
   listPermissions() {
     return apiRequest<
@@ -3260,28 +3479,77 @@ export const iamApi = {
   openAttendance() {
     return apiRequest<{
       id: string;
-      clockInAt: string;
+      clockInAt: string | null;
       clockOutAt?: string | null;
+      workDate?: string | null;
+      status?: string;
     } | null>("/iam/attendance/open", { token: token() });
   },
-  listAttendance(params?: { from?: string; to?: string; userId?: string }) {
+  listAttendance(params?: {
+    from?: string;
+    to?: string;
+    workDate?: string;
+    userId?: string;
+    shiftId?: string;
+    status?: string;
+  }) {
     const qs = new URLSearchParams();
     if (params?.from) qs.set("from", params.from);
     if (params?.to) qs.set("to", params.to);
+    if (params?.workDate) qs.set("workDate", params.workDate);
     if (params?.userId) qs.set("userId", params.userId);
+    if (params?.shiftId) qs.set("shiftId", params.shiftId);
+    if (params?.status) qs.set("status", params.status);
     const q = qs.toString();
-    return apiRequest<
-      Array<{
-        id: string;
-        userId: string;
-        fullName: string;
-        email: string;
-        clockInAt: string;
-        clockOutAt?: string | null;
-        method: string;
-        minutes: number | null;
-      }>
-    >(`/iam/attendance${q ? `?${q}` : ""}`, { token: token() });
+    return apiRequest<AttendanceRow[]>(`/iam/attendance${q ? `?${q}` : ""}`, {
+      token: token(),
+    });
+  },
+  getAttendance(id: string) {
+    return apiRequest<AttendanceRow>(`/iam/attendance/${id}`, {
+      token: token(),
+    });
+  },
+  createAttendance(body: {
+    userId: string;
+    workDate: string;
+    shiftId?: string;
+    clockIn?: string;
+    clockOut?: string;
+    breakMinutes?: number;
+    status: string;
+    notes?: string;
+  }) {
+    return apiRequest<AttendanceRow>("/iam/attendance", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  updateAttendance(
+    id: string,
+    body: {
+      userId?: string;
+      workDate?: string;
+      shiftId?: string | null;
+      clockIn?: string | null;
+      clockOut?: string | null;
+      breakMinutes?: number;
+      status?: string;
+      notes?: string | null;
+    },
+  ) {
+    return apiRequest<AttendanceRow>(`/iam/attendance/${id}`, {
+      method: "PATCH",
+      body,
+      token: token(),
+    });
+  },
+  deleteAttendance(id: string) {
+    return apiRequest<{ ok: boolean }>(`/iam/attendance/${id}`, {
+      method: "DELETE",
+      token: token(),
+    });
   },
   listShifts() {
     return apiRequest<
@@ -3362,13 +3630,21 @@ export const iamApi = {
       token: token(),
     });
   },
-  webauthnRegisterOptions() {
+  webauthnRegisterOptions(clientOrigin?: string) {
     return apiRequest<Record<string, unknown>>(
       "/iam/webauthn/register/options",
-      { method: "POST", body: {}, token: token() },
+      {
+        method: "POST",
+        body: clientOrigin ? { clientOrigin } : {},
+        token: token(),
+      },
     );
   },
-  webauthnRegisterVerify(body: { response: unknown; label?: string }) {
+  webauthnRegisterVerify(body: {
+    response: unknown;
+    label?: string;
+    clientOrigin?: string;
+  }) {
     return apiRequest("/iam/webauthn/register/verify", {
       method: "POST",
       body,
@@ -3391,16 +3667,23 @@ export const iamApi = {
       token: token(),
     });
   },
-  webauthnLoginOptions(email: string) {
+  webauthnLoginOptions(email: string, clientOrigin?: string) {
     return apiRequest<Record<string, unknown>>(
       "/iam/webauthn/login/options",
-      { method: "POST", body: { email } },
+      {
+        method: "POST",
+        body: { email, ...(clientOrigin ? { clientOrigin } : {}) },
+      },
     );
   },
-  webauthnLoginVerify(email: string, response: unknown) {
+  webauthnLoginVerify(
+    email: string,
+    response: unknown,
+    clientOrigin?: string,
+  ) {
     return apiRequest("/iam/webauthn/login/verify", {
       method: "POST",
-      body: { email, response },
+      body: { email, response, ...(clientOrigin ? { clientOrigin } : {}) },
     });
   },
 };
@@ -3544,6 +3827,175 @@ export const suppliersApi = {
       token: token(),
     });
   },
+  listGrns() {
+    return apiRequest<
+      Array<{
+        id: string;
+        grnNumber: string;
+        supplierId: string;
+        purchaseOrderId: string;
+        notes?: string | null;
+        receivedAt: string;
+        supplier?: { id: string; name: string };
+        purchaseOrder?: {
+          id: string;
+          poNumber: string | null;
+          status?: string;
+        };
+        lines?: Array<{
+          id: string;
+          stockLevelId: string;
+          qty: number;
+          unitCost: number | null;
+          stockLevel?: {
+            id: string;
+            sku: string;
+            product?: { name: string } | null;
+          };
+        }>;
+      }>
+    >("/goods-receipts", { token: token() });
+  },
+  invoiceFromGrn(id: string) {
+    return apiRequest<{
+      id: string;
+      invoiceNumber: string;
+      status: string;
+      grandTotal: number;
+      balanceDue: number;
+    }>(`/goods-receipts/${id}/invoice`, {
+      method: "POST",
+      token: token(),
+    });
+  },
+  listInvoices(status?: string) {
+    const qs = status ? `?status=${encodeURIComponent(status)}` : "";
+    return apiRequest<
+      Array<{
+        id: string;
+        supplierId: string;
+        purchaseOrderId?: string | null;
+        goodsReceiptId?: string | null;
+        invoiceNumber: string;
+        invoiceDate: string;
+        dueDate?: string | null;
+        subtotal: number;
+        taxTotal: number;
+        grandTotal: number;
+        amountPaid: number;
+        balanceDue: number;
+        status: string;
+        notes?: string | null;
+        supplier?: { id: string; name: string };
+        purchaseOrder?: { id: string; poNumber: string | null };
+        goodsReceipt?: { id: string; grnNumber: string };
+      }>
+    >(`/supplier-invoices${qs}`, { token: token() });
+  },
+  listOutstanding() {
+    return apiRequest<
+      Array<{
+        id: string;
+        supplierId: string;
+        invoiceNumber: string;
+        invoiceDate: string;
+        dueDate?: string | null;
+        grandTotal: number;
+        amountPaid: number;
+        balanceDue: number;
+        status: string;
+        supplier?: { id: string; name: string };
+      }>
+    >("/supplier-invoices/outstanding", { token: token() });
+  },
+  createInvoice(body: {
+    supplierId: string;
+    purchaseOrderId?: string;
+    goodsReceiptId?: string;
+    invoiceNumber?: string;
+    invoiceDate?: string;
+    dueDate?: string;
+    subtotal: number;
+    taxTotal?: number;
+    notes?: string;
+    isCredit?: boolean;
+  }) {
+    return apiRequest("/supplier-invoices", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  payInvoice(
+    id: string,
+    body: {
+      amount: number;
+      method?: string;
+      reference?: string;
+      notes?: string;
+    },
+  ) {
+    return apiRequest<{
+      invoice: { id: string; status: string; balanceDue: number };
+      payment: { id: string; amount: number };
+    }>(`/supplier-invoices/${id}/pay`, {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  listPayments(supplierId?: string) {
+    const qs = supplierId
+      ? `?supplierId=${encodeURIComponent(supplierId)}`
+      : "";
+    return apiRequest<
+      Array<{
+        id: string;
+        supplierId: string;
+        supplierInvoiceId?: string | null;
+        amount: number;
+        method: string;
+        reference?: string | null;
+        notes?: string | null;
+        paidAt: string;
+        supplier?: { id: string; name: string };
+        invoice?: {
+          id: string;
+          invoiceNumber: string;
+          status: string;
+        };
+      }>
+    >(`/supplier-payments${qs}`, { token: token() });
+  },
+  createPayment(body: {
+    supplierId: string;
+    supplierInvoiceId?: string;
+    amount: number;
+    method?: string;
+    reference?: string;
+    notes?: string;
+  }) {
+    return apiRequest("/supplier-payments", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  supplierLedger(supplierId: string) {
+    return apiRequest<{
+      supplierId: string;
+      balance: number;
+      items: Array<{
+        at: string;
+        kind: "invoice" | "credit" | "payment";
+        ref: string;
+        debit: number;
+        credit: number;
+        balance: number;
+        note?: string | null;
+      }>;
+    }>(`/suppliers/${supplierId}/ledger`, { token: token() });
+  },
 };
 
 export const syncApi = {
@@ -3684,6 +4136,7 @@ export type CatalogProductListItem = {
   skuCode: string;
   sku?: string;
   barcode?: string | null;
+  barcodeType?: string | null;
   kind: CatalogProductKind;
   status: CatalogProductStatus;
   photoUrl?: string | null;
@@ -3814,13 +4267,14 @@ export const catalogApi = {
     );
   },
   remove(id: string) {
-    return apiRequest<{ ok: boolean; deleted?: boolean }>(
-      `/catalog/products/${id}`,
-      {
-        method: "DELETE",
-        token: token(),
-      },
-    );
+    return apiRequest<{
+      ok: boolean;
+      deleted?: boolean;
+      softDeleted?: boolean;
+    }>(`/catalog/products/${id}`, {
+      method: "DELETE",
+      token: token(),
+    });
   },
   generateSku(body?: { name?: string; kind?: string; prefix?: string }) {
     return apiRequest<{ sku: string; skuCode: string }>("/catalog/sku/generate", {
@@ -3828,6 +4282,26 @@ export const catalogApi = {
       body: body ?? {},
       token: token(),
     });
+  },
+  generateBarcode() {
+    return apiRequest<{ barcode: string; barcodeType: string }>(
+      "/catalog/barcode/generate",
+      {
+        method: "POST",
+        body: {},
+        token: token(),
+      },
+    );
+  },
+  checkBarcode(code: string, excludeId?: string) {
+    const qs = new URLSearchParams({ code });
+    if (excludeId) qs.set("excludeId", excludeId);
+    return apiRequest<{
+      available: boolean;
+      barcode: string;
+      barcodeType: string;
+      reason?: string | null;
+    }>(`/catalog/barcode/check?${qs}`, { token: token() });
   },
   listBrands(q?: string) {
     return apiRequest<
@@ -3855,6 +4329,16 @@ export const catalogApi = {
     return apiRequest(`/catalog/brands/${id}`, {
       method: "PATCH",
       body,
+      token: token(),
+    });
+  },
+  removeBrand(id: string) {
+    return apiRequest<{
+      ok: boolean;
+      deleted?: boolean;
+      softDeleted?: boolean;
+    }>(`/catalog/brands/${id}`, {
+      method: "DELETE",
       token: token(),
     });
   },
@@ -3897,6 +4381,16 @@ export const catalogApi = {
     return apiRequest(`/catalog/categories/${id}`, {
       method: "PATCH",
       body,
+      token: token(),
+    });
+  },
+  removeCategory(id: string) {
+    return apiRequest<{
+      ok: boolean;
+      deleted?: boolean;
+      softDeleted?: boolean;
+    }>(`/catalog/categories/${id}`, {
+      method: "DELETE",
       token: token(),
     });
   },

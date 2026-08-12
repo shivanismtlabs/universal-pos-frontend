@@ -2,7 +2,7 @@
 
 /**
  * Shared WebAuthn / passkey helpers for live-app biometrics
- * (Windows Hello, Touch ID, Face ID, Android biometrics).
+ * (Windows Hello, Touch ID, Face ID, Android biometrics / fingerprint).
  */
 import {
   browserSupportsWebAuthn,
@@ -16,10 +16,16 @@ import { iamApi } from "@/lib/api";
 export function canUseBiometrics(): boolean {
   if (typeof window === "undefined") return false;
   try {
+    // Secure context required (HTTPS or localhost / 127.0.0.1)
+    if (!window.isSecureContext) return false;
     return browserSupportsWebAuthn();
   } catch {
     return false;
   }
+}
+
+function clientOrigin(): string {
+  return typeof window !== "undefined" ? window.location.origin : "";
 }
 
 export async function registerDeviceBiometric(label = "This device") {
@@ -28,13 +34,14 @@ export async function registerDeviceBiometric(label = "This device") {
       "Biometrics require HTTPS (or localhost) and a supported browser",
     );
   }
-  const options = await iamApi.webauthnRegisterOptions();
+  const options = await iamApi.webauthnRegisterOptions(clientOrigin());
   const attestation = await startRegistration({
     optionsJSON: options as unknown as PublicKeyCredentialCreationOptionsJSON,
   });
   return iamApi.webauthnRegisterVerify({
     response: attestation,
     label,
+    clientOrigin: clientOrigin(),
   });
 }
 
@@ -46,11 +53,18 @@ export async function biometricLogin(email: string) {
   }
   const normalized = email.trim().toLowerCase();
   if (!normalized) throw new Error("Enter your email first");
-  const options = await iamApi.webauthnLoginOptions(normalized);
+  const options = await iamApi.webauthnLoginOptions(
+    normalized,
+    clientOrigin(),
+  );
   const assertion = await startAuthentication({
     optionsJSON: options as unknown as PublicKeyCredentialRequestOptionsJSON,
   });
-  return iamApi.webauthnLoginVerify(normalized, assertion);
+  return iamApi.webauthnLoginVerify(
+    normalized,
+    assertion,
+    clientOrigin(),
+  );
 }
 
 export const BIOMETRIC_LAST_EMAIL_KEY = "upos-bio-email";

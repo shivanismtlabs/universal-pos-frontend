@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Copy } from "lucide-react";
 import { toast } from "sonner";
 import { loyaltyApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
@@ -11,9 +12,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { PageHeader, EmptyState, PageSkeleton } from "@/components/page-header";
-import { cn } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 
-type Tab = "coupons" | "gift" | "points";
+async function copyText(value: string) {
+  try {
+    await navigator.clipboard.writeText(value);
+    toast.success("Code copied");
+  } catch {
+    toast.error("Could not copy");
+  }
+}
+
+type Tab = "coupons" | "gift" | "points" | "redemptions";
 
 export default function LoyaltyPage() {
   const { money } = useBootstrap();
@@ -48,6 +58,11 @@ export default function LoyaltyPage() {
     queryKey: ["loyalty-settings"],
     queryFn: () => loyaltyApi.getSettings(),
     enabled: tab === "points",
+  });
+  const ledger = useQuery({
+    queryKey: ["loyalty-ledger-redeem"],
+    queryFn: () => loyaltyApi.listLedger({ kind: "redeem", limit: 100 }),
+    enabled: tab === "redemptions",
   });
 
   const create = useMutation({
@@ -88,7 +103,18 @@ export default function LoyaltyPage() {
       return row as { code?: string };
     },
     onSuccess: (row) => {
-      toast.success(`Gift card ${row?.code ?? ""} issued`);
+      const code = row?.code?.trim();
+      toast.success(
+        code ? `Gift card ${code} issued` : "Gift card issued",
+        code
+          ? {
+              action: {
+                label: "Copy",
+                onClick: () => void copyText(code),
+              },
+            }
+          : undefined,
+      );
       setGcCode("");
       void qc.invalidateQueries({ queryKey: ["loyalty-gift-cards"] });
     },
@@ -117,7 +143,7 @@ export default function LoyaltyPage() {
     <div className="mx-auto max-w-3xl space-y-6">
       <PageHeader
         title="Loyalty"
-        subtitle="Coupons, gift cards, and points — usable at the sale counter."
+        subtitle="Coupons, gift cards, points, and redemption history — usable at the sale counter."
       />
 
       <div className="flex gap-1 rounded-xl bg-[#eef2f8] p-1">
@@ -126,6 +152,7 @@ export default function LoyaltyPage() {
             ["coupons", "Coupons"],
             ["gift", "Gift cards"],
             ["points", "Points"],
+            ["redemptions", "Redemptions"],
           ] as const
         ).map(([k, label]) => (
           <button
@@ -321,9 +348,21 @@ export default function LoyaltyPage() {
                     className="flex flex-wrap items-center justify-between gap-2 py-3"
                   >
                     <div>
-                      <p className="font-mono font-semibold text-[#0b1f33]">
-                        {c.code}
-                      </p>
+                      <div className="flex items-center gap-1.5">
+                        <p className="font-mono font-semibold text-[#0b1f33]">
+                          {c.code}
+                        </p>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 w-7 px-0 text-[#5a6b7d]"
+                          title="Copy code"
+                          onClick={() => void copyText(c.code)}
+                        >
+                          <Copy className="size-3.5" />
+                        </Button>
+                      </div>
                       <p className="text-[0.75rem] text-[#5a6b7d]">
                         Balance {money(c.balance)} · {c.status}
                         {c.customer ? ` · ${c.customer.fullName}` : ""}
@@ -416,6 +455,72 @@ export default function LoyaltyPage() {
               {settings.data.enabled ? "on" : "off"}
             </p>
           ) : null}
+        </section>
+      ) : null}
+
+      {tab === "redemptions" ? (
+        <section className="overflow-hidden rounded-xl border border-[#d9e0ea] bg-white">
+          <div className="border-b border-[#eef2f8] px-4 py-3">
+            <h2 className="text-sm font-semibold text-[#0b1f33]">
+              Points redemptions
+            </h2>
+            <p className="mt-0.5 text-xs text-[#5a6b7d]">
+              History from the counter when staff redeem customer points.
+            </p>
+          </div>
+          {ledger.isLoading ? (
+            <p className="px-4 py-8 text-center text-sm text-[#5a6b7d]">
+              Loading…
+            </p>
+          ) : !ledger.data?.items?.length ? (
+            <EmptyState
+              title="No redemptions yet"
+              detail="Select a customer at Counter, enter points, Quote, then Charge."
+            />
+          ) : (
+            <div className="max-h-[min(60dvh,32rem)] overflow-auto">
+              <table className="w-full min-w-[640px] border-collapse text-left text-[0.8125rem]">
+                <thead className="sticky top-0 z-[1] bg-[#f8fafc] text-[0.65rem] font-semibold tracking-[0.06em] text-[#5a6b7d] uppercase">
+                  <tr className="border-b border-[#e4e9f0]">
+                    <th className="px-3 py-2.5">When</th>
+                    <th className="px-3 py-2.5">Customer</th>
+                    <th className="px-3 py-2.5 text-right">Points</th>
+                    <th className="px-3 py-2.5 text-right">Balance after</th>
+                    <th className="px-3 py-2.5">Note</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ledger.data.items.map((row) => (
+                    <tr
+                      key={row.id}
+                      className="border-b border-[#eef2f8] hover:bg-[#f8fafc]"
+                    >
+                      <td className="px-3 py-2 whitespace-nowrap text-[#5a6b7d]">
+                        {formatDate(row.createdAt)}
+                      </td>
+                      <td className="px-3 py-2 font-medium text-[#0b1f33]">
+                        {row.customer.fullName}
+                        {row.customer.phone ? (
+                          <span className="mt-0.5 block text-[0.7rem] font-normal text-[#8b9bb0]">
+                            {row.customer.phone}
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums font-semibold text-[#b45309]">
+                        {row.points}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums text-[#5a6b7d]">
+                        {row.balanceAfter}
+                      </td>
+                      <td className="px-3 py-2 text-[#5a6b7d]">
+                        {row.note ?? "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
       ) : null}
     </div>

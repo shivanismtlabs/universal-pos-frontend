@@ -57,6 +57,18 @@
   --color-background: #f4f6fa;
   --color-foreground: #0b1f33;
   --font-sans: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+  /* Bare `border` / `divide-*` must not inherit near-black text color */
+  --default-border-color: #d9e0ea;
+  --color-border: #d9e0ea;
+}
+
+@layer base {
+  *,
+  ::before,
+  ::after,
+  ::backdrop {
+    border-color: #d9e0ea;
+  }
 }
 
 html {
@@ -86,10 +98,26 @@ body {
   background: rgba(26, 86, 219, 0.16);
 }
 
-/* Visible keyboard focus — every interactive element */
+/* Visible keyboard focus — blue ring, never browser black outline */
+:focus {
+  outline: none;
+}
 :focus-visible {
   outline: 2px solid #1a56db;
   outline-offset: 2px;
+}
+
+/* Native controls that skip our Input/Select components */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+select,
+textarea {
+  border-color: #d9e0ea;
+}
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus,
+select:focus,
+textarea:focus {
+  border-color: #1a56db;
+  outline: none;
 }
 
 .page-title {

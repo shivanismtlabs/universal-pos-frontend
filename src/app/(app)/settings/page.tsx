@@ -94,9 +94,15 @@ export default function SettingsPage() {
       gstin: t.gstin ?? t.taxId ?? "",
       taxMode: t.taxMode ?? "in_gst",
       ratePercent: String(
-        typeof settingsTax?.ratePercent === "number"
-          ? settingsTax.ratePercent
-          : 5,
+        (() => {
+          const raw = settingsTax?.ratePercent;
+          if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+          if (typeof raw === "string" && raw.trim()) {
+            const n = Number(raw.replace(/%/g, "").trim());
+            if (Number.isFinite(n)) return n;
+          }
+          return t.taxMode === "vat" ? 20 : 5;
+        })(),
       ),
       inclusive: settingsTax?.inclusive === true,
     });
@@ -427,17 +433,21 @@ export default function SettingsPage() {
               disabled={tax.taxMode === "none"}
             />
           </div>
-          <label className="flex items-center gap-2 text-sm text-[#0b1f33]">
-            <input
-              type="checkbox"
-              checked={tax.inclusive}
-              onChange={(e) =>
-                setTax((t) => ({ ...t, inclusive: e.target.checked }))
-              }
-              disabled={tax.taxMode === "none"}
-            />
-            Catalog prices include tax
-          </label>
+              <label className="flex items-center gap-2 text-sm text-[#0b1f33]">
+                <input
+                  type="checkbox"
+                  checked={tax.inclusive}
+                  onChange={(e) =>
+                    setTax((t) => ({ ...t, inclusive: e.target.checked }))
+                  }
+                  disabled={tax.taxMode === "none"}
+                />
+                Catalog prices include tax
+              </label>
+              <p className="text-[0.75rem] text-[#8b9bb0]">
+                Off = tax is added on top of ticket due (recommended). On =
+                prices already include tax, so Due matches Subtotal.
+              </p>
           <Button
             disabled={saveTax.isPending}
             onClick={() => saveTax.mutate()}
@@ -543,8 +553,10 @@ export default function SettingsPage() {
             </p>
             <p className="mt-1 text-xs text-[#6b7280]">
               Register this device&apos;s fingerprint / face / Windows Hello to
-              sign in without typing a password. Works only on supporting
-              browsers over HTTPS (or localhost).
+              sign in without typing a password. Use the same browser address
+              every time (prefer{" "}
+              <span className="font-mono">http://localhost:3000</span> — not
+              127.0.0.1). Works on HTTPS or localhost.
             </p>
             <BiometricSetup />
           </div>

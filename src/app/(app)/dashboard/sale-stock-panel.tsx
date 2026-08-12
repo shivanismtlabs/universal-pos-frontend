@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { posApi } from "@/lib/api";
+import { catalogApi, posApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { canWriteCatalog } from "@/lib/roles";
 import { useAuthStore } from "@/lib/auth-store";
@@ -62,7 +62,7 @@ const EMPTY = {
   itemType: "goods" as "goods" | "service",
   itemStructure: "single" as "single" | "variants",
   taxPreference: "taxable" as "taxable" | "non_taxable",
-  taxRatePercent: "",
+  taxRatePercent: "5",
   openingStockValue: "",
   returnable: true,
   batchTracking: false,
@@ -879,15 +879,39 @@ export function SaleStockPanel({
                   </div>
                   <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
                     <Label className="sm:pt-2.5">Barcode</Label>
-                    <Input
-                      className="font-mono"
-                      placeholder="Scan or type barcode"
-                      value={form.barcode}
-                      onChange={(e) =>
-                        setForm((f) => ({ ...f, barcode: e.target.value }))
-                      }
-                      maxLength={32}
-                    />
+                    <div className="flex gap-1">
+                      <Input
+                        className="font-mono"
+                        placeholder="Auto if empty · or Generate"
+                        value={form.barcode}
+                        onChange={(e) =>
+                          setForm((f) => ({ ...f, barcode: e.target.value }))
+                        }
+                        maxLength={32}
+                      />
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="shrink-0"
+                        onClick={() => {
+                          void catalogApi
+                            .generateBarcode()
+                            .then((r) => {
+                              setForm((f) => ({ ...f, barcode: r.barcode }));
+                              toast.success("Barcode generated");
+                            })
+                            .catch((e) =>
+                              toast.error(
+                                e instanceof ApiError
+                                  ? e.message
+                                  : "Barcode failed",
+                              ),
+                            );
+                        }}
+                      >
+                        Generate
+                      </Button>
+                    </div>
                   </div>
                   <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
                     <Label className="sm:pt-2.5">UPC</Label>

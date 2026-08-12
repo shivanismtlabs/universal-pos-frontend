@@ -288,8 +288,8 @@ export default function LoginForm() {
             onClick={() => void onBiometric()}
           >
             {bioBusy
-              ? "Waiting for device…"
-              : "Sign in with biometrics / passkey"}
+              ? "Waiting for fingerprint / Windows Hello…"
+              : "Sign in with fingerprint / biometrics"}
           </Button>
         ) : (
           <p className="text-center text-[0.72rem] text-[#8b9bb0]">

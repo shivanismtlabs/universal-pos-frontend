@@ -63,6 +63,10 @@ type Props = {
   autoFocus?: boolean;
   /** When true, USB/keyboard wedge scanners auto-submit after a short pause */
   autoSubmitWedge?: boolean;
+  /** POS receiving uses Add; catalog forms usually hide it (default true). */
+  showSubmitButton?: boolean;
+  /** USB scanner hint under the field (default true). */
+  showHint?: boolean;
   inputRef?: Ref<HTMLInputElement>;
 };
 
@@ -80,6 +84,8 @@ export function BarcodeScanInput({
   inputClassName,
   autoFocus,
   autoSubmitWedge = true,
+  showSubmitButton = true,
+  showHint = true,
   inputRef,
 }: Props) {
   const id = useId();
@@ -180,24 +186,27 @@ export function BarcodeScanInput({
             placeholder={placeholder}
             className={cn(
               "h-12 pl-10 font-mono text-[0.95rem]",
+              !showSubmitButton && "h-10",
               inputClassName,
             )}
             onChange={(e) => handleChange(e.target.value)}
             onKeyDown={handleKeyDown}
           />
         </div>
-        <Button
-          type="submit"
-          className="h-12 min-w-[5.25rem] px-4"
-          disabled={disabled || !value.trim()}
-        >
-          Add
-        </Button>
+        {showSubmitButton ? (
+          <Button
+            type="submit"
+            className="h-12 min-w-[5.25rem] px-4"
+            disabled={disabled || !value.trim()}
+          >
+            Add
+          </Button>
+        ) : null}
         {cameraOk ? (
           <Button
             type="button"
             variant="secondary"
-            className="h-12 px-3"
+            className={cn("px-3", showSubmitButton ? "h-12" : "h-10")}
             disabled={disabled}
             title="Camera barcode scan"
             onClick={() => setCameraOpen(true)}
@@ -215,10 +224,12 @@ export function BarcodeScanInput({
           </Button>
         ) : null}
       </form>
-      <p className="text-[0.7rem] text-[#8b9bb0]">
-        USB scanner: keep focus here · Enter submits
-        {cameraOk ? " · Camera available" : ""}
-      </p>
+      {showHint ? (
+        <p className="text-[0.7rem] text-[#8b9bb0]">
+          USB scanner: keep focus here · Enter submits
+          {cameraOk ? " · Camera available" : ""}
+        </p>
+      ) : null}
 
       {cameraOpen ? (
         <CameraBarcodeModal

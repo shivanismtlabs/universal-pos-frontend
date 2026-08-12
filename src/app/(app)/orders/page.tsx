@@ -114,7 +114,7 @@ export default function OrdersPage() {
                 <tr key={o.id} className="hover:bg-[#f7f9fc]">
                   <td className="px-4 py-3 font-medium">
                     <Link
-                      href={`/orders/${o.id}`}
+                      href={`/orders/view?id=${o.id}`}
                       className="text-[var(--ink)] hover:underline"
                     >
                       {o.orderNumber}

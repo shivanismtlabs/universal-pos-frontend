@@ -1090,7 +1090,7 @@ export default function PosWorkstation() {
                     </p>
                   </div>
                   <Link
-                    href={`/orders/${data.id}`}
+                    href={`/orders/view?id=${data.id}`}
                     className="pt-1 text-xs font-semibold text-[#1a56db] hover:underline"
                   >
                     Full details

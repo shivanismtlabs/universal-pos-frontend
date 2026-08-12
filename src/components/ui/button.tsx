@@ -23,8 +23,8 @@ const buttonVariants = cva(
           "active:bg-[#1341a8]",
         ].join(" "),
         secondary: [
-          "border border-[#d9e0ea] bg-white text-[#0b1f33]",
-          "hover:border-[#c5d0e0] hover:bg-[#f8fafc]",
+          "border border-[#e4e9f0] bg-white text-[#0b1f33]",
+          "hover:border-[#d5dde8] hover:bg-[#f8fafc]",
         ].join(" "),
         soft: [
           "bg-[#e8eefb] text-[#1341a8]",
@@ -32,7 +32,7 @@ const buttonVariants = cva(
         ].join(" "),
         ghost: "text-[#5a6b7d] hover:bg-[#eef3fb] hover:text-[#0b1f33]",
         danger: [
-          "border border-[#efc4c4] bg-white text-[#c81e1e]",
+          "border border-[#f0d4d4] bg-white text-[#c81e1e]",
           "hover:bg-[#fff6f6]",
         ].join(" "),
       },

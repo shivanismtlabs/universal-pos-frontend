@@ -10,7 +10,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import {
-  Archive,
   Copy,
   Plus,
   Search,
@@ -29,6 +28,7 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { ModeBadge } from "@/components/mode-badge";
 import { ProductThumb } from "@/components/product-thumb";
+import { EntityRowActions } from "@/components/entity-row-actions";
 
 const KINDS: { value: CatalogProductKind | ""; label: string }[] = [
   { value: "", label: "All types" },
@@ -161,6 +161,9 @@ function ProductsPanel() {
   const [categoryId, setCategoryId] = useState("");
   const [brandId, setBrandId] = useState("");
 
+  const [page, setPage] = useState(1);
+  const pageSize = 25;
+
   const cats = useQuery({
     queryKey: ["catalog-categories"],
     queryFn: () => catalogApi.listCategories(),
@@ -180,6 +183,10 @@ function ProductsPanel() {
         brandId: brandId || undefined,
       }),
   });
+
+  useEffect(() => {
+    setPage(1);
+  }, [q, kind, status, categoryId, brandId]);
 
   const dup = useMutation({
     mutationFn: (id: string) => catalogApi.duplicate(id),
@@ -202,7 +209,23 @@ function ProductsPanel() {
       toast.error(e instanceof ApiError ? e.message : "Archive failed"),
   });
 
-  const items = list.data?.items ?? [];
+  const remove = useMutation({
+    mutationFn: (id: string) => catalogApi.remove(id),
+    onSuccess: (res) => {
+      void qc.invalidateQueries({ queryKey: ["catalog-products"] });
+      toast.success(
+        res.softDeleted
+          ? "Item is in use — archived instead"
+          : "Item deleted",
+      );
+    },
+    onError: (e: Error) =>
+      toast.error(e instanceof ApiError ? e.message : "Delete failed"),
+  });
+
+  const allItems = list.data?.items ?? [];
+  const totalPages = Math.max(1, Math.ceil(allItems.length / pageSize));
+  const items = allItems.slice((page - 1) * pageSize, page * pageSize);
 
   return (
     <div className="space-y-3">
@@ -310,8 +333,8 @@ function ProductsPanel() {
                     <ProductThumb
                       src={p.photoUrl || p.images?.[0]}
                       label={p.name}
-                      size="sm"
-                      className="rounded border border-[#eef1f4]"
+                      size="md"
+                      className="rounded-lg"
                     />
                   </td>
                   <td className="px-3 py-2">
@@ -343,32 +366,49 @@ function ProductsPanel() {
                     <StatusPill status={p.status} />
                   </td>
                   <td className="px-3 py-2">
-                    <div className="flex justify-end gap-1">
+                    <div className="flex items-center justify-end gap-0.5">
+                      <EntityRowActions
+                        onEdit={() =>
+                          router.push(`/catalog/view?id=${p.id}`)
+                        }
+                        editTitle="Edit"
+                        onSoftDelete={
+                          p.status !== "archived"
+                            ? () => {
+                                if (
+                                  confirm(
+                                    `Archive “${p.name}”? It will leave active sales.`,
+                                  )
+                                ) {
+                                  archive.mutate(p.id);
+                                }
+                              }
+                            : undefined
+                        }
+                        softDeleteTitle="Archive (soft delete)"
+                        onDelete={() => {
+                          if (
+                            confirm(
+                              `Delete “${p.name}”? Unused items are removed; items used in orders are archived.`,
+                            )
+                          ) {
+                            remove.mutate(p.id);
+                          }
+                        }}
+                        deleteTitle="Delete"
+                        disabled={
+                          archive.isPending || remove.isPending || dup.isPending
+                        }
+                      />
                       <Button
                         size="sm"
-                        variant="secondary"
-                        onClick={() => router.push(`/catalog/view?id=${p.id}`)}
-                      >
-                        View
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="secondary"
+                        variant="ghost"
+                        className="h-8 w-8 px-0 text-[#5a6b7d]"
                         title="Duplicate"
                         onClick={() => dup.mutate(p.id)}
                       >
                         <Copy className="size-3.5" />
                       </Button>
-                      {p.status !== "archived" ? (
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          title="Archive"
-                          onClick={() => archive.mutate(p.id)}
-                        >
-                          <Archive className="size-3.5" />
-                        </Button>
-                      ) : null}
                     </div>
                   </td>
                 </tr>
@@ -377,6 +417,32 @@ function ProductsPanel() {
           </tbody>
         </table>
       </div>
+      {allItems.length > pageSize ? (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[0.75rem] text-[#5a6b7d]">
+            Showing {(page - 1) * pageSize + 1}–
+            {Math.min(page * pageSize, allItems.length)} of {allItems.length}
+          </p>
+          <div className="flex gap-1">
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              Prev
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -403,6 +469,8 @@ function StatusPill({ status }: { status: string }) {
 function BrandsPanel() {
   const qc = useQueryClient();
   const [name, setName] = useState("");
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
   const brands = useQuery({
     queryKey: ["catalog-brands"],
     queryFn: () => catalogApi.listBrands(),
@@ -416,6 +484,40 @@ function BrandsPanel() {
     },
     onError: (e: Error) =>
       toast.error(e instanceof ApiError ? e.message : "Failed"),
+  });
+  const update = useMutation({
+    mutationFn: () =>
+      catalogApi.updateBrand(editId!, { name: editName.trim() }),
+    onSuccess: () => {
+      setEditId(null);
+      void qc.invalidateQueries({ queryKey: ["catalog-brands"] });
+      toast.success("Brand updated");
+    },
+    onError: (e: Error) =>
+      toast.error(e instanceof ApiError ? e.message : "Update failed"),
+  });
+  const soft = useMutation({
+    mutationFn: (id: string) =>
+      catalogApi.updateBrand(id, { isActive: false }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["catalog-brands"] });
+      toast.success("Brand deactivated");
+    },
+    onError: (e: Error) =>
+      toast.error(e instanceof ApiError ? e.message : "Failed"),
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => catalogApi.removeBrand(id),
+    onSuccess: (res) => {
+      void qc.invalidateQueries({ queryKey: ["catalog-brands"] });
+      toast.success(
+        res.softDeleted
+          ? "Brand in use — deactivated instead"
+          : "Brand deleted",
+      );
+    },
+    onError: (e: Error) =>
+      toast.error(e instanceof ApiError ? e.message : "Delete failed"),
   });
 
   return (
@@ -439,24 +541,77 @@ function BrandsPanel() {
       </div>
       <div className="overflow-hidden rounded-md border border-[#e4e9f0] bg-white">
         <table className="w-full text-sm">
-          <thead className="border-b bg-[#f7f9fb] text-[0.7rem] text-[#5a6b7d] uppercase">
+          <thead className="border-b border-[#eef1f4] bg-[#f7f9fb] text-[0.7rem] text-[#5a6b7d] uppercase">
             <tr>
               <th className="px-3 py-2 text-left">Brand</th>
               <th className="px-3 py-2 text-left">Status</th>
+              <th className="px-3 py-2 text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
             {(brands.data ?? []).map((b) => (
               <tr key={b.id} className="border-b border-[#f0f3f7]">
-                <td className="px-3 py-2 font-medium">{b.name}</td>
+                <td className="px-3 py-2 font-medium">
+                  {editId === b.id ? (
+                    <div className="flex max-w-xs gap-2">
+                      <Input
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                      />
+                      <Button
+                        size="sm"
+                        disabled={!editName.trim() || update.isPending}
+                        onClick={() => update.mutate()}
+                      >
+                        Save
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setEditId(null)}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  ) : (
+                    b.name
+                  )}
+                </td>
                 <td className="px-3 py-2">
                   {b.isActive ? "Active" : "Inactive"}
+                </td>
+                <td className="px-3 py-2 text-right">
+                  <EntityRowActions
+                    onEdit={() => {
+                      setEditId(b.id);
+                      setEditName(b.name);
+                    }}
+                    onSoftDelete={
+                      b.isActive
+                        ? () => {
+                            if (confirm(`Deactivate brand “${b.name}”?`)) {
+                              soft.mutate(b.id);
+                            }
+                          }
+                        : undefined
+                    }
+                    softDeleteTitle="Deactivate (soft delete)"
+                    onDelete={() => {
+                      if (
+                        confirm(
+                          `Delete brand “${b.name}”? Unused brands are removed; in-use brands are deactivated.`,
+                        )
+                      ) {
+                        remove.mutate(b.id);
+                      }
+                    }}
+                  />
                 </td>
               </tr>
             ))}
             {!brands.data?.length ? (
               <tr>
-                <td colSpan={2} className="px-3 py-6 text-center text-[#5a6b7d]">
+                <td colSpan={3} className="px-3 py-6 text-center text-[#5a6b7d]">
                   No brands yet
                 </td>
               </tr>
@@ -472,6 +627,8 @@ function CategoriesPanel() {
   const qc = useQueryClient();
   const [name, setName] = useState("");
   const [parentId, setParentId] = useState("");
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
   const cats = useQuery({
     queryKey: ["catalog-categories"],
     queryFn: () => catalogApi.listCategories(),
@@ -490,6 +647,40 @@ function CategoriesPanel() {
     },
     onError: (e: Error) =>
       toast.error(e instanceof ApiError ? e.message : "Failed"),
+  });
+  const update = useMutation({
+    mutationFn: () =>
+      catalogApi.updateCategory(editId!, { name: editName.trim() }),
+    onSuccess: () => {
+      setEditId(null);
+      void qc.invalidateQueries({ queryKey: ["catalog-categories"] });
+      toast.success("Category updated");
+    },
+    onError: (e: Error) =>
+      toast.error(e instanceof ApiError ? e.message : "Update failed"),
+  });
+  const soft = useMutation({
+    mutationFn: (id: string) =>
+      catalogApi.updateCategory(id, { isActive: false }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["catalog-categories"] });
+      toast.success("Category deactivated");
+    },
+    onError: (e: Error) =>
+      toast.error(e instanceof ApiError ? e.message : "Failed"),
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => catalogApi.removeCategory(id),
+    onSuccess: (res) => {
+      void qc.invalidateQueries({ queryKey: ["catalog-categories"] });
+      toast.success(
+        res.softDeleted
+          ? "Category in use — deactivated instead"
+          : "Category deleted",
+      );
+    },
+    onError: (e: Error) =>
+      toast.error(e instanceof ApiError ? e.message : "Delete failed"),
   });
 
   const roots = useMemo(
@@ -531,22 +722,82 @@ function CategoriesPanel() {
       </div>
       <div className="overflow-hidden rounded-md border border-[#e4e9f0] bg-white">
         <table className="w-full text-sm">
-          <thead className="border-b bg-[#f7f9fb] text-[0.7rem] text-[#5a6b7d] uppercase">
+          <thead className="border-b border-[#eef1f4] bg-[#f7f9fb] text-[0.7rem] text-[#5a6b7d] uppercase">
             <tr>
               <th className="px-3 py-2 text-left">Category</th>
               <th className="px-3 py-2 text-left">Parent</th>
               <th className="px-3 py-2 text-right">Products</th>
+              <th className="px-3 py-2 text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
             {(cats.data ?? []).map((c) => (
               <tr key={c.id} className="border-b border-[#f0f3f7]">
-                <td className="px-3 py-2 font-medium">{c.name}</td>
+                <td className="px-3 py-2 font-medium">
+                  {editId === c.id ? (
+                    <div className="flex max-w-xs gap-2">
+                      <Input
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                      />
+                      <Button
+                        size="sm"
+                        disabled={!editName.trim() || update.isPending}
+                        onClick={() => update.mutate()}
+                      >
+                        Save
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setEditId(null)}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  ) : (
+                    <>
+                      {c.name}
+                      {!c.isActive ? (
+                        <span className="ml-2 text-[0.7rem] text-[#8a9bb0]">
+                          Inactive
+                        </span>
+                      ) : null}
+                    </>
+                  )}
+                </td>
                 <td className="px-3 py-2 text-[#5a6b7d]">
                   {c.parent?.name ?? "—"}
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums">
                   {c._count?.products ?? 0}
+                </td>
+                <td className="px-3 py-2 text-right">
+                  <EntityRowActions
+                    onEdit={() => {
+                      setEditId(c.id);
+                      setEditName(c.name);
+                    }}
+                    onSoftDelete={
+                      c.isActive
+                        ? () => {
+                            if (confirm(`Deactivate category “${c.name}”?`)) {
+                              soft.mutate(c.id);
+                            }
+                          }
+                        : undefined
+                    }
+                    softDeleteTitle="Deactivate (soft delete)"
+                    onDelete={() => {
+                      if (
+                        confirm(
+                          `Delete category “${c.name}”? Unused categories are removed; ones with products/children are deactivated.`,
+                        )
+                      ) {
+                        remove.mutate(c.id);
+                      }
+                    }}
+                  />
                 </td>
               </tr>
             ))}

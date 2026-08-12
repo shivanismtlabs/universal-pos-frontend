@@ -35,12 +35,12 @@ export function ProductThumb({
 }) {
   const dim =
     size === "sm"
-      ? "h-9 w-9"
+      ? "h-11 w-11"
       : size === "lg"
-        ? "h-14 w-14"
+        ? "h-16 w-16"
         : size === "xl"
-          ? "h-[4.5rem] w-[4.5rem] sm:h-20 sm:w-20"
-          : "h-10 w-10";
+          ? "h-20 w-20 sm:h-24 sm:w-24"
+          : "h-12 w-12";
 
   const resolved = mediaUrl(src);
   const fallback = svgCover(label);

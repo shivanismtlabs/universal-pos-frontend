@@ -6,7 +6,8 @@
  * Purchases/suppliers/transfer live as linked modules.
  */
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -20,6 +21,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import { EntityRowActions } from "@/components/entity-row-actions";
+import { PageSkeleton } from "@/components/page-header";
 
 type Tab =
   | "levels"
@@ -31,11 +34,43 @@ type Tab =
   | "alerts"
   | "warehouses";
 
+const TAB_IDS: Tab[] = [
+  "levels",
+  "alerts",
+  "in",
+  "out",
+  "damage",
+  "audit",
+  "ledger",
+  "warehouses",
+];
+
+function parseTab(raw: string | null): Tab {
+  if (raw && TAB_IDS.includes(raw as Tab)) return raw as Tab;
+  return "levels";
+}
+
 export default function InventoryPage() {
+  return (
+    <Suspense fallback={<PageSkeleton rows={8} />}>
+      <InventoryPageInner />
+    </Suspense>
+  );
+}
+
+function InventoryPageInner() {
   const roles = useAuthStore((s) => s.user?.roles);
   const canWrite = canWriteCatalog(roles);
-  const [tab, setTab] = useState<Tab>("levels");
+  const search = useSearchParams();
+  const router = useRouter();
+  /** URL is source of truth — avoids stale state when opening /inventory?tab=alerts */
+  const tab = parseTab(search.get("tab"));
   const [locationId, setLocationId] = useState("");
+
+  function selectTab(next: Tab) {
+    const qs = next === "levels" ? "" : `?tab=${next}`;
+    router.replace(`/inventory${qs}`, { scroll: false });
+  }
 
   const locations = useQuery({
     queryKey: ["locations"],
@@ -47,6 +82,9 @@ export default function InventoryPage() {
     locations.data?.find((l) => l.isActive !== false)?.id ||
     locations.data?.[0]?.id ||
     "";
+
+  const activeLocName =
+    locations.data?.find((l) => l.id === activeLoc)?.name ?? "—";
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "levels", label: "Stock levels" },
@@ -74,13 +112,13 @@ export default function InventoryPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" asChild>
+          <Button variant="ghost" asChild>
             <Link href="/transfers">Stock transfer</Link>
           </Button>
-          <Button variant="secondary" asChild>
+          <Button variant="ghost" asChild>
             <Link href="/suppliers">Suppliers & POs</Link>
           </Button>
-          <Button variant="secondary" asChild>
+          <Button variant="ghost" asChild>
             <Link href="/adjustments">Adjustments history</Link>
           </Button>
         </div>
@@ -102,6 +140,11 @@ export default function InventoryPage() {
             ))}
           </select>
         </div>
+        {locations.data && locations.data.length > 1 ? (
+          <p className="pb-2 text-[0.75rem] text-[#8b9bb0]">
+            Stock is per location — switch the dropdown if this store looks empty.
+          </p>
+        ) : null}
       </div>
 
       <div className="flex flex-wrap gap-1 border-b border-[#eef1f4]">
@@ -109,7 +152,7 @@ export default function InventoryPage() {
           <button
             key={t.id}
             type="button"
-            onClick={() => setTab(t.id)}
+            onClick={() => selectTab(t.id)}
             className={cn(
               "px-3 py-2 text-sm font-medium border-b-2 -mb-px",
               tab === t.id
@@ -125,7 +168,9 @@ export default function InventoryPage() {
       {tab === "levels" && activeLoc ? (
         <LevelsTab locationId={activeLoc} canWrite={canWrite} />
       ) : null}
-      {tab === "alerts" ? <AlertsTab locationId={activeLoc} /> : null}
+      {tab === "alerts" ? (
+        <AlertsTab locationId={activeLoc} locationName={activeLocName} />
+      ) : null}
       {tab === "in" && activeLoc ? (
         <MoveTab mode="in" locationId={activeLoc} canWrite={canWrite} />
       ) : null}
@@ -204,7 +249,7 @@ function LevelsTab({
           Low stock only
         </label>
       </div>
-      <div className="overflow-x-auto rounded-md border bg-white">
+      <div className="overflow-x-auto rounded-md border border-[#e4e9f0] bg-white">
         <table className="w-full min-w-[720px] text-sm">
           <thead className="bg-[#f7f9fb] text-left text-[0.7rem] uppercase text-[#5a6b7d]">
             <tr>
@@ -242,10 +287,8 @@ function LevelsTab({
                 </td>
                 <td className="px-3 py-2 text-right">
                   {canWrite ? (
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => {
+                    <EntityRowActions
+                      onEdit={() => {
                         setReorderId(r.stockLevelId);
                         setRp(
                           r.reorderPoint != null ? String(r.reorderPoint) : "",
@@ -254,9 +297,8 @@ function LevelsTab({
                           r.reorderQty != null ? String(r.reorderQty) : "",
                         );
                       }}
-                    >
-                      Reorder
-                    </Button>
+                      editTitle="Edit reorder levels"
+                    />
                   ) : null}
                 </td>
               </tr>
@@ -307,35 +349,104 @@ function LevelsTab({
   );
 }
 
-function AlertsTab({ locationId }: { locationId: string }) {
+function AlertsTab({
+  locationId,
+  locationName,
+}: {
+  locationId: string;
+  locationName: string;
+}) {
+  const [q, setQ] = useState("");
   const alerts = useQuery({
     queryKey: ["inv-low", locationId],
     queryFn: () => inventoryApi.lowStock(locationId || undefined),
   });
+
+  const rows = useMemo(() => {
+    const list = alerts.data?.items ?? [];
+    const needle = q.trim().toLowerCase();
+    if (!needle) return list;
+    return list.filter(
+      (i) =>
+        i.name.toLowerCase().includes(needle) ||
+        i.sku.toLowerCase().includes(needle) ||
+        (i.location?.name ?? "").toLowerCase().includes(needle),
+    );
+  }, [alerts.data, q]);
+
   return (
-    <div className="rounded-md border bg-white p-4">
-      <p className="mb-3 text-sm text-[#5a6b7d]">
-        Items at or below reorder point (defaults to 5 if unset).
-      </p>
-      <p className="mb-2 text-sm font-semibold">
-        {alerts.data?.count ?? 0} alert(s)
-      </p>
-      <ul className="divide-y text-sm">
-        {(alerts.data?.items ?? []).map((i) => (
-          <li key={i.stockLevelId} className="flex justify-between py-2">
-            <span>
-              {i.name}{" "}
-              <span className="font-mono text-xs text-[#8a9bb0]">{i.sku}</span>
-            </span>
-            <span className="text-amber-800">
-              {i.qtyOnHand} / reorder {i.reorderPoint ?? 5}
-            </span>
-          </li>
-        ))}
-        {!alerts.data?.items?.length ? (
-          <li className="py-6 text-center text-[#5a6b7d]">No low stock</li>
-        ) : null}
-      </ul>
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#e4e9f0] bg-white px-4 py-2.5">
+        <Input
+          className="h-9 max-w-sm flex-1 text-[0.8125rem]"
+          placeholder="Search name or SKU"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+        <span className="text-[0.75rem] text-[#8b9bb0]">
+          {rows.length} alert{rows.length === 1 ? "" : "s"} · at or below
+          reorder
+        </span>
+      </div>
+
+      <section className="overflow-hidden rounded-xl border border-[#e4e9f0] bg-white shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
+        <div className="max-h-[min(60dvh,32rem)] overflow-auto">
+          <table className="w-full min-w-[640px] border-collapse text-left text-[0.8125rem]">
+            <thead className="sticky top-0 z-[1] bg-[#f8fafc] text-[0.65rem] font-semibold tracking-[0.06em] text-[#5a6b7d] uppercase">
+              <tr className="border-b border-[#e4e9f0]">
+                <th className="px-3 py-2.5">Name</th>
+                <th className="px-3 py-2.5">SKU</th>
+                <th className="px-3 py-2.5 text-right">On hand</th>
+                <th className="px-3 py-2.5 text-right">Reorder</th>
+                <th className="px-3 py-2.5 text-right">Gap</th>
+                <th className="px-3 py-2.5">Location</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((i) => {
+                const rp = i.reorderPoint ?? 5;
+                const gap = Math.max(0, rp - Number(i.qtyOnHand));
+                return (
+                  <tr
+                    key={i.stockLevelId}
+                    className="border-b border-[#eef2f8] hover:bg-[#f8fafc]"
+                  >
+                    <td className="px-3 py-2 font-medium text-[#0b1f33]">
+                      {i.name}
+                    </td>
+                    <td className="px-3 py-2 font-mono text-[0.75rem] text-[#5a6b7d]">
+                      {i.sku}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-amber-800">
+                      {i.qtyOnHand}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-[#5a6b7d]">
+                      {rp}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums font-semibold text-[#b45309]">
+                      {gap}
+                    </td>
+                    <td className="px-3 py-2 text-[#5a6b7d]">
+                      {i.location?.name ?? locationName}
+                    </td>
+                  </tr>
+                );
+              })}
+              {!rows.length ? (
+                <tr>
+                  <td
+                    colSpan={6}
+                    className="px-3 py-10 text-center text-[#8b9bb0]"
+                  >
+                    No low stock alerts
+                    {locationId ? " at this location" : ""}.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   );
 }
@@ -386,14 +497,14 @@ function MoveTab({
   }
 
   return (
-    <div className="max-w-md space-y-3 rounded-md border bg-white p-4">
+    <div className="max-w-md space-y-3 rounded-md border border-[#e4e9f0] bg-white p-4">
       <h3 className="font-semibold">
         {mode === "in" ? "Stock In" : "Stock Out"}
       </h3>
       <div>
         <Label>Item</Label>
         <select
-          className="h-9 w-full rounded-md border px-2 text-sm"
+          className="h-9 w-full rounded-md border border-[#dce3ec] px-2 text-sm"
           value={stockLevelId}
           onChange={(e) => setStockLevelId(e.target.value)}
         >
@@ -448,13 +559,22 @@ function DamageTab({
     queryFn: () =>
       inventoryApi.listLevels({ locationId, includeZero: true }),
   });
-  const damaged = useMemo(
-    () => (levels.data?.items ?? []).filter((i) => i.qtyDamaged > 0),
-    [levels.data],
-  );
+  const [q, setQ] = useState("");
+  const damaged = useMemo(() => {
+    const list = (levels.data?.items ?? []).filter((i) => i.qtyDamaged > 0);
+    const needle = q.trim().toLowerCase();
+    if (!needle) return list;
+    return list.filter(
+      (i) =>
+        i.name.toLowerCase().includes(needle) ||
+        i.sku.toLowerCase().includes(needle) ||
+        i.productSku.toLowerCase().includes(needle),
+    );
+  }, [levels.data, q]);
   const [stockLevelId, setStockLevelId] = useState("");
   const [qty, setQty] = useState("1");
   const [reason, setReason] = useState("");
+  const [restoreQty, setRestoreQty] = useState<Record<string, string>>({});
 
   const mark = useMutation({
     mutationFn: () =>
@@ -466,6 +586,8 @@ function DamageTab({
       }),
     onSuccess: () => {
       toast.success("Moved to damaged");
+      setQty("1");
+      setReason("");
       void qc.invalidateQueries({ queryKey: ["inv-levels"] });
     },
     onError: (e: Error) =>
@@ -473,15 +595,15 @@ function DamageTab({
   });
 
   const restore = useMutation({
-    mutationFn: (id: string) =>
+    mutationFn: ({ id, amount }: { id: string; amount: number }) =>
       inventoryApi.restoreDamaged({
         locationId,
         stockLevelId: id,
-        qty: 1,
+        qty: amount,
         reason: "Restored to sellable",
       }),
     onSuccess: () => {
-      toast.success("Restored 1 unit");
+      toast.success("Restored to sellable");
       void qc.invalidateQueries({ queryKey: ["inv-levels"] });
     },
     onError: (e: Error) =>
@@ -489,64 +611,163 @@ function DamageTab({
   });
 
   return (
-    <div className="grid gap-4 md:grid-cols-2">
+    <div className="space-y-4">
       {canWrite ? (
-        <div className="space-y-3 rounded-md border bg-white p-4">
-          <h3 className="font-semibold">Mark damaged</h3>
-          <select
-            className="h-9 w-full rounded-md border px-2 text-sm"
-            value={stockLevelId}
-            onChange={(e) => setStockLevelId(e.target.value)}
-          >
-            <option value="">Select item…</option>
-            {(levels.data?.items ?? []).map((i) => (
-              <option key={i.stockLevelId} value={i.stockLevelId}>
-                {i.name} — sellable {i.qtyOnHand}
-              </option>
-            ))}
-          </select>
-          <Input
-            type="number"
-            value={qty}
-            onChange={(e) => setQty(e.target.value)}
-          />
-          <Input
-            placeholder="Reason"
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-          />
-          <Button
-            disabled={!stockLevelId || mark.isPending}
-            onClick={() => mark.mutate()}
-          >
-            Quarantine
-          </Button>
+        <div className="grid max-w-3xl gap-3 rounded-xl border border-[#e4e9f0] bg-white p-4 sm:grid-cols-2">
+          <h3 className="sm:col-span-2 text-sm font-semibold text-[#0b1f33]">
+            Mark damaged
+          </h3>
+          <div className="sm:col-span-2">
+            <Label>Item</Label>
+            <select
+              className="mt-1 h-9 w-full rounded-md border border-[#dce3ec] px-2 text-sm"
+              value={stockLevelId}
+              onChange={(e) => setStockLevelId(e.target.value)}
+            >
+              <option value="">Select item…</option>
+              {(levels.data?.items ?? []).map((i) => (
+                <option key={i.stockLevelId} value={i.stockLevelId}>
+                  {i.name} — sellable {i.qtyOnHand} {i.sellUnit}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <Label>Qty</Label>
+            <Input
+              className="mt-1"
+              type="number"
+              min={0.001}
+              step="any"
+              value={qty}
+              onChange={(e) => setQty(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label>Reason</Label>
+            <Input
+              className="mt-1"
+              placeholder="Broken, expired, quarantine…"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <Button
+              disabled={!stockLevelId || !Number(qty) || mark.isPending}
+              onClick={() => mark.mutate()}
+            >
+              Quarantine
+            </Button>
+          </div>
         </div>
       ) : null}
-      <div className="rounded-md border bg-white p-4">
-        <h3 className="mb-2 font-semibold">Damaged stock</h3>
-        <ul className="divide-y text-sm">
-          {damaged.map((d) => (
-            <li key={d.stockLevelId} className="flex justify-between py-2">
-              <span>
-                {d.name} · {d.qtyDamaged} {d.sellUnit}
-              </span>
-              {canWrite ? (
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => restore.mutate(d.stockLevelId)}
-                >
-                  Restore 1
-                </Button>
-              ) : null}
-            </li>
-          ))}
-          {!damaged.length ? (
-            <li className="py-4 text-[#5a6b7d]">No damaged qty</li>
-          ) : null}
-        </ul>
+
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#e4e9f0] bg-white px-4 py-2.5">
+        <Input
+          className="h-9 max-w-sm flex-1 text-[0.8125rem]"
+          placeholder="Search damaged items"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+        <span className="text-[0.75rem] text-[#8b9bb0]">
+          {damaged.length} item{damaged.length === 1 ? "" : "s"}
+        </span>
       </div>
+
+      <section className="overflow-hidden rounded-xl border border-[#e4e9f0] bg-white shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
+        <div className="max-h-[min(60dvh,32rem)] overflow-auto">
+          <table className="w-full min-w-[720px] border-collapse text-left text-[0.8125rem]">
+            <thead className="sticky top-0 z-[1] bg-[#f8fafc] text-[0.65rem] font-semibold tracking-[0.06em] text-[#5a6b7d] uppercase">
+              <tr className="border-b border-[#e4e9f0]">
+                <th className="px-3 py-2.5">Name</th>
+                <th className="px-3 py-2.5">SKU</th>
+                <th className="px-3 py-2.5 text-right">Sellable</th>
+                <th className="px-3 py-2.5 text-right">Damaged</th>
+                <th className="px-3 py-2.5">Unit</th>
+                <th className="px-3 py-2.5 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {damaged.map((d) => {
+                const max = Number(d.qtyDamaged);
+                const entered = restoreQty[d.stockLevelId] ?? "1";
+                const amount = Math.min(
+                  max,
+                  Math.max(0, Number(entered) || 0),
+                );
+                return (
+                  <tr
+                    key={d.stockLevelId}
+                    className="border-b border-[#eef2f8] hover:bg-[#f8fafc]"
+                  >
+                    <td className="px-3 py-2 font-medium text-[#0b1f33]">
+                      {d.name}
+                    </td>
+                    <td className="px-3 py-2 font-mono text-[0.75rem] text-[#5a6b7d]">
+                      {d.sku}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {d.qtyOnHand}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums font-semibold text-[#b45309]">
+                      {d.qtyDamaged}
+                    </td>
+                    <td className="px-3 py-2 text-[#5a6b7d]">{d.sellUnit}</td>
+                    <td className="px-3 py-2">
+                      {canWrite ? (
+                        <div className="flex items-center justify-end gap-1.5">
+                          <Input
+                            className="h-8 w-16 text-right text-xs tabular-nums"
+                            type="number"
+                            min={0.001}
+                            max={max}
+                            step="any"
+                            value={entered}
+                            onChange={(e) =>
+                              setRestoreQty((m) => ({
+                                ...m,
+                                [d.stockLevelId]: e.target.value,
+                              }))
+                            }
+                          />
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={amount <= 0 || restore.isPending}
+                            onClick={() =>
+                              restore.mutate({
+                                id: d.stockLevelId,
+                                amount,
+                              })
+                            }
+                          >
+                            Restore
+                          </Button>
+                        </div>
+                      ) : (
+                        <span className="block text-right text-[#8b9bb0]">
+                          —
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              {!damaged.length ? (
+                <tr>
+                  <td
+                    colSpan={6}
+                    className="px-3 py-10 text-center text-[#8b9bb0]"
+                  >
+                    No damaged quantity at this location.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   );
 }
@@ -625,7 +846,7 @@ function AuditTab({
         </Button>
       ) : null}
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-md border bg-white">
+        <div className="rounded-md border border-[#e4e9f0] bg-white">
           <table className="w-full text-sm">
             <thead className="bg-[#f7f9fb] text-left text-[0.7rem] uppercase text-[#5a6b7d]">
               <tr>
@@ -652,7 +873,7 @@ function AuditTab({
           </table>
         </div>
         {activeId && detail.data ? (
-          <div className="space-y-2 rounded-md border bg-white p-3">
+          <div className="space-y-2 rounded-md border border-[#e4e9f0] bg-white p-3">
             <h3 className="font-semibold">Count lines</h3>
             <div className="max-h-[360px] overflow-y-auto">
               <table className="w-full text-sm">
@@ -728,7 +949,7 @@ function LedgerTab({ locationId }: { locationId: string }) {
   return (
     <div className="space-y-2">
       <select
-        className="h-9 rounded-md border px-2 text-sm"
+        className="h-9 rounded-md border border-[#dce3ec] px-2 text-sm"
         value={type}
         onChange={(e) => setType(e.target.value)}
       >
@@ -749,7 +970,7 @@ function LedgerTab({ locationId }: { locationId: string }) {
           </option>
         ))}
       </select>
-      <div className="overflow-x-auto rounded-md border bg-white">
+      <div className="overflow-x-auto rounded-md border border-[#e4e9f0] bg-white">
         <table className="w-full min-w-[640px] text-sm">
           <thead className="bg-[#f7f9fb] text-left text-[0.7rem] uppercase text-[#5a6b7d]">
             <tr>
@@ -820,7 +1041,7 @@ function WarehousesTab({ canWrite }: { canWrite: boolean }) {
   return (
     <div className="grid gap-4 md:grid-cols-[280px_1fr]">
       {canWrite ? (
-        <div className="space-y-2 rounded-md border bg-white p-4">
+        <div className="space-y-2 rounded-md border border-[#e4e9f0] bg-white p-4">
           <h3 className="font-semibold">Add location / warehouse</h3>
           <Label>Name</Label>
           <Input value={name} onChange={(e) => setName(e.target.value)} />
@@ -828,7 +1049,7 @@ function WarehousesTab({ canWrite }: { canWrite: boolean }) {
           <Input value={code} onChange={(e) => setCode(e.target.value)} />
           <Label>Type</Label>
           <select
-            className="h-9 w-full rounded-md border px-2 text-sm"
+            className="h-9 w-full rounded-md border border-[#dce3ec] px-2 text-sm"
             value={type}
             onChange={(e) => setType(e.target.value)}
           >
@@ -848,7 +1069,7 @@ function WarehousesTab({ canWrite }: { canWrite: boolean }) {
           </Button>
         </div>
       ) : null}
-      <div className="overflow-hidden rounded-md border bg-white">
+      <div className="overflow-hidden rounded-md border border-[#e4e9f0] bg-white">
         <table className="w-full text-sm">
           <thead className="bg-[#f7f9fb] text-left text-[0.7rem] uppercase text-[#5a6b7d]">
             <tr>

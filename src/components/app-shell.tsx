@@ -121,6 +121,20 @@ const NAV_GROUPS: NavGroup[] = [
         commerce: "sale",
       },
       {
+        href: "/inventory?tab=alerts",
+        label: "Low stock",
+        icon: Bell,
+        module: "inventory",
+        commerce: "sale",
+      },
+      {
+        href: "/inventory?tab=damage",
+        label: "Damaged stock",
+        icon: PackageCheck,
+        module: "inventory",
+        commerce: "sale",
+      },
+      {
         href: "/adjustments",
         label: "Adjustments",
         icon: PackageCheck,
@@ -183,6 +197,13 @@ const NAV_GROUPS: NavGroup[] = [
         module: "inventory",
       },
       {
+        href: "/purchases",
+        label: "GRN & payables",
+        icon: Truck,
+        commerce: "sale",
+        module: "inventory",
+      },
+      {
         href: "/expenses",
         label: "Expenses",
         icon: Wallet,
@@ -203,15 +224,14 @@ const NAV_GROUPS: NavGroup[] = [
       },
       {
         href: "/loyalty",
-        label: "Coupons",
+        label: "Loyalty",
         icon: TicketPercent,
       },
       {
         href: "/parties",
         label: "Customer groups",
         icon: UsersRound,
-        module: "rental",
-        commerce: "rental",
+        module: "orders",
       },
       {
         href: "/appointments",
@@ -347,7 +367,7 @@ function hrefTab(href: string) {
   return new URLSearchParams(qs).get("tab");
 }
 
-/** Active state — catalog tabs use ?tab= so Items/Categories/Brands stay distinct */
+/** Active state — catalog/inventory tabs use ?tab= so sibling links stay distinct */
 function isLeafActive(pathname: string, search: string, href: string) {
   const base = hrefPath(href);
   const wantTab = hrefTab(href);
@@ -359,6 +379,14 @@ function isLeafActive(pathname: string, search: string, href: string) {
     if (pathname !== "/catalog") return false;
     if (!wantTab || wantTab === "products") {
       return !haveTab || haveTab === "products";
+    }
+    return haveTab === wantTab;
+  }
+
+  if (base === "/inventory") {
+    if (pathname !== "/inventory") return false;
+    if (!wantTab || wantTab === "levels") {
+      return !haveTab || haveTab === "levels";
     }
     return haveTab === wantTab;
   }

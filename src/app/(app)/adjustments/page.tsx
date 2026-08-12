@@ -11,23 +11,16 @@ import { useAuthStore } from "@/lib/auth-store";
 import { useBootstrap } from "@/lib/bootstrap";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  EmptyState,
-  PageSkeleton,
-} from "@/components/page-header";
+import { EmptyState, PageSkeleton } from "@/components/page-header";
 import {
   StockAdjustDialog,
   type StockAdjustTarget,
 } from "@/components/stock-adjust-dialog";
-import {
-  formatQtyWithUnit,
-  normalizeSellUnit,
-} from "@/lib/sell-units";
+import { formatQtyWithUnit, normalizeSellUnit } from "@/lib/sell-units";
 import { cn } from "@/lib/utils";
 
 /**
- * Zoho-style Inventory → Adjustments — history + new qty adjustment.
- * Universal POS (sale commerce mode).
+ * Zoho-style Inventory → Adjustments — scrollable history + new qty adjustment.
  */
 export default function InventoryAdjustmentsPage() {
   const { hasMode } = useBootstrap();
@@ -111,7 +104,7 @@ export default function InventoryAdjustmentsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
+    <div className="flex min-h-0 flex-col gap-4 pb-10">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-[0.65rem] font-bold tracking-[0.12em] text-[#1a56db] uppercase">
@@ -126,8 +119,11 @@ export default function InventoryAdjustmentsPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button asChild size="sm" variant="secondary">
+          <Button asChild size="sm" variant="ghost">
             <Link href="/catalog">Items</Link>
+          </Button>
+          <Button asChild size="sm" variant="ghost">
+            <Link href="/transfers">Stock transfer</Link>
           </Button>
           {canWrite ? (
             <Button size="sm" onClick={() => setPickOpen(true)}>
@@ -137,7 +133,7 @@ export default function InventoryAdjustmentsPage() {
         </div>
       </header>
 
-      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#d9e0ea] bg-white px-4 py-2.5">
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#e4e9f0] bg-white px-4 py-2.5">
         <Input
           className="h-9 max-w-sm flex-1 text-[0.8125rem]"
           placeholder="Search product, SKU, reason, or staff"
@@ -162,66 +158,67 @@ export default function InventoryAdjustmentsPage() {
           }
         />
       ) : (
-        <section className="overflow-x-auto rounded-xl border border-[#d9e0ea] bg-white shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
-          <table className="w-full min-w-[52rem] text-left text-[0.8125rem]">
-            <thead className="border-b border-[#eef1f4] bg-[#f8fafc] text-[0.7rem] font-semibold tracking-wide text-[#5a6b7d] uppercase">
-              <tr>
-                <th className="px-4 py-2.5">Date</th>
-                <th className="px-3 py-2.5">Item</th>
-                <th className="px-3 py-2.5">SKU</th>
-                <th className="px-3 py-2.5 text-right">Delta</th>
-                <th className="px-3 py-2.5 text-right">Before</th>
-                <th className="px-3 py-2.5 text-right">After</th>
-                <th className="px-3 py-2.5">Reason</th>
-                <th className="px-4 py-2.5">By</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#eef1f4]">
-              {items.map((r) => {
-                const unit = normalizeSellUnit(r.sellUnit);
-                const up = r.delta > 0;
-                const down = r.delta < 0;
-                return (
-                  <tr key={r.id} className="hover:bg-[#fafbfc]">
-                    <td className="px-4 py-3 whitespace-nowrap text-[#5a6b7d]">
-                      {new Date(r.createdAt).toLocaleString()}
-                    </td>
-                    <td className="px-3 py-3 font-medium text-[#0b1f33]">
-                      {r.productName}
-                    </td>
-                    <td className="px-3 py-3 font-mono text-[0.75rem] text-[#5a6b7d]">
-                      {r.sku}
-                    </td>
-                    <td
-                      className={cn(
-                        "px-3 py-3 text-right font-semibold tabular-nums",
-                        up && "text-[#047857]",
-                        down && "text-[#c81e1e]",
-                        !up && !down && "text-[#5a6b7d]",
-                      )}
-                    >
-                      {up ? "+" : ""}
-                      {formatQtyWithUnit(r.delta, unit)}
-                    </td>
-                    <td className="px-3 py-3 text-right tabular-nums text-[#5a6b7d]">
-                      {formatQtyWithUnit(r.beforeQty, unit)}
-                    </td>
-                    <td className="px-3 py-3 text-right font-semibold tabular-nums text-[#0b1f33]">
-                      {formatQtyWithUnit(r.afterQty, unit)}
-                    </td>
-                    <td className="max-w-[12rem] truncate px-3 py-3 text-[#5a6b7d]">
-                      {r.reason || "—"}
-                    </td>
-                    <td className="px-4 py-3 text-[#5a6b7d]">{r.actorName}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-[#e4e9f0] bg-white shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
+          <div className="max-h-[min(60dvh,32rem)] overflow-auto overscroll-contain [scrollbar-gutter:stable]">
+            <table className="w-full min-w-[52rem] text-left text-[0.8125rem]">
+              <thead className="sticky top-0 z-[1] border-b border-[#eef1f4] bg-[#f8fafc] text-[0.7rem] font-semibold tracking-wide text-[#5a6b7d] uppercase">
+                <tr>
+                  <th className="px-4 py-2.5">Date</th>
+                  <th className="px-3 py-2.5">Item</th>
+                  <th className="px-3 py-2.5">SKU</th>
+                  <th className="px-3 py-2.5 text-right">Delta</th>
+                  <th className="px-3 py-2.5 text-right">Before</th>
+                  <th className="px-3 py-2.5 text-right">After</th>
+                  <th className="px-3 py-2.5">Reason</th>
+                  <th className="px-4 py-2.5">By</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#eef1f4]">
+                {items.map((r) => {
+                  const unit = normalizeSellUnit(r.sellUnit);
+                  const up = r.delta > 0;
+                  const down = r.delta < 0;
+                  return (
+                    <tr key={r.id} className="hover:bg-[#fafbfc]">
+                      <td className="px-4 py-3 whitespace-nowrap text-[#5a6b7d]">
+                        {new Date(r.createdAt).toLocaleString()}
+                      </td>
+                      <td className="px-3 py-3 font-medium text-[#0b1f33]">
+                        {r.productName}
+                      </td>
+                      <td className="px-3 py-3 font-mono text-[0.75rem] text-[#5a6b7d]">
+                        {r.sku}
+                      </td>
+                      <td
+                        className={cn(
+                          "px-3 py-3 text-right font-semibold tabular-nums",
+                          up && "text-[#047857]",
+                          down && "text-[#c81e1e]",
+                          !up && !down && "text-[#5a6b7d]",
+                        )}
+                      >
+                        {up ? "+" : ""}
+                        {formatQtyWithUnit(r.delta, unit)}
+                      </td>
+                      <td className="px-3 py-3 text-right tabular-nums text-[#5a6b7d]">
+                        {formatQtyWithUnit(r.beforeQty, unit)}
+                      </td>
+                      <td className="px-3 py-3 text-right font-semibold tabular-nums text-[#0b1f33]">
+                        {formatQtyWithUnit(r.afterQty, unit)}
+                      </td>
+                      <td className="max-w-[12rem] truncate px-3 py-3 text-[#5a6b7d]">
+                        {r.reason || "—"}
+                      </td>
+                      <td className="px-4 py-3 text-[#5a6b7d]">{r.actorName}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
 
-      {/* Pick item for new adjustment */}
       {pickOpen ? (
         <div className="fixed inset-0 z-[85] flex items-center justify-center p-4">
           <button
@@ -230,8 +227,8 @@ export default function InventoryAdjustmentsPage() {
             aria-label="Close"
             onClick={() => setPickOpen(false)}
           />
-          <div className="relative z-10 flex max-h-[85dvh] w-full max-w-lg flex-col overflow-hidden rounded-xl border border-[#d9e0ea] bg-white shadow-xl">
-            <div className="border-b border-[#eef1f4] px-5 py-4">
+          <div className="relative z-10 flex max-h-[85dvh] w-full max-w-lg flex-col overflow-hidden rounded-xl border border-[#e4e9f0] bg-white shadow-xl">
+            <div className="shrink-0 border-b border-[#eef1f4] px-5 py-4">
               <h2 className="text-lg font-semibold text-[#0b1f33]">
                 New adjustment
               </h2>
@@ -246,7 +243,7 @@ export default function InventoryAdjustmentsPage() {
                 autoFocus
               />
             </div>
-            <ul className="min-h-0 flex-1 overflow-y-auto divide-y divide-[#eef1f4]">
+            <ul className="min-h-0 flex-1 overflow-y-auto overscroll-contain divide-y divide-[#eef1f4]">
               {(products.data?.items ?? []).map((item) => (
                 <li key={item.id}>
                   <button
@@ -271,10 +268,7 @@ export default function InventoryAdjustmentsPage() {
                       </span>
                     </span>
                     <span className="shrink-0 text-[0.8rem] font-semibold text-[#1341a8]">
-                      {formatQtyWithUnit(
-                        Number(item.qty),
-                        item.sellUnit,
-                      )}
+                      {formatQtyWithUnit(Number(item.qty), item.sellUnit)}
                     </span>
                   </button>
                 </li>
@@ -288,10 +282,10 @@ export default function InventoryAdjustmentsPage() {
                 </li>
               ) : null}
             </ul>
-            <div className="border-t border-[#eef1f4] px-5 py-3 text-right">
+            <div className="shrink-0 border-t border-[#eef1f4] px-5 py-3 text-right">
               <Button
                 type="button"
-                variant="secondary"
+                variant="ghost"
                 size="sm"
                 onClick={() => setPickOpen(false)}
               >

@@ -11,6 +11,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ProductThumb } from "@/components/product-thumb";
+import { ProductBarcodePreview } from "@/components/product-barcode-preview";
+import { EntityRowActions } from "@/components/entity-row-actions";
 
 export default function CatalogProductViewRoute() {
   return (
@@ -28,8 +30,16 @@ function CatalogProductDetailPage() {
   const router = useRouter();
   const qc = useQueryClient();
   const [tab, setTab] = useState<
-    "overview" | "variants" | "bundle" | "batches" | "serials" | "inventory"
+    | "overview"
+    | "barcode"
+    | "variants"
+    | "bundle"
+    | "batches"
+    | "serials"
+    | "inventory"
   >("overview");
+  const [barcodeDraft, setBarcodeDraft] = useState("");
+  const [barcodeErr, setBarcodeErr] = useState<string | null>(null);
 
   const product = useQuery({
     queryKey: ["catalog-product", id],
@@ -65,6 +75,61 @@ function CatalogProductDetailPage() {
       toast.success("Duplicated");
       if (row?.id) router.push(`/catalog/view?id=${row.id}`);
     },
+  });
+
+  const remove = useMutation({
+    mutationFn: () => catalogApi.remove(id),
+    onSuccess: (res) => {
+      toast.success(
+        res.softDeleted
+          ? "Item is in use — archived instead"
+          : "Item deleted",
+      );
+      if (res.deleted) router.push("/catalog");
+      else invalidate();
+    },
+    onError: (e: Error) =>
+      toast.error(e instanceof ApiError ? e.message : "Delete failed"),
+  });
+
+  const saveBarcode = useMutation({
+    mutationFn: async () => {
+      const code = barcodeDraft.trim();
+      if (!code) throw new Error("Enter or generate a barcode");
+      const check = await catalogApi.checkBarcode(code, id);
+      if (!check.available) {
+        throw new Error(
+          check.reason === "duplicate"
+            ? "Barcode already exists"
+            : "Invalid barcode",
+        );
+      }
+      return catalogApi.updateProduct(id, {
+        barcode: check.barcode,
+        barcodeType: check.barcodeType || "code128",
+      });
+    },
+    onSuccess: () => {
+      invalidate();
+      toast.success("Barcode saved");
+      setBarcodeErr(null);
+    },
+    onError: (e: Error) => {
+      const msg = e instanceof ApiError ? e.message : e.message;
+      setBarcodeErr(msg);
+      toast.error(msg);
+    },
+  });
+
+  const genBarcode = useMutation({
+    mutationFn: () => catalogApi.generateBarcode(),
+    onSuccess: (r) => {
+      setBarcodeDraft(r.barcode);
+      setBarcodeErr(null);
+      toast.success("Code 128 barcode generated — click Save barcode");
+    },
+    onError: (e: Error) =>
+      toast.error(e instanceof ApiError ? e.message : "Generate failed"),
   });
 
   /** Variant form */
@@ -223,7 +288,7 @@ function CatalogProductDetailPage() {
             </p>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button variant="secondary" asChild>
             <Link href="/catalog">Back</Link>
           </Button>
@@ -245,12 +310,29 @@ function CatalogProductDetailPage() {
               Activate
             </Button>
           ) : null}
-          <Button
-            variant="secondary"
-            onClick={() => setStatus.mutate("archived")}
-          >
-            Archive
-          </Button>
+          <EntityRowActions
+            onSoftDelete={
+              p.status !== "archived"
+                ? () => {
+                    if (confirm(`Archive “${p.name}”?`)) {
+                      setStatus.mutate("archived");
+                    }
+                  }
+                : undefined
+            }
+            softDeleteTitle="Archive (soft delete)"
+            onDelete={() => {
+              if (
+                confirm(
+                  `Delete “${p.name}”? Unused items are removed; items used in orders are archived.`,
+                )
+              ) {
+                remove.mutate();
+              }
+            }}
+            deleteTitle="Delete"
+            disabled={remove.isPending || setStatus.isPending}
+          />
         </div>
       </header>
 
@@ -258,6 +340,7 @@ function CatalogProductDetailPage() {
         {(
           [
             ["overview", "Overview"],
+            ["barcode", "Barcode"],
             ["variants", "Variants"],
             ["bundle", "Bundle"],
             ["batches", "Batch & expiry"],
@@ -339,9 +422,73 @@ function CatalogProductDetailPage() {
         </div>
       ) : null}
 
+      {tab === "barcode" ? (
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+          <div className="space-y-3 rounded-md border border-[#e4e9f0] bg-white p-4">
+            <p className="text-sm text-[#5a6b7d]">
+              Code 128 is the default for internal barcodes. You can also type
+              or scan an existing package barcode (EAN/UPC).
+            </p>
+            <div>
+              <Label>Barcode value</Label>
+              <div className="mt-1.5 flex flex-wrap gap-2">
+                <Input
+                  className="min-w-[200px] flex-1 font-mono uppercase"
+                  value={barcodeDraft || p.barcode || ""}
+                  onChange={(e) => {
+                    setBarcodeDraft(e.target.value);
+                    setBarcodeErr(null);
+                  }}
+                  onFocus={() => {
+                    if (!barcodeDraft && p.barcode) setBarcodeDraft(p.barcode);
+                  }}
+                  placeholder="Generate or enter barcode"
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={genBarcode.isPending}
+                  onClick={() => genBarcode.mutate()}
+                >
+                  Generate barcode
+                </Button>
+                <Button
+                  type="button"
+                  disabled={saveBarcode.isPending}
+                  onClick={() => {
+                    if (!barcodeDraft && p.barcode) setBarcodeDraft(p.barcode);
+                    saveBarcode.mutate();
+                  }}
+                >
+                  Save barcode
+                </Button>
+              </div>
+              {barcodeErr ? (
+                <p className="mt-1 text-xs text-rose-600">{barcodeErr}</p>
+              ) : null}
+            </div>
+            <Row label="Stored type" value={p.barcodeType ?? "—"} />
+          </div>
+          {(barcodeDraft || p.barcode) ? (
+            <ProductBarcodePreview
+              variant="label"
+              value={barcodeDraft || p.barcode || ""}
+              barcodeType={p.barcodeType || "code128"}
+              productName={p.name}
+              sku={p.skuCode}
+              showPrint
+            />
+          ) : (
+            <div className="rounded-md border border-dashed border-[#e4e9f0] bg-white p-6 text-center text-sm text-[#6b7280]">
+              Generate or enter a barcode to preview the label.
+            </div>
+          )}
+        </div>
+      ) : null}
+
       {tab === "variants" ? (
         <div className="space-y-3">
-          <div className="grid gap-2 rounded-md border bg-white p-4 sm:grid-cols-4">
+          <div className="grid gap-2 rounded-md border border-[#e4e9f0] bg-white p-4 sm:grid-cols-4">
             <div>
               <Label>Variant name</Label>
               <Input
@@ -376,7 +523,7 @@ function CatalogProductDetailPage() {
               Add variant (auto SKU)
             </Button>
           </div>
-          <table className="w-full text-sm border rounded-md bg-white">
+          <table className="w-full text-sm border border-[#e4e9f0] rounded-md bg-white">
             <thead className="bg-[#f7f9fb] text-left text-[0.7rem] uppercase text-[#5a6b7d]">
               <tr>
                 <th className="px-3 py-2">Name</th>
@@ -387,7 +534,7 @@ function CatalogProductDetailPage() {
             </thead>
             <tbody>
               {(p.variants ?? []).map((v) => (
-                <tr key={v.id} className="border-t">
+                <tr key={v.id} className="border-t border-[#eef1f4]">
                   <td className="px-3 py-2">{v.name}</td>
                   <td className="px-3 py-2 font-mono text-xs">{v.skuCode}</td>
                   <td className="px-3 py-2 text-[#5a6b7d]">
@@ -410,7 +557,7 @@ function CatalogProductDetailPage() {
       ) : null}
 
       {tab === "bundle" ? (
-        <div className="space-y-3 rounded-md border bg-white p-4">
+        <div className="space-y-3 rounded-md border border-[#e4e9f0] bg-white p-4">
           {p.kind !== "bundle" ? (
             <p className="text-sm text-amber-700">
               Set product type to Bundle to manage combo components.
@@ -421,7 +568,7 @@ function CatalogProductDetailPage() {
                 <div className="min-w-[200px] flex-1">
                   <Label>Component product</Label>
                   <select
-                    className="h-9 w-full rounded-md border px-2 text-sm"
+                    className="h-9 w-full rounded-md border border-[#d9e0ea] px-2 text-sm"
                     value={compId}
                     onChange={(e) => setCompId(e.target.value)}
                   >
@@ -461,7 +608,7 @@ function CatalogProductDetailPage() {
 
       {tab === "batches" ? (
         <div className="space-y-3">
-          <div className="grid gap-2 rounded-md border bg-white p-4 sm:grid-cols-4">
+          <div className="grid gap-2 rounded-md border border-[#e4e9f0] bg-white p-4 sm:grid-cols-4">
             <div>
               <Label>Batch code</Label>
               <Input
@@ -472,7 +619,7 @@ function CatalogProductDetailPage() {
             <div>
               <Label>Location</Label>
               <select
-                className="h-9 w-full rounded-md border px-2 text-sm"
+                className="h-9 w-full rounded-md border border-[#d9e0ea] px-2 text-sm"
                 value={batchLoc}
                 onChange={(e) => setBatchLoc(e.target.value)}
               >
@@ -507,7 +654,7 @@ function CatalogProductDetailPage() {
               Add batch
             </Button>
           </div>
-          <table className="w-full text-sm border rounded-md bg-white">
+          <table className="w-full text-sm border border-[#e4e9f0] rounded-md bg-white">
             <thead className="bg-[#f7f9fb] text-left text-[0.7rem] uppercase text-[#5a6b7d]">
               <tr>
                 <th className="px-3 py-2">Code</th>
@@ -518,7 +665,7 @@ function CatalogProductDetailPage() {
             </thead>
             <tbody>
               {(p.batches ?? []).map((b) => (
-                <tr key={b.id} className="border-t">
+                <tr key={b.id} className="border-t border-[#eef1f4]">
                   <td className="px-3 py-2 font-mono text-xs">{b.batchCode}</td>
                   <td className="px-3 py-2">{b.location?.name}</td>
                   <td className="px-3 py-2">
@@ -536,7 +683,7 @@ function CatalogProductDetailPage() {
 
       {tab === "serials" ? (
         <div className="space-y-3">
-          <div className="flex flex-wrap gap-2 rounded-md border bg-white p-4">
+          <div className="flex flex-wrap gap-2 rounded-md border border-[#e4e9f0] bg-white p-4">
             <div className="min-w-[220px] flex-1">
               <Label>Serial / unit barcode</Label>
               <Input
@@ -557,7 +704,7 @@ function CatalogProductDetailPage() {
               Enable serial tracking on this product to register units.
             </p>
           ) : null}
-          <ul className="text-sm rounded-md border bg-white divide-y">
+          <ul className="text-sm rounded-md border border-[#e4e9f0] bg-white divide-y divide-[#eef1f4]">
             {(p.serials ?? []).map((s) => (
               <li key={s.id} className="px-3 py-2 flex justify-between">
                 <span className="font-mono">{s.serial}</span>
@@ -571,7 +718,7 @@ function CatalogProductDetailPage() {
       ) : null}
 
       {tab === "inventory" ? (
-        <div className="rounded-md border bg-white p-4">
+        <div className="rounded-md border border-[#e4e9f0] bg-white p-4">
           <p className="mb-3 text-sm text-[#5a6b7d]">
             Location quantities are Inventory — not editable here. Use Stock
             levels / Adjustments for movements.
@@ -586,7 +733,7 @@ function CatalogProductDetailPage() {
             </thead>
             <tbody>
               {(p.inventoryByLocation ?? []).map((row) => (
-                <tr key={row.stockLevelId} className="border-t">
+                <tr key={row.stockLevelId} className="border-t border-[#eef1f4]">
                   <td className="py-2">{row.location?.name ?? row.locationId}</td>
                   <td className="py-2 text-right tabular-nums">
                     {row.qtyOnHand} {row.sellUnit}

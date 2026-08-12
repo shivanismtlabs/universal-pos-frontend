@@ -45,9 +45,20 @@ type CartLine = {
   sellUnit: SellUnit;
   category?: string | null;
   image?: string | null;
+  /** Product override % (e.g. 18). null/undefined → tenant rate */
+  taxRatePercent?: number | null;
 };
 
-type PayMethod = "cash" | "upi" | "card" | "store_credit" | "gift_card";
+type PayMethod =
+  | "cash"
+  | "upi"
+  | "card"
+  | "bank_transfer"
+  | "wallet"
+  | "qr"
+  | "emi"
+  | "store_credit"
+  | "gift_card";
 
 const TOUCH_KEY = "upos-counter-touch-mode";
 
@@ -100,13 +111,21 @@ export default function RetailPosWorkstation({
   })();
   const taxSettings = useMemo(() => {
     const settings = boot?.tenant?.settings as
-      | { tax?: { ratePercent?: number; inclusive?: boolean } }
+      | { tax?: { ratePercent?: number | string; inclusive?: boolean } }
       | undefined;
     const mode = boot?.tenant?.taxMode ?? "in_gst";
     if (mode === "none") return { rate: 0, inclusive: false };
-    const ratePercent =
-      typeof settings?.tax?.ratePercent === "number"
-        ? settings.tax.ratePercent
+    const raw = settings?.tax?.ratePercent;
+    const parsed =
+      typeof raw === "number"
+        ? raw
+        : typeof raw === "string" && raw.trim()
+          ? Number(raw.replace(/%/g, "").trim())
+          : NaN;
+    const ratePercent = Number.isFinite(parsed)
+      ? parsed
+      : mode === "vat"
+        ? 20
         : 5;
     return {
       rate: Math.min(40, Math.max(0, ratePercent)) / 100,
@@ -118,6 +137,8 @@ export default function RetailPosWorkstation({
 
   const [scan, setScan] = useState("");
   const [filter, setFilter] = useState("");
+  const [catalogPage, setCatalogPage] = useState(1);
+  const pageSize = compact ? 24 : 40;
   const [lowStockOnly, setLowStockOnly] = useState(false);
   const [category, setCategory] = useState<string>("all");
   const [customerId, setCustomerId] = useState("");
@@ -212,18 +233,31 @@ export default function RetailPosWorkstation({
   ]);
 
   const catalog = useQuery({
-    queryKey: ["pos-sale-catalog", locationId, filter, lowStockOnly],
+    queryKey: [
+      "pos-sale-catalog",
+      locationId,
+      filter,
+      lowStockOnly,
+      catalogPage,
+      pageSize,
+    ],
     queryFn: () =>
       posApi.saleCatalog({
         locationId,
         q: filter.trim() || undefined,
-        limit: 120,
+        limit: pageSize,
+        page: catalogPage,
         lowStock: lowStockOnly || undefined,
         maxQty: lowStockOnly ? 5 : undefined,
       }),
     enabled: Boolean(locationId),
     refetchInterval: 30_000,
+    placeholderData: (prev) => prev,
   });
+
+  useEffect(() => {
+    setCatalogPage(1);
+  }, [filter, lowStockOnly, locationId]);
 
   const categories = useMemo(() => {
     const set = new Map<string, string>();
@@ -238,6 +272,9 @@ export default function RetailPosWorkstation({
     if (category === "all") return list;
     return list.filter((s) => s.category?.id === category);
   }, [catalog.data, category]);
+
+  const catalogTotal = catalog.data?.total ?? items.length;
+  const catalogTotalPages = catalog.data?.totalPages ?? 1;
 
   const parked = useQuery({
     queryKey: ["pos-sale-parked", locationId],
@@ -298,12 +335,24 @@ export default function RetailPosWorkstation({
 
   const subtotal = cart.reduce((s, l) => s + l.unitPrice * l.qty, 0);
   const taxAmount = (() => {
-    if (taxSettings.rate <= 0) return 0;
-    if (taxSettings.inclusive) {
-      const net = subtotal / (1 + taxSettings.rate);
-      return Math.round((subtotal - net) * 100) / 100;
+    if (taxSettings.rate <= 0 && !cart.some((l) => (l.taxRatePercent ?? null) != null))
+      return 0;
+    let tax = 0;
+    for (const l of cart) {
+      const lineGross = l.unitPrice * l.qty;
+      const rate =
+        l.taxRatePercent != null && Number.isFinite(l.taxRatePercent)
+          ? Math.min(40, Math.max(0, l.taxRatePercent)) / 100
+          : taxSettings.rate;
+      if (rate <= 0) continue;
+      if (taxSettings.inclusive) {
+        const net = lineGross / (1 + rate);
+        tax += lineGross - net;
+      } else {
+        tax += lineGross * rate;
+      }
     }
-    return Math.round(subtotal * taxSettings.rate * 100) / 100;
+    return Math.round(tax * 100) / 100;
   })();
   /** Pre-discount ticket total (matches server discountable base). */
   const ticketBeforeDiscount = taxSettings.inclusive
@@ -375,15 +424,21 @@ export default function RetailPosWorkstation({
     qtyOnHand: number;
     sellUnit?: string;
     category?: { name: string } | null;
-  image?: string | null;
-  photoUrl?: string | null;
-  images?: string[];
+    image?: string | null;
+    photoUrl?: string | null;
+    images?: string[];
+    taxRatePercent?: number | null;
   }) {
     const price = moneyNumber(row.sellPrice);
-    const image = row.image ?? row.photoUrl ?? null;
+    const image =
+      row.image ?? row.photoUrl ?? row.images?.[0] ?? null;
     const unit = normalizeSellUnit(row.sellUnit);
     const step = qtyStep(unit);
     const onHand = Number(row.qtyOnHand);
+    const taxRatePercent =
+      row.taxRatePercent != null && Number.isFinite(row.taxRatePercent)
+        ? row.taxRatePercent
+        : null;
     setCart((prev) => {
       const existing = prev.find((l) => l.stockLevelId === row.id);
       if (existing) {
@@ -394,7 +449,14 @@ export default function RetailPosWorkstation({
         }
         return prev.map((l) =>
           l.stockLevelId === row.id
-            ? { ...l, qty: next, maxQty: onHand, sellUnit: unit }
+            ? {
+                ...l,
+                qty: next,
+                maxQty: onHand,
+                sellUnit: unit,
+                image: l.image ?? image,
+                taxRatePercent: l.taxRatePercent ?? taxRatePercent,
+              }
             : l,
         );
       }
@@ -415,6 +477,7 @@ export default function RetailPosWorkstation({
           sellUnit: unit,
           category: row.category?.name ?? null,
           image,
+          taxRatePercent,
         },
       ];
     });
@@ -529,6 +592,9 @@ export default function RetailPosWorkstation({
           : couponCode.trim()
             ? { couponCode: couponCode.trim() }
             : {}),
+      };
+
+      const checkoutExtras = {
         ...(loyaltyQuote && loyaltyQuote.points > 0
           ? { loyaltyPointsToRedeem: loyaltyQuote.points }
           : {}),
@@ -547,6 +613,14 @@ export default function RetailPosWorkstation({
 
       if (payMethod === "store_credit" && !customerId) {
         toast.error("Select a customer to pay with store credit");
+        return;
+      }
+
+      // Split + partial together is unsupported (prepare has no partial)
+      if (splitPay && allowPartial && chargeAmount < totalDue - 0.001) {
+        toast.error(
+          "Turn off Partial payment when using Split cash + card/UPI",
+        );
         return;
       }
 
@@ -646,6 +720,7 @@ export default function RetailPosWorkstation({
       const payAmt = chargeAmount;
       const result = await posApi.saleCheckout({
         ...cartPayload,
+        ...checkoutExtras,
         payments: [
           {
             method:
@@ -1177,6 +1252,47 @@ export default function RetailPosWorkstation({
                 </li>
               ) : null}
             </ul>
+            {catalogTotalPages > 1 ? (
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#eef2f8] bg-[#fafbfc] px-3 py-2.5">
+                <p className="text-[0.75rem] text-[#5a6b7d]">
+                  Page {catalogPage} of {catalogTotalPages}
+                  <span className="text-[#8b9bb0]">
+                    {" "}
+                    · {catalogTotal} in stock
+                  </span>
+                </p>
+                <div className="flex items-center gap-1">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    disabled={catalogPage <= 1 || catalog.isFetching}
+                    onClick={() => setCatalogPage((p) => Math.max(1, p - 1))}
+                  >
+                    Prev
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    disabled={
+                      catalogPage >= catalogTotalPages || catalog.isFetching
+                    }
+                    onClick={() =>
+                      setCatalogPage((p) =>
+                        Math.min(catalogTotalPages, p + 1),
+                      )
+                    }
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            ) : catalogTotal > 0 ? (
+              <p className="border-t border-[#eef2f8] px-3 py-2 text-[0.72rem] text-[#8b9bb0]">
+                {catalogTotal} product{catalogTotal === 1 ? "" : "s"} in stock
+              </p>
+            ) : null}
           </div>
         </section>
 
@@ -1277,83 +1393,94 @@ export default function RetailPosWorkstation({
             {cart.map((l) => (
               <li
                 key={l.stockLevelId}
-                className="flex items-center gap-2.5 rounded-[10px] border border-[#e8edf4] bg-[#f8fafc] px-2 py-1.5"
+                className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-[10px] border border-[#e8edf4] bg-[#f8fafc] px-2 py-1.5"
               >
                 <ProductThumb src={l.image} label={l.name} size="md" />
-                <div className="min-w-0 flex-1">
+                <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-[#0b1f33]">
                     {l.name}
                   </p>
-                  <p className="font-mono text-[0.65rem] text-[#8b9bb0]">
+                  <p className="truncate font-mono text-[0.65rem] text-[#8b9bb0]">
                     {money(l.unitPrice)} {priceUnitLabel(l.sellUnit)}
+                    {l.taxRatePercent != null
+                      ? ` · tax ${l.taxRatePercent}%`
+                      : ""}
                   </p>
+                  <div className="mt-1 flex items-center gap-2">
+                    <div className="flex shrink-0 items-center rounded-lg bg-white p-0.5 ring-1 ring-[#e4e9f0]">
+                      <button
+                        type="button"
+                        className="grid h-7 w-7 place-items-center rounded-md text-sm font-bold text-[#0b1f33] transition hover:bg-[#e8eefb]"
+                        onClick={() =>
+                          setCart((prev) =>
+                            prev
+                              .map((x) => {
+                                if (x.stockLevelId !== l.stockLevelId) return x;
+                                const step = qtyStep(x.sellUnit);
+                                const next = normalizeQty(
+                                  x.qty - step,
+                                  x.sellUnit,
+                                );
+                                return { ...x, qty: Math.max(0, next) };
+                              })
+                              .filter((x) => x.qty > 0),
+                          )
+                        }
+                      >
+                        −
+                      </button>
+                      {allowsDecimalQty(l.sellUnit) ? (
+                        <input
+                          type="number"
+                          className="w-12 border-0 bg-transparent text-center text-sm font-bold tabular-nums text-[#0b1f33] outline-none"
+                          min={0}
+                          max={l.maxQty}
+                          step={0.001}
+                          value={l.qty}
+                          onChange={(e) => {
+                            const raw = Number(e.target.value);
+                            if (!Number.isFinite(raw)) return;
+                            setCart((prev) =>
+                              prev.map((x) => {
+                                if (x.stockLevelId !== l.stockLevelId) return x;
+                                const next = normalizeQty(raw, x.sellUnit);
+                                if (next < 0 || next > x.maxQty) return x;
+                                return { ...x, qty: next };
+                              }),
+                            );
+                          }}
+                        />
+                      ) : (
+                        <span className="w-7 text-center text-sm font-bold tabular-nums text-[#0b1f33]">
+                          {l.qty}
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        className="grid h-7 w-7 place-items-center rounded-md text-sm font-bold text-[#0b1f33] transition hover:bg-[#e8eefb]"
+                        onClick={() =>
+                          setCart((prev) =>
+                            prev.map((x) => {
+                              if (x.stockLevelId !== l.stockLevelId) return x;
+                              const step = qtyStep(x.sellUnit);
+                              const next = normalizeQty(
+                                x.qty + step,
+                                x.sellUnit,
+                              );
+                              if (next > x.maxQty + 1e-9) return x;
+                              return { ...x, qty: next };
+                            }),
+                          )
+                        }
+                      >
+                        +
+                      </button>
+                    </div>
+                    <p className="min-w-0 flex-1 truncate text-right text-sm font-bold tabular-nums text-[#0b1f33]">
+                      {money(l.unitPrice * l.qty)}
+                    </p>
+                  </div>
                 </div>
-                <div className="flex items-center rounded-lg bg-white p-0.5 ring-1 ring-[#d9e0ea]">
-                  <button
-                    type="button"
-                    className="grid h-8 w-8 place-items-center rounded-md text-sm font-bold text-[#0b1f33] transition hover:bg-[#e8eefb]"
-                    onClick={() =>
-                      setCart((prev) =>
-                        prev
-                          .map((x) => {
-                            if (x.stockLevelId !== l.stockLevelId) return x;
-                            const step = qtyStep(x.sellUnit);
-                            const next = normalizeQty(x.qty - step, x.sellUnit);
-                            return { ...x, qty: Math.max(0, next) };
-                          })
-                          .filter((x) => x.qty > 0),
-                      )
-                    }
-                  >
-                    −
-                  </button>
-                  {allowsDecimalQty(l.sellUnit) ? (
-                    <input
-                      type="number"
-                      className="w-14 border-0 bg-transparent text-center text-sm font-bold tabular-nums text-[#0b1f33] outline-none"
-                      min={0}
-                      max={l.maxQty}
-                      step={0.001}
-                      value={l.qty}
-                      onChange={(e) => {
-                        const raw = Number(e.target.value);
-                        if (!Number.isFinite(raw)) return;
-                        setCart((prev) =>
-                          prev.map((x) => {
-                            if (x.stockLevelId !== l.stockLevelId) return x;
-                            const next = normalizeQty(raw, x.sellUnit);
-                            if (next < 0 || next > x.maxQty) return x;
-                            return { ...x, qty: next };
-                          }),
-                        );
-                      }}
-                    />
-                  ) : (
-                    <span className="w-7 text-center text-sm font-bold tabular-nums text-[#0b1f33]">
-                      {l.qty}
-                    </span>
-                  )}
-                  <button
-                    type="button"
-                    className="grid h-8 w-8 place-items-center rounded-md text-sm font-bold text-[#0b1f33] transition hover:bg-[#e8eefb]"
-                    onClick={() =>
-                      setCart((prev) =>
-                        prev.map((x) => {
-                          if (x.stockLevelId !== l.stockLevelId) return x;
-                          const step = qtyStep(x.sellUnit);
-                          const next = normalizeQty(x.qty + step, x.sellUnit);
-                          if (next > x.maxQty + 1e-9) return x;
-                          return { ...x, qty: next };
-                        }),
-                      )
-                    }
-                  >
-                    +
-                  </button>
-                </div>
-                <p className="w-16 text-right text-sm font-bold tabular-nums text-[#0b1f33]">
-                  {money(l.unitPrice * l.qty)}
-                </p>
               </li>
             ))}
             {!cart.length ? (
@@ -1538,22 +1665,27 @@ export default function RetailPosWorkstation({
               {taxAmount > 0 ? (
                 <div className="mt-1 flex items-baseline justify-between text-sm text-[#5a6b7d]">
                   <span>
-                    Tax
-                    {taxSettings.inclusive ? " (incl.)" : " (added)"}
-                    {` · ${(taxSettings.rate * 100).toFixed(
-                      (taxSettings.rate * 100) % 1 ? 2 : 0,
-                    )}%`}
+                    {taxSettings.inclusive
+                      ? "Tax (included in prices)"
+                      : "Tax (added)"}
                   </span>
                   <span className="tabular-nums text-[#0b1f33]">
+                    {taxSettings.inclusive ? "" : "+"}
                     {money(taxAmount)}
                   </span>
                 </div>
               ) : (
                 <div className="mt-1 flex items-baseline justify-between text-xs text-[#8b9bb0]">
                   <span>Tax</span>
-                  <span>None</span>
+                  <span>None · set on item or Settings</span>
                 </div>
               )}
+              {taxSettings.inclusive && taxAmount > 0 ? (
+                <p className="mt-1 text-[0.65rem] leading-snug text-[#8b9bb0]">
+                  Prices already include tax, so Due matches Subtotal. Turn off
+                  “Catalog prices include tax” in Settings to add tax on top.
+                </p>
+              ) : null}
               {discountNum > 0 ? (
                 <div className="mt-1 flex items-baseline justify-between text-sm text-[#0b1f33]">
                   <span>Discount</span>
@@ -1587,6 +1719,10 @@ export default function RetailPosWorkstation({
                   "cash",
                   "upi",
                   "card",
+                  "qr",
+                  "wallet",
+                  "bank_transfer",
+                  "emi",
                   "store_credit",
                   "gift_card",
                 ] as const
@@ -1611,13 +1747,54 @@ export default function RetailPosWorkstation({
                     ? "Credit"
                     : m === "gift_card"
                       ? "Gift"
-                      : m}
+                      : m === "bank_transfer"
+                        ? "Bank"
+                        : m === "wallet"
+                          ? "Wallet"
+                          : m === "qr"
+                            ? "QR"
+                            : m === "emi"
+                              ? "EMI"
+                              : m}
                 </button>
               ))}
             </div>
             {payMethod === "store_credit" ? (
               <p className="text-[0.7rem] text-[#5a6b7d]">
                 Debits customer store credit balance. Needs a linked customer.
+              </p>
+            ) : null}
+            {payMethod === "qr" ? (
+              <div className="space-y-2 rounded-[10px] border border-[#d9e0ea] bg-white p-3">
+                <p className="text-[0.7rem] text-[#5a6b7d]">
+                  Show this QR to the customer (UPI / wallet scan), then confirm
+                  payment collected.
+                </p>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  alt="Pay QR"
+                  className="mx-auto h-36 w-36 rounded-md border border-[#eef2f8] bg-white"
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(
+                    `upi://pay?am=${chargeAmount.toFixed(2)}&cu=INR&tn=${encodeURIComponent("Universal POS")}`,
+                  )}`}
+                />
+              </div>
+            ) : null}
+            {payMethod === "bank_transfer" ? (
+              <p className="text-[0.7rem] text-[#5a6b7d]">
+                Confirm bank transfer received, then charge to settle the sale.
+              </p>
+            ) : null}
+            {payMethod === "wallet" ? (
+              <p className="text-[0.7rem] text-[#5a6b7d]">
+                PhonePe / Paytm / similar — confirm collection on the device,
+                then charge.
+              </p>
+            ) : null}
+            {payMethod === "emi" ? (
+              <p className="text-[0.7rem] text-[#5a6b7d]">
+                Record EMI / installment collection at the counter (manual
+                confirm).
               </p>
             ) : null}
             {payMethod === "gift_card" ? (
@@ -1719,46 +1896,61 @@ export default function RetailPosWorkstation({
             ) : null}
 
             {customerId ? (
-              <div className="flex gap-2">
-                <Input
-                  inputMode="numeric"
-                  placeholder="Loyalty points to redeem"
-                  value={loyaltyPointsInput}
-                  onChange={(e) => {
-                    setLoyaltyPointsInput(e.target.value);
-                    setLoyaltyQuote(null);
-                  }}
-                />
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  disabled={!loyaltyPointsInput.trim()}
-                  onClick={async () => {
-                    try {
-                      const q = await loyaltyApi.quotePoints(
-                        customerId,
-                        Number(loyaltyPointsInput),
-                        totalDue + loyaltyOff,
-                      );
-                      setLoyaltyQuote({
-                        points: q.points,
-                        amountOff: q.amountOff,
-                      });
-                      toast.success(
-                        `Redeem ${q.points} pts → −${money(q.amountOff)}`,
-                      );
-                    } catch (e) {
-                      toast.error(
-                        e instanceof ApiError
-                          ? e.messages.join(", ")
-                          : "Points quote failed",
-                      );
-                    }
-                  }}
-                >
-                  Apply pts
-                </Button>
+              <div className="space-y-1.5">
+                <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
+                  Redeem loyalty points
+                </Label>
+                <div className="flex gap-2">
+                  <Input
+                    inputMode="numeric"
+                    placeholder="Points to redeem"
+                    value={loyaltyPointsInput}
+                    onChange={(e) => {
+                      setLoyaltyPointsInput(e.target.value);
+                      setLoyaltyQuote(null);
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={!loyaltyPointsInput.trim()}
+                    onClick={async () => {
+                      try {
+                        const q = await loyaltyApi.quotePoints(
+                          customerId,
+                          Number(loyaltyPointsInput),
+                          totalDue + loyaltyOff,
+                        );
+                        setLoyaltyQuote({
+                          points: q.points,
+                          amountOff: q.amountOff,
+                        });
+                        toast.success(
+                          `Redeem ${q.points} pts → −${money(q.amountOff)}`,
+                        );
+                      } catch (e) {
+                        toast.error(
+                          e instanceof ApiError
+                            ? e.messages.join(", ")
+                            : "Points quote failed",
+                        );
+                      }
+                    }}
+                  >
+                    Apply pts
+                  </Button>
+                </div>
+                {loyaltyQuote ? (
+                  <p className="text-xs text-[#1a56db]">
+                    Applied on charge: −{money(loyaltyQuote.amountOff)} (
+                    {loyaltyQuote.points} pts)
+                  </p>
+                ) : (
+                  <p className="text-[0.7rem] text-[#8b9bb0]">
+                    Apply points, then Charge — discount applies to Due.
+                  </p>
+                )}
               </div>
             ) : null}
 
@@ -1864,11 +2056,9 @@ export default function RetailPosWorkstation({
               onClick={() => void checkout()}
             >
               {busy || stripeBusy
-                ? payMethod === "cash" ||
-                  payMethod === "store_credit" ||
-                  payMethod === "gift_card"
-                  ? "Processing…"
-                  : "Opening Stripe…"
+                ? payMethod === "card" || payMethod === "upi"
+                  ? "Opening Stripe…"
+                  : "Processing…"
                 : !registerSession
                   ? "Open register to charge"
                   : allowPartial && chargeAmount < totalDue - 0.001
