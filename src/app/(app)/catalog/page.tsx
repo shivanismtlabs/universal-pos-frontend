@@ -28,6 +28,13 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { ModeBadge } from "@/components/mode-badge";
 import { ProductThumb } from "@/components/product-thumb";
+import { FieldError } from "@/components/ui/form";
+import {
+  createBrandSchema,
+  createCategorySchema,
+  zodFieldErrors,
+  zodMessages,
+} from "@/lib/validations";
 import { EntityRowActions } from "@/components/entity-row-actions";
 
 const KINDS: { value: CatalogProductKind | ""; label: string }[] = [
@@ -369,7 +376,7 @@ function ProductsPanel() {
                     <div className="flex items-center justify-end gap-0.5">
                       <EntityRowActions
                         onEdit={() =>
-                          router.push(`/catalog/view?id=${p.id}`)
+                          router.push(`/catalog/edit?id=${p.id}`)
                         }
                         editTitle="Edit"
                         onSoftDelete={
@@ -471,30 +478,53 @@ function BrandsPanel() {
   const [name, setName] = useState("");
   const [editId, setEditId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [editErrors, setEditErrors] = useState<Record<string, string>>({});
   const brands = useQuery({
     queryKey: ["catalog-brands"],
     queryFn: () => catalogApi.listBrands(),
   });
   const create = useMutation({
-    mutationFn: () => catalogApi.createBrand({ name: name.trim() }),
+    mutationFn: () => {
+      const parsed = createBrandSchema.safeParse({ name });
+      if (!parsed.success) {
+        setFieldErrors(zodFieldErrors(parsed.error));
+        toast.error(zodMessages(parsed.error)[0] ?? "Check the form");
+        throw new Error(zodMessages(parsed.error)[0] ?? "Invalid brand");
+      }
+      setFieldErrors({});
+      return catalogApi.createBrand({ name: parsed.data.name });
+    },
     onSuccess: () => {
       setName("");
+      setFieldErrors({});
       void qc.invalidateQueries({ queryKey: ["catalog-brands"] });
       toast.success("Brand created");
     },
-    onError: (e: Error) =>
-      toast.error(e instanceof ApiError ? e.message : "Failed"),
+    onError: (e: Error) => {
+      if (e instanceof ApiError) toast.error(e.message);
+    },
   });
   const update = useMutation({
-    mutationFn: () =>
-      catalogApi.updateBrand(editId!, { name: editName.trim() }),
+    mutationFn: () => {
+      const parsed = createBrandSchema.safeParse({ name: editName });
+      if (!parsed.success) {
+        setEditErrors(zodFieldErrors(parsed.error));
+        toast.error(zodMessages(parsed.error)[0] ?? "Check the form");
+        throw new Error(zodMessages(parsed.error)[0] ?? "Invalid brand");
+      }
+      setEditErrors({});
+      return catalogApi.updateBrand(editId!, { name: parsed.data.name });
+    },
     onSuccess: () => {
       setEditId(null);
+      setEditErrors({});
       void qc.invalidateQueries({ queryKey: ["catalog-brands"] });
       toast.success("Brand updated");
     },
-    onError: (e: Error) =>
-      toast.error(e instanceof ApiError ? e.message : "Update failed"),
+    onError: (e: Error) => {
+      if (e instanceof ApiError) toast.error(e.message);
+    },
   });
   const soft = useMutation({
     mutationFn: (id: string) =>
@@ -531,9 +561,16 @@ function BrandsPanel() {
           Optional on products — services often have no brand.
         </p>
         <Label>Name</Label>
-        <Input value={name} onChange={(e) => setName(e.target.value)} />
+        <Input
+          value={name}
+          onChange={(e) => {
+            setName(e.target.value);
+            setFieldErrors((f) => ({ ...f, name: "" }));
+          }}
+        />
+        <FieldError message={fieldErrors.name} />
         <Button
-          disabled={!name.trim() || create.isPending}
+          disabled={create.isPending}
           onClick={() => create.mutate()}
         >
           Save brand
@@ -553,25 +590,34 @@ function BrandsPanel() {
               <tr key={b.id} className="border-b border-[#f0f3f7]">
                 <td className="px-3 py-2 font-medium">
                   {editId === b.id ? (
-                    <div className="flex max-w-xs gap-2">
-                      <Input
-                        value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
-                      />
-                      <Button
-                        size="sm"
-                        disabled={!editName.trim() || update.isPending}
-                        onClick={() => update.mutate()}
-                      >
-                        Save
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setEditId(null)}
-                      >
-                        Cancel
-                      </Button>
+                    <div className="flex max-w-xs flex-col gap-1">
+                      <div className="flex gap-2">
+                        <Input
+                          value={editName}
+                          onChange={(e) => {
+                            setEditName(e.target.value);
+                            setEditErrors((f) => ({ ...f, name: "" }));
+                          }}
+                        />
+                        <Button
+                          size="sm"
+                          disabled={update.isPending}
+                          onClick={() => update.mutate()}
+                        >
+                          Save
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            setEditId(null);
+                            setEditErrors({});
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                      <FieldError message={editErrors.name} />
                     </div>
                   ) : (
                     b.name
@@ -629,35 +675,57 @@ function CategoriesPanel() {
   const [parentId, setParentId] = useState("");
   const [editId, setEditId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [editErrors, setEditErrors] = useState<Record<string, string>>({});
   const cats = useQuery({
     queryKey: ["catalog-categories"],
     queryFn: () => catalogApi.listCategories(),
   });
   const create = useMutation({
-    mutationFn: () =>
-      catalogApi.createCategory({
-        name: name.trim(),
+    mutationFn: () => {
+      const parsed = createCategorySchema.safeParse({ name });
+      if (!parsed.success) {
+        setFieldErrors(zodFieldErrors(parsed.error));
+        toast.error(zodMessages(parsed.error)[0] ?? "Check the form");
+        throw new Error(zodMessages(parsed.error)[0] ?? "Invalid category");
+      }
+      setFieldErrors({});
+      return catalogApi.createCategory({
+        name: parsed.data.name,
         parentId: parentId || undefined,
-      }),
+      });
+    },
     onSuccess: () => {
       setName("");
       setParentId("");
+      setFieldErrors({});
       void qc.invalidateQueries({ queryKey: ["catalog-categories"] });
       toast.success("Category created");
     },
-    onError: (e: Error) =>
-      toast.error(e instanceof ApiError ? e.message : "Failed"),
+    onError: (e: Error) => {
+      if (e instanceof ApiError) toast.error(e.message);
+    },
   });
   const update = useMutation({
-    mutationFn: () =>
-      catalogApi.updateCategory(editId!, { name: editName.trim() }),
+    mutationFn: () => {
+      const parsed = createCategorySchema.safeParse({ name: editName });
+      if (!parsed.success) {
+        setEditErrors(zodFieldErrors(parsed.error));
+        toast.error(zodMessages(parsed.error)[0] ?? "Check the form");
+        throw new Error(zodMessages(parsed.error)[0] ?? "Invalid category");
+      }
+      setEditErrors({});
+      return catalogApi.updateCategory(editId!, { name: parsed.data.name });
+    },
     onSuccess: () => {
       setEditId(null);
+      setEditErrors({});
       void qc.invalidateQueries({ queryKey: ["catalog-categories"] });
       toast.success("Category updated");
     },
-    onError: (e: Error) =>
-      toast.error(e instanceof ApiError ? e.message : "Update failed"),
+    onError: (e: Error) => {
+      if (e instanceof ApiError) toast.error(e.message);
+    },
   });
   const soft = useMutation({
     mutationFn: (id: string) =>
@@ -699,7 +767,14 @@ function CategoriesPanel() {
           Nested via parent — no separate subcategory table.
         </p>
         <Label>Name</Label>
-        <Input value={name} onChange={(e) => setName(e.target.value)} />
+        <Input
+          value={name}
+          onChange={(e) => {
+            setName(e.target.value);
+            setFieldErrors((f) => ({ ...f, name: "" }));
+          }}
+        />
+        <FieldError message={fieldErrors.name} />
         <Label>Parent (optional)</Label>
         <select
           className="h-9 w-full rounded-md border border-[#dce3ec] px-2 text-sm"
@@ -714,7 +789,7 @@ function CategoriesPanel() {
           ))}
         </select>
         <Button
-          disabled={!name.trim() || create.isPending}
+          disabled={create.isPending}
           onClick={() => create.mutate()}
         >
           Save category
@@ -735,25 +810,34 @@ function CategoriesPanel() {
               <tr key={c.id} className="border-b border-[#f0f3f7]">
                 <td className="px-3 py-2 font-medium">
                   {editId === c.id ? (
-                    <div className="flex max-w-xs gap-2">
-                      <Input
-                        value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
-                      />
-                      <Button
-                        size="sm"
-                        disabled={!editName.trim() || update.isPending}
-                        onClick={() => update.mutate()}
-                      >
-                        Save
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setEditId(null)}
-                      >
-                        Cancel
-                      </Button>
+                    <div className="flex max-w-xs flex-col gap-1">
+                      <div className="flex gap-2">
+                        <Input
+                          value={editName}
+                          onChange={(e) => {
+                            setEditName(e.target.value);
+                            setEditErrors((f) => ({ ...f, name: "" }));
+                          }}
+                        />
+                        <Button
+                          size="sm"
+                          disabled={update.isPending}
+                          onClick={() => update.mutate()}
+                        >
+                          Save
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            setEditId(null);
+                            setEditErrors({});
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                      <FieldError message={editErrors.name} />
                     </div>
                   ) : (
                     <>

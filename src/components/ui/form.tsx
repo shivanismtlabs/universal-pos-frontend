@@ -17,6 +17,27 @@ export function FieldError({
   );
 }
 
+/** Show multiple validation lines (password rules, etc.) */
+export function FieldErrors({
+  messages,
+  className,
+}: {
+  messages?: string[];
+  className?: string;
+}) {
+  if (!messages?.length) return null;
+  return (
+    <ul
+      className={cn("mt-1.5 space-y-0.5 text-xs text-[#b91c1c]", className)}
+      role="alert"
+    >
+      {messages.map((m) => (
+        <li key={m}>• {m}</li>
+      ))}
+    </ul>
+  );
+}
+
 export function FormSection({
   title,
   description,

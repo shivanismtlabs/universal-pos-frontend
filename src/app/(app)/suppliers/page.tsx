@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { X } from "lucide-react";
 import { toast } from "sonner";
 import { loyaltyApi, posApi, suppliersApi } from "@/lib/api";
@@ -12,7 +13,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import { formatDate, moneyNumber } from "@/lib/utils";
+import { FieldError } from "@/components/ui/form";
+import { formatDate, moneyNumber, newIdempotencyKey } from "@/lib/utils";
+import {
+  createSupplierSchema,
+  type CreateSupplierInput,
+  zodMessages,
+} from "@/lib/validations";
 
 export default function SuppliersPage() {
   const qc = useQueryClient();
@@ -121,7 +128,8 @@ export default function SuppliersPage() {
     setLineTaxPercent(String(rate));
   }
 
-  const supplierForm = useForm({
+  const supplierForm = useForm<CreateSupplierInput>({
+    resolver: zodResolver(createSupplierSchema),
     defaultValues: { name: "", contact: "", phone: "" },
   });
   const poForm = useForm({
@@ -131,9 +139,10 @@ export default function SuppliersPage() {
       expectedDelivery: "",
     },
   });
+  const supplierErrors = supplierForm.formState.errors;
 
   const createSupplier = useMutation({
-    mutationFn: (v: { name: string; contact: string; phone: string }) =>
+    mutationFn: (v: CreateSupplierInput) =>
       suppliersApi.create({
         name: v.name,
         contact: v.contact || undefined,
@@ -154,6 +163,18 @@ export default function SuppliersPage() {
       poType: string;
       expectedDelivery: string;
     }) => {
+      if (lineSkuId) {
+        const qty = Number(lineQty);
+        const unitCost = Number(lineUnitCost);
+        if (!(qty > 0) || !Number.isFinite(qty)) {
+          toast.error("Qty must be greater than 0");
+          throw new Error("Qty must be greater than 0");
+        }
+        if (!Number.isFinite(unitCost) || unitCost < 0) {
+          toast.error("Unit cost cannot be negative");
+          throw new Error("Unit cost cannot be negative");
+        }
+      }
       const { qty, unit, taxPct, subtotal, discount, tax, grand } = poTotals;
       const noteParts: string[] = [];
       if (lineSkuId) {
@@ -194,8 +215,13 @@ export default function SuppliersPage() {
       clearCouponAndDiscount();
       void qc.invalidateQueries({ queryKey: ["purchase-orders"] });
     },
-    onError: (e) =>
-      toast.error(e instanceof ApiError ? e.messages.join(", ") : "Failed"),
+    onError: (e) => {
+      if (e instanceof ApiError) {
+        toast.error(e.messages.join(", "));
+      } else if (!(e instanceof Error)) {
+        toast.error("Create PO failed");
+      }
+    },
   });
 
   const updatePo = useMutation({
@@ -238,13 +264,25 @@ export default function SuppliersPage() {
       id: string;
       lines: Array<{ stockLevelId: string; qty: number }>;
       reason?: string;
-    }) => suppliersApi.returnPo(id, { lines, reason }),
+    }) =>
+      suppliersApi.returnPo(id, {
+        lines,
+        reason,
+        reasonCode: "supplier_damaged",
+        createCreditNote: true,
+        idempotencyKey: newIdempotencyKey("rtv"),
+      }),
     onSuccess: (res) => {
       const n = res.returned.reduce((s, r) => s + r.qtyReturned, 0);
-      toast.success(`Returned ${n} units to supplier`);
+      const credit = res.creditNote
+        ? ` · SCN ${res.creditNote.invoiceNumber}`
+        : "";
+      toast.success(`Returned ${n} units to supplier${credit}`);
       void qc.invalidateQueries({ queryKey: ["purchase-orders"] });
       void qc.invalidateQueries({ queryKey: ["pos-sale-catalog"] });
       void qc.invalidateQueries({ queryKey: ["pos-sale-catalog-for-po"] });
+      void qc.invalidateQueries({ queryKey: ["supplier-invoices"] });
+      void qc.invalidateQueries({ queryKey: ["supplier-invoices-outstanding"] });
     },
     onError: (e) =>
       toast.error(
@@ -253,19 +291,26 @@ export default function SuppliersPage() {
   });
 
   const updateSupplier = useMutation({
-    mutationFn: () =>
-      suppliersApi.update(editId!, {
-        name: editForm.name.trim() || undefined,
-        contact: editForm.contact.trim() || undefined,
-        phone: editForm.phone.trim() || undefined,
-      }),
+    mutationFn: () => {
+      const parsed = createSupplierSchema.safeParse(editForm);
+      if (!parsed.success) {
+        toast.error(zodMessages(parsed.error).join(", "));
+        throw new Error(zodMessages(parsed.error)[0] ?? "Invalid supplier");
+      }
+      return suppliersApi.update(editId!, {
+        name: parsed.data.name,
+        contact: parsed.data.contact || undefined,
+        phone: parsed.data.phone || undefined,
+      });
+    },
     onSuccess: () => {
       toast.success("Supplier updated");
       setEditId(null);
       void qc.invalidateQueries({ queryKey: ["suppliers"] });
     },
-    onError: (e) =>
-      toast.error(e instanceof ApiError ? e.messages.join(", ") : "Failed"),
+    onError: (e) => {
+      if (e instanceof ApiError) toast.error(e.messages.join(", "));
+    },
   });
 
   return (
@@ -363,13 +408,17 @@ export default function SuppliersPage() {
             onSubmit={supplierForm.handleSubmit((v) =>
               createSupplier.mutate(v),
             )}
+            noValidate
           >
-            <Input
-              placeholder="Name"
-              {...supplierForm.register("name", { required: true })}
-            />
+            <div>
+              <Input placeholder="Name" {...supplierForm.register("name")} />
+              <FieldError message={supplierErrors.name?.message} />
+            </div>
             <Input placeholder="Contact" {...supplierForm.register("contact")} />
-            <Input placeholder="Phone" {...supplierForm.register("phone")} />
+            <div>
+              <Input placeholder="Phone" {...supplierForm.register("phone")} />
+              <FieldError message={supplierErrors.phone?.message} />
+            </div>
             <Button type="submit" size="sm" disabled={createSupplier.isPending}>
               Add supplier
             </Button>

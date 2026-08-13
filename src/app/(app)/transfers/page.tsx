@@ -13,6 +13,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { EmptyState, PageSkeleton } from "@/components/page-header";
+import { FieldError } from "@/components/ui/form";
+import {
+  stockTransferSchema,
+  zodFieldErrors,
+  zodMessages,
+} from "@/lib/validations";
 
 type Line = {
   productId: string;
@@ -223,6 +229,7 @@ function TransferComposer({
   const [q, setQ] = useState("");
   const [notes, setNotes] = useState("");
   const [lines, setLines] = useState<Line[]>([]);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const locations = useQuery({
     queryKey: ["locations"],
@@ -248,31 +255,35 @@ function TransferComposer({
 
   const transfer = useMutation({
     mutationFn: () => {
-      if (!fromId || !toId) throw new Error("Pick both locations");
-      if (fromId === toId) throw new Error("Source and destination must differ");
       const payload = lines
-        .map((l) => ({ productId: l.productId, qty: Number(l.qty) }))
-        .filter((l) => l.qty > 0);
-      if (!payload.length) throw new Error("Add at least one product qty");
-      return inventoryApi.transferStock({
+        .map((l) => ({ productId: l.productId, qty: l.qty }))
+        .filter((l) => Number(l.qty) > 0);
+      const parsed = stockTransferSchema.safeParse({
         fromLocationId: fromId,
         toLocationId: toId,
-        notes: notes.trim() || undefined,
+        notes,
         lines: payload,
+      });
+      if (!parsed.success) {
+        setFieldErrors(zodFieldErrors(parsed.error));
+        toast.error(zodMessages(parsed.error)[0] ?? "Check the form");
+        throw new Error(zodMessages(parsed.error)[0] ?? "Invalid transfer");
+      }
+      setFieldErrors({});
+      return inventoryApi.transferStock({
+        fromLocationId: parsed.data.fromLocationId,
+        toLocationId: parsed.data.toLocationId,
+        notes: parsed.data.notes?.trim() || undefined,
+        lines: parsed.data.lines,
       });
     },
     onSuccess: (data) => {
       toast.success(`Transferred ${data.lines.length} line(s)`);
       onDone();
     },
-    onError: (e) =>
-      toast.error(
-        e instanceof ApiError
-          ? e.messages.join(", ")
-          : e instanceof Error
-            ? e.message
-            : "Transfer failed",
-      ),
+    onError: (e) => {
+      if (e instanceof ApiError) toast.error(e.messages.join(", "));
+    },
   });
 
   function addProduct(row: {
@@ -298,14 +309,10 @@ function TransferComposer({
         unit: row.sellUnit || "pcs",
       },
     ]);
+    setFieldErrors((f) => ({ ...f, lines: "" }));
   }
 
-  const canSubmit =
-    Boolean(fromId) &&
-    Boolean(toId) &&
-    fromId !== toId &&
-    lines.some((l) => Number(l.qty) > 0) &&
-    !transfer.isPending;
+  const canSubmit = !transfer.isPending;
 
   const fromName = activeLocations.find((l) => l.id === fromId)?.name ?? "—";
   const toName = activeLocations.find((l) => l.id === toId)?.name ?? "—";
@@ -342,6 +349,11 @@ function TransferComposer({
                 onChange={(e) => {
                   setFromId(e.target.value);
                   setLines([]);
+                  setFieldErrors((f) => ({
+                    ...f,
+                    fromLocationId: "",
+                    toLocationId: "",
+                  }));
                 }}
               >
                 <option value="">Select…</option>
@@ -352,6 +364,7 @@ function TransferComposer({
                   </option>
                 ))}
               </select>
+              <FieldError message={fieldErrors.fromLocationId} />
             </div>
             <div className="flex items-end justify-center pb-2">
               <span className="grid h-11 w-11 place-items-center rounded-xl bg-[#e8eefb] text-[#1a56db]">
@@ -363,7 +376,10 @@ function TransferComposer({
               <select
                 className="mt-1.5 h-10 w-full rounded-lg border border-[#e4e9f0] bg-white px-2 text-sm"
                 value={toId}
-                onChange={(e) => setToId(e.target.value)}
+                onChange={(e) => {
+                  setToId(e.target.value);
+                  setFieldErrors((f) => ({ ...f, toLocationId: "" }));
+                }}
               >
                 <option value="">Select…</option>
                 {activeLocations.map((l) => (
@@ -373,6 +389,7 @@ function TransferComposer({
                   </option>
                 ))}
               </select>
+              <FieldError message={fieldErrors.toLocationId} />
             </div>
           </div>
 
@@ -382,8 +399,12 @@ function TransferComposer({
               className="mt-1.5"
               placeholder="Optional note (for example: weekend restock)"
               value={notes}
-              onChange={(e) => setNotes(e.target.value)}
+              onChange={(e) => {
+                setNotes(e.target.value);
+                setFieldErrors((f) => ({ ...f, notes: "" }));
+              }}
             />
+            <FieldError message={fieldErrors.notes} />
           </div>
 
           <div className="grid gap-4 lg:grid-cols-2">
@@ -444,6 +465,7 @@ function TransferComposer({
               <h3 className="text-sm font-semibold text-[#0b1f33]">
                 Transfer cart → {toName}
               </h3>
+              <FieldError message={fieldErrors.lines} />
               <ul className="mt-2 max-h-52 space-y-2 overflow-y-auto">
                 {lines.map((l) => (
                   <li
@@ -461,15 +483,16 @@ function TransferComposer({
                       className="h-9 w-20"
                       inputMode="decimal"
                       value={l.qty}
-                      onChange={(e) =>
+                      onChange={(e) => {
                         setLines((prev) =>
                           prev.map((x) =>
                             x.productId === l.productId
                               ? { ...x, qty: e.target.value }
                               : x,
                           ),
-                        )
-                      }
+                        );
+                        setFieldErrors((f) => ({ ...f, lines: "" }));
+                      }}
                     />
                     <button
                       type="button"

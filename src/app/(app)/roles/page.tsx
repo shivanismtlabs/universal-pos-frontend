@@ -9,7 +9,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/page-header";
+import { FieldError } from "@/components/ui/form";
 import { cn } from "@/lib/utils";
+import {
+  createRoleNameSchema,
+  zodFieldErrors,
+  zodMessages,
+} from "@/lib/validations";
 
 export default function RolesPage() {
   const qc = useQueryClient();
@@ -26,6 +32,7 @@ export default function RolesPage() {
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const selected = useMemo(
     () => (rolesQ.data ?? []).find((r) => r.id === selectedId) ?? null,
@@ -35,6 +42,7 @@ export default function RolesPage() {
   function selectRole(id: string) {
     const r = (rolesQ.data ?? []).find((x) => x.id === id);
     setSelectedId(id);
+    setFieldErrors({});
     if (r) {
       setName(r.name);
       setCode(r.code);
@@ -43,8 +51,20 @@ export default function RolesPage() {
   }
 
   const create = useMutation({
-    mutationFn: () =>
-      iamApi.createRole({ name, code: code || undefined, permissions: picked }),
+    mutationFn: () => {
+      const parsed = createRoleNameSchema.safeParse({ name });
+      if (!parsed.success) {
+        setFieldErrors(zodFieldErrors(parsed.error));
+        toast.error(zodMessages(parsed.error)[0] ?? "Check the form");
+        throw new Error(zodMessages(parsed.error)[0] ?? "Invalid role");
+      }
+      setFieldErrors({});
+      return iamApi.createRole({
+        name: parsed.data.name,
+        code: code || undefined,
+        permissions: picked,
+      });
+    },
     onSuccess: () => {
       toast.success("Role created");
       void qc.invalidateQueries({ queryKey: ["iam-roles"] });
@@ -52,16 +72,25 @@ export default function RolesPage() {
       setCode("");
       setPicked([]);
       setSelectedId(null);
+      setFieldErrors({});
     },
-    onError: (e) =>
-      toast.error(e instanceof ApiError ? e.messages.join(", ") : "Failed"),
+    onError: (e) => {
+      if (e instanceof ApiError) toast.error(e.messages.join(", "));
+    },
   });
 
   const save = useMutation({
     mutationFn: () => {
       if (!selectedId) throw new Error("none");
+      const parsed = createRoleNameSchema.safeParse({ name });
+      if (!parsed.success) {
+        setFieldErrors(zodFieldErrors(parsed.error));
+        toast.error(zodMessages(parsed.error)[0] ?? "Check the form");
+        throw new Error(zodMessages(parsed.error)[0] ?? "Invalid role");
+      }
+      setFieldErrors({});
       return iamApi.updateRole(selectedId, {
-        name,
+        name: parsed.data.name,
         permissions: picked,
       });
     },
@@ -69,8 +98,9 @@ export default function RolesPage() {
       toast.success("Role updated");
       void qc.invalidateQueries({ queryKey: ["iam-roles"] });
     },
-    onError: (e) =>
-      toast.error(e instanceof ApiError ? e.messages.join(", ") : "Failed"),
+    onError: (e) => {
+      if (e instanceof ApiError) toast.error(e.messages.join(", "));
+    },
   });
 
   const remove = useMutation({
@@ -137,6 +167,7 @@ export default function RolesPage() {
                 setName("");
                 setCode("");
                 setPicked([]);
+                setFieldErrors({});
               }}
             >
               + New custom role
@@ -154,9 +185,13 @@ export default function RolesPage() {
               <Input
                 className="mt-1.5"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  setFieldErrors((f) => ({ ...f, name: "" }));
+                }}
                 placeholder="Floor supervisor"
               />
+              <FieldError message={fieldErrors.name} />
             </div>
             <div>
               <Label>Code</Label>
@@ -206,7 +241,7 @@ export default function RolesPage() {
               <>
                 <Button
                   type="button"
-                  disabled={save.isPending || locked || !name.trim()}
+                  disabled={save.isPending || locked}
                   onClick={() => save.mutate()}
                 >
                   {save.isPending ? "Saving…" : "Save changes"}
@@ -229,7 +264,7 @@ export default function RolesPage() {
             ) : (
               <Button
                 type="button"
-                disabled={create.isPending || !name.trim()}
+                disabled={create.isPending}
                 onClick={() => create.mutate()}
               >
                 {create.isPending ? "Creating…" : "Create role"}

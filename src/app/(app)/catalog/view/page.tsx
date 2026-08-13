@@ -292,6 +292,9 @@ function CatalogProductDetailPage() {
           <Button variant="secondary" asChild>
             <Link href="/catalog">Back</Link>
           </Button>
+          <Button asChild>
+            <Link href={`/catalog/edit?id=${p.id}`}>Edit</Link>
+          </Button>
           <Button variant="secondary" onClick={() => dup.mutate()}>
             Duplicate
           </Button>

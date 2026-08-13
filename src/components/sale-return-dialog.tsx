@@ -31,6 +31,9 @@ export function SaleReturnDialog({
   const { money } = useBootstrap();
   const [mode, setMode] = useState<"return" | "exchange">(defaultMode);
   const [qtyByLevel, setQtyByLevel] = useState<Record<string, string>>({});
+  const [conditionByLevel, setConditionByLevel] = useState<
+    Record<string, string>
+  >({});
   const [method, setMethod] = useState("cash");
   const [reasonCode, setReasonCode] = useState("");
   const [reason, setReason] = useState("");
@@ -58,6 +61,8 @@ export function SaleReturnDialog({
     queryKey: ["returned-qty", orderId],
     queryFn: () => posApi.returnedQuantities(orderId),
   });
+
+  const remainingRefundable = returnedQty.data?.remainingRefundable;
 
   const catalog = useQuery({
     queryKey: ["sale-return-catalog", catalogQ],
@@ -159,6 +164,7 @@ export function SaleReturnDialog({
           l.remaining,
           Math.max(0, Math.floor(moneyNumber(qtyByLevel[l.stockLevelId] || 0))),
         ),
+        condition: conditionByLevel[l.stockLevelId] || "good",
       }))
       .filter((i) => i.quantity > 0);
 
@@ -175,14 +181,18 @@ export function SaleReturnDialog({
       | {
           kind: "return";
           status?: string;
+          message?: string;
           amount?: string | number;
           storeCreditBalance?: number | null;
           restocked?: Array<{ stockLevelId: string; quantity: number }>;
         }
       | {
           kind: "exchange";
+          message?: string;
           net: number;
           orderNumber: string;
+          invoiceNumber?: string | null;
+          exchangeOrderId?: string;
         }
     > => {
       const items = selectedReturnItems();
@@ -199,19 +209,24 @@ export function SaleReturnDialog({
         if (!replaceItems.length) {
           throw new Error("Pick at least one replacement item");
         }
+        const settle =
+          method === "original" ? "cash" : method;
         const r = await posApi.saleExchange({
           orderId,
           returnItems: items,
           replaceItems,
-          settleMethod: method,
+          settleMethod: settle,
           reasonCode,
           reason: reason.trim() || undefined,
           idempotencyKey: newIdempotencyKey("sale-exchange"),
         });
         return {
           kind: "exchange",
+          message: r.message,
           net: r.replacement.net,
           orderNumber: r.replacement.orderNumber,
+          invoiceNumber: r.replacement.invoiceNumber ?? null,
+          exchangeOrderId: r.replacement.orderId,
         };
       }
 
@@ -228,11 +243,15 @@ export function SaleReturnDialog({
     onSuccess: (r) => {
       if (r.kind === "exchange") {
         toast.success(
-          `Exchange done · net ${money(r.net)} · new ticket ${r.orderNumber}`,
+          r.message ||
+            `✓ Exchange Completed · net ${money(r.net)} · ${r.orderNumber}${
+              r.invoiceNumber ? ` · ${r.invoiceNumber}` : ""
+            }`,
         );
-      } else if (r.status === "pending") {
+      } else if (r.status === "pending" || r.status === "requested") {
         toast.success(
-          `Return submitted for approval · ${money(r.amount ?? 0)}`,
+          r.message ||
+            `Return requested — awaiting approval · ${money(r.amount ?? 0)}`,
         );
       } else {
         const credit =
@@ -240,7 +259,8 @@ export function SaleReturnDialog({
             ? ` · store credit bal ${money(r.storeCreditBalance)}`
             : "";
         toast.success(
-          `Refund ${money(r.amount)} · restocked ${r.restocked?.length ?? 0} line(s)${credit}`,
+          r.message ||
+            `✓ Return Completed · ${money(r.amount)}${credit}`,
         );
       }
       void qc.invalidateQueries({ queryKey: ["pos-sale-recent"] });
@@ -340,7 +360,7 @@ export function SaleReturnDialog({
                       · left {l.remaining} · {money(l.unitPrice)} each
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <Label className="sr-only">Return qty</Label>
                     <Input
                       className="h-9 w-20"
@@ -359,6 +379,24 @@ export function SaleReturnDialog({
                     <span className="text-xs text-[#8b9bb0]">
                       / {l.remaining}
                     </span>
+                    <Select
+                      className="h-9 w-32"
+                      value={conditionByLevel[l.stockLevelId] ?? "good"}
+                      onChange={(e) =>
+                        setConditionByLevel((m) => ({
+                          ...m,
+                          [l.stockLevelId]: e.target.value,
+                        }))
+                      }
+                    >
+                      <option value="good">Good / resellable</option>
+                      <option value="damaged">Damaged</option>
+                      <option value="defective">Defective</option>
+                      <option value="opened">Opened</option>
+                      <option value="used">Used</option>
+                      <option value="quarantine">Quarantine</option>
+                      <option value="scrap">Scrap</option>
+                    </Select>
                   </div>
                 </li>
               ))}
@@ -430,8 +468,9 @@ export function SaleReturnDialog({
               <option value="upi">UPI</option>
               <option value="card">Card</option>
               {mode === "return" ? (
-                <option value="store_credit">Store credit</option>
+                <option value="original">Original payment method</option>
               ) : null}
+              <option value="store_credit">Store credit</option>
             </Select>
           </div>
           <div>
@@ -460,11 +499,22 @@ export function SaleReturnDialog({
         </div>
 
         <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-[#eef2f8] pt-4">
-          <p className="text-sm font-semibold text-[#0b1f33]">
-            {mode === "exchange"
-              ? `Net ${money(replacePreview - refundPreview)}`
-              : `Refund ${money(refundPreview)}`}
-          </p>
+          <div>
+            <p className="text-sm font-semibold text-[#0b1f33]">
+              {mode === "exchange"
+                ? `Net ${money(replacePreview - refundPreview)}`
+                : `Refund ${money(refundPreview)}`}
+            </p>
+            {remainingRefundable != null ? (
+              <p className="text-xs text-[#5a6b7d]">
+                Remaining refundable {money(remainingRefundable)}
+              </p>
+            ) : null}
+            <p className="mt-1 text-[0.7rem] text-[#8a9bb0]">
+              Final amount is calculated on the server (tax + discount from the
+              original bill). Preview is approximate.
+            </p>
+          </div>
           <Button
             type="button"
             disabled={

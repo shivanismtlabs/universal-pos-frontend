@@ -8,10 +8,16 @@ import { AuthShell } from "@/components/auth-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { FieldError } from "@/components/ui/form";
+import { FieldError, FieldErrors } from "@/components/ui/form";
 import { authApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
-import { strongPasswordSchema } from "@/lib/validations";
+import {
+  forgotPasswordEmailSchema,
+  resetPasswordSchema,
+  zodFieldErrors,
+  zodMessages,
+} from "@/lib/validations";
+import { ZodError } from "zod";
 
 type Step = "email" | "otp";
 
@@ -24,15 +30,22 @@ export default function ForgotPasswordForm() {
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
   const [devCode, setDevCode] = useState<string | null>(null);
-  const [fieldError, setFieldError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [passwordMessages, setPasswordMessages] = useState<string[]>([]);
+
+  function clearErrors() {
+    setFieldErrors({});
+    setPasswordMessages([]);
+  }
 
   async function sendOtp() {
-    setFieldError(null);
-    const trimmed = email.trim().toLowerCase();
-    if (!trimmed.includes("@")) {
-      setFieldError("Enter a valid email");
+    clearErrors();
+    const parsed = forgotPasswordEmailSchema.safeParse({ email });
+    if (!parsed.success) {
+      setFieldErrors(zodFieldErrors(parsed.error));
       return;
     }
+    const trimmed = parsed.data.email;
     setBusy(true);
     try {
       const res = await authApi.forgotPassword(trimmed);
@@ -54,27 +67,28 @@ export default function ForgotPasswordForm() {
 
   async function resetPassword(e: React.FormEvent) {
     e.preventDefault();
-    setFieldError(null);
-    const code = otp.trim();
-    if (!/^\d{6}$/.test(code)) {
-      setFieldError("Enter the 6-digit OTP");
-      return;
-    }
-    const pw = strongPasswordSchema.safeParse(password);
-    if (!pw.success) {
-      setFieldError(pw.error.issues[0]?.message ?? "Invalid password");
-      return;
-    }
-    if (password !== confirm) {
-      setFieldError("Passwords do not match");
+    clearErrors();
+    const parsed = resetPasswordSchema.safeParse({
+      otp,
+      password,
+      confirm,
+    });
+    if (!parsed.success) {
+      setFieldErrors(zodFieldErrors(parsed.error));
+      const pwIssues = parsed.error.issues.filter(
+        (i) => i.path[0] === "password",
+      );
+      setPasswordMessages(
+        pwIssues.length ? zodMessages(new ZodError(pwIssues)) : [],
+      );
       return;
     }
     setBusy(true);
     try {
       const res = await authApi.resetPassword({
         email,
-        otp: code,
-        newPassword: password,
+        otp: parsed.data.otp,
+        newPassword: parsed.data.password,
       });
       toast.success(res.message);
       router.replace("/login");
@@ -113,7 +127,7 @@ export default function ForgotPasswordForm() {
               value={email}
               onChange={(ev) => setEmail(ev.target.value)}
             />
-            <FieldError message={fieldError ?? undefined} />
+            <FieldError message={fieldErrors.email} />
           </div>
           <Button type="submit" className="w-full" disabled={busy}>
             {busy ? "Sending…" : "Send OTP"}
@@ -148,6 +162,7 @@ export default function ForgotPasswordForm() {
               value={otp}
               onChange={(ev) => setOtp(ev.target.value.replace(/\D/g, "").slice(0, 6))}
             />
+            <FieldError message={fieldErrors.otp} />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="fp-password">New password</Label>
@@ -161,6 +176,7 @@ export default function ForgotPasswordForm() {
             <p className="text-[0.7rem] text-[#8b9bb0]">
               8+ chars, upper, lower, number, special character
             </p>
+            <FieldErrors messages={passwordMessages} />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="fp-confirm">Confirm password</Label>
@@ -171,7 +187,7 @@ export default function ForgotPasswordForm() {
               value={confirm}
               onChange={(ev) => setConfirm(ev.target.value)}
             />
-            <FieldError message={fieldError ?? undefined} />
+            <FieldError message={fieldErrors.confirm} />
           </div>
           <Button type="submit" className="w-full" disabled={busy}>
             {busy ? "Updating…" : "Reset password"}

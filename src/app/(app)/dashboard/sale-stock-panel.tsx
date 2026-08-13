@@ -47,7 +47,7 @@ const EMPTY = {
   sku: "",
   sellUnit: "pcs" as SellUnit | string,
   price: "",
-  qty: "0",
+  qty: "1",
   manufacturer: "",
   brand: "",
   barcode: "",
@@ -1131,7 +1131,10 @@ export function SaleStockPanel({
                           <Label className="sm:pt-2.5">Opening Stock *</Label>
                           <div>
                             <Input
-                              inputMode="decimal"
+                              type="number"
+                              inputMode="numeric"
+                              min={1}
+                              step={1}
                               value={form.qty}
                               onChange={(e) =>
                                 setForm((f) => ({
@@ -1146,7 +1149,7 @@ export function SaleStockPanel({
                               </p>
                             ) : (
                               <p className="mt-1 text-[0.65rem] text-[#8b9bb0]">
-                                Stock on Hand after save (current location)
+                                Minimum 1 — 0 / 0.1 / 0.2 not allowed
                               </p>
                             )}
                           </div>
@@ -1829,13 +1832,13 @@ export function SaleStockPanel({
                               <Label>Stock on hand</Label>
                               <Input
                                 type="number"
+                                min={0}
                                 step={
                                   draft?.sellUnit === "kg" ||
                                   draft?.sellUnit === "L"
                                     ? "0.001"
                                     : "1"
                                 }
-                                min="0"
                                 value={draft?.qty ?? ""}
                                 onChange={(e) =>
                                   setDraft((d) =>

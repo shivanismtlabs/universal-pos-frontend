@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Check,
@@ -59,7 +59,7 @@ function firstName(full?: string | null) {
  * commerce-mode aware — sale unlocks inventory steps; never industry-hardcoded.
  */
 export function HomeGettingStarted() {
-  const { hasMode, productName } = useBootstrap();
+  const { hasMode, productName, data: boot } = useBootstrap();
   const user = useAuthStore((s) => s.user);
   const hasSale = hasMode("sale");
   const [importOpen, setImportOpen] = useState(false);
@@ -71,6 +71,33 @@ export function HomeGettingStarted() {
   });
 
   const products = floor.data?.counts?.products ?? 0;
+  const inStock = floor.data?.counts?.inStock ?? 0;
+
+  const taxConfigured = useMemo(() => {
+    const t = boot?.tenant;
+    if (!t) return false;
+    if (t.taxId || t.gstin) return true;
+    const settings =
+      t.settings && typeof t.settings === "object"
+        ? (t.settings as Record<string, unknown>)
+        : {};
+    const tax =
+      settings.tax && typeof settings.tax === "object"
+        ? (settings.tax as Record<string, unknown>)
+        : {};
+    if (t.taxMode === "none") return true;
+    return (
+      typeof tax.ratePercent === "number" ||
+      (typeof tax.ratePercent === "string" && tax.ratePercent.trim() !== "")
+    );
+  }, [boot?.tenant]);
+
+  const prefsConfigured = useMemo(() => {
+    const branding = boot?.tenant?.branding;
+    return Boolean(
+      branding?.productName?.trim() || branding?.tagline?.trim(),
+    );
+  }, [boot?.tenant?.branding]);
 
   const steps = useMemo((): StepDef[] => {
     const list: StepDef[] = [
@@ -92,7 +119,7 @@ export function HomeGettingStarted() {
           "Set tax IDs, rates, and receipt fields so invoices match your region (GST/VAT or none).",
         tip: "Tax applies at checkout for any commerce mode you enable.",
         primary: { label: "Tax & shop settings", href: "/settings" },
-        done: false,
+        done: taxConfigured,
       },
     ];
 
@@ -117,7 +144,7 @@ export function HomeGettingStarted() {
           tip: "Purchases from suppliers restock multiple items at once.",
           primary: { label: "Suppliers / purchases", href: "/suppliers" },
           secondary: { label: "Stock levels", href: "/inventory" },
-          done: products > 0 && (floor.data?.counts?.inStock ?? 0) > 0,
+          done: products > 0 && inStock > 0,
         },
       );
     }
@@ -131,7 +158,7 @@ export function HomeGettingStarted() {
           "Branding, receipts, PIN switch, and commerce modes stay under one shop profile.",
         primary: { label: "Preferences", href: "/settings" },
         secondary: { label: "Software plan", href: "/plan" },
-        done: false,
+        done: prefsConfigured,
       },
       {
         id: "register",
@@ -141,7 +168,7 @@ export function HomeGettingStarted() {
           "Open the counter, run a sales register for the shift, and take your first payment.",
         primary: { label: "Open counter", href: "/counter" },
         secondary: { label: "All orders", href: "/orders" },
-        done: false,
+        done: prefsConfigured,
       },
       {
         id: "customers",
@@ -151,15 +178,37 @@ export function HomeGettingStarted() {
           "Save customers for credit and history. Review sales and export CSV when needed.",
         primary: { label: "Customers", href: "/customers" },
         secondary: { label: "Reports", href: "/reports" },
-        done: false,
+        done: prefsConfigured,
       },
     );
 
     return list.map((s, i) => ({ ...s, n: i + 1 }));
-  }, [hasSale, products, floor.data?.counts?.inStock]);
+  }, [hasSale, products, inStock, taxConfigured, prefsConfigured]);
 
-  const firstOpen = steps.find((s) => !s.done)?.id ?? steps[0]?.id ?? "store";
+  const unlockedIds = useMemo(() => {
+    const ids = new Set<StepId>();
+    let lockedRest = false;
+    for (const step of steps) {
+      if (lockedRest) break;
+      ids.add(step.id);
+      if (!step.done) lockedRest = true;
+    }
+    return ids;
+  }, [steps]);
+
+  const firstOpen =
+    steps.find((s) => unlockedIds.has(s.id) && !s.done)?.id ??
+    steps.find((s) => unlockedIds.has(s.id))?.id ??
+    steps[0]?.id ??
+    "store";
   const [activeId, setActiveId] = useState<StepId>(firstOpen);
+
+  useEffect(() => {
+    if (!unlockedIds.has(activeId)) {
+      setActiveId(firstOpen);
+    }
+  }, [activeId, firstOpen, unlockedIds]);
+
   const active = steps.find((s) => s.id === activeId) ?? steps[0];
   const doneCount = steps.filter((s) => s.done).length;
   const total = steps.length;
@@ -194,14 +243,27 @@ export function HomeGettingStarted() {
         <ol className="divide-y divide-[#eef1f4] border-b border-[#eef1f4] lg:border-r lg:border-b-0">
           {steps.map((s) => {
             const selected = s.id === active?.id;
+            const locked = !unlockedIds.has(s.id);
             return (
               <li key={s.id}>
                 <button
                   type="button"
-                  onClick={() => setActiveId(s.id)}
+                  disabled={locked}
+                  title={
+                    locked
+                      ? "Complete the previous step first"
+                      : undefined
+                  }
+                  onClick={() => {
+                    if (!locked) setActiveId(s.id);
+                  }}
                   className={cn(
                     "flex w-full items-center gap-3 px-4 py-3.5 text-left transition sm:px-5",
-                    selected ? "bg-[#eef4ff]" : "bg-white hover:bg-[#f8fafc]",
+                    locked
+                      ? "cursor-not-allowed bg-[#f8fafc] opacity-55"
+                      : selected
+                        ? "bg-[#eef4ff]"
+                        : "bg-white hover:bg-[#f8fafc]",
                   )}
                 >
                   <span
@@ -209,9 +271,11 @@ export function HomeGettingStarted() {
                       "grid h-7 w-7 shrink-0 place-items-center rounded-full text-[0.75rem] font-semibold",
                       s.done
                         ? "bg-[#1a56db] text-white"
-                        : selected
-                          ? "border-2 border-[#1a56db] text-[#1a56db]"
-                          : "border border-[#cfd8e6] text-[#5a6b7d]",
+                        : locked
+                          ? "border border-[#d9e0ea] text-[#9aa8b8]"
+                          : selected
+                            ? "border-2 border-[#1a56db] text-[#1a56db]"
+                            : "border border-[#cfd8e6] text-[#5a6b7d]",
                     )}
                   >
                     {s.done ? (
@@ -223,17 +287,28 @@ export function HomeGettingStarted() {
                   <span
                     className={cn(
                       "min-w-0 flex-1 text-[0.9rem]",
-                      selected
-                        ? "font-semibold text-[#0b1f33]"
-                        : "font-medium text-[#2c3e50]",
+                      locked
+                        ? "font-medium text-[#8b9bb0]"
+                        : selected
+                          ? "font-semibold text-[#0b1f33]"
+                          : "font-medium text-[#2c3e50]",
                     )}
                   >
                     {s.title}
+                    {locked ? (
+                      <span className="mt-0.5 block text-[0.7rem] font-normal text-[#9aa8b8]">
+                        Complete previous step to unlock
+                      </span>
+                    ) : null}
                   </span>
                   <ChevronRight
                     className={cn(
                       "h-4 w-4 shrink-0",
-                      selected ? "text-[#1a56db]" : "text-[#cfd8e6]",
+                      locked
+                        ? "text-[#d9e0ea]"
+                        : selected
+                          ? "text-[#1a56db]"
+                          : "text-[#cfd8e6]",
                     )}
                   />
                 </button>
@@ -278,7 +353,7 @@ export function HomeGettingStarted() {
                     with.
                   </p>
                   <Button asChild className="mt-5" variant="secondary">
-                    <Link href="/catalog?panel=add">Add Item</Link>
+                    <Link href="/catalog/new">Add Item</Link>
                   </Button>
                 </div>
               </div>

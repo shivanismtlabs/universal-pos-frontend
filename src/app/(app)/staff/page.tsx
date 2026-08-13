@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 import {
   Users,
@@ -18,20 +19,16 @@ import { ApiError } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { FieldError } from "@/components/ui/form";
 import { useAuthStore } from "@/lib/auth-store";
-import { passwordStrength } from "@/lib/validations";
+import {
+  inviteStaffSchema,
+  passwordStrength,
+  type InviteStaffInput,
+} from "@/lib/validations";
 import { PageHeader } from "@/components/page-header";
 import { SetPinDialog } from "@/components/set-pin-dialog";
 import { cn } from "@/lib/utils";
-
-type Form = {
-  fullName: string;
-  email: string;
-  password: string;
-  phone: string;
-  roleCode: string;
-  primaryStoreId: string;
-};
 
 const ROLE_LABELS: Record<string, string> = {
   admin: "Admin",
@@ -122,7 +119,10 @@ export default function StaffPage() {
     queryFn: () => iamApi.openAttendance(),
   });
 
-  const form = useForm<Form>({
+  const form = useForm<InviteStaffInput>({
+    resolver: zodResolver(inviteStaffSchema),
+    criteriaMode: "all",
+    mode: "onBlur",
     defaultValues: {
       fullName: "",
       email: "",
@@ -134,9 +134,10 @@ export default function StaffPage() {
   });
   const watchPassword = form.watch("password") ?? "";
   const strength = passwordStrength(watchPassword);
+  const { errors } = form.formState;
 
   const create = useMutation({
-    mutationFn: (v: Form) =>
+    mutationFn: (v: InviteStaffInput) =>
       usersApi.create({
         fullName: v.fullName,
         email: v.email,
@@ -383,34 +384,28 @@ export default function StaffPage() {
             <form
               className="mt-4 space-y-3"
               onSubmit={form.handleSubmit((v) => create.mutate(v))}
+              noValidate
             >
               <div>
                 <Label>Full name</Label>
-                <Input
-                  className="mt-1.5"
-                  {...form.register("fullName", { required: true })}
-                />
+                <Input className="mt-1.5" {...form.register("fullName")} />
+                <FieldError message={errors.fullName?.message} />
               </div>
               <div>
                 <Label>Email</Label>
                 <Input
                   className="mt-1.5"
                   type="email"
-                  {...form.register("email", { required: true })}
+                  {...form.register("email")}
                 />
+                <FieldError message={errors.email?.message} />
               </div>
               <div>
                 <Label>Password</Label>
                 <Input
                   className="mt-1.5"
                   type="password"
-                  {...form.register("password", {
-                    required: true,
-                    minLength: 8,
-                    validate: (v) =>
-                      passwordStrength(v).ok ||
-                      "Need 8–72 chars with upper, lower, number, special",
-                  })}
+                  {...form.register("password")}
                 />
                 <ul className="mt-1.5 grid grid-cols-2 gap-0.5 text-[0.65rem] text-[#6b7280]">
                   {(
@@ -432,6 +427,7 @@ export default function StaffPage() {
                     </li>
                   ))}
                 </ul>
+                <FieldError message={errors.password?.message} />
               </div>
               <div>
                 <Label>Phone</Label>
@@ -440,6 +436,7 @@ export default function StaffPage() {
                   placeholder="+91… or any country"
                   {...form.register("phone")}
                 />
+                <FieldError message={errors.phone?.message} />
               </div>
               <div>
                 <Label>Role</Label>
@@ -453,6 +450,7 @@ export default function StaffPage() {
                     </option>
                   ))}
                 </select>
+                <FieldError message={errors.roleCode?.message} />
                 <p className="mt-1 text-[0.7rem] text-[#6b7280]">
                   {allRoleOptions.find(
                     (r) => r.value === form.watch("roleCode"),

@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useState, type ComponentType } from "react";
+import { useEffect, useMemo, useState, type ComponentType } from "react";
 import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -23,43 +25,67 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { FieldError } from "@/components/ui/form";
 import { authApi, appsApi, type PortalSessionResponse } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useAuthStore } from "@/lib/auth-store";
 import { applyPortalResponse } from "@/lib/auth-portal";
 import { cn } from "@/lib/utils";
+import {
+  INDIAN_STATES,
+  citiesForState,
+  isKnownIndianState,
+} from "@/lib/india-locations";
+import { phoneSchema } from "@/lib/validations";
 
-const INDIAN_STATES = [
-  "Andhra Pradesh",
-  "Arunachal Pradesh",
-  "Assam",
-  "Bihar",
-  "Chhattisgarh",
-  "Delhi",
-  "Goa",
-  "Gujarat",
-  "Haryana",
-  "Himachal Pradesh",
-  "Jharkhand",
-  "Karnataka",
-  "Kerala",
-  "Madhya Pradesh",
-  "Maharashtra",
-  "Manipur",
-  "Meghalaya",
-  "Mizoram",
-  "Nagaland",
-  "Odisha",
-  "Punjab",
-  "Rajasthan",
-  "Sikkim",
-  "Tamil Nadu",
-  "Telangana",
-  "Tripura",
-  "Uttar Pradesh",
-  "Uttarakhand",
-  "West Bengal",
-];
+const createOrgSchema = z
+  .object({
+    businessType: z.string().min(1, "Select a business type"),
+    organizationName: z
+      .string()
+      .trim()
+      .min(2, "Organization name must be at least 2 characters")
+      .max(100, "Organization name is too long"),
+    phone: phoneSchema.optional().or(z.literal("")),
+    addressLine1: z
+      .string()
+      .trim()
+      .min(3, "Enter street address")
+      .max(255, "Address is too long"),
+    state: z
+      .string()
+      .min(1, "Select a state")
+      .refine(isKnownIndianState, "Select a valid state"),
+    city: z.string().min(1, "Select a city"),
+    postalCode: z
+      .string()
+      .trim()
+      .regex(/^\d{6}$/, "Enter a valid 6-digit PIN code"),
+    currencyCode: z.string().min(3).max(3),
+    fiscalYearStart: z.string().min(1),
+    inventoryStartDate: z.string().min(1, "Inventory start date is required"),
+    taxId: z
+      .string()
+      .trim()
+      .max(20)
+      .refine(
+        (v) => !v || /^[0-9A-Z]{15}$/i.test(v.replace(/\s/g, "")),
+        "GSTIN must be 15 characters (letters/numbers)",
+      ),
+    storeName: z.string().trim().max(100).optional().or(z.literal("")),
+  })
+  .superRefine((v, ctx) => {
+    const cities = citiesForState(v.state);
+    if (cities.length && !cities.includes(v.city)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["city"],
+        message: "Select a city for the chosen state",
+      });
+    }
+  });
+
+type CreateForm = z.infer<typeof createOrgSchema>;
 
 type IconType = ComponentType<{ className?: string }>;
 
@@ -111,21 +137,6 @@ const BUSINESS_TYPES: Array<{
   },
 ];
 
-type CreateForm = {
-  businessType: string;
-  organizationName: string;
-  phone: string;
-  addressLine1: string;
-  city: string;
-  state: string;
-  postalCode: string;
-  currencyCode: string;
-  fiscalYearStart: string;
-  inventoryStartDate: string;
-  taxId: string;
-  storeName: string;
-};
-
 export default function OrganizationsPage() {
   const router = useRouter();
   const qc = useQueryClient();
@@ -146,6 +157,8 @@ export default function OrganizationsPage() {
   const [customFields, setCustomFields] = useState<string[]>([""]);
 
   const form = useForm<CreateForm>({
+    resolver: zodResolver(createOrgSchema),
+    mode: "onBlur",
     defaultValues: {
       businessType: "retail",
       organizationName: "",
@@ -163,7 +176,16 @@ export default function OrganizationsPage() {
   });
 
   const selectedBusinessType = form.watch("businessType");
+  const selectedState = form.watch("state");
+  const cityOptions = useMemo(
+    () => citiesForState(selectedState || ""),
+    [selectedState],
+  );
   const isOther = selectedBusinessType === "other";
+
+  useEffect(() => {
+    form.setValue("city", "");
+  }, [selectedState, form]);
 
   useEffect(() => {
     setHydrated(true);
@@ -261,7 +283,7 @@ export default function OrganizationsPage() {
           customItemFields && customItemFields.length
             ? customItemFields
             : undefined,
-        phone: values.phone.trim() || undefined,
+        phone: values.phone?.trim() || undefined,
         addressLine1: values.addressLine1.trim() || undefined,
         city: values.city.trim() || undefined,
         state: values.state.trim() || undefined,
@@ -271,8 +293,8 @@ export default function OrganizationsPage() {
         locale: "en-IN",
         fiscalYearStart: values.fiscalYearStart || undefined,
         inventoryStartDate: values.inventoryStartDate || undefined,
-        taxId: values.taxId.trim() || undefined,
-        storeName: values.storeName.trim() || undefined,
+        taxId: values.taxId?.trim() || undefined,
+        storeName: values.storeName?.trim() || undefined,
       });
       await enterApp(data);
     } catch (e) {
@@ -545,10 +567,10 @@ export default function OrganizationsPage() {
                         <Input
                           className="mt-1"
                           placeholder="City Apparel Store"
-                          {...form.register("organizationName", {
-                            required: true,
-                            minLength: 2,
-                          })}
+                          {...form.register("organizationName")}
+                        />
+                        <FieldError
+                          message={form.formState.errors.organizationName?.message}
                         />
                       </div>
                       <div>
@@ -558,6 +580,9 @@ export default function OrganizationsPage() {
                           placeholder="Main Store"
                           {...form.register("storeName")}
                         />
+                        <FieldError
+                          message={form.formState.errors.storeName?.message}
+                        />
                       </div>
                       <div>
                         <Label>Phone</Label>
@@ -566,46 +591,82 @@ export default function OrganizationsPage() {
                           placeholder="+91 …"
                           {...form.register("phone")}
                         />
+                        <FieldError
+                          message={form.formState.errors.phone?.message}
+                        />
                       </div>
                       <div className="sm:col-span-2">
-                        <Label>Address</Label>
+                        <Label>Address *</Label>
                         <Input
                           className="mt-1"
                           placeholder="Street address"
                           {...form.register("addressLine1")}
                         />
+                        <FieldError
+                          message={form.formState.errors.addressLine1?.message}
+                        />
                       </div>
                       <div>
-                        <Label>City</Label>
-                        <Input className="mt-1" {...form.register("city")} />
-                      </div>
-                      <div>
-                        <Label>State</Label>
+                        <Label>State *</Label>
                         <Select
                           className="mt-1"
                           {...form.register("state")}
                         >
-                          <option value="">Select state</option>
+                          <option value="">Select state first</option>
                           {INDIAN_STATES.map((s) => (
                             <option key={s} value={s}>
                               {s}
                             </option>
                           ))}
                         </Select>
+                        <FieldError
+                          message={form.formState.errors.state?.message}
+                        />
                       </div>
                       <div>
-                        <Label>Postal code</Label>
+                        <Label>City *</Label>
+                        <Select
+                          className="mt-1"
+                          disabled={!selectedState}
+                          {...form.register("city")}
+                        >
+                          <option value="">
+                            {selectedState
+                              ? "Select city"
+                              : "Select state first"}
+                          </option>
+                          {cityOptions.map((c) => (
+                            <option key={c} value={c}>
+                              {c}
+                            </option>
+                          ))}
+                        </Select>
+                        <FieldError
+                          message={form.formState.errors.city?.message}
+                        />
+                      </div>
+                      <div>
+                        <Label>Postal code *</Label>
                         <Input
                           className="mt-1"
+                          inputMode="numeric"
+                          maxLength={6}
+                          placeholder="6-digit PIN"
                           {...form.register("postalCode")}
+                        />
+                        <FieldError
+                          message={form.formState.errors.postalCode?.message}
                         />
                       </div>
                       <div>
                         <Label>Tax ID / GSTIN</Label>
                         <Input
                           className="mt-1 uppercase"
-                          placeholder="29AABCU…"
+                          placeholder="29AABCU9603R1ZM"
                           {...form.register("taxId")}
+                        />
+                        <FieldError
+                          message={form.formState.errors.taxId?.message}
                         />
                       </div>
                       <div>

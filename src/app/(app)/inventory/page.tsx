@@ -23,6 +23,12 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { EntityRowActions } from "@/components/entity-row-actions";
 import { PageSkeleton } from "@/components/page-header";
+import { FieldError } from "@/components/ui/form";
+import {
+  stockMoveSchema,
+  zodFieldErrors,
+  zodMessages,
+} from "@/lib/validations";
 
 type Tab =
   | "levels"
@@ -469,13 +475,26 @@ function MoveTab({
   const [stockLevelId, setStockLevelId] = useState("");
   const [qty, setQty] = useState("1");
   const [reason, setReason] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const run = useMutation({
     mutationFn: () => {
-      const body = {
+      const parsed = stockMoveSchema.safeParse({
         locationId,
-        reason: reason || undefined,
-        lines: [{ stockLevelId, qty: Number(qty) }],
+        stockLevelId,
+        qty,
+        reason,
+      });
+      if (!parsed.success) {
+        setFieldErrors(zodFieldErrors(parsed.error));
+        toast.error(zodMessages(parsed.error)[0] ?? "Check the form");
+        throw new Error(zodMessages(parsed.error)[0] ?? "Invalid stock move");
+      }
+      setFieldErrors({});
+      const body = {
+        locationId: parsed.data.locationId,
+        reason: parsed.data.reason || undefined,
+        lines: [{ stockLevelId: parsed.data.stockLevelId, qty: parsed.data.qty }],
       };
       return mode === "in"
         ? inventoryApi.stockIn(body)
@@ -485,11 +504,13 @@ function MoveTab({
       toast.success(mode === "in" ? "Stock in recorded" : "Stock out recorded");
       setQty("1");
       setReason("");
+      setFieldErrors({});
       void qc.invalidateQueries({ queryKey: ["inv-levels"] });
       void qc.invalidateQueries({ queryKey: ["inv-ledger"] });
     },
-    onError: (e: Error) =>
-      toast.error(e instanceof ApiError ? e.message : "Failed"),
+    onError: (e: Error) => {
+      if (e instanceof ApiError) toast.error(e.message);
+    },
   });
 
   if (!canWrite) {
@@ -501,12 +522,18 @@ function MoveTab({
       <h3 className="font-semibold">
         {mode === "in" ? "Stock In" : "Stock Out"}
       </h3>
+      {!locationId ? (
+        <FieldError message="Select a location" />
+      ) : null}
       <div>
         <Label>Item</Label>
         <select
           className="h-9 w-full rounded-md border border-[#dce3ec] px-2 text-sm"
           value={stockLevelId}
-          onChange={(e) => setStockLevelId(e.target.value)}
+          onChange={(e) => {
+            setStockLevelId(e.target.value);
+            setFieldErrors((f) => ({ ...f, stockLevelId: "" }));
+          }}
         >
           <option value="">Select…</option>
           {(levels.data?.items ?? []).map((i) => (
@@ -515,6 +542,7 @@ function MoveTab({
             </option>
           ))}
         </select>
+        <FieldError message={fieldErrors.stockLevelId} />
       </div>
       <div>
         <Label>Quantity</Label>
@@ -523,21 +551,29 @@ function MoveTab({
           min={0.001}
           step="any"
           value={qty}
-          onChange={(e) => setQty(e.target.value)}
+          onChange={(e) => {
+            setQty(e.target.value);
+            setFieldErrors((f) => ({ ...f, qty: "" }));
+          }}
         />
+        <FieldError message={fieldErrors.qty} />
       </div>
       <div>
         <Label>Reason</Label>
         <Input
           value={reason}
-          onChange={(e) => setReason(e.target.value)}
+          onChange={(e) => {
+            setReason(e.target.value);
+            setFieldErrors((f) => ({ ...f, reason: "" }));
+          }}
           placeholder={
             mode === "in" ? "GRN, found stock, return…" : "Write-off, usage…"
           }
         />
+        <FieldError message={fieldErrors.reason} />
       </div>
       <Button
-        disabled={!stockLevelId || !Number(qty) || run.isPending}
+        disabled={run.isPending}
         onClick={() => run.mutate()}
       >
         {mode === "in" ? "Receive stock" : "Issue stock"}
@@ -575,39 +611,67 @@ function DamageTab({
   const [qty, setQty] = useState("1");
   const [reason, setReason] = useState("");
   const [restoreQty, setRestoreQty] = useState<Record<string, string>>({});
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const mark = useMutation({
-    mutationFn: () =>
-      inventoryApi.markDamaged({
+    mutationFn: () => {
+      const parsed = stockMoveSchema.safeParse({
         locationId,
         stockLevelId,
-        qty: Number(qty),
-        reason: reason || undefined,
-      }),
+        qty,
+        reason,
+      });
+      if (!parsed.success) {
+        setFieldErrors(zodFieldErrors(parsed.error));
+        toast.error(zodMessages(parsed.error)[0] ?? "Check the form");
+        throw new Error(zodMessages(parsed.error)[0] ?? "Invalid qty");
+      }
+      setFieldErrors({});
+      return inventoryApi.markDamaged({
+        locationId: parsed.data.locationId,
+        stockLevelId: parsed.data.stockLevelId,
+        qty: parsed.data.qty,
+        reason: parsed.data.reason || undefined,
+      });
+    },
     onSuccess: () => {
       toast.success("Moved to damaged");
       setQty("1");
       setReason("");
+      setFieldErrors({});
       void qc.invalidateQueries({ queryKey: ["inv-levels"] });
     },
-    onError: (e: Error) =>
-      toast.error(e instanceof ApiError ? e.message : "Failed"),
+    onError: (e: Error) => {
+      if (e instanceof ApiError) toast.error(e.message);
+    },
   });
 
   const restore = useMutation({
-    mutationFn: ({ id, amount }: { id: string; amount: number }) =>
-      inventoryApi.restoreDamaged({
+    mutationFn: ({ id, amount }: { id: string; amount: number }) => {
+      const parsed = stockMoveSchema.safeParse({
         locationId,
         stockLevelId: id,
         qty: amount,
         reason: "Restored to sellable",
-      }),
+      });
+      if (!parsed.success) {
+        toast.error(zodMessages(parsed.error)[0] ?? "Invalid quantity");
+        throw new Error(zodMessages(parsed.error)[0] ?? "Invalid qty");
+      }
+      return inventoryApi.restoreDamaged({
+        locationId: parsed.data.locationId,
+        stockLevelId: parsed.data.stockLevelId,
+        qty: parsed.data.qty,
+        reason: "Restored to sellable",
+      });
+    },
     onSuccess: () => {
       toast.success("Restored to sellable");
       void qc.invalidateQueries({ queryKey: ["inv-levels"] });
     },
-    onError: (e: Error) =>
-      toast.error(e instanceof ApiError ? e.message : "Failed"),
+    onError: (e: Error) => {
+      if (e instanceof ApiError) toast.error(e.message);
+    },
   });
 
   return (
@@ -622,7 +686,10 @@ function DamageTab({
             <select
               className="mt-1 h-9 w-full rounded-md border border-[#dce3ec] px-2 text-sm"
               value={stockLevelId}
-              onChange={(e) => setStockLevelId(e.target.value)}
+              onChange={(e) => {
+                setStockLevelId(e.target.value);
+                setFieldErrors((f) => ({ ...f, stockLevelId: "" }));
+              }}
             >
               <option value="">Select item…</option>
               {(levels.data?.items ?? []).map((i) => (
@@ -631,6 +698,7 @@ function DamageTab({
                 </option>
               ))}
             </select>
+            <FieldError message={fieldErrors.stockLevelId} />
           </div>
           <div>
             <Label>Qty</Label>
@@ -640,8 +708,12 @@ function DamageTab({
               min={0.001}
               step="any"
               value={qty}
-              onChange={(e) => setQty(e.target.value)}
+              onChange={(e) => {
+                setQty(e.target.value);
+                setFieldErrors((f) => ({ ...f, qty: "" }));
+              }}
             />
+            <FieldError message={fieldErrors.qty} />
           </div>
           <div>
             <Label>Reason</Label>
@@ -649,12 +721,16 @@ function DamageTab({
               className="mt-1"
               placeholder="Broken, expired, quarantine…"
               value={reason}
-              onChange={(e) => setReason(e.target.value)}
+              onChange={(e) => {
+                setReason(e.target.value);
+                setFieldErrors((f) => ({ ...f, reason: "" }));
+              }}
             />
+            <FieldError message={fieldErrors.reason} />
           </div>
           <div className="sm:col-span-2">
             <Button
-              disabled={!stockLevelId || !Number(qty) || mark.isPending}
+              disabled={mark.isPending}
               onClick={() => mark.mutate()}
             >
               Quarantine

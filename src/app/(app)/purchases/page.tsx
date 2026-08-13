@@ -12,6 +12,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { PageHeader, EmptyState, PageSkeleton } from "@/components/page-header";
+import { FieldError } from "@/components/ui/form";
+import {
+  createSupplierInvoiceSchema,
+  paySupplierInvoiceSchema,
+  zodFieldErrors,
+  zodMessages,
+} from "@/lib/validations";
 
 type Tab = "grn" | "invoices" | "outstanding" | "payments" | "ledger";
 
@@ -84,26 +91,43 @@ export default function PurchasesPage() {
   const [invTax, setInvTax] = useState("");
   const [invDue, setInvDue] = useState("");
   const [invCredit, setInvCredit] = useState(false);
+  const [invErrors, setInvErrors] = useState<Record<string, string>>({});
 
   const createInvoice = useMutation({
-    mutationFn: () =>
-      suppliersApi.createInvoice({
+    mutationFn: () => {
+      const parsed = createSupplierInvoiceSchema.safeParse({
         supplierId: invSupplierId,
-        subtotal: Number(invSubtotal),
-        taxTotal: invTax ? Number(invTax) : 0,
-        dueDate: invDue || undefined,
+        subtotal: invSubtotal,
+        taxTotal: invTax === "" ? 0 : invTax,
+        dueDate: invDue,
+      });
+      if (!parsed.success) {
+        setInvErrors(zodFieldErrors(parsed.error));
+        toast.error(zodMessages(parsed.error)[0] ?? "Check the form");
+        throw new Error(zodMessages(parsed.error)[0] ?? "Invalid invoice");
+      }
+      setInvErrors({});
+      return suppliersApi.createInvoice({
+        supplierId: parsed.data.supplierId,
+        subtotal: parsed.data.subtotal,
+        taxTotal: parsed.data.taxTotal,
+        dueDate: parsed.data.dueDate || undefined,
         isCredit: invCredit || undefined,
-      }),
+      });
+    },
     onSuccess: () => {
       toast.success(invCredit ? "Credit note created" : "Invoice created");
       setInvSubtotal("");
       setInvTax("");
       setInvDue("");
       setInvCredit(false);
+      setInvErrors({});
       void qc.invalidateQueries({ queryKey: ["supplier-invoices"] });
       void qc.invalidateQueries({ queryKey: ["supplier-invoices-outstanding"] });
     },
-    onError: (e) => toast.error(errMsg(e)),
+    onError: (e) => {
+      if (e instanceof ApiError) toast.error(errMsg(e));
+    },
   });
 
   // ── Bill from GRN ────────────────────────────────────────────────────────
@@ -123,25 +147,49 @@ export default function PurchasesPage() {
   const [payAmount, setPayAmount] = useState("");
   const [payMethod, setPayMethod] = useState("bank_transfer");
   const [payRef, setPayRef] = useState("");
+  const [payKind, setPayKind] = useState<"payment" | "refund">("payment");
+  const [payErrors, setPayErrors] = useState<Record<string, string>>({});
 
   const payInvoice = useMutation({
-    mutationFn: () =>
-      suppliersApi.payInvoice(payId!, {
-        amount: Number(payAmount),
+    mutationFn: () => {
+      const parsed = paySupplierInvoiceSchema.safeParse({
+        amount: payAmount,
         method: payMethod,
-        reference: payRef.trim() || undefined,
-      }),
+        kind: payKind,
+        reference: payRef,
+      });
+      if (!parsed.success) {
+        setPayErrors(zodFieldErrors(parsed.error));
+        toast.error(zodMessages(parsed.error)[0] ?? "Check the form");
+        throw new Error(zodMessages(parsed.error)[0] ?? "Invalid payment");
+      }
+      setPayErrors({});
+      return suppliersApi.payInvoice(payId!, {
+        amount: parsed.data.amount,
+        method: parsed.data.method,
+        kind: parsed.data.kind,
+        reference: parsed.data.reference?.trim() || undefined,
+      });
+    },
     onSuccess: () => {
-      toast.success("Payment recorded");
+      toast.success(
+        payKind === "refund"
+          ? "Supplier refund (money in) recorded"
+          : "Payment recorded",
+      );
       setPayId(null);
       setPayAmount("");
       setPayRef("");
+      setPayKind("payment");
+      setPayErrors({});
       void qc.invalidateQueries({ queryKey: ["supplier-invoices-outstanding"] });
       void qc.invalidateQueries({ queryKey: ["supplier-invoices"] });
       void qc.invalidateQueries({ queryKey: ["supplier-payments"] });
       void qc.invalidateQueries({ queryKey: ["supplier-ledger"] });
     },
-    onError: (e) => toast.error(errMsg(e)),
+    onError: (e) => {
+      if (e instanceof ApiError) toast.error(errMsg(e));
+    },
   });
 
   // ── Ledger ───────────────────────────────────────────────────────────────
@@ -259,7 +307,10 @@ export default function PurchasesPage() {
               <Select
                 className="mt-1"
                 value={invSupplierId}
-                onChange={(e) => setInvSupplierId(e.target.value)}
+                onChange={(e) => {
+                  setInvSupplierId(e.target.value);
+                  setInvErrors((f) => ({ ...f, supplierId: "" }));
+                }}
               >
                 <option value="">Select…</option>
                 {(suppliers.data ?? []).map((s) => (
@@ -268,6 +319,7 @@ export default function PurchasesPage() {
                   </option>
                 ))}
               </Select>
+              <FieldError message={invErrors.supplierId} />
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
@@ -276,8 +328,12 @@ export default function PurchasesPage() {
                   type="number"
                   className="mt-1"
                   value={invSubtotal}
-                  onChange={(e) => setInvSubtotal(e.target.value)}
+                  onChange={(e) => {
+                    setInvSubtotal(e.target.value);
+                    setInvErrors((f) => ({ ...f, subtotal: "" }));
+                  }}
                 />
+                <FieldError message={invErrors.subtotal} />
               </div>
               <div>
                 <Label>Tax</Label>
@@ -285,8 +341,12 @@ export default function PurchasesPage() {
                   type="number"
                   className="mt-1"
                   value={invTax}
-                  onChange={(e) => setInvTax(e.target.value)}
+                  onChange={(e) => {
+                    setInvTax(e.target.value);
+                    setInvErrors((f) => ({ ...f, taxTotal: "" }));
+                  }}
                 />
+                <FieldError message={invErrors.taxTotal} />
               </div>
             </div>
             <div>
@@ -295,9 +355,13 @@ export default function PurchasesPage() {
                 type="date"
                 className="mt-1"
                 value={invDue}
-                onChange={(e) => setInvDue(e.target.value)}
+                onChange={(e) => {
+                  setInvDue(e.target.value);
+                  setInvErrors((f) => ({ ...f, dueDate: "" }));
+                }}
                 min={todayYmd()}
               />
+              <FieldError message={invErrors.dueDate} />
             </div>
             <label className="flex items-center gap-2 text-sm text-[#0b1f33]">
               <input
@@ -310,9 +374,7 @@ export default function PurchasesPage() {
             </label>
             <Button
               type="button"
-              disabled={
-                createInvoice.isPending || !invSupplierId || !invSubtotal
-              }
+              disabled={createInvoice.isPending}
               onClick={() => createInvoice.mutate()}
             >
               {createInvoice.isPending ? "Saving…" : "Create invoice"}
@@ -384,15 +446,22 @@ export default function PurchasesPage() {
                     type="number"
                     className="mt-1"
                     value={payAmount}
-                    onChange={(e) => setPayAmount(e.target.value)}
+                    onChange={(e) => {
+                      setPayAmount(e.target.value);
+                      setPayErrors((f) => ({ ...f, amount: "" }));
+                    }}
                   />
+                  <FieldError message={payErrors.amount} />
                 </div>
                 <div>
                   <Label>Method</Label>
                   <Select
                     className="mt-1"
                     value={payMethod}
-                    onChange={(e) => setPayMethod(e.target.value)}
+                    onChange={(e) => {
+                      setPayMethod(e.target.value);
+                      setPayErrors((f) => ({ ...f, method: "" }));
+                    }}
                   >
                     {PAY_METHODS.map((m) => (
                       <option key={m.value} value={m.value}>
@@ -400,24 +469,50 @@ export default function PurchasesPage() {
                       </option>
                     ))}
                   </Select>
+                  <FieldError message={payErrors.method} />
+                </div>
+                <div>
+                  <Label>Type</Label>
+                  <Select
+                    className="mt-1"
+                    value={payKind}
+                    onChange={(e) => {
+                      setPayKind(e.target.value as "payment" | "refund");
+                      setPayErrors((f) => ({ ...f, kind: "" }));
+                    }}
+                  >
+                    <option value="payment">Pay supplier (money out)</option>
+                    <option value="refund">
+                      Supplier refund (money in)
+                    </option>
+                  </Select>
+                  <FieldError message={payErrors.kind} />
                 </div>
                 <div>
                   <Label>Reference</Label>
                   <Input
                     className="mt-1"
                     value={payRef}
-                    onChange={(e) => setPayRef(e.target.value)}
+                    onChange={(e) => {
+                      setPayRef(e.target.value);
+                      setPayErrors((f) => ({ ...f, reference: "" }));
+                    }}
                     placeholder="Cheque / UTR / note"
                   />
+                  <FieldError message={payErrors.reference} />
                 </div>
               </div>
               <div className="flex gap-2">
                 <Button
                   type="button"
-                  disabled={payInvoice.isPending || !payAmount}
+                  disabled={payInvoice.isPending}
                   onClick={() => payInvoice.mutate()}
                 >
-                  {payInvoice.isPending ? "Saving…" : "Pay"}
+                  {payInvoice.isPending
+                    ? "Saving…"
+                    : payKind === "refund"
+                      ? "Record refund"
+                      : "Pay"}
                 </Button>
                 <Button
                   type="button"
@@ -426,6 +521,7 @@ export default function PurchasesPage() {
                     setPayId(null);
                     setPayAmount("");
                     setPayRef("");
+                    setPayErrors({});
                   }}
                 >
                   Cancel
@@ -484,9 +580,12 @@ export default function PurchasesPage() {
                               setPayAmount(
                                 String(Math.abs(inv.balanceDue).toFixed(2)),
                               );
+                              setPayKind(
+                                inv.status === "credit" ? "refund" : "payment",
+                              );
                             }}
                           >
-                            Pay
+                            {inv.status === "credit" ? "Refund" : "Pay"}
                           </Button>
                         </td>
                       </tr>

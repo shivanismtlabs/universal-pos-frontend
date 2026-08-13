@@ -429,6 +429,7 @@ export default function RetailPosWorkstation({
     sellPrice: string | number;
     qtyOnHand: number;
     sellUnit?: string;
+    trackQty?: boolean;
     category?: { name: string } | null;
     image?: string | null;
     photoUrl?: string | null;
@@ -441,6 +442,7 @@ export default function RetailPosWorkstation({
     const unit = normalizeSellUnit(row.sellUnit);
     const step = qtyStep(unit);
     const onHand = Number(row.qtyOnHand);
+    const tracks = row.trackQty !== false;
     const taxRatePercent =
       row.taxRatePercent != null && Number.isFinite(row.taxRatePercent)
         ? row.taxRatePercent
@@ -449,7 +451,7 @@ export default function RetailPosWorkstation({
       const existing = prev.find((l) => l.stockLevelId === row.id);
       if (existing) {
         const next = normalizeQty(existing.qty + step, unit);
-        if (next > onHand + 1e-9) {
+        if (tracks && next > onHand + 1e-9) {
           toast.error("Not enough stock");
           return prev;
         }
@@ -458,7 +460,7 @@ export default function RetailPosWorkstation({
             ? {
                 ...l,
                 qty: next,
-                maxQty: onHand,
+                maxQty: tracks ? onHand : Math.max(l.maxQty, next + 100),
                 sellUnit: unit,
                 image: l.image ?? image,
                 taxRatePercent: l.taxRatePercent ?? taxRatePercent,
@@ -466,11 +468,11 @@ export default function RetailPosWorkstation({
             : l,
         );
       }
-      if (onHand <= 0) {
-        toast.error("Out of stock");
+      if (tracks && onHand <= 0) {
+        toast.error("Out of stock — set opening qty / stock in Inventory first");
         return prev;
       }
-      const startQty = Math.min(step, onHand);
+      const startQty = tracks ? Math.min(step, onHand) : step;
       return [
         ...prev,
         {
@@ -479,7 +481,7 @@ export default function RetailPosWorkstation({
           name: row.name,
           unitPrice: price,
           qty: normalizeQty(startQty, unit),
-          maxQty: onHand,
+          maxQty: tracks ? onHand : 999999,
           sellUnit: unit,
           category: row.category?.name ?? null,
           image,
@@ -1214,11 +1216,11 @@ export default function RetailPosWorkstation({
                 const src = gallery[0] ?? row.image ?? row.photoUrl;
                 const inCart = cart.find((l) => l.stockLevelId === row.id);
                 const cartQty = inCart?.qty ?? 0;
-                const available = Math.max(
-                  0,
-                  Number(row.qtyOnHand) - cartQty,
-                );
-                const low = available < 5;
+                const tracks = row.trackQty !== false;
+                const available = tracks
+                  ? Math.max(0, Number(row.qtyOnHand) - cartQty)
+                  : 999;
+                const low = tracks && available < 5;
                 return (
                   <li key={row.id}>
                     <button
@@ -1256,16 +1258,18 @@ export default function RetailPosWorkstation({
                           <span
                             className={cn(
                               "rounded-md px-1.5 py-0.5 font-sans text-[0.65rem] font-semibold",
-                              available <= 0
+                              available <= 0 && tracks
                                 ? "bg-[#fef2f2] text-[#c81e1e]"
                                 : low
                                   ? "bg-[#fff7ed] text-[#9a3412]"
                                   : "bg-[#e8eefb] text-[#1a56db]",
                             )}
                           >
-                            {available <= 0
-                              ? "In ticket"
-                              : `${formatQtyWithUnit(available, row.sellUnit)} left`}
+                            {tracks
+                              ? available <= 0
+                                ? "In ticket"
+                                : `${formatQtyWithUnit(available, row.sellUnit)} left`
+                              : "No stock limit"}
                           </span>
                         </p>
                       </div>
@@ -1877,18 +1881,48 @@ export default function RetailPosWorkstation({
             ) : null}
             {payMethod === "qr" ? (
               <div className="space-y-2 rounded-[10px] border border-[#d9e0ea] bg-white p-3">
-                <p className="text-[0.7rem] text-[#5a6b7d]">
-                  Show this QR to the customer (UPI / wallet scan), then confirm
-                  payment collected.
-                </p>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  alt="Pay QR"
-                  className="mx-auto h-36 w-36 rounded-md border border-[#eef2f8] bg-white"
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(
-                    `upi://pay?am=${chargeAmount.toFixed(2)}&cu=INR&tn=${encodeURIComponent("Universal POS")}`,
-                  )}`}
-                />
+                {(() => {
+                  const posSettings =
+                    boot?.tenant?.settings &&
+                    typeof boot.tenant.settings === "object"
+                      ? (boot.tenant.settings as Record<string, unknown>).pos
+                      : undefined;
+                  const pos =
+                    posSettings && typeof posSettings === "object"
+                      ? (posSettings as Record<string, unknown>)
+                      : {};
+                  const vpa =
+                    typeof pos.upiVpa === "string" ? pos.upiVpa.trim() : "";
+                  const payee =
+                    (typeof pos.upiPayeeName === "string" &&
+                      pos.upiPayeeName.trim()) ||
+                    productName ||
+                    "Universal POS";
+                  if (!vpa) {
+                    return (
+                      <p className="text-[0.75rem] text-amber-800">
+                        Set your shop UPI ID in Settings → Counter first.
+                        Scanning this incomplete QR causes PhonePe/GPay to show
+                        a technical glitch.
+                      </p>
+                    );
+                  }
+                  const upiUri = `upi://pay?pa=${encodeURIComponent(vpa)}&pn=${encodeURIComponent(payee)}&am=${chargeAmount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(productName || "Universal POS")}`;
+                  return (
+                    <>
+                      <p className="text-[0.7rem] text-[#5a6b7d]">
+                        Show this QR to the customer (UPI / wallet scan), then
+                        confirm payment collected. Payee: {vpa}
+                      </p>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        alt="Pay QR"
+                        className="mx-auto h-36 w-36 rounded-md border border-[#eef2f8] bg-white"
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(upiUri)}`}
+                      />
+                    </>
+                  );
+                })()}
               </div>
             ) : null}
             {payMethod === "bank_transfer" ? (

@@ -233,8 +233,126 @@ export const createPaymentSchema = z.object({
 export type CreatePaymentInput = z.infer<typeof createPaymentSchema>;
 
 export const createCategorySchema = z.object({
-  name: z.string().min(2).max(100),
+  name: z
+    .string()
+    .trim()
+    .min(2, "Category name must be at least 2 characters")
+    .max(100, "Category name is too long"),
 });
+
+export const createBrandSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(2, "Brand name must be at least 2 characters")
+    .max(100, "Brand name is too long"),
+});
+
+export const createRoleNameSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(2, "Role name must be at least 2 characters")
+    .max(100, "Role name is too long"),
+});
+
+export const positiveQtySchema = z.coerce
+  .number({ invalid_type_error: "Enter a valid quantity" })
+  .positive("Quantity must be greater than 0")
+  .max(99_999_999, "Quantity is too large");
+
+/** Stock adjust delta — any non-zero number (negative removes stock). */
+export const adjustDeltaSchema = z.coerce
+  .number({ invalid_type_error: "Enter a valid quantity" })
+  .min(-99_999_999, "Quantity is too large")
+  .max(99_999_999, "Quantity is too large")
+  .refine((n) => n !== 0, {
+    message: "Quantity change cannot be zero",
+  });
+
+export const stockMoveSchema = z.object({
+  locationId: z.string().min(1, "Select a location"),
+  stockLevelId: z.string().min(1, "Select an item"),
+  qty: positiveQtySchema,
+  reason: z.string().trim().max(500).optional().or(z.literal("")),
+});
+
+export const stockAdjustFormSchema = z.object({
+  delta: adjustDeltaSchema,
+  reason: z.string().max(500).optional().or(z.literal("")),
+});
+
+export const stockTransferSchema = z
+  .object({
+    fromLocationId: z.string().min(1, "Select from location"),
+    toLocationId: z.string().min(1, "Select to location"),
+    notes: z.string().trim().max(500).optional().or(z.literal("")),
+    lines: z
+      .array(
+        z.object({
+          productId: z.string().min(1),
+          qty: positiveQtySchema,
+        }),
+      )
+      .min(1, "Add at least one product with quantity greater than 0"),
+  })
+  .refine((v) => v.fromLocationId !== v.toLocationId, {
+    message: "From and to locations must be different",
+    path: ["toLocationId"],
+  });
+
+export const createCouponSchema = z
+  .object({
+    code: z
+      .string()
+      .trim()
+      .min(2, "Coupon code must be at least 2 characters")
+      .max(32, "Coupon code is too long"),
+    description: z.string().trim().max(255).optional().or(z.literal("")),
+    discountType: z.enum(["percent", "fixed"]),
+    discountValue: z.coerce
+      .number({ invalid_type_error: "Enter a valid discount value" })
+      .positive("Discount must be greater than 0"),
+    minOrderAmount: z
+      .string()
+      .optional()
+      .or(z.literal(""))
+      .transform((v) => {
+        if (!v?.trim()) return undefined;
+        const n = Number(v);
+        return Number.isFinite(n) ? n : NaN;
+      })
+      .refine((v) => v === undefined || (Number.isFinite(v) && v >= 0), {
+        message: "Enter a valid minimum order amount",
+      }),
+  })
+  .superRefine((v, ctx) => {
+    if (v.discountType === "percent") {
+      if (v.discountValue > 100) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["discountValue"],
+          message: "Percent off cannot exceed 100",
+        });
+      }
+      return;
+    }
+    if (v.discountValue > 99_999_999.99) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["discountValue"],
+        message: "Amount is too large",
+      });
+    }
+    if (Math.round(v.discountValue * 100) / 100 !== v.discountValue) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["discountValue"],
+        message: "Amount can have at most 2 decimal places",
+      });
+    }
+  });
+export type CreateCouponInput = z.infer<typeof createCouponSchema>;
 
 const sellUnitEnum = z.enum(["pcs", "pack", "kg", "g", "L", "ml"]);
 
@@ -285,6 +403,14 @@ export const addSaleProductSchema = z
     trackInventory: z.boolean().default(true),
   })
   .superRefine((v, ctx) => {
+    if (v.trackInventory && !(v.qty >= 1)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["qty"],
+        message: "Opening quantity must be at least 1 (not 0, 0.1, or 0.2)",
+      });
+      return;
+    }
     if (!v.trackInventory) return;
     const whole =
       v.sellUnit === "pcs" ||
@@ -426,3 +552,282 @@ export const availabilityQuerySchema = z.object({
   storeId: z.string().uuid().optional().or(z.literal("")),
   size: z.string().max(32).optional().or(z.literal("")),
 });
+
+/** ---- Shared field helpers (use across app forms) ---- */
+
+export const emailSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .email("Enter a valid email")
+  .max(255);
+
+export const optionalEmailSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .email("Enter a valid email")
+  .max(255)
+  .optional()
+  .or(z.literal(""));
+
+export const optionalPhoneSchema = phoneSchema.optional().or(z.literal(""));
+
+export const pinCodeSchema = z
+  .string()
+  .trim()
+  .regex(/^\d{6}$/, "Enter a valid 6-digit PIN code");
+
+export const gstinSchema = z
+  .string()
+  .trim()
+  .refine(
+    (v) => !v || /^[0-9A-Z]{15}$/i.test(v.replace(/\s/g, "")),
+    "GSTIN must be 15 characters (letters/numbers)",
+  );
+
+export const moneyAmountSchema = z.coerce
+  .number({ invalid_type_error: "Enter a valid amount" })
+  .positive("Amount must be greater than 0")
+  .max(99_999_999.99, "Amount is too large")
+  .refine((n) => Math.round(n * 100) / 100 === n, {
+    message: "Amount can have at most 2 decimal places",
+  });
+
+export const nonNegMoneySchema = z.coerce
+  .number({ invalid_type_error: "Enter a valid amount" })
+  .min(0, "Cannot be negative")
+  .max(99_999_999.99, "Amount is too large");
+
+export const issueGiftCardSchema = z.object({
+  initialValue: moneyAmountSchema,
+  code: z
+    .string()
+    .trim()
+    .max(32, "Code is too long")
+    .optional()
+    .or(z.literal(""))
+    .refine((v) => !v || v.length >= 2, {
+      message: "Code must be at least 2 characters",
+    }),
+});
+
+export const createSupplierInvoiceSchema = z.object({
+  supplierId: z.string().min(1, "Select a supplier"),
+  subtotal: moneyAmountSchema,
+  taxTotal: nonNegMoneySchema,
+  dueDate: z
+    .string()
+    .optional()
+    .or(z.literal(""))
+    .refine((v) => !v || /^\d{4}-\d{2}-\d{2}$/.test(v), {
+      message: "Pick a valid due date",
+    }),
+});
+
+export const paySupplierInvoiceSchema = z.object({
+  amount: moneyAmountSchema,
+  method: z.string().min(1, "Select a payment method"),
+  kind: z.enum(["payment", "refund"]),
+  reference: z.string().trim().max(120).optional().or(z.literal("")),
+});
+
+export function zodFieldErrors(error: z.ZodError): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const issue of error.issues) {
+    const key = String(issue.path[0] ?? "_form");
+    if (!out[key]) out[key] = issue.message;
+  }
+  return out;
+}
+
+export function zodMessages(error: z.ZodError): string[] {
+  return [...new Set(error.issues.map((i) => i.message))];
+}
+
+export const createCatalogProductSchema = z
+  .object({
+    name: z
+      .string()
+      .trim()
+      .min(2, "Product name must be at least 2 characters")
+      .max(255, "Product name is too long"),
+    kind: z.enum(["physical", "service", "digital", "bundle", "rental"]),
+    status: z.enum(["active", "inactive", "draft", "archived"]),
+    skuCode: z
+      .string()
+      .trim()
+      .max(32)
+      .optional()
+      .or(z.literal(""))
+      .refine(
+        (v) =>
+          !v ||
+          (/^[A-Za-z0-9][A-Za-z0-9._\-/]*$/.test(v) && v.length >= 2),
+        "SKU: 2+ chars, letters/numbers and . _ - / only",
+      ),
+    barcode: z.string().trim().max(32).optional().or(z.literal("")),
+    basePrice: z.coerce
+      .number({ invalid_type_error: "Enter a valid selling price" })
+      .min(0, "Price cannot be negative")
+      .max(9_999_999.99),
+    costPrice: z
+      .string()
+      .optional()
+      .or(z.literal(""))
+      .transform((v) => {
+        if (!v?.trim()) return undefined;
+        const n = Number(v);
+        return Number.isFinite(n) ? n : NaN;
+      })
+      .refine((v) => v === undefined || (Number.isFinite(v) && v >= 0), {
+        message: "Enter a valid cost price",
+      }),
+    mrp: z
+      .string()
+      .optional()
+      .or(z.literal(""))
+      .transform((v) => {
+        if (!v?.trim()) return undefined;
+        const n = Number(v);
+        return Number.isFinite(n) ? n : NaN;
+      })
+      .refine((v) => v === undefined || (Number.isFinite(v) && v >= 0), {
+        message: "Enter a valid MRP",
+      }),
+    taxRatePercent: z.coerce
+      .number({ invalid_type_error: "Enter a valid tax %" })
+      .min(0, "Tax % cannot be negative")
+      .max(40, "Tax % looks too high"),
+    unitOfMeasure: z.string().trim().min(1).max(16),
+    trackInventory: z.boolean(),
+    openingQty: z.string().optional().or(z.literal("")),
+  })
+  .superRefine((v, ctx) => {
+    if (!v.trackInventory) return;
+    const q = Number(v.openingQty);
+    if (!Number.isFinite(q) || q < 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["openingQty"],
+        message: "Opening quantity must be at least 1",
+      });
+    }
+  });
+export type CreateCatalogProductInput = z.infer<
+  typeof createCatalogProductSchema
+>;
+
+export const inviteStaffSchema = z.object({
+  fullName: z
+    .string()
+    .trim()
+    .min(2, "Name must be at least 2 characters")
+    .max(255),
+  email: emailSchema,
+  password: strongPasswordSchema,
+  phone: optionalPhoneSchema,
+  roleCode: z.string().min(1, "Select a role"),
+  primaryStoreId: z.string().optional().or(z.literal("")),
+});
+export type InviteStaffInput = z.infer<typeof inviteStaffSchema>;
+
+export const createSupplierSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(2, "Supplier name must be at least 2 characters")
+    .max(255),
+  contact: z.string().trim().max(120).optional().or(z.literal("")),
+  phone: optionalPhoneSchema,
+});
+export type CreateSupplierInput = z.infer<typeof createSupplierSchema>;
+
+export const createExpenseSchema = z.object({
+  amount: moneyAmountSchema,
+  spentAt: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Pick a valid date"),
+  categoryId: z.string().optional().or(z.literal("")),
+  paymentMethod: z.enum([
+    "cash",
+    "upi",
+    "card",
+    "bank_transfer",
+    "petty_cash",
+    "other",
+  ]),
+  payee: z.string().trim().max(120).optional().or(z.literal("")),
+  notes: z.string().trim().max(2000).optional().or(z.literal("")),
+});
+export type CreateExpenseInput = z.infer<typeof createExpenseSchema>;
+
+export const pettyCashAmountSchema = z.object({
+  amount: moneyAmountSchema,
+  notes: z.string().trim().max(500).optional().or(z.literal("")),
+});
+
+export const expenseCategoryNameSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(2, "Category name must be at least 2 characters")
+    .max(100),
+});
+
+export const settingsBrandSchema = z.object({
+  productName: z
+    .string()
+    .trim()
+    .min(2, "Shop name must be at least 2 characters")
+    .max(100),
+  tagline: z.string().trim().max(200).optional().or(z.literal("")),
+  currencyCode: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(/^[A-Z]{3}$/, "Use a 3-letter currency code (e.g. INR)"),
+  locale: z.string().trim().min(2, "Locale is required").max(20),
+  timezone: z.string().trim().min(2, "Timezone is required").max(64),
+});
+
+export const settingsTaxSchema = z.object({
+  taxMode: z.enum(["in_gst", "simple", "vat", "none"]),
+  ratePercent: z.coerce
+    .number({ invalid_type_error: "Enter a valid tax rate" })
+    .min(0)
+    .max(40),
+  inclusive: z.boolean(),
+  gstin: gstinSchema.optional().or(z.literal("")),
+});
+
+export const settingsCounterSchema = z.object({
+  maxDiscount: z.coerce
+    .number({ invalid_type_error: "Enter a valid discount %" })
+    .min(0)
+    .max(100),
+  pinSwitchEnabled: z.boolean(),
+  upiVpa: z
+    .string()
+    .trim()
+    .refine(
+      (v) => !v || /^[^\s@]+@[^\s@]+$/.test(v),
+      "UPI ID must look like name@bank",
+    ),
+  upiPayeeName: z.string().trim().max(100).optional().or(z.literal("")),
+});
+
+export const forgotPasswordEmailSchema = z.object({
+  email: emailSchema,
+});
+
+export const resetPasswordSchema = z
+  .object({
+    otp: z.string().regex(/^\d{6}$/, "Enter the 6-digit OTP"),
+    password: strongPasswordSchema,
+    confirm: z.string().min(1, "Confirm your password"),
+  })
+  .refine((v) => v.password === v.confirm, {
+    message: "Passwords do not match",
+    path: ["confirm"],
+  });

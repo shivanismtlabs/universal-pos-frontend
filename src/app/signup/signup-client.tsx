@@ -61,6 +61,8 @@ export default function SignupClient() {
     formState: { errors, isSubmitting },
   } = useForm<SignupInput>({
     resolver: zodResolver(signupSchema),
+    criteriaMode: "all",
+    mode: "onChange",
     defaultValues: {
       fullName: "",
       email: "",
@@ -74,6 +76,20 @@ export default function SignupClient() {
   const email = watch("email") ?? "";
   const strength = passwordStrength(password, { email });
   const strengthPct = Math.round((strength.score / 7) * 100);
+  const passwordRules = [
+    { ok: strength.checks.length, label: "At least 8 characters (max 72)" },
+    { ok: strength.checks.lower, label: "One lowercase letter (a–z)" },
+    { ok: strength.checks.upper, label: "One uppercase letter (A–Z)" },
+    { ok: strength.checks.number, label: "One number (0–9)" },
+    { ok: strength.checks.special, label: "One special character (!@#$…)" },
+    {
+      ok: strength.checks.noEmailPart,
+      label: "Must not contain your email name",
+    },
+  ] as const;
+  const passwordFailLines = passwordRules
+    .filter((r) => password.length > 0 && !r.ok)
+    .map((r) => r.label);
 
   async function onSubmit(values: SignupInput) {
     try {
@@ -184,7 +200,27 @@ export default function SignupClient() {
               style={{ width: `${strengthPct}%` }}
             />
           </div>
-          <FieldError message={errors.password?.message} />
+          <ul className="mt-1.5 space-y-0.5 text-[0.72rem]">
+            {passwordRules.map((r) => (
+              <li
+                key={r.label}
+                className={cn(
+                  r.ok ? "text-[#15803d]" : "text-[#6b7280]",
+                )}
+              >
+                {r.ok ? "✓" : "○"} {r.label}
+              </li>
+            ))}
+          </ul>
+          {passwordFailLines.length ? (
+            <ul className="mt-1 space-y-0.5 text-[0.75rem] text-[#c81e1e]">
+              {passwordFailLines.map((line) => (
+                <li key={line}>• {line}</li>
+              ))}
+            </ul>
+          ) : errors.password?.message ? (
+            <FieldError message={errors.password.message} />
+          ) : null}
         </div>
 
         <div className="space-y-1.5">

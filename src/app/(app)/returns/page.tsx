@@ -403,8 +403,14 @@ function SaleReturnsDesk() {
 
   const approve = useMutation({
     mutationFn: (id: string) => posApi.approveSaleReturn(id),
-    onSuccess: () => {
-      toast.success("Return approved");
+    onSuccess: (r) => {
+      const row = r as { message?: string; status?: string };
+      toast.success(
+        row?.message ||
+          (row?.status === "completed"
+            ? "✓ Return Completed"
+            : "Return approved"),
+      );
       void qc.invalidateQueries({ queryKey: ["sale-returns-list"] });
     },
     onError: (e) =>
@@ -424,7 +430,7 @@ function SaleReturnsDesk() {
   const items = recent.data?.items ?? [];
   const pendingItems = pending.data?.items ?? [];
   const historyItems = (history.data?.items ?? []).filter(
-    (r) => r.status !== "pending",
+    (r) => r.status !== "pending" && r.status !== "requested",
   );
 
   return (
@@ -590,12 +596,26 @@ function SaleReturnsDesk() {
               <li key={r.id} className="flex justify-between gap-3 py-3">
                 <div>
                   <p className="font-semibold text-[#111827]">
-                    {r.orderNumber ?? r.orderId.slice(0, 8)} · {r.status}
+                    {r.orderNumber ?? r.orderId.slice(0, 8)} ·{" "}
+                    {r.statusLabel ??
+                      (r.status === "completed"
+                        ? "✓ Return Completed"
+                        : r.status)}
                   </p>
                   <p className="text-xs text-[#6b7280]">
-                    {money(r.refundAmount ?? 0)} · {r.reasonCode ?? "—"} ·{" "}
-                    {formatDate(r.createdAt)}
+                    {money(r.refundAmount ?? 0)}
+                    {r.refundMethod ? ` · ${r.refundMethod}` : ""} ·{" "}
+                    {r.reasonCode ?? "—"} · {formatDate(r.createdAt)}
                   </p>
+                  {r.exchangeOrderNumber || r.invoiceNumber ? (
+                    <p className="mt-0.5 text-xs text-[#1a56db]">
+                      {r.exchangeOrderNumber
+                        ? `Exchange ${r.exchangeOrderNumber}`
+                        : null}
+                      {r.exchangeOrderNumber && r.invoiceNumber ? " · " : null}
+                      {r.invoiceNumber ? `Invoice ${r.invoiceNumber}` : null}
+                    </p>
+                  ) : null}
                 </div>
               </li>
             ))}

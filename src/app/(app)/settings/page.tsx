@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { tenantsApi, appsApi, iamApi } from "@/lib/api";
+import { tenantsApi, appsApi, iamApi, posApi, expensesApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useBootstrap } from "@/lib/bootstrap";
 import { useAuthStore } from "@/lib/auth-store";
@@ -12,10 +12,19 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { FieldError } from "@/components/ui/form";
 import { PageHeader } from "@/components/page-header";
 import { canUseBiometrics, registerDeviceBiometric } from "@/lib/webauthn";
+import {
+  expenseCategoryNameSchema,
+  settingsBrandSchema,
+  settingsCounterSchema,
+  settingsTaxSchema,
+  zodFieldErrors,
+  zodMessages,
+} from "@/lib/validations";
 
-type Tab = "branding" | "tax" | "receipt" | "counter";
+type Tab = "branding" | "tax" | "receipt" | "counter" | "returns" | "expenses";
 
 const BUSINESS_TYPES = [
   { id: "retail", label: "Retail" },
@@ -62,6 +71,35 @@ export default function SettingsPage() {
   const [receiptFooter, setReceiptFooter] = useState("");
   const [maxDiscount, setMaxDiscount] = useState("15");
   const [pinSwitchEnabled, setPinSwitchEnabled] = useState(true);
+  const [upiVpa, setUpiVpa] = useState("");
+  const [upiPayeeName, setUpiPayeeName] = useState("");
+  const [approvalThreshold, setApprovalThreshold] = useState("0");
+  const [expenseApprovalThreshold, setExpenseApprovalThreshold] =
+    useState("0");
+  const [expCatName, setExpCatName] = useState("");
+  const [expCatReceipt, setExpCatReceipt] = useState(false);
+  const [expCatAccount, setExpCatAccount] = useState("");
+  const [reasonCode, setReasonCode] = useState("");
+  const [reasonLabel, setReasonLabel] = useState("");
+  const [reasonApplies, setReasonApplies] = useState("customer");
+  const [brandErrors, setBrandErrors] = useState<Record<string, string>>({});
+  const [taxErrors, setTaxErrors] = useState<Record<string, string>>({});
+  const [counterErrors, setCounterErrors] = useState<Record<string, string>>(
+    {},
+  );
+
+  const refundReasons = useQuery({
+    queryKey: ["refund-reasons-settings"],
+    queryFn: () => posApi.listRefundReasons(),
+    enabled: canEdit && tab === "returns",
+  });
+
+  const expenseCategories = useQuery({
+    queryKey: ["expense-categories-settings"],
+    queryFn: () => expensesApi.listCategories(),
+    enabled: canEdit && tab === "expenses",
+  });
+
 
   useEffect(() => {
     if (!boot?.tenant) return;
@@ -74,6 +112,14 @@ export default function SettingsPage() {
     const settingsPos =
       settings.pos && typeof settings.pos === "object"
         ? (settings.pos as Record<string, unknown>)
+        : undefined;
+    const settingsReturns =
+      settings.returns && typeof settings.returns === "object"
+        ? (settings.returns as Record<string, unknown>)
+        : undefined;
+    const settingsExpenses =
+      settings.expenses && typeof settings.expenses === "object"
+        ? (settings.expenses as Record<string, unknown>)
         : undefined;
 
     const bt =
@@ -119,6 +165,32 @@ export default function SettingsPage() {
       ),
     );
     setPinSwitchEnabled(settingsPos?.pinSwitchEnabled !== false);
+    setUpiVpa(
+      typeof settingsPos?.upiVpa === "string" ? settingsPos.upiVpa : "",
+    );
+    setUpiPayeeName(
+      typeof settingsPos?.upiPayeeName === "string"
+        ? settingsPos.upiPayeeName
+        : "",
+    );
+    setApprovalThreshold(
+      String(
+        typeof settingsReturns?.approvalThresholdAmount === "number"
+          ? settingsReturns.approvalThresholdAmount
+          : typeof settingsReturns?.approvalThresholdAmount === "string"
+            ? settingsReturns.approvalThresholdAmount
+            : 0,
+      ),
+    );
+    setExpenseApprovalThreshold(
+      String(
+        typeof settingsExpenses?.approvalThresholdAmount === "number"
+          ? settingsExpenses.approvalThresholdAmount
+          : typeof settingsExpenses?.approvalThresholdAmount === "string"
+            ? settingsExpenses.approvalThresholdAmount
+            : 0,
+      ),
+    );
   }, [boot?.tenant, boot?.business?.type, businessType]);
 
   const invalidate = () => {
@@ -135,16 +207,22 @@ export default function SettingsPage() {
 
   const saveBrand = useMutation({
     mutationFn: () => {
-      const name = branding.productName.trim();
-      if (name.length < 2) throw new Error("Shop name must be at least 2 characters");
+      const parsed = settingsBrandSchema.safeParse(branding);
+      if (!parsed.success) {
+        setBrandErrors(zodFieldErrors(parsed.error));
+        for (const m of zodMessages(parsed.error)) toast.error(m);
+        throw new Error(zodMessages(parsed.error)[0] ?? "Invalid branding");
+      }
+      setBrandErrors({});
+      const name = parsed.data.productName;
       return tenantsApi.updateMe({
         name,
-        currencyCode: branding.currencyCode.trim().toUpperCase() || "INR",
-        locale: branding.locale.trim() || "en-IN",
-        timezone: branding.timezone.trim() || "Asia/Kolkata",
+        currencyCode: parsed.data.currencyCode || "INR",
+        locale: parsed.data.locale || "en-IN",
+        timezone: parsed.data.timezone || "Asia/Kolkata",
         branding: {
           productName: name,
-          tagline: branding.tagline.trim(),
+          tagline: parsed.data.tagline?.trim() ?? "",
         },
       });
     },
@@ -152,7 +230,9 @@ export default function SettingsPage() {
       toast.success("Branding saved");
       invalidate();
     },
-    onError: (e) => toast.error(errMsg(e)),
+    onError: (e) => {
+      if (e instanceof ApiError || !(e instanceof Error)) toast.error(errMsg(e));
+    },
   });
 
   const saveBusinessType = useMutation({
@@ -170,18 +250,28 @@ export default function SettingsPage() {
 
   const saveTax = useMutation({
     mutationFn: () => {
-      const rate = Number(tax.ratePercent);
-      if (tax.taxMode !== "none" && (!Number.isFinite(rate) || rate < 0 || rate > 40)) {
-        throw new Error("Tax rate must be between 0 and 40");
+      const taxMode = tax.taxMode as "in_gst" | "simple" | "vat" | "none";
+      const parsed = settingsTaxSchema.safeParse({
+        taxMode,
+        ratePercent: taxMode === "none" ? 0 : tax.ratePercent,
+        inclusive: tax.inclusive,
+        gstin: tax.gstin,
+      });
+      if (!parsed.success) {
+        setTaxErrors(zodFieldErrors(parsed.error));
+        for (const m of zodMessages(parsed.error)) toast.error(m);
+        throw new Error(zodMessages(parsed.error)[0] ?? "Invalid tax settings");
       }
-      const gstin = tax.gstin.trim().toUpperCase();
+      setTaxErrors({});
+      const gstin = (parsed.data.gstin ?? "").trim().toUpperCase();
       return tenantsApi.updateMe({
         gstin: gstin || "",
         taxId: gstin || "",
-        taxMode: tax.taxMode,
+        taxMode: parsed.data.taxMode,
         tax: {
-          ratePercent: tax.taxMode === "none" ? 0 : rate,
-          inclusive: tax.inclusive,
+          ratePercent:
+            parsed.data.taxMode === "none" ? 0 : parsed.data.ratePercent,
+          inclusive: parsed.data.inclusive,
           receiptFooter: receiptFooter.trim(),
         },
       });
@@ -190,7 +280,9 @@ export default function SettingsPage() {
       toast.success("Tax settings saved");
       invalidate();
     },
-    onError: (e) => toast.error(errMsg(e)),
+    onError: (e) => {
+      if (e instanceof ApiError || !(e instanceof Error)) toast.error(errMsg(e));
+    },
   });
 
   const saveReceipt = useMutation({
@@ -207,18 +299,146 @@ export default function SettingsPage() {
 
   const saveCounter = useMutation({
     mutationFn: () => {
-      const max = Number(maxDiscount);
-      if (!Number.isFinite(max) || max < 0 || max > 100) {
-        throw new Error("Discount limit must be between 0 and 100");
-      }
-      return tenantsApi.updateMe({
-        maxCashierDiscountPercent: max,
+      const parsed = settingsCounterSchema.safeParse({
+        maxDiscount,
         pinSwitchEnabled,
+        upiVpa,
+        upiPayeeName,
+      });
+      if (!parsed.success) {
+        setCounterErrors(zodFieldErrors(parsed.error));
+        for (const m of zodMessages(parsed.error)) toast.error(m);
+        throw new Error(
+          zodMessages(parsed.error)[0] ?? "Invalid counter settings",
+        );
+      }
+      setCounterErrors({});
+      return tenantsApi.updateMe({
+        maxCashierDiscountPercent: parsed.data.maxDiscount,
+        pinSwitchEnabled: parsed.data.pinSwitchEnabled,
+        upiVpa: parsed.data.upiVpa.trim(),
+        upiPayeeName: parsed.data.upiPayeeName?.trim() ?? "",
       });
     },
     onSuccess: () => {
       toast.success("Counter settings saved");
       invalidate();
+    },
+    onError: (e) => {
+      if (e instanceof ApiError || !(e instanceof Error)) toast.error(errMsg(e));
+    },
+  });
+
+  const saveReturns = useMutation({
+    mutationFn: () =>
+      tenantsApi.updateMe({
+        settings: {
+          returns: {
+            approvalThresholdAmount: Number(approvalThreshold) || 0,
+          },
+        },
+      }),
+    onSuccess: () => {
+      toast.success("Return settings saved");
+      invalidate();
+    },
+    onError: (e) => toast.error(errMsg(e)),
+  });
+
+  const seedReasons = useMutation({
+    mutationFn: () => posApi.seedRefundReasons(),
+    onSuccess: () => {
+      toast.success("Default return reasons ready");
+      void qc.invalidateQueries({ queryKey: ["refund-reasons-settings"] });
+    },
+    onError: (e) => toast.error(errMsg(e)),
+  });
+
+  const addReason = useMutation({
+    mutationFn: () =>
+      posApi.createRefundReason({
+        code: reasonCode.trim(),
+        label: reasonLabel.trim(),
+        appliesTo: reasonApplies,
+      }),
+    onSuccess: () => {
+      toast.success("Reason added");
+      setReasonCode("");
+      setReasonLabel("");
+      void qc.invalidateQueries({ queryKey: ["refund-reasons-settings"] });
+    },
+    onError: (e) => toast.error(errMsg(e)),
+  });
+
+  const saveExpenses = useMutation({
+    mutationFn: () =>
+      tenantsApi.updateMe({
+        settings: {
+          expenses: {
+            approvalThresholdAmount: Number(expenseApprovalThreshold) || 0,
+          },
+        },
+      }),
+    onSuccess: () => {
+      toast.success("Expense settings saved");
+      invalidate();
+    },
+    onError: (e) => toast.error(errMsg(e)),
+  });
+
+  const seedExpenseCategories = useMutation({
+    mutationFn: () => expensesApi.seedCategories(),
+    onSuccess: () => {
+      toast.success("Default expense categories ready");
+      void qc.invalidateQueries({ queryKey: ["expense-categories-settings"] });
+      void qc.invalidateQueries({ queryKey: ["expense-categories"] });
+    },
+    onError: (e) => toast.error(errMsg(e)),
+  });
+
+  const addExpenseCategory = useMutation({
+    mutationFn: () => {
+      const parsed = expenseCategoryNameSchema.safeParse({ name: expCatName });
+      if (!parsed.success) {
+        for (const m of zodMessages(parsed.error)) toast.error(m);
+        throw new Error(zodMessages(parsed.error)[0] ?? "Invalid category");
+      }
+      return expensesApi.createCategory({
+        name: parsed.data.name,
+        receiptRequired: expCatReceipt,
+        accountCode: expCatAccount.trim() || undefined,
+      });
+    },
+    onSuccess: () => {
+      toast.success("Category added");
+      setExpCatName("");
+      setExpCatReceipt(false);
+      setExpCatAccount("");
+      void qc.invalidateQueries({ queryKey: ["expense-categories-settings"] });
+      void qc.invalidateQueries({ queryKey: ["expense-categories"] });
+    },
+    onError: (e) => {
+      if (e instanceof ApiError || !(e instanceof Error)) toast.error(errMsg(e));
+    },
+  });
+
+  const toggleExpenseCategory = useMutation({
+    mutationFn: (row: { id: string; isActive?: boolean }) =>
+      expensesApi.updateCategory(row.id, { isActive: row.isActive === false }),
+    onSuccess: () => {
+      toast.success("Category updated");
+      void qc.invalidateQueries({ queryKey: ["expense-categories-settings"] });
+      void qc.invalidateQueries({ queryKey: ["expense-categories"] });
+    },
+    onError: (e) => toast.error(errMsg(e)),
+  });
+
+  const deleteExpenseCategory = useMutation({
+    mutationFn: (id: string) => expensesApi.deleteCategory(id),
+    onSuccess: () => {
+      toast.success("Category removed");
+      void qc.invalidateQueries({ queryKey: ["expense-categories-settings"] });
+      void qc.invalidateQueries({ queryKey: ["expense-categories"] });
     },
     onError: (e) => toast.error(errMsg(e)),
   });
@@ -230,6 +450,8 @@ export default function SettingsPage() {
         { id: "tax" as const, label: "Tax" },
         { id: "receipt" as const, label: "Receipt" },
         { id: "counter" as const, label: "Counter" },
+        { id: "returns" as const, label: "Returns" },
+        { id: "expenses" as const, label: "Expenses" },
       ] as const,
     [],
   );
@@ -243,7 +465,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-lg space-y-6">
+    <div className="mx-auto max-w-2xl space-y-6">
       <PageHeader
         title="Settings"
         subtitle={
@@ -253,14 +475,14 @@ export default function SettingsPage() {
         }
       />
 
-      <div className="flex gap-1 rounded-xl border border-[#e5e7eb] bg-[#f9fafb] p-1">
+      <div className="flex gap-1 overflow-x-auto rounded-xl border border-[#e5e7eb] bg-[#f9fafb] p-1">
         {tabs.map((t) => (
           <button
             key={t.id}
             type="button"
             onClick={() => setTab(t.id)}
             className={cn(
-              "flex-1 rounded-lg px-2 py-2 text-[0.8rem] font-medium transition sm:px-3 sm:text-sm",
+              "shrink-0 flex-1 rounded-lg px-2 py-2 text-[0.8rem] font-medium transition sm:px-3 sm:text-sm",
               tab === t.id
                 ? "bg-white text-[#0b1f33] shadow-sm"
                 : "text-[#6b7280] hover:text-[#0b1f33]",
@@ -324,6 +546,7 @@ export default function SettingsPage() {
               }
               placeholder="Your business name"
             />
+            <FieldError message={brandErrors.productName} />
           </div>
           <div>
             <Label>Tagline</Label>
@@ -335,6 +558,7 @@ export default function SettingsPage() {
               }
               placeholder="Short line under the shop name"
             />
+            <FieldError message={brandErrors.tagline} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -351,6 +575,7 @@ export default function SettingsPage() {
                 maxLength={3}
                 placeholder="INR"
               />
+              <FieldError message={brandErrors.currencyCode} />
             </div>
             <div>
               <Label>Locale</Label>
@@ -362,6 +587,7 @@ export default function SettingsPage() {
                 }
                 placeholder="en-IN"
               />
+              <FieldError message={brandErrors.locale} />
             </div>
           </div>
           <div>
@@ -374,6 +600,7 @@ export default function SettingsPage() {
               }
               placeholder="Asia/Kolkata"
             />
+            <FieldError message={brandErrors.timezone} />
           </div>
           <Button
             disabled={
@@ -402,6 +629,7 @@ export default function SettingsPage() {
               placeholder="Optional for simple tax modes"
               maxLength={20}
             />
+            <FieldError message={taxErrors.gstin} />
           </div>
           <div>
             <Label>Tax mode</Label>
@@ -417,6 +645,7 @@ export default function SettingsPage() {
               <option value="vat">VAT</option>
               <option value="none">No tax</option>
             </select>
+            <FieldError message={taxErrors.taxMode} />
           </div>
           <div>
             <Label>Rate (%)</Label>
@@ -432,6 +661,7 @@ export default function SettingsPage() {
               }
               disabled={tax.taxMode === "none"}
             />
+            <FieldError message={taxErrors.ratePercent} />
           </div>
               <label className="flex items-center gap-2 text-sm text-[#0b1f33]">
                 <input
@@ -499,6 +729,7 @@ export default function SettingsPage() {
               value={maxDiscount}
               onChange={(e) => setMaxDiscount(e.target.value)}
             />
+            <FieldError message={counterErrors.maxDiscount} />
             <p className="mt-1 text-xs text-[#6b7280]">
               Higher discounts require a manager. Default is 15%.
             </p>
@@ -518,6 +749,32 @@ export default function SettingsPage() {
               </span>
             </span>
           </label>
+
+          <div>
+            <Label>Shop UPI ID (for QR payments)</Label>
+            <Input
+              className="mt-1"
+              placeholder="shop@okaxis"
+              value={upiVpa}
+              onChange={(e) => setUpiVpa(e.target.value)}
+              autoComplete="off"
+            />
+            <FieldError message={counterErrors.upiVpa} />
+            <p className="mt-1 text-xs text-[#6b7280]">
+              Required for Counter → QR. Without this, PhonePe/GPay show a
+              technical glitch when customers scan.
+            </p>
+          </div>
+          <div>
+            <Label>UPI payee name</Label>
+            <Input
+              className="mt-1"
+              placeholder={productName || "Shop name"}
+              value={upiPayeeName}
+              onChange={(e) => setUpiPayeeName(e.target.value)}
+            />
+            <FieldError message={counterErrors.upiPayeeName} />
+          </div>
 
           <div className="rounded-xl border border-[#eef1f4] bg-[#f7f9fc] px-3 py-2.5">
             <p className="text-[0.75rem] font-semibold text-[#0b1f33]">
@@ -559,6 +816,214 @@ export default function SettingsPage() {
               127.0.0.1). Works on HTTPS or localhost.
             </p>
             <BiometricSetup />
+          </div>
+        </section>
+      ) : null}
+
+      {tab === "returns" ? (
+        <section className="space-y-4 rounded-2xl border border-[#e5e7eb] bg-white p-5">
+          <p className="text-xs text-[#6b7280]">
+            Customer return approval threshold and reason catalog. Supplier
+            reasons use applies-to = supplier/both.
+          </p>
+          <div>
+            <Label>Auto-approve returns up to (amount)</Label>
+            <Input
+              className="mt-1"
+              type="number"
+              min={0}
+              value={approvalThreshold}
+              onChange={(e) => setApprovalThreshold(e.target.value)}
+            />
+            <p className="mt-1 text-xs text-[#6b7280]">
+              Cashiers can complete returns at or below this amount without
+              manager approval. 0 = always require approval.
+            </p>
+          </div>
+          <Button
+            disabled={saveReturns.isPending}
+            onClick={() => saveReturns.mutate()}
+          >
+            {saveReturns.isPending ? "Saving…" : "Save return settings"}
+          </Button>
+
+          <div className="border-t border-[#eef1f4] pt-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-semibold text-[#0b1f33]">
+                Return reasons
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                disabled={seedReasons.isPending}
+                onClick={() => seedReasons.mutate()}
+              >
+                Seed defaults
+              </Button>
+            </div>
+            <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto text-sm">
+              {(refundReasons.data ?? []).map((r) => (
+                <li
+                  key={r.id}
+                  className="flex justify-between gap-2 rounded-md bg-[#f7f9fc] px-2 py-1.5"
+                >
+                  <span>
+                    {r.label}{" "}
+                    <span className="font-mono text-[0.65rem] text-[#8b9bb0]">
+                      {r.code}
+                    </span>
+                  </span>
+                  <span className="text-[0.65rem] uppercase text-[#5a6b7d]">
+                    {r.appliesTo ?? "customer"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              <Input
+                placeholder="Code"
+                value={reasonCode}
+                onChange={(e) => setReasonCode(e.target.value)}
+              />
+              <Input
+                placeholder="Label"
+                value={reasonLabel}
+                onChange={(e) => setReasonLabel(e.target.value)}
+              />
+              <select
+                className="h-10 rounded-lg border border-[#e4e9f0] bg-white px-3 text-sm"
+                value={reasonApplies}
+                onChange={(e) => setReasonApplies(e.target.value)}
+              >
+                <option value="customer">Customer</option>
+                <option value="supplier">Supplier</option>
+                <option value="both">Both</option>
+              </select>
+              <Button
+                type="button"
+                disabled={
+                  !reasonCode.trim() ||
+                  !reasonLabel.trim() ||
+                  addReason.isPending
+                }
+                onClick={() => addReason.mutate()}
+              >
+                Add reason
+              </Button>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {tab === "expenses" ? (
+        <section className="space-y-4 rounded-2xl border border-[#e5e7eb] bg-white p-5">
+          <p className="text-xs text-[#6b7280]">
+            Expense approval threshold and category catalog. Petty cash
+            replenishment is not an expense — manage funds on the Expenses desk.
+          </p>
+          <div>
+            <Label>Auto-approve expenses up to (amount)</Label>
+            <Input
+              className="mt-1"
+              type="number"
+              min={0}
+              value={expenseApprovalThreshold}
+              onChange={(e) => setExpenseApprovalThreshold(e.target.value)}
+            />
+            <p className="mt-1 text-xs text-[#6b7280]">
+              Expenses at or below this amount can skip manager approval when
+              policy allows. 0 = always require approval.
+            </p>
+          </div>
+          <Button
+            disabled={saveExpenses.isPending}
+            onClick={() => saveExpenses.mutate()}
+          >
+            {saveExpenses.isPending ? "Saving…" : "Save expense settings"}
+          </Button>
+
+          <div className="border-t border-[#eef1f4] pt-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold text-[#111827]">
+                Expense categories
+              </h3>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={seedExpenseCategories.isPending}
+                onClick={() => seedExpenseCategories.mutate()}
+              >
+                {seedExpenseCategories.isPending
+                  ? "Seeding…"
+                  : "Seed defaults"}
+              </Button>
+            </div>
+            <ul className="mb-3 space-y-1 text-sm text-[#5a6b7d]">
+              {(expenseCategories.data ?? []).map((c) => (
+                <li
+                  key={c.id}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-[#f9fafb] px-2 py-1.5 ring-1 ring-[#e5e7eb]"
+                >
+                  <span>
+                    {c.name}
+                    {c.receiptRequired ? " · receipt required" : ""}
+                    {c.accountCode ? ` · ${c.accountCode}` : ""}
+                    {c.isActive === false ? " · inactive" : ""}
+                  </span>
+                  <span className="flex gap-2">
+                    <button
+                      type="button"
+                      className="text-xs font-medium text-[#1a56db]"
+                      onClick={() => toggleExpenseCategory.mutate(c)}
+                    >
+                      {c.isActive === false ? "Activate" : "Deactivate"}
+                    </button>
+                    <button
+                      type="button"
+                      className="text-xs font-medium text-red-600"
+                      onClick={() => deleteExpenseCategory.mutate(c.id)}
+                    >
+                      Delete
+                    </button>
+                  </span>
+                </li>
+              ))}
+              {!expenseCategories.isLoading &&
+              !(expenseCategories.data ?? []).length ? (
+                <li className="text-xs text-[#8b9bb0]">
+                  No categories yet — seed defaults or add one below.
+                </li>
+              ) : null}
+            </ul>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Input
+                placeholder="Category name"
+                value={expCatName}
+                onChange={(e) => setExpCatName(e.target.value)}
+              />
+              <Input
+                placeholder="Account code (optional)"
+                value={expCatAccount}
+                onChange={(e) => setExpCatAccount(e.target.value)}
+              />
+            </div>
+            <label className="mt-2 flex items-center gap-2 text-sm text-[#5a6b7d]">
+              <input
+                type="checkbox"
+                checked={expCatReceipt}
+                onChange={(e) => setExpCatReceipt(e.target.checked)}
+              />
+              Receipt required for this category
+            </label>
+            <Button
+              className="mt-3"
+              type="button"
+              disabled={!expCatName.trim() || addExpenseCategory.isPending}
+              onClick={() => addExpenseCategory.mutate()}
+            >
+              {addExpenseCategory.isPending ? "Adding…" : "Add category"}
+            </Button>
           </div>
         </section>
       ) : null}

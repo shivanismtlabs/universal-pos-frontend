@@ -1,11 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { catalogApi, type CatalogProductKind } from "@/lib/api";
+import {
+  catalogApi,
+  type CatalogProductKind,
+  type CatalogProductStatus,
+} from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useBootstrap } from "@/lib/bootstrap";
 import { Button } from "@/components/ui/button";
@@ -18,6 +22,7 @@ import {
   ProductImagePicker,
   type ProductImagePickerHandle,
 } from "@/components/product-image-picker";
+import { ProductThumb } from "@/components/product-thumb";
 import {
   createCatalogProductSchema,
   zodFieldErrors,
@@ -38,12 +43,23 @@ const UNITS = [
   "service",
 ];
 
-export default function NewCatalogProductPage() {
+export default function EditCatalogProductRoute() {
+  return (
+    <Suspense
+      fallback={<p className="p-8 text-sm text-[#5a6b7d]">Loading item…</p>}
+    >
+      <EditCatalogProductPage />
+    </Suspense>
+  );
+}
+
+function EditCatalogProductPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
+  const search = useSearchParams();
+  const id = search.get("id")?.trim() || "";
   const imagePickerRef = useRef<ProductImagePickerHandle>(null);
-  const { itemMetaFields, businessConfig, businessType, data: boot } =
-    useBootstrap();
-  const defaultLocationId = boot?.locations?.[0]?.id;
+  const { itemMetaFields, businessConfig, businessType } = useBootstrap();
   const cats = useQuery({
     queryKey: ["catalog-categories"],
     queryFn: () => catalogApi.listCategories(),
@@ -52,9 +68,15 @@ export default function NewCatalogProductPage() {
     queryKey: ["catalog-brands"],
     queryFn: () => catalogApi.listBrands(),
   });
+  const product = useQuery({
+    queryKey: ["catalog-product", id],
+    queryFn: () => catalogApi.getProduct(id),
+    enabled: Boolean(id),
+  });
 
   /** Org custom / profile extras (from business config itemFields). */
   const [extraFields, setExtraFields] = useState<Record<string, string>>({});
+  const [hydrated, setHydrated] = useState(false);
 
   const profileLabel = useMemo(() => {
     return businessConfig?.label || businessType || "Shop";
@@ -64,7 +86,7 @@ export default function NewCatalogProductPage() {
     name: "",
     shortName: "",
     kind: "physical" as CatalogProductKind,
-    status: "active" as const,
+    status: "active" as CatalogProductStatus,
     skuCode: "",
     barcode: "",
     barcodeType: "code128",
@@ -86,8 +108,59 @@ export default function NewCatalogProductPage() {
     canSell: true,
     canPurchase: true,
     availableInPos: true,
-    openingQty: "1",
   });
+
+  useEffect(() => {
+    setHydrated(false);
+    setExtraFields({});
+    imagePickerRef.current?.clear();
+  }, [id]);
+
+  useEffect(() => {
+    if (!product.data || hydrated) return;
+    const p = product.data;
+    const meta = p.meta;
+    const rateFromMeta =
+      meta && typeof meta.taxRatePercent === "number"
+        ? String(meta.taxRatePercent)
+        : p.taxCode?.match(/(\d+(?:\.\d+)?)/)?.[1] || "5";
+    setForm({
+      name: p.name ?? "",
+      shortName: p.shortName ?? "",
+      kind: p.kind,
+      status: p.status === "archived" ? "inactive" : p.status,
+      skuCode: p.skuCode ?? "",
+      barcode: p.barcode ?? "",
+      barcodeType: p.barcodeType || "code128",
+      internalCode: p.internalCode ?? "",
+      categoryId: p.category?.id ?? "",
+      brandId: p.brand?.id ?? "",
+      shortDescription: p.shortDescription ?? "",
+      description: p.description ?? "",
+      basePrice: String(p.basePrice ?? p.sellingPrice ?? 0),
+      costPrice: p.costPrice != null ? String(p.costPrice) : "",
+      mrp: p.mrp != null ? String(p.mrp) : "",
+      taxCode: p.taxCode ?? "",
+      taxRatePercent: rateFromMeta,
+      unitOfMeasure: p.unitOfMeasure || "pcs",
+      photoUrl: p.photoUrl ?? "",
+      trackInventory: p.trackInventory !== false,
+      trackSerial: !!p.trackSerial,
+      trackBatch: !!p.trackBatch,
+      canSell: p.canSell !== false,
+      canPurchase: p.canPurchase !== false,
+      availableInPos: p.availableInPos !== false,
+    });
+    if (itemMetaFields.length && meta) {
+      const extras: Record<string, string> = {};
+      for (const f of itemMetaFields) {
+        const v = meta[f.key];
+        if (v != null && f.key !== "taxRatePercent") extras[f.key] = String(v);
+      }
+      setExtraFields(extras);
+    }
+    setHydrated(true);
+  }, [product.data, hydrated, itemMetaFields]);
 
   const applyKindDefaults = (kind: CatalogProductKind) => {
     const nonStock = kind === "service" || kind === "digital" || kind === "bundle";
@@ -142,13 +215,13 @@ export default function NewCatalogProductPage() {
 
   useEffect(() => {
     const code = form.barcode.trim();
-    if (!code) {
+    if (!code || !id) {
       setBarcodeError(null);
       return;
     }
     const t = window.setTimeout(() => {
       void catalogApi
-        .checkBarcode(code)
+        .checkBarcode(code, id)
         .then((r) => {
           if (!r.available) {
             setBarcodeError(
@@ -170,13 +243,15 @@ export default function NewCatalogProductPage() {
         });
     }, 400);
     return () => window.clearTimeout(t);
-  }, [form.barcode]);
+  }, [form.barcode, id]);
 
   const save = useMutation({
     mutationFn: () => {
+      if (!id) throw new Error("Missing product id");
       if (barcodeError) {
         throw new Error(barcodeError);
       }
+      // No opening-stock field on edit — skip openingQty refine via trackInventory:false for schema only.
       const parsed = createCatalogProductSchema.safeParse({
         name: form.name,
         kind: form.kind,
@@ -188,8 +263,8 @@ export default function NewCatalogProductPage() {
         mrp: form.mrp,
         taxRatePercent: form.taxRatePercent,
         unitOfMeasure: form.unitOfMeasure,
-        trackInventory: form.trackInventory,
-        openingQty: form.openingQty,
+        trackInventory: false,
+        openingQty: "",
       });
       if (!parsed.success) {
         setFieldErrors(zodFieldErrors(parsed.error));
@@ -199,48 +274,50 @@ export default function NewCatalogProductPage() {
       }
       setFieldErrors({});
       const uploaded = imagePickerRef.current?.getUploadDataUrls() ?? [];
+      const existingPhotos = product.data?.images?.length
+        ? product.data.images
+        : form.photoUrl.trim()
+          ? [form.photoUrl.trim()]
+          : [];
       const photos = [
         ...uploaded,
-        ...(form.photoUrl.trim() ? [form.photoUrl.trim()] : []),
+        ...existingPhotos.filter(Boolean),
       ];
-      return catalogApi.createProduct({
+      const uniquePhotos = [...new Set(photos)];
+      return catalogApi.updateProduct(id, {
         name: form.name.trim(),
         shortName: form.shortName.trim() || undefined,
         kind: form.kind,
         status: form.status,
         skuCode: form.skuCode.trim() || undefined,
-        barcode: form.barcode.trim() || undefined,
+        barcode: form.barcode.trim() || null,
         barcodeType: form.barcode.trim()
           ? form.barcodeType || "code128"
-          : undefined,
+          : null,
         internalCode: form.internalCode.trim() || undefined,
-        categoryId: form.categoryId || undefined,
-        brandId: form.brandId || undefined,
+        categoryId: form.categoryId || null,
+        brandId: form.brandId || null,
         shortDescription: form.shortDescription.trim() || undefined,
         description: form.description.trim() || undefined,
         basePrice: Number(form.basePrice) || 0,
-        costPrice: form.costPrice ? Number(form.costPrice) : undefined,
-        mrp: form.mrp ? Number(form.mrp) : undefined,
+        costPrice: form.costPrice ? Number(form.costPrice) : null,
+        mrp: form.mrp ? Number(form.mrp) : null,
         taxCode: (() => {
           const rate = Number(form.taxRatePercent);
           if (Number.isFinite(rate) && rate > 0) {
             return form.taxCode.trim() || `GST${rate}`;
           }
-          return form.taxCode.trim() || undefined;
+          return form.taxCode.trim() || null;
         })(),
         unitOfMeasure: form.unitOfMeasure,
-        photoUrl: photos[0],
-        images: photos.length ? photos : undefined,
+        photoUrl: uniquePhotos[0] || form.photoUrl.trim() || null,
+        images: uniquePhotos.length ? uniquePhotos : undefined,
         trackInventory: form.trackInventory,
         trackSerial: form.trackSerial,
         trackBatch: form.trackBatch,
         canSell: form.canSell,
         canPurchase: form.canPurchase,
         availableInPos: form.availableInPos,
-        locationId: defaultLocationId || undefined,
-        openingQty: form.trackInventory
-          ? Number(form.openingQty)
-          : undefined,
         extraFields: (() => {
           const out: Record<string, unknown> = {};
           const rate = Number(form.taxRatePercent);
@@ -258,9 +335,11 @@ export default function NewCatalogProductPage() {
         })(),
       });
     },
-    onSuccess: (p) => {
-      toast.success("Product created");
-      router.push(p?.id ? `/catalog/view?id=${p.id}` : "/catalog");
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["catalog-products"] });
+      void queryClient.invalidateQueries({ queryKey: ["catalog-product", id] });
+      toast.success("Item updated");
+      router.push(`/catalog/view?id=${id}`);
     },
     onError: (e: Error) =>
       toast.error(e instanceof ApiError ? e.message : e.message || "Save failed"),
@@ -269,6 +348,32 @@ export default function NewCatalogProductPage() {
   const section =
     "space-y-3 rounded-md border border-[#e4e9f0] bg-white p-4";
 
+  if (!id) {
+    return (
+      <p className="p-8 text-sm text-[#c81e1e]">
+        Missing item id.{" "}
+        <Link href="/catalog" className="text-[#1a56db]">
+          Back to Items
+        </Link>
+      </p>
+    );
+  }
+
+  if (product.isLoading || !hydrated) {
+    return <p className="p-8 text-sm text-[#5a6b7d]">Loading item…</p>;
+  }
+
+  if (product.isError || !product.data) {
+    return (
+      <p className="p-8 text-sm text-[#c81e1e]">
+        Item not found.{" "}
+        <Link href="/catalog" className="text-[#1a56db]">
+          Back to Items
+        </Link>
+      </p>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-3xl space-y-4 pb-12">
       <header className="flex flex-wrap items-center justify-between gap-2 border-b border-[#eef1f4] pb-3">
@@ -276,17 +381,20 @@ export default function NewCatalogProductPage() {
           <p className="text-[0.65rem] font-bold tracking-wide text-[#1a56db] uppercase">
             Catalog
           </p>
-          <h1 className="text-xl font-semibold text-[#0b1f33]">New Item</h1>
+          <h1 className="text-xl font-semibold text-[#0b1f33]">Edit Item</h1>
+          <p className="mt-0.5 font-mono text-xs text-[#5a6b7d]">
+            {product.data.skuCode}
+          </p>
         </div>
         <div className="flex gap-2">
           <Button variant="secondary" asChild>
-            <Link href="/catalog">Cancel</Link>
+            <Link href={`/catalog/view?id=${id}`}>Cancel</Link>
           </Button>
           <Button
             disabled={!form.name.trim() || save.isPending}
             onClick={() => save.mutate()}
           >
-            Save
+            {save.isPending ? "Saving…" : "Save"}
           </Button>
         </div>
       </header>
@@ -357,8 +465,37 @@ export default function NewCatalogProductPage() {
               placeholder="https://… or leave blank and upload below"
             />
           </div>
+          {(product.data.images?.length || form.photoUrl) ? (
+            <div className="sm:col-span-2">
+              <Label>Current images</Label>
+              <div className="mt-1 flex flex-wrap gap-2">
+                {(product.data.images?.length
+                  ? product.data.images
+                  : [form.photoUrl]
+                )
+                  .filter(Boolean)
+                  .slice(0, 8)
+                  .map((src) => (
+                    <ProductThumb
+                      key={src}
+                      src={src}
+                      label={form.name}
+                      className="rounded border border-[#e4e9f0]"
+                    />
+                  ))}
+              </div>
+              <p className="mt-1 text-[0.75rem] text-[#8a9bb0]">
+                Upload below to add more. Existing images are kept unless you
+                clear the image URL.
+              </p>
+            </div>
+          ) : null}
           <div className="sm:col-span-2">
-            <ProductImagePicker ref={imagePickerRef} />
+            <ProductImagePicker
+              ref={imagePickerRef}
+              label="Add images"
+              hint="Optional · new photos are added to the gallery"
+            />
           </div>
           <div className="sm:col-span-2">
             <Label>Short description</Label>
@@ -599,25 +736,6 @@ export default function NewCatalogProductPage() {
               ))}
             </select>
           </div>
-          {form.trackInventory ? (
-            <div>
-              <Label>Opening qty (default location)</Label>
-              <Input
-                type="number"
-                min={1}
-                step={1}
-                value={form.openingQty}
-                onChange={(e) => {
-                  clearFieldError("openingQty");
-                  setForm((f) => ({ ...f, openingQty: e.target.value }));
-                }}
-              />
-              <FieldError message={fieldErrors.openingQty} />
-              <p className="mt-1 text-[0.7rem] text-[#8a9bb0]">
-                Minimum 1 (0 / 0.1 not allowed)
-              </p>
-            </div>
-          ) : null}
         </div>
       </section>
 

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useBootstrap } from "@/lib/bootstrap";
 import { EmptyState, PageSkeleton } from "@/components/page-header";
 import { HomeDashboard } from "@/components/home-dashboard";
@@ -10,16 +11,20 @@ import { SaleDashboard } from "./sale-dashboard";
 import { RentalDashboard } from "./rental-dashboard";
 import { SubscriptionDashboard } from "./subscription-dashboard";
 import { ServiceDashboard } from "./service-dashboard";
+import { posApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+import { Lock } from "lucide-react";
 
 type HomeTab = "dashboard" | "getting-started" | "floors";
 type FloorView = "sale" | "rent" | "service" | "subscription";
 
 /**
  * Home after login — Zoho-style Dashboard / Getting Started, plus mode floors.
+ * Tabs unlock in order as setup progress completes.
  */
 export default function DashboardPage() {
-  const { isLoading, hasMode } = useBootstrap();
+  const { isLoading, hasMode, data: boot } = useBootstrap();
   const [homeTab, setHomeTab] = useState<HomeTab>("getting-started");
   const [floor, setFloor] = useState<FloorView>("sale");
 
@@ -29,24 +34,62 @@ export default function DashboardPage() {
   const hasSub = hasMode("subscription");
   const hasAnyMode = hasSale || hasRent || hasService || hasSub;
 
+  const floorQ = useQuery({
+    queryKey: ["pos-sale-floor"],
+    queryFn: () => posApi.saleFloor(),
+    enabled: hasSale,
+  });
+
+  const taxConfigured = useMemo(() => {
+    const t = boot?.tenant;
+    if (!t) return false;
+    if (t.taxId || t.gstin) return true;
+    const settings =
+      t.settings && typeof t.settings === "object"
+        ? (t.settings as Record<string, unknown>)
+        : {};
+    const tax =
+      settings.tax && typeof settings.tax === "object"
+        ? (settings.tax as Record<string, unknown>)
+        : {};
+    if (t.taxMode === "none") return true;
+    return (
+      typeof tax.ratePercent === "number" ||
+      (typeof tax.ratePercent === "string" && tax.ratePercent.trim() !== "")
+    );
+  }, [boot?.tenant]);
+
+  const products = floorQ.data?.counts?.products ?? 0;
+  const dashboardUnlocked = taxConfigured;
+  const floorsUnlocked = !hasSale || products > 0;
+
   useEffect(() => {
     try {
       const seen = localStorage.getItem("upos-home-setup-seen");
-      if (seen === "1") setHomeTab("dashboard");
+      if (seen === "1" && dashboardUnlocked) setHomeTab("dashboard");
     } catch {
       /* ignore */
     }
-  }, []);
+  }, [dashboardUnlocked]);
 
   useEffect(() => {
-    if (homeTab !== "getting-started") {
+    if (homeTab === "dashboard" && dashboardUnlocked) {
       try {
         localStorage.setItem("upos-home-setup-seen", "1");
       } catch {
         /* ignore */
       }
     }
-  }, [homeTab]);
+  }, [homeTab, dashboardUnlocked]);
+
+  useEffect(() => {
+    if (homeTab === "dashboard" && !dashboardUnlocked) {
+      setHomeTab("getting-started");
+    }
+    if (homeTab === "floors" && !floorsUnlocked) {
+      setHomeTab("getting-started");
+    }
+  }, [homeTab, dashboardUnlocked, floorsUnlocked]);
 
   if (isLoading) {
     return <PageSkeleton rows={6} />;
@@ -64,6 +107,20 @@ export default function DashboardPage() {
   const showFloors =
     [hasSale, hasRent, hasService, hasSub].filter(Boolean).length > 0;
 
+  function selectTab(id: HomeTab) {
+    if (id === "dashboard" && !dashboardUnlocked) {
+      toast.message("Finish tax settings in Getting Started first");
+      setHomeTab("getting-started");
+      return;
+    }
+    if (id === "floors" && !floorsUnlocked) {
+      toast.message("Add at least one item in Getting Started first");
+      setHomeTab("getting-started");
+      return;
+    }
+    setHomeTab(id);
+  }
+
   return (
     <div className="space-y-5">
       {/* Zoho top tabs */}
@@ -75,10 +132,24 @@ export default function DashboardPage() {
         >
           {(
             [
-              { id: "dashboard" as const, label: "Dashboard" },
-              { id: "getting-started" as const, label: "Getting Started" },
+              {
+                id: "getting-started" as const,
+                label: "Getting Started",
+                locked: false,
+              },
+              {
+                id: "dashboard" as const,
+                label: "Dashboard",
+                locked: !dashboardUnlocked,
+              },
               ...(showFloors
-                ? [{ id: "floors" as const, label: "Shop floors" }]
+                ? [
+                    {
+                      id: "floors" as const,
+                      label: "Shop floors",
+                      locked: !floorsUnlocked,
+                    },
+                  ]
                 : []),
             ] as const
           ).map((t) => {
@@ -89,15 +160,26 @@ export default function DashboardPage() {
                 type="button"
                 role="tab"
                 aria-selected={active}
-                onClick={() => setHomeTab(t.id)}
+                aria-disabled={t.locked}
+                title={
+                  t.locked
+                    ? t.id === "dashboard"
+                      ? "Complete tax settings first"
+                      : "Add inventory items first"
+                    : undefined
+                }
+                onClick={() => selectTab(t.id)}
                 className={cn(
-                  "-mb-px border-b-2 px-1 pb-2.5 pt-1 text-[0.9rem] font-medium transition sm:mr-6 sm:px-0",
+                  "-mb-px inline-flex items-center gap-1.5 border-b-2 px-1 pb-2.5 pt-1 text-[0.9rem] font-medium transition sm:mr-6 sm:px-0",
                   active
                     ? "border-[#1a56db] font-semibold text-[#1a56db]"
-                    : "border-transparent text-[#5a6b7d] hover:text-[#0b1f33]",
+                    : t.locked
+                      ? "border-transparent text-[#b0bac8]"
+                      : "border-transparent text-[#5a6b7d] hover:text-[#0b1f33]",
                 )}
               >
                 {t.label}
+                {t.locked ? <Lock className="h-3 w-3 opacity-70" /> : null}
               </button>
             );
           })}
@@ -107,7 +189,6 @@ export default function DashboardPage() {
       {homeTab === "dashboard" ? (
         <div className="space-y-6">
           <HomeDashboard />
-          {/* Detailed KPIs under Zoho-style invoice summary */}
           <OverviewDashboard embed />
         </div>
       ) : null}

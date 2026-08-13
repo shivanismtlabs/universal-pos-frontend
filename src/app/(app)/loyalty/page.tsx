@@ -12,7 +12,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { PageHeader, EmptyState, PageSkeleton } from "@/components/page-header";
+import { FieldError } from "@/components/ui/form";
 import { cn, formatDate } from "@/lib/utils";
+import {
+  createCouponSchema,
+  issueGiftCardSchema,
+  zodFieldErrors,
+  zodMessages,
+} from "@/lib/validations";
 
 async function copyText(value: string) {
   try {
@@ -40,6 +47,8 @@ export default function LoyaltyPage() {
 
   const [gcValue, setGcValue] = useState("1000");
   const [gcCode, setGcCode] = useState("");
+  const [couponErrors, setCouponErrors] = useState<Record<string, string>>({});
+  const [giftErrors, setGiftErrors] = useState<Record<string, string>>({});
 
   const [earn, setEarn] = useState("1");
   const [cpp, setCpp] = useState("0.01");
@@ -66,22 +75,38 @@ export default function LoyaltyPage() {
   });
 
   const create = useMutation({
-    mutationFn: () =>
-      loyaltyApi.createCoupon({
-        code: code.trim(),
-        description: description.trim() || undefined,
+    mutationFn: () => {
+      const parsed = createCouponSchema.safeParse({
+        code,
+        description,
         discountType,
-        discountValue: Number(discountValue),
-        minOrderAmount: minOrder ? Number(minOrder) : undefined,
-      }),
+        discountValue,
+        minOrderAmount: minOrder,
+      });
+      if (!parsed.success) {
+        setCouponErrors(zodFieldErrors(parsed.error));
+        toast.error(zodMessages(parsed.error)[0] ?? "Check the form");
+        throw new Error(zodMessages(parsed.error)[0] ?? "Invalid coupon");
+      }
+      setCouponErrors({});
+      return loyaltyApi.createCoupon({
+        code: parsed.data.code,
+        description: parsed.data.description || undefined,
+        discountType: parsed.data.discountType,
+        discountValue: parsed.data.discountValue,
+        minOrderAmount: parsed.data.minOrderAmount,
+      });
+    },
     onSuccess: () => {
       toast.success("Coupon created");
       setCode("");
       setDescription("");
+      setCouponErrors({});
       void qc.invalidateQueries({ queryKey: ["loyalty-coupons"] });
     },
-    onError: (e) =>
-      toast.error(e instanceof ApiError ? e.messages.join(", ") : "Failed"),
+    onError: (e) => {
+      if (e instanceof ApiError) toast.error(e.messages.join(", "));
+    },
   });
 
   const patch = useMutation({
@@ -96,9 +121,19 @@ export default function LoyaltyPage() {
 
   const issueCard = useMutation({
     mutationFn: async () => {
+      const parsed = issueGiftCardSchema.safeParse({
+        initialValue: gcValue,
+        code: gcCode,
+      });
+      if (!parsed.success) {
+        setGiftErrors(zodFieldErrors(parsed.error));
+        toast.error(zodMessages(parsed.error)[0] ?? "Check the form");
+        throw new Error(zodMessages(parsed.error)[0] ?? "Invalid gift card");
+      }
+      setGiftErrors({});
       const row = await loyaltyApi.issueGiftCard({
-        initialValue: Number(gcValue),
-        code: gcCode.trim() || undefined,
+        initialValue: parsed.data.initialValue,
+        code: parsed.data.code?.trim() || undefined,
       });
       return row as { code?: string };
     },
@@ -116,10 +151,12 @@ export default function LoyaltyPage() {
           : undefined,
       );
       setGcCode("");
+      setGiftErrors({});
       void qc.invalidateQueries({ queryKey: ["loyalty-gift-cards"] });
     },
-    onError: (e) =>
-      toast.error(e instanceof ApiError ? e.messages.join(", ") : "Failed"),
+    onError: (e) => {
+      if (e instanceof ApiError) toast.error(e.messages.join(", "));
+    },
   });
 
   const saveSettings = useMutation({
@@ -190,22 +227,28 @@ export default function LoyaltyPage() {
                 <Input
                   className="mt-1 uppercase"
                   value={code}
-                  onChange={(e) => setCode(e.target.value)}
+                  onChange={(e) => {
+                    setCode(e.target.value);
+                    setCouponErrors((f) => ({ ...f, code: "" }));
+                  }}
                   placeholder="SAVE10"
                 />
+                <FieldError message={couponErrors.code} />
               </div>
               <div>
                 <Label>Type</Label>
                 <Select
                   className="mt-1"
                   value={discountType}
-                  onChange={(e) =>
-                    setDiscountType(e.target.value as "percent" | "fixed")
-                  }
+                  onChange={(e) => {
+                    setDiscountType(e.target.value as "percent" | "fixed");
+                    setCouponErrors((f) => ({ ...f, discountType: "" }));
+                  }}
                 >
                   <option value="percent">Percent off</option>
                   <option value="fixed">Fixed amount off</option>
                 </Select>
+                <FieldError message={couponErrors.discountType} />
               </div>
               <div>
                 <Label>Value</Label>
@@ -213,8 +256,12 @@ export default function LoyaltyPage() {
                   className="mt-1"
                   type="number"
                   value={discountValue}
-                  onChange={(e) => setDiscountValue(e.target.value)}
+                  onChange={(e) => {
+                    setDiscountValue(e.target.value);
+                    setCouponErrors((f) => ({ ...f, discountValue: "" }));
+                  }}
                 />
+                <FieldError message={couponErrors.discountValue} />
               </div>
               <div>
                 <Label>Min order (optional)</Label>
@@ -222,22 +269,30 @@ export default function LoyaltyPage() {
                   className="mt-1"
                   type="number"
                   value={minOrder}
-                  onChange={(e) => setMinOrder(e.target.value)}
+                  onChange={(e) => {
+                    setMinOrder(e.target.value);
+                    setCouponErrors((f) => ({ ...f, minOrderAmount: "" }));
+                  }}
                 />
+                <FieldError message={couponErrors.minOrderAmount} />
               </div>
               <div className="sm:col-span-2">
                 <Label>Description</Label>
                 <Input
                   className="mt-1"
                   value={description}
-                  onChange={(e) => setDescription(e.target.value)}
+                  onChange={(e) => {
+                    setDescription(e.target.value);
+                    setCouponErrors((f) => ({ ...f, description: "" }));
+                  }}
                 />
+                <FieldError message={couponErrors.description} />
               </div>
             </div>
             <Button
               className="mt-4"
               type="button"
-              disabled={create.isPending || !code.trim()}
+              disabled={create.isPending}
               onClick={() => create.mutate()}
             >
               {create.isPending ? "Saving…" : "Create coupon"}
@@ -309,23 +364,31 @@ export default function LoyaltyPage() {
                   className="mt-1"
                   type="number"
                   value={gcValue}
-                  onChange={(e) => setGcValue(e.target.value)}
+                  onChange={(e) => {
+                    setGcValue(e.target.value);
+                    setGiftErrors((f) => ({ ...f, initialValue: "" }));
+                  }}
                 />
+                <FieldError message={giftErrors.initialValue} />
               </div>
               <div>
                 <Label>Code (optional)</Label>
                 <Input
                   className="mt-1 uppercase"
                   value={gcCode}
-                  onChange={(e) => setGcCode(e.target.value)}
+                  onChange={(e) => {
+                    setGcCode(e.target.value);
+                    setGiftErrors((f) => ({ ...f, code: "" }));
+                  }}
                   placeholder="Auto-generated if blank"
                 />
+                <FieldError message={giftErrors.code} />
               </div>
             </div>
             <Button
               className="mt-4"
               type="button"
-              disabled={issueCard.isPending || !Number(gcValue)}
+              disabled={issueCard.isPending}
               onClick={() => issueCard.mutate()}
             >
               {issueCard.isPending ? "Issuing…" : "Issue card"}
