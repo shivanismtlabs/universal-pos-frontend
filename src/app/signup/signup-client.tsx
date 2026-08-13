@@ -46,7 +46,17 @@ const signupSchema = z
   .refine((v) => v.password === v.confirmPassword, {
     message: "Passwords do not match",
     path: ["confirmPassword"],
-  });
+  })
+  .refine(
+    (v) => {
+      const local = v.email.split("@")[0]?.toLowerCase() ?? "";
+      return !local || local.length < 2 || !v.password.toLowerCase().includes(local);
+    },
+    {
+      message: "Password must not contain your email name",
+      path: ["password"],
+    },
+  );
 
 type SignupInput = z.infer<typeof signupSchema>;
 
@@ -61,7 +71,6 @@ export default function SignupClient() {
     formState: { errors, isSubmitting },
   } = useForm<SignupInput>({
     resolver: zodResolver(signupSchema),
-    criteriaMode: "all",
     mode: "onChange",
     defaultValues: {
       fullName: "",
@@ -75,21 +84,27 @@ export default function SignupClient() {
   const password = watch("password") ?? "";
   const email = watch("email") ?? "";
   const strength = passwordStrength(password, { email });
-  const strengthPct = Math.round((strength.score / 7) * 100);
-  const passwordRules = [
-    { ok: strength.checks.length, label: "At least 8 characters (max 72)" },
-    { ok: strength.checks.lower, label: "One lowercase letter (a–z)" },
-    { ok: strength.checks.upper, label: "One uppercase letter (A–Z)" },
-    { ok: strength.checks.number, label: "One number (0–9)" },
-    { ok: strength.checks.special, label: "One special character (!@#$…)" },
-    {
-      ok: strength.checks.noEmailPart,
-      label: "Must not contain your email name",
-    },
-  ] as const;
-  const passwordFailLines = passwordRules
-    .filter((r) => password.length > 0 && !r.ok)
-    .map((r) => r.label);
+  /** Signup has 6 rules (no shop slug). */
+  const signupScore = [
+    strength.checks.length,
+    strength.checks.lower,
+    strength.checks.upper,
+    strength.checks.number,
+    strength.checks.special,
+    strength.checks.noEmailPart,
+  ].filter(Boolean).length;
+  const strengthPct = Math.round((signupScore / 6) * 100);
+  const passwordMissing = [
+    !strength.checks.length && "At least 8 characters (max 72)",
+    !strength.checks.lower && "One lowercase letter (a–z)",
+    !strength.checks.upper && "One uppercase letter (A–Z)",
+    !strength.checks.number && "One number (0–9)",
+    !strength.checks.special && "One special character (!@#$…)",
+    !strength.checks.noEmailPart && "Must not contain your email name",
+  ].filter(Boolean) as string[];
+  const passwordOk = passwordMissing.length === 0 && password.length > 0;
+  const showPasswordHints =
+    password.length > 0 || Boolean(errors.password);
 
   async function onSubmit(values: SignupInput) {
     try {
@@ -147,7 +162,7 @@ export default function SignupClient() {
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="email">Work email</Label>
+          <Label htmlFor="email"> email</Label>
           <Input
             id="email"
             type="email"
@@ -187,39 +202,36 @@ export default function SignupClient() {
             autoComplete="new-password"
             {...register("password")}
           />
-          <div className="h-1.5 overflow-hidden rounded-full bg-[#eef2f8]">
-            <div
-              className={cn(
-                "h-full rounded-full transition-all",
-                strength.score <= 2
-                  ? "bg-[#ef4444]"
-                  : strength.score <= 4
-                    ? "bg-[#f59e0b]"
-                    : "bg-[#16a34a]",
+          {showPasswordHints ? (
+            <>
+              <div className="h-1 overflow-hidden rounded-full bg-[#eef2f8]">
+                <div
+                  className={cn(
+                    "h-full rounded-full transition-all",
+                    passwordOk
+                      ? "bg-[#16a34a]"
+                      : signupScore <= 2
+                        ? "bg-[#ef4444]"
+                        : "bg-[#f59e0b]",
+                  )}
+                  style={{ width: `${strengthPct}%` }}
+                />
+              </div>
+              {passwordOk ? (
+                <p className="mt-1 text-[0.75rem] text-[#15803d]">
+                  Password looks good
+                </p>
+              ) : (
+                <ul
+                  className="mt-1 space-y-0.5 text-[0.75rem] text-[#b91c1c]"
+                  role="alert"
+                >
+                  {passwordMissing.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
               )}
-              style={{ width: `${strengthPct}%` }}
-            />
-          </div>
-          <ul className="mt-1.5 space-y-0.5 text-[0.72rem]">
-            {passwordRules.map((r) => (
-              <li
-                key={r.label}
-                className={cn(
-                  r.ok ? "text-[#15803d]" : "text-[#6b7280]",
-                )}
-              >
-                {r.ok ? "✓" : "○"} {r.label}
-              </li>
-            ))}
-          </ul>
-          {passwordFailLines.length ? (
-            <ul className="mt-1 space-y-0.5 text-[0.75rem] text-[#c81e1e]">
-              {passwordFailLines.map((line) => (
-                <li key={line}>• {line}</li>
-              ))}
-            </ul>
-          ) : errors.password?.message ? (
-            <FieldError message={errors.password.message} />
+            </>
           ) : null}
         </div>
 
