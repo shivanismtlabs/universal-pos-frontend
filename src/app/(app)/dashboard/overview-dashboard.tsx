@@ -67,6 +67,10 @@ export function OverviewDashboard({ embed = false }: { embed?: boolean }) {
     queryKey: ["reports-payments-summary"],
     queryFn: () => reportsApi.paymentsSummary(),
   });
+  const financeDash = useQuery({
+    queryKey: ["reports-dashboard-finance"],
+    queryFn: () => reportsApi.dashboardFinance(),
+  });
   const floor = useQuery({
     queryKey: ["pos-sale-floor"],
     queryFn: () => posApi.saleFloor(),
@@ -115,6 +119,27 @@ export function OverviewDashboard({ embed = false }: { embed?: boolean }) {
     const max = Math.max(...vals, 1);
     return vals.map((v) => Math.max(8, Math.round((v / max) * 36)));
   }, [recent.data]);
+
+  const cashSpark = useMemo(() => {
+    const series = financeDash.data?.cashFlow.series ?? [];
+    if (!series.length) return null;
+    const max = Math.max(1, ...series.map((s) => Math.max(s.inflow, s.outflow)));
+    return series.map((s) => ({
+      date: s.date,
+      inH: Math.max(2, Math.round((s.inflow / max) * 48)),
+      outH: Math.max(2, Math.round((s.outflow / max) * 48)),
+      net: s.net,
+    }));
+  }, [financeDash.data]);
+
+  const expCatMax = useMemo(
+    () =>
+      Math.max(
+        1,
+        ...(financeDash.data?.expenses.byCategory.map((c) => c.amount) ?? [1]),
+      ),
+    [financeDash.data],
+  );
 
   const tasks = [
     ...(hasSale && products === 0
@@ -397,6 +422,115 @@ export function OverviewDashboard({ embed = false }: { embed?: boolean }) {
               ))}
             </ul>
           </div>
+        </section>
+      </div>
+
+      {/* Finance charts — cash flow + expenses / tax */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <section className="rounded-[14px] border border-[#d9e0ea] bg-white p-5 shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <h2 className="text-[0.9375rem] font-semibold text-[#0b1f33]">
+                Cash flow
+              </h2>
+              <p className="text-[0.75rem] text-[#5a6b7d]">
+                Last 14 days · in vs out
+              </p>
+            </div>
+            <Link
+              href="/reports/finance"
+              className="text-[0.75rem] font-semibold text-[#1a56db] hover:underline"
+            >
+              Finance reports
+            </Link>
+          </div>
+          {cashSpark ? (
+            <>
+              <div className="mt-5 flex h-28 items-end gap-1">
+                {cashSpark.map((s) => (
+                  <div
+                    key={s.date}
+                    className="flex flex-1 flex-col items-center justify-end gap-0.5"
+                    title={`${s.date}: net ${formatInr(s.net)}`}
+                  >
+                    <div
+                      className="w-full max-w-[1.1rem] rounded-t-sm bg-[#0e9f6e]"
+                      style={{ height: `${s.inH}px` }}
+                    />
+                    <div
+                      className="w-full max-w-[1.1rem] rounded-b-sm bg-[#f87171]"
+                      style={{ height: `${s.outH}px` }}
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-3 text-[0.75rem] text-[#5a6b7d]">
+                <span>
+                  In {formatInr(financeDash.data?.cashFlow.cashIn ?? 0)}
+                </span>
+                <span>
+                  Out {formatInr(financeDash.data?.cashFlow.cashOut ?? 0)}
+                </span>
+                <span className="font-semibold text-[#0b1f33]">
+                  Net {formatInr(financeDash.data?.cashFlow.netCash ?? 0)}
+                </span>
+              </div>
+            </>
+          ) : (
+            <p className="mt-6 text-sm text-[#8b9bb0]">
+              No cash movements yet — receipts and expenses will chart here.
+            </p>
+          )}
+        </section>
+
+        <section className="rounded-[14px] border border-[#d9e0ea] bg-white p-5 shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <h2 className="text-[0.9375rem] font-semibold text-[#0b1f33]">
+                Expenses & tax
+              </h2>
+              <p className="text-[0.75rem] text-[#5a6b7d]">
+                Category spend · net tax payable
+              </p>
+            </div>
+            <span className="rounded-lg bg-[#e8eefb] px-2.5 py-1 text-[0.7rem] font-semibold text-[#1341a8]">
+              {formatInr(financeDash.data?.tax.netTaxPayable ?? 0)} tax
+            </span>
+          </div>
+          <ul className="mt-4 space-y-2.5">
+            {(financeDash.data?.expenses.byCategory ?? []).slice(0, 5).map((c) => (
+              <li key={c.categoryId ?? c.name}>
+                <div className="mb-1 flex justify-between text-[0.8rem]">
+                  <span className="truncate text-[#5a6b7d]">{c.name}</span>
+                  <span className="tabular-nums font-medium text-[#0b1f33]">
+                    {formatInr(c.amount)}
+                  </span>
+                </div>
+                <div className="h-1.5 overflow-hidden rounded bg-[#eef1f4]">
+                  <div
+                    className="h-full rounded bg-[#1a56db]"
+                    style={{ width: `${(c.amount / expCatMax) * 100}%` }}
+                  />
+                </div>
+              </li>
+            ))}
+            {!financeDash.data?.expenses.byCategory?.length ? (
+              <li className="rounded-xl bg-[#f4f6fa] px-4 py-6 text-center text-sm text-[#5a6b7d]">
+                No expenses yet.{" "}
+                <Link href="/expenses" className="font-semibold text-[#1a56db]">
+                  Add expense →
+                </Link>
+              </li>
+            ) : null}
+          </ul>
+          {(financeDash.data?.suppliers.outstanding ?? 0) > 0 ? (
+            <p className="mt-4 border-t border-[#eef1f4] pt-3 text-[0.75rem] text-[#5a6b7d]">
+              Supplier AP outstanding{" "}
+              <span className="font-semibold text-[#0b1f33]">
+                {formatInr(financeDash.data?.suppliers.outstanding ?? 0)}
+              </span>
+            </p>
+          ) : null}
         </section>
       </div>
 

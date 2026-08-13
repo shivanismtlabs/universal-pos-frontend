@@ -12,6 +12,11 @@ type CustomerRow = {
   fullName: string;
   phone: string;
   email?: string | null;
+  loyaltyPoints?: number;
+  storeCreditBalance?: number;
+  openDueTotal?: number;
+  availableCredit?: number | null;
+  creditLimit?: number | null;
 };
 
 /**
@@ -26,6 +31,8 @@ export function CustomerPicker({
   placeholder = "Search name or phone…",
   disabled,
   className,
+  showBalances = false,
+  money,
 }: {
   value: string;
   onChange: (customerId: string, customer?: CustomerRow | null) => void;
@@ -34,6 +41,9 @@ export function CustomerPicker({
   placeholder?: string;
   disabled?: boolean;
   className?: string;
+  /** Show pts / wallet / due under the trigger after select */
+  showBalances?: boolean;
+  money?: (n: string | number) => string;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -54,6 +64,13 @@ export function CustomerPicker({
         fullName: String(row.fullName ?? ""),
         phone: String(row.phone ?? ""),
         email: (row.email as string | null | undefined) ?? null,
+        loyaltyPoints: row.summary?.loyaltyPoints ?? row.loyaltyPoints ?? 0,
+        storeCreditBalance: Number(
+          row.summary?.storeCreditBalance ?? row.storeCreditBalance ?? 0,
+        ),
+        openDueTotal: row.summary?.openDueTotal ?? 0,
+        availableCredit: row.summary?.availableCredit ?? null,
+        creditLimit: row.summary?.creditLimit ?? row.creditLimit ?? null,
       } satisfies CustomerRow;
     },
     enabled: Boolean(value) && value.length > 10,
@@ -79,6 +96,8 @@ export function CustomerPicker({
     return "Selected customer";
   }, [value, selected.data, allowWalkIn, walkInLabel]);
 
+  const fmt = money ?? ((n: string | number) => String(n));
+
   useEffect(() => {
     function onDoc(e: MouseEvent) {
       if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
@@ -102,6 +121,43 @@ export function CustomerPicker({
         <span className="min-w-0 truncate font-medium">{label}</span>
         <Search className="h-4 w-4 shrink-0 text-[#8b9bb0]" />
       </button>
+
+      {showBalances && selected.data && value ? (
+        <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[0.7rem] text-[#5a6b7d]">
+          <span>
+            Pts{" "}
+            <strong className="text-[#0b1f33]">
+              {selected.data.loyaltyPoints ?? 0}
+            </strong>
+          </span>
+          <span>
+            Wallet{" "}
+            <strong className="text-[#0b1f33]">
+              {fmt(selected.data.storeCreditBalance ?? 0)}
+            </strong>
+          </span>
+          <span>
+            Due{" "}
+            <strong
+              className={
+                (selected.data.openDueTotal ?? 0) > 0
+                  ? "text-[#b45309]"
+                  : "text-[#0b1f33]"
+              }
+            >
+              {fmt(selected.data.openDueTotal ?? 0)}
+            </strong>
+          </span>
+          <span>
+            Credit{" "}
+            <strong className="text-[#0b1f33]">
+              {selected.data.availableCredit == null
+                ? "∞"
+                : fmt(selected.data.availableCredit)}
+            </strong>
+          </span>
+        </div>
+      ) : null}
 
       {open ? (
         <div className="absolute z-40 mt-1.5 w-full overflow-hidden rounded-[12px] border border-[#d9e0ea] bg-white shadow-[0_12px_28px_-12px_rgba(11,31,51,0.28)]">
@@ -147,7 +203,17 @@ export function CustomerPicker({
                     value === c.id && "bg-[#e8eefb]",
                   )}
                   onClick={() => {
-                    onChange(c.id, c);
+                    onChange(c.id, {
+                      id: c.id,
+                      fullName: c.fullName,
+                      phone: c.phone,
+                      email: c.email,
+                      loyaltyPoints: c.loyaltyPoints,
+                      storeCreditBalance:
+                        c.storeCreditBalance != null
+                          ? Number(c.storeCreditBalance)
+                          : undefined,
+                    });
                     setOpen(false);
                     setQ("");
                   }}

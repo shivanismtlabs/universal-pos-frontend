@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -41,8 +42,14 @@ function normalizeParties(rows: PartyRow[] | null | undefined): PartyRow[] {
 }
 
 function PartiesDesk() {
+  const searchParams = useSearchParams();
   const qc = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const id = searchParams.get("id");
+    if (id) setSelectedId(id);
+  }, [searchParams]);
 
   const parties = useQuery({
     queryKey: ["parties"],

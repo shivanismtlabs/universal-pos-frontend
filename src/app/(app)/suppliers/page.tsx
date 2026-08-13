@@ -3,22 +3,28 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
+import { X } from "lucide-react";
 import { toast } from "sonner";
-import { posApi, suppliersApi } from "@/lib/api";
+import { loyaltyApi, posApi, suppliersApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useBootstrap } from "@/lib/bootstrap";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import { formatDate } from "@/lib/utils";
+import { formatDate, moneyNumber } from "@/lib/utils";
 
 export default function SuppliersPage() {
   const qc = useQueryClient();
-  const { hasSale } = useBootstrap();
+  const { hasSale, money, data: boot } = useBootstrap();
   const isRentalOnly = false;
   const [lineSkuId, setLineSkuId] = useState("");
   const [lineQty, setLineQty] = useState("10");
+  const [lineUnitCost, setLineUnitCost] = useState("");
+  const [lineTaxPercent, setLineTaxPercent] = useState("");
+  const [discountAmount, setDiscountAmount] = useState("");
+  const [couponCode, setCouponCode] = useState("");
+  const [couponApplied, setCouponApplied] = useState<string | null>(null);
   const [receiveQty, setReceiveQty] = useState<Record<string, string>>({});
   const [returnQty, setReturnQty] = useState<Record<string, string>>({});
   const [editId, setEditId] = useState<string | null>(null);
@@ -27,6 +33,23 @@ export default function SuppliersPage() {
     contact: "",
     phone: "",
   });
+
+  const defaultTaxPercent = useMemo(() => {
+    const settings = boot?.tenant?.settings as
+      | { tax?: { ratePercent?: number | string } }
+      | undefined;
+    const mode = boot?.tenant?.taxMode ?? "in_gst";
+    if (mode === "none") return 0;
+    const raw = settings?.tax?.ratePercent;
+    const parsed =
+      typeof raw === "number"
+        ? raw
+        : typeof raw === "string" && raw.trim()
+          ? Number(raw.replace(/%/g, "").trim())
+          : NaN;
+    if (Number.isFinite(parsed)) return Math.min(40, Math.max(0, parsed));
+    return mode === "vat" ? 20 : 5;
+  }, [boot?.tenant]);
 
   const suppliers = useQuery({
     queryKey: ["suppliers"],
@@ -40,7 +63,7 @@ export default function SuppliersPage() {
   });
   const catalog = useQuery({
     queryKey: ["pos-sale-catalog-for-po"],
-    queryFn: () => posApi.saleCatalog({ limit: 200 }),
+    queryFn: () => posApi.saleCatalog({ limit: 200, forPurchase: true }),
     enabled: hasSale,
   });
 
@@ -48,6 +71,55 @@ export default function SuppliersPage() {
     () => catalog.data?.items ?? [],
     [catalog.data],
   );
+
+  const selectedSku = useMemo(
+    () => skuOptions.find((s) => s.id === lineSkuId) ?? null,
+    [skuOptions, lineSkuId],
+  );
+
+  const poTotals = useMemo(() => {
+    const qty = Math.max(1, Number(lineQty) || 1);
+    const unit = Math.max(0, moneyNumber(lineUnitCost || 0));
+    const taxPct = Math.min(
+      40,
+      Math.max(0, moneyNumber(lineTaxPercent || 0)),
+    );
+    const subtotal = Math.round(unit * qty * 100) / 100;
+    const discountEntered = Math.max(0, moneyNumber(discountAmount || 0));
+    const discount = Math.min(discountEntered, subtotal);
+    const taxable = Math.max(0, subtotal - discount);
+    const tax = Math.round(taxable * (taxPct / 100) * 100) / 100;
+    const grand = Math.round((taxable + tax) * 100) / 100;
+    return { qty, unit, taxPct, subtotal, discount, tax, grand };
+  }, [lineQty, lineUnitCost, lineTaxPercent, discountAmount]);
+
+  function clearCouponAndDiscount() {
+    setCouponCode("");
+    setCouponApplied(null);
+    setDiscountAmount("");
+  }
+
+  function applySelectedProduct(id: string) {
+    setLineSkuId(id);
+    clearCouponAndDiscount();
+    if (!id) {
+      setLineUnitCost("");
+      setLineTaxPercent("");
+      return;
+    }
+    const row = skuOptions.find((s) => s.id === id);
+    if (!row) return;
+    const cost =
+      row.costPrice != null && Number.isFinite(Number(row.costPrice))
+        ? Number(row.costPrice)
+        : moneyNumber(row.sellPrice);
+    setLineUnitCost(String(cost));
+    const rate =
+      row.taxRatePercent != null && Number.isFinite(row.taxRatePercent)
+        ? row.taxRatePercent
+        : defaultTaxPercent;
+    setLineTaxPercent(String(rate));
+  }
 
   const supplierForm = useForm({
     defaultValues: { name: "", contact: "", phone: "" },
@@ -82,13 +154,29 @@ export default function SuppliersPage() {
       poType: string;
       expectedDelivery: string;
     }) => {
-      const qty = Math.max(1, Number(lineQty) || 1);
+      const { qty, unit, taxPct, subtotal, discount, tax, grand } = poTotals;
+      const noteParts: string[] = [];
+      if (lineSkuId) {
+        noteParts.push(
+          `Subtotal ${subtotal.toFixed(2)} · Discount ${discount.toFixed(2)} · Tax ${taxPct}% = ${tax.toFixed(2)} · Total ${grand.toFixed(2)}`,
+        );
+      }
+      if (couponApplied) noteParts.push(`Coupon ${couponApplied}`);
       return suppliersApi.createPo({
         supplierId: v.supplierId,
         poType: v.poType,
         expectedDelivery: v.expectedDelivery || undefined,
+        notes: noteParts.length ? noteParts.join(" · ") : undefined,
         ...(lineSkuId
-          ? { lines: [{ stockLevelId: lineSkuId, qtyOrdered: qty }] }
+          ? {
+              lines: [
+                {
+                  stockLevelId: lineSkuId,
+                  qtyOrdered: qty,
+                  ...(unit > 0 ? { unitCost: unit } : {}),
+                },
+              ],
+            }
           : {}),
       });
     },
@@ -101,6 +189,9 @@ export default function SuppliersPage() {
       });
       setLineSkuId("");
       setLineQty("10");
+      setLineUnitCost("");
+      setLineTaxPercent("");
+      clearCouponAndDiscount();
       void qc.invalidateQueries({ queryKey: ["purchase-orders"] });
     },
     onError: (e) =>
@@ -320,7 +411,7 @@ export default function SuppliersPage() {
                   <Label>Product to order (SKU)</Label>
                   <Select
                     value={lineSkuId}
-                    onChange={(e) => setLineSkuId(e.target.value)}
+                    onChange={(e) => applySelectedProduct(e.target.value)}
                   >
                     <option value="">Optional — pick later on receive</option>
                     {skuOptions.map((s) => (
@@ -331,15 +422,164 @@ export default function SuppliersPage() {
                   </Select>
                 </div>
                 {lineSkuId ? (
-                  <div className="field-shell">
-                    <Label>Qty ordered</Label>
-                    <Input
-                      type="number"
-                      min={1}
-                      value={lineQty}
-                      onChange={(e) => setLineQty(e.target.value)}
-                    />
-                  </div>
+                  <>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="field-shell">
+                        <Label>Qty ordered</Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          value={lineQty}
+                          onChange={(e) => setLineQty(e.target.value)}
+                        />
+                      </div>
+                      <div className="field-shell">
+                        <Label>Unit cost</Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          inputMode="decimal"
+                          value={lineUnitCost}
+                          onChange={(e) => setLineUnitCost(e.target.value)}
+                          placeholder="0.00"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="field-shell">
+                        <Label>Tax %</Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          max={40}
+                          step="0.01"
+                          inputMode="decimal"
+                          value={lineTaxPercent}
+                          onChange={(e) => setLineTaxPercent(e.target.value)}
+                        />
+                        <p className="mt-1 text-[0.65rem] text-[#8b9bb0]">
+                          {selectedSku?.taxRatePercent != null
+                            ? `From item tax (${selectedSku.taxRatePercent}%)`
+                            : `Shop default (${defaultTaxPercent}%)`}
+                        </p>
+                      </div>
+                      <div className="field-shell">
+                        <div className="mb-1 flex items-center justify-between gap-2">
+                          <Label>Discount</Label>
+                          {couponApplied || moneyNumber(discountAmount || 0) > 0 ? (
+                            <button
+                              type="button"
+                              className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-[#d9e0ea] text-[#5a6b7d] hover:bg-[#f4f6fa] hover:text-[#0b1f33]"
+                              title="Clear discount & coupon"
+                              onClick={clearCouponAndDiscount}
+                            >
+                              <X className="h-3 w-3" strokeWidth={2.5} />
+                            </button>
+                          ) : null}
+                        </div>
+                        <Input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          inputMode="decimal"
+                          value={discountAmount}
+                          onChange={(e) => {
+                            setDiscountAmount(e.target.value);
+                            setCouponApplied(null);
+                          }}
+                          placeholder="0.00"
+                        />
+                      </div>
+                    </div>
+                    <div className="field-shell">
+                      <Label>Coupon code</Label>
+                      <div className="flex gap-1">
+                        <Input
+                          className="uppercase"
+                          placeholder="CODE"
+                          value={couponCode}
+                          onChange={(e) => {
+                            setCouponCode(e.target.value);
+                            setCouponApplied(null);
+                          }}
+                        />
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          className="shrink-0"
+                          disabled={!couponCode.trim() || poTotals.subtotal <= 0}
+                          onClick={async () => {
+                            try {
+                              const v = await loyaltyApi.validateCoupon(
+                                couponCode.trim(),
+                                poTotals.subtotal,
+                              );
+                              setDiscountAmount(String(v.amountOff));
+                              setCouponApplied(v.code);
+                              toast.success(
+                                `Coupon ${v.code}: −${money(v.amountOff)}`,
+                              );
+                            } catch (e) {
+                              toast.error(
+                                e instanceof ApiError
+                                  ? e.messages.join(", ")
+                                  : "Invalid coupon",
+                              );
+                            }
+                          }}
+                        >
+                          Apply
+                        </Button>
+                        {couponApplied ? (
+                          <button
+                            type="button"
+                            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[#d9e0ea] text-[#5a6b7d] hover:bg-[#f4f6fa] hover:text-[#0b1f33]"
+                            title="Clear coupon & discount"
+                            onClick={clearCouponAndDiscount}
+                          >
+                            <X className="h-4 w-4" strokeWidth={2.5} />
+                          </button>
+                        ) : null}
+                      </div>
+                      <p className="mt-1 text-[0.65rem] text-[#8b9bb0]">
+                        {couponApplied
+                          ? `Applied ${couponApplied}`
+                          : "Optional — from Coupons setup"}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-[#e8edf4] bg-[#f8fafc] px-3 py-2 text-xs text-[#0b1f33]">
+                      <div className="flex justify-between gap-2">
+                        <span className="text-[#5a6b7d]">Subtotal</span>
+                        <span className="tabular-nums">
+                          {money(poTotals.subtotal)}
+                        </span>
+                      </div>
+                      {poTotals.discount > 0 ? (
+                        <div className="mt-1 flex justify-between gap-2">
+                          <span className="text-[#5a6b7d]">Discount</span>
+                          <span className="tabular-nums">
+                            −{money(poTotals.discount)}
+                          </span>
+                        </div>
+                      ) : null}
+                      <div className="mt-1 flex justify-between gap-2">
+                        <span className="text-[#5a6b7d]">
+                          Tax ({poTotals.taxPct}%)
+                        </span>
+                        <span className="tabular-nums">
+                          {money(poTotals.tax)}
+                        </span>
+                      </div>
+                      <div className="mt-1 flex justify-between gap-2 border-t border-[#e8edf4] pt-1 font-semibold">
+                        <span>Order total</span>
+                        <span className="tabular-nums">
+                          {money(poTotals.grand)}
+                        </span>
+                      </div>
+                    </div>
+                  </>
                 ) : null}
               </>
             ) : null}

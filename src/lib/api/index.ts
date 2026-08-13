@@ -290,6 +290,8 @@ export const customersApi = {
         email?: string | null;
         eventDate?: string | null;
         notes?: string | null;
+        dateOfBirth?: string | null;
+        marketingOptIn?: boolean;
         loyaltyPoints?: number;
         storeCreditBalance?: string | number;
       }>;
@@ -313,8 +315,11 @@ export const customersApi = {
       email?: string | null;
       notes?: string | null;
       eventDate?: string | null;
+      dateOfBirth?: string | null;
+      marketingOptIn?: boolean;
       loyaltyPoints?: number;
       storeCreditBalance?: string | number;
+      creditLimit?: number | null;
       summary?: {
         orderCount: number;
         openDueCount: number;
@@ -322,6 +327,19 @@ export const customersApi = {
         loyaltyPoints: number;
         storeCreditBalance: number;
         noteCount: number;
+        totalSpent?: number;
+        lastVisitAt?: string | null;
+        lastVisitOrder?: string | null;
+        creditLimit?: number | null;
+        availableCredit?: number | null;
+        activeMembership?: {
+          id: string;
+          status: string;
+          planName: string;
+          productId: string;
+          currentPeriodEnd: string;
+          price: number;
+        } | null;
       };
       partyMemberships?: Array<{
         roleLabel?: string | null;
@@ -363,6 +381,58 @@ export const customersApi = {
         createdAt: string;
       }>;
     }>(`/customers/${customerId}/dues?limit=${limit}`, { token: token() });
+  },
+
+  listPayments(customerId: string, limit = 50) {
+    return apiRequest<{
+      items: Array<{
+        id: string;
+        type: string;
+        method: string;
+        amount: number;
+        createdAt: string;
+        orderId: string;
+        orderNumber: string;
+        orderKind: string;
+        orderStatus: string;
+      }>;
+    }>(`/customers/${customerId}/payments?limit=${limit}`, {
+      token: token(),
+    });
+  },
+
+  listMemberships(customerId: string, limit = 50) {
+    return apiRequest<{
+      items: Array<{
+        id: string;
+        status: string;
+        billingPeriodDays: number;
+        price: number;
+        startsAt: string;
+        currentPeriodStart: string;
+        currentPeriodEnd: string;
+        cancelledAt: string | null;
+        product: { id: string; name: string; skuCode: string | null };
+      }>;
+    }>(`/customers/${customerId}/memberships?limit=${limit}`, {
+      token: token(),
+    });
+  },
+
+  listActivity(customerId: string, limit = 50) {
+    return apiRequest<{
+      items: Array<{
+        id: string;
+        kind: string;
+        title: string;
+        detail: string | null;
+        amount: number | null;
+        createdAt: string;
+        href?: string | null;
+      }>;
+    }>(`/customers/${customerId}/activity?limit=${limit}`, {
+      token: token(),
+    });
   },
 
   listLoyaltyLedger(customerId: string, limit = 50) {
@@ -1078,6 +1148,9 @@ export const ordersApi = {
         subtotal: string | number;
         depositTotal?: string | number;
         customer?: { id?: string; fullName: string; phone: string };
+        productSummary?: string;
+        productNames?: string[];
+        itemCount?: number;
         pickupDate?: string | null;
         returnDueDate?: string | null;
         eventDate?: string | null;
@@ -1828,6 +1901,7 @@ export const posApi = {
     page?: number;
     lowStock?: boolean;
     maxQty?: number;
+    forPurchase?: boolean;
   }) {
     const qs = new URLSearchParams();
     if (params?.locationId) qs.set("locationId", params.locationId);
@@ -1836,6 +1910,7 @@ export const posApi = {
     if (params?.page) qs.set("page", String(params.page));
     if (params?.lowStock) qs.set("lowStock", "1");
     if (params?.maxQty) qs.set("maxQty", String(params.maxQty));
+    if (params?.forPurchase) qs.set("forPurchase", "1");
     const q = qs.toString();
     return apiRequest<{
       locationId: string;
@@ -1849,6 +1924,7 @@ export const posApi = {
         id: string;
         sku: string;
         sellPrice: string | number;
+        costPrice?: number | null;
         qtyOnHand: number;
         sellUnit?: string;
         lowStock?: boolean;
@@ -1899,6 +1975,11 @@ export const posApi = {
       idempotencyKey: string;
       type?: string;
       giftCardCode?: string;
+      bankReference?: string;
+      bankAccountName?: string;
+      bankAccountNumber?: string;
+      bankIfsc?: string;
+      bankName?: string;
     }>;
     cashTendered?: number;
     note?: string;
@@ -2510,6 +2591,31 @@ export const appsApi = {
       { token: token() },
     );
   },
+  search(q: string, limit = 8) {
+    const qs = new URLSearchParams({ q, limit: String(limit) });
+    return apiRequest<{
+      q: string;
+      products: Array<{
+        id: string;
+        name: string;
+        sku: string;
+        barcode?: string | null;
+        price: number;
+        kind: string;
+        category?: string | null;
+        href: string;
+      }>;
+      customers: Array<{
+        id: string;
+        fullName: string;
+        phone: string;
+        email?: string | null;
+        dateOfBirth?: string | null;
+        marketingOptIn?: boolean;
+        href: string;
+      }>;
+    }>(`/search?${qs}`, { token: token() });
+  },
   listModules() {
     return apiRequest<
       Array<{
@@ -2852,7 +2958,1362 @@ export const servicesCommerceApi = {
   },
 };
 
+export type DailySalesReport = {
+  date: string;
+  timezone: string;
+  currencyCode: string;
+  businessType: string;
+  summary: {
+    orderCount: number;
+    grossSales: number;
+    discounts: number;
+    tax: number;
+    netSales: number;
+    refunds: number;
+    netRevenue: number;
+    avgOrderValue: number;
+  };
+  comparison: {
+    previousDay: {
+      date: string;
+      netRevenue: number;
+      orderCount: number;
+      changePct: number | null;
+    };
+    sameDayLastWeek: {
+      date: string;
+      netRevenue: number;
+      orderCount: number;
+      changePct: number | null;
+    };
+  };
+  hourly: Array<{
+    hour: number;
+    label: string;
+    sales: number;
+    orders: number;
+  }>;
+  byPaymentMethod: Array<{
+    method: string;
+    amount: number;
+    count: number;
+    pct: number;
+  }>;
+  byCategory: Array<{
+    categoryId: string | null;
+    name: string;
+    qty: number;
+    revenue: number;
+  }>;
+  topProducts: Array<{
+    productId: string | null;
+    name: string;
+    sku: string;
+    qty: number;
+    revenue: number;
+  }>;
+  registerReconciliation: Array<{
+    id: string;
+    locationName: string;
+    openedBy: string;
+    openedAt: string;
+    closedAt: string | null;
+    openingFloat: number;
+    closingCash: number | null;
+    expectedCash: number;
+    variance: number | null;
+    status: string;
+  }>;
+  variations: {
+    channelSplit: Array<{ key: string; count: number; sales: number }>;
+    fulfillmentSplit: Array<{ key: string; count: number; sales: number }>;
+    tableTurnover: number | null;
+    avgDiningMinutes: number | null;
+    appointments: {
+      completed: number;
+      noShows: number;
+      scheduled: number;
+      checkedIn: number;
+      cancelled: number;
+    };
+  };
+  transactions: {
+    page: number;
+    pageSize: number;
+    total: number;
+    items: Array<{
+      id: string;
+      orderNumber: string;
+      kind: string;
+      status: string;
+      createdAt: string;
+      customerName: string;
+      cashierName: string;
+      locationName: string;
+      subtotal: number;
+      discountTotal: number;
+      taxTotal: number;
+      net: number;
+      balanceDue: number;
+      paymentMethods: string[];
+    }>;
+  };
+  registerSessions: Array<{
+    id: string;
+    label: string;
+    locationId: string;
+    openedAt: string;
+    closedAt: string | null;
+  }>;
+};
+
+export type TopSellingRankBy = "revenue" | "units" | "margin" | "orders";
+
+export type TopSellingProductRow = {
+  rank?: number;
+  productId: string | null;
+  key: string;
+  name: string;
+  sku: string;
+  categoryId: string | null;
+  categoryName: string | null;
+  itemKind: string;
+  unitsSold: number;
+  grossRevenue: number;
+  profitContribution: number;
+  profitMarginPct: number;
+  orderCount: number;
+  pctOfTotalSales: number;
+  trend: {
+    direction: "up" | "down" | "flat";
+    changePct: number | null;
+    prevRevenue: number;
+    prevUnits: number;
+  };
+  frequentlyBoughtWith: Array<{
+    productId: string | null;
+    key: string;
+    name: string;
+    sku: string;
+    coOrderCount: number;
+    strengthPct: number;
+  }>;
+};
+
+export type TopSellingProductsReport = {
+  title: string;
+  businessType: string;
+  tenantName: string;
+  timezone: string;
+  currencyCode: string;
+  period: {
+    from: string;
+    to: string;
+    days: number;
+    prevFrom: string;
+    prevTo: string;
+  };
+  filters: {
+    locationId: string | null;
+    categoryId: string | null;
+    mealPeriod: string;
+    rankBy: TopSellingRankBy;
+    topN: number;
+    includeCrossSell: boolean;
+  };
+  labels: {
+    units: string;
+    orders: string;
+    revenue: string;
+    profit: string;
+    entity: string;
+  };
+  showMealPeriod: boolean;
+  emphasizeMargin: boolean;
+  totals: {
+    grossRevenue: number;
+    unitsSold: number;
+    profitContribution: number;
+    orderCount: number;
+    productCount: number;
+  };
+  pool: TopSellingProductRow[];
+  items: Array<TopSellingProductRow & { rank: number }>;
+  chart: Array<{
+    rank: number;
+    name: string;
+    sku: string;
+    revenue: number;
+    units: number;
+    marginPct: number;
+    profit: number;
+    orders: number;
+  }>;
+};
+
+export type ProfitAndLossReport = {
+  tenantName: string;
+  timezone: string;
+  currencyCode: string;
+  businessType: string;
+  costingMethod: string;
+  costingNote: string;
+  period: {
+    from: string;
+    to: string;
+    preset: string;
+    locationIds: string[];
+  };
+  current: {
+    grossSales: number;
+    returnsRefunds: number;
+    discounts: number;
+    netSales: number;
+    cogs: number;
+    costOfService: number;
+    totalDirectCost: number;
+    grossProfit: number;
+    grossMarginPct: number | null;
+    operatingExpenses: number;
+    expensesByCategory: Array<{
+      categoryId: string | null;
+      name: string;
+      amount: number;
+    }>;
+    operatingProfit: number;
+    taxCollected: number;
+    taxExpense: number;
+    netProfit: number;
+    netMarginPct: number | null;
+  };
+  previous: {
+    from: string;
+    to: string;
+    netSales: number;
+    grossProfit: number;
+    operatingExpenses: number;
+    netProfit: number;
+  } | null;
+  comparison: {
+    netSalesPct: number | null;
+    grossProfitPct: number | null;
+    netProfitPct: number | null;
+    opexPct: number | null;
+  } | null;
+  statement: Array<{
+    key: string;
+    label: string;
+    amount: number | null;
+    indent: number;
+    bold?: boolean;
+    section?: boolean;
+    pct?: number | null;
+  }>;
+  waterfall: Array<{ key: string; label: string; value: number }>;
+};
+
+export type InventoryReportParams = {
+  locationId?: string;
+  locationIds?: string[];
+  categoryId?: string;
+  supplierId?: string;
+  productId?: string;
+  q?: string;
+  from?: string;
+  to?: string;
+  costingMethod?: "standard" | "weighted_average" | "fifo" | "lifo";
+  expiryWindowDays?: 30 | 60 | 90;
+  inventoryClass?: "all" | "ingredient" | "finished";
+  consolidated?: boolean;
+  velocityDays?: number;
+  leadTimeDays?: number;
+  limit?: number;
+};
+
+function inventoryQs(params?: InventoryReportParams) {
+  const qs = new URLSearchParams();
+  if (!params) return "";
+  if (params.locationId) qs.set("locationId", params.locationId);
+  if (params.locationIds?.length)
+    qs.set("locationIds", params.locationIds.join(","));
+  if (params.categoryId) qs.set("categoryId", params.categoryId);
+  if (params.supplierId) qs.set("supplierId", params.supplierId);
+  if (params.productId) qs.set("productId", params.productId);
+  if (params.q) qs.set("q", params.q);
+  if (params.from) qs.set("from", params.from);
+  if (params.to) qs.set("to", params.to);
+  if (params.costingMethod) qs.set("costingMethod", params.costingMethod);
+  if (params.expiryWindowDays)
+    qs.set("expiryWindowDays", String(params.expiryWindowDays));
+  if (params.inventoryClass && params.inventoryClass !== "all")
+    qs.set("inventoryClass", params.inventoryClass);
+  if (params.consolidated) qs.set("consolidated", "true");
+  if (params.velocityDays) qs.set("velocityDays", String(params.velocityDays));
+  if (params.leadTimeDays) qs.set("leadTimeDays", String(params.leadTimeDays));
+  if (params.limit) qs.set("limit", String(params.limit));
+  const q = qs.toString();
+  return q ? `?${q}` : "";
+}
+
+export type InventoryStockStatus = "in_stock" | "low_stock" | "out_of_stock";
+
+export type InventoryCurrentStockReport = {
+  generatedAt: string;
+  timeZone: string;
+  currencyCode: string;
+  businessType: string;
+  consolidated: boolean;
+  costingMethod: string;
+  summary: {
+    skuCount: number;
+    totalQty: number;
+    totalValue: number;
+    inStock: number;
+    lowStock: number;
+    outOfStock: number;
+  };
+  variations?: {
+    restaurantIngredientSplit?: boolean;
+    byClass?: Array<{
+      inventoryClass: string;
+      count: number;
+      value: number;
+    }>;
+  };
+  items: Array<{
+    stockLevelId: string;
+    productId: string;
+    locationId: string;
+    locationName: string;
+    item: string;
+    sku: string;
+    categoryId: string | null;
+    category: string | null;
+    qtyOnHand: number;
+    qtyDamaged: number;
+    unitCost: number;
+    stockValue: number;
+    reorderPoint: number | null;
+    reorderQty: number | null;
+    status: InventoryStockStatus;
+    inventoryClass: string;
+    unitOfMeasure: string;
+  }>;
+};
+
+export type InventoryStockMovementReport = {
+  from: string;
+  to: string;
+  summary: {
+    stockIn: number;
+    stockOut: number;
+    adjustments: number;
+    eventCount: number;
+  };
+  items: Array<{
+    id: string;
+    at: string;
+    type: string;
+    direction: string;
+    quantity: number;
+    runningBalance: number;
+    damageDelta: number;
+    reason: string | null;
+    item: string;
+    sku: string | null;
+    category: string | null;
+    locationName: string;
+    actorName: string | null;
+  }>;
+};
+
+export type InventoryValuationReport = {
+  costingMethod: string;
+  costingNote: string;
+  summary: { totalValue: number; totalQty: number; skuCount: number };
+  byCategory: Array<{ key: string; value: number; qty: number; lines: number }>;
+  byBranch: Array<{ key: string; value: number; qty: number; lines: number }>;
+  items: Array<{
+    item: string;
+    sku: string;
+    category: string | null;
+    locationName: string;
+    qtyOnHand: number;
+    unitCost: number;
+    value: number;
+  }>;
+};
+
+export type InventoryAdjustmentsReport = {
+  from: string;
+  to: string;
+  summary: {
+    eventCount: number;
+    netQty: number;
+    damageQty: number;
+    byReason: Array<{ code: string; count: number }>;
+  };
+  items: Array<{
+    id: string;
+    at: string;
+    type: string;
+    reasonCode: string;
+    reason: string | null;
+    quantity: number;
+    damageDelta: number;
+    item: string;
+    sku: string | null;
+    locationName: string;
+    approvedBy: string | null;
+  }>;
+};
+
+export type InventoryReorderReport = {
+  velocityDays: number;
+  summary: {
+    itemCount: number;
+    outOfStock: number;
+    lowStock: number;
+    withSupplier: number;
+  };
+  items: Array<{
+    stockLevelId: string;
+    productId: string;
+    locationId: string;
+    locationName: string;
+    item: string;
+    sku: string;
+    category: string | null;
+    qtyOnHand: number;
+    reorderPoint: number;
+    suggestedQty: number;
+    avgDailySales: number;
+    leadTimeDays: number;
+    status: InventoryStockStatus;
+    supplierId: string | null;
+    supplierName: string | null;
+    unitCost: number | null;
+    canCreatePo: boolean;
+  }>;
+};
+
+export type InventoryExpiryReport = {
+  expiryWindowDays: number;
+  summary: {
+    batchCount: number;
+    expired: number;
+    critical: number;
+    warning: number;
+    atRiskValue: number;
+  };
+  items: Array<{
+    batchId: string;
+    batchCode: string;
+    item: string;
+    sku: string | null;
+    category: string | null;
+    locationName: string;
+    expiresAt: string;
+    daysLeft: number;
+    urgency: "expired" | "critical" | "warning";
+    qtyOnHand: number;
+    stockValue: number;
+  }>;
+};
+
+export type SlowMovingStockReport = {
+  generatedAt: string;
+  timeZone: string;
+  currencyCode: string;
+  businessType: string;
+  title: string;
+  labels: {
+    entity: string;
+    velocity: string;
+    actionHint: string;
+  };
+  inactiveDays: number;
+  velocityLookbackDays: number;
+  filters: {
+    locationId: string | null;
+    categoryId: string | null;
+    supplierId: string | null;
+    minStockValue: number;
+    inactiveDays: number;
+  };
+  summary: {
+    itemCount: number;
+    totalCapitalLocked: number;
+    neverSoldCount: number;
+    criticalCount: number;
+    highCount: number;
+    avgDaysSinceSale: number | null;
+  };
+  histogram: Array<{
+    key: string;
+    label: string;
+    itemCount: number;
+    stockValue: number;
+  }>;
+  items: Array<{
+    productId: string;
+    locationId: string;
+    locationName: string;
+    item: string;
+    sku: string;
+    categoryId: string | null;
+    category: string | null;
+    qtyOnHand: number;
+    unitCost: number;
+    stockValue: number;
+    lastSaleDate: string | null;
+    daysSinceLastSale: number | null;
+    avgMonthlyVelocity: number;
+    neverSold: boolean;
+    severity: "critical" | "high" | "medium" | "watch";
+    suggestedAction: string;
+    suggestedActionCode: string;
+    supplierId: string | null;
+    supplierName: string | null;
+  }>;
+};
+
+export type CustomerReportsParams = {
+  from?: string;
+  to?: string;
+  locationId?: string;
+  customerId?: string;
+  rankBy?: "spend" | "visits" | "profit";
+  segment?: string;
+  minSpend?: number;
+  minDue?: number;
+  q?: string;
+  limit?: number;
+};
+
+function customerReportQs(params?: CustomerReportsParams) {
+  const qs = new URLSearchParams();
+  if (!params) return "";
+  if (params.from) qs.set("from", params.from);
+  if (params.to) qs.set("to", params.to);
+  if (params.locationId) qs.set("locationId", params.locationId);
+  if (params.customerId) qs.set("customerId", params.customerId);
+  if (params.rankBy) qs.set("rankBy", params.rankBy);
+  if (params.segment) qs.set("segment", params.segment);
+  if (params.minSpend != null && params.minSpend > 0)
+    qs.set("minSpend", String(params.minSpend));
+  if (params.minDue != null && params.minDue > 0)
+    qs.set("minDue", String(params.minDue));
+  if (params.q) qs.set("q", params.q);
+  if (params.limit) qs.set("limit", String(params.limit));
+  const q = qs.toString();
+  return q ? `?${q}` : "";
+}
+
+export type CustomerPurchaseHistoryReport = {
+  period: { from: string; to: string };
+  customer: {
+    id: string;
+    fullName: string;
+    phone: string;
+    email?: string | null;
+    loyaltyPoints: number;
+    storeCreditBalance: number;
+    profileHref: string;
+  };
+  summary: { orderCount: number; totalSpent: number; openDue: number };
+  items: Array<{
+    orderId: string;
+    orderNumber: string;
+    date: string;
+    status: string;
+    branch: string;
+    amount: number;
+    balanceDue: number;
+    paymentMethodLabel: string;
+    lineItems: Array<{
+      name: string;
+      sku: string | null;
+      qty: number;
+      lineTotal: number;
+    }>;
+    href: string;
+  }>;
+};
+
+export type CustomerTopReport = {
+  period: { from: string; to: string };
+  rankBy: string;
+  summary: {
+    customerCount: number;
+    totalSpend: number;
+    totalVisits: number;
+    totalProfit: number;
+  };
+  items: Array<{
+    rank: number;
+    customerId: string;
+    fullName: string;
+    phone: string;
+    email?: string | null;
+    visits: number;
+    totalSpend: number;
+    profitContributed: number;
+    avgTicket: number;
+    lastVisit: string | null;
+    rfmSegment: string;
+    profileHref: string;
+  }>;
+};
+
+export type CustomerNewVsReturningReport = {
+  period: { from: string; to: string };
+  summary: {
+    newCustomers: number;
+    returningCustomers: number;
+    totalOrders: number;
+    retentionRatePct: number | null;
+    retainedFromPrior: number;
+    priorActiveCustomers: number;
+  };
+  series: Array<{
+    date: string;
+    newCustomers: number;
+    returningVisits: number;
+  }>;
+};
+
+export type CustomerRfmReport = {
+  period: { from: string; to: string };
+  pie: Array<{ segment: string; customerCount: number; totalSpend: number }>;
+  items: Array<{
+    customerId: string;
+    fullName: string;
+    phone: string;
+    recencyDays: number;
+    frequency: number;
+    monetary: number;
+    rScore: number;
+    fScore: number;
+    mScore: number;
+    segment: string;
+    lastVisit: string | null;
+    profileHref: string;
+  }>;
+};
+
+export type CustomerOutstandingReport = {
+  asOf: string;
+  summary: {
+    customerCount: number;
+    totalOutstanding: number;
+    criticalCount: number;
+  };
+  agingBuckets: Array<{
+    key: string;
+    label: string;
+    amount: number;
+    severity: string;
+  }>;
+  items: Array<{
+    customerId: string;
+    fullName: string;
+    phone: string;
+    totalDue: number;
+    oldestDays: number;
+    severity: string;
+    buckets: Record<string, number>;
+    profileHref: string;
+    orders: Array<{
+      orderId: string;
+      orderNumber: string;
+      balanceDue: number;
+      daysOverdue: number;
+      agingBucket: string;
+      branch: string;
+      orderDate: string;
+    }>;
+  }>;
+};
+
+export type CustomerLoyaltyReport = {
+  period: { from: string; to: string };
+  loyaltyEnabled: boolean;
+  expireDaysConfigured: number | null;
+  summary: {
+    customerCount: number;
+    pointsEarned: number;
+    pointsRedeemed: number;
+    pointsOutstanding: number;
+    pointsExpiring: number;
+  };
+  items: Array<{
+    customerId: string;
+    fullName: string;
+    phone: string;
+    balance: number;
+    earned: number;
+    redeemed: number;
+    adjusted: number;
+    expiringPoints: number;
+    profileHref: string;
+  }>;
+};
+
+export type EmployeeSalesReport = {
+  title: string;
+  businessType: string;
+  period: { from: string; to: string };
+  commission: {
+    enabled: boolean;
+    type: string;
+    ratePercent: number;
+    note: string;
+  };
+  summary: {
+    staffCount: number;
+    totalSales: number;
+    totalTransactions: number;
+    totalCommission: number;
+    totalRefunds: number;
+    totalHours: number;
+  };
+  chart: Array<{
+    rank: number;
+    name: string;
+    sales: number;
+    transactions: number;
+    salesPerHour: number | null;
+  }>;
+  leaderboard: Array<{
+    rank: number;
+    userId: string;
+    fullName: string;
+    email: string;
+    roleLabel: string;
+    roles: string[];
+    employeeCode: string | null;
+    totalSales: number;
+    salesInShift: number;
+    transactions: number;
+    avgTicket: number;
+    itemsSold: number;
+    upsellRatePct: number;
+    commissionEarned: number;
+    refundAmount: number;
+    refundCount: number;
+    voidCount: number;
+    hoursWorked: number;
+    salesPerHour: number | null;
+    tipsEarned: number;
+    tipPct: number | null;
+    tablesServed: number;
+    servicesPerformed: number;
+    rebookingRatePct: number | null;
+  }>;
+  detail: {
+    user: { id: string; fullName: string; email: string };
+    transactions: Array<{
+      orderId: string;
+      orderNumber: string;
+      date: string;
+      status: string;
+      branch: string;
+      amount: number;
+      paymentMethods: string[];
+      items: Array<{
+        name: string;
+        sku: string | null;
+        qty: number;
+        lineTotal: number;
+      }>;
+      href: string;
+    }>;
+  } | null;
+};
+
+export type FinanceReportParams = {
+  from?: string;
+  to?: string;
+  locationId?: string;
+};
+
+export type TaxReport = {
+  generatedAt: string;
+  tenantName: string;
+  timeZone: string;
+  currencyCode: string;
+  businessType: string;
+  period: { from: string; to: string };
+  summary: {
+    taxableSales: number;
+    outputTax: number;
+    invoiceTax: number;
+    cgst: number;
+    sgst: number;
+    igst: number;
+    inputTax: number;
+    netTaxPayable: number;
+    orderCount: number;
+    invoiceCount: number;
+    purchaseInvoiceCount: number;
+  };
+  breakdown: Array<{ key: string; label: string; amount: number }>;
+  invoices: Array<{
+    invoiceNumber: string;
+    orderNumber: string | null;
+    branch: string | null;
+    date: string;
+    taxable: number;
+    cgst: number;
+    sgst: number;
+    igst: number;
+    grandTotal: number;
+  }>;
+};
+
+export type SupplierReport = {
+  generatedAt: string;
+  tenantName: string;
+  currencyCode: string;
+  period: { from: string; to: string };
+  summary: {
+    supplierCount: number;
+    totalBilled: number;
+    totalPaid: number;
+    totalOutstanding: number;
+    purchaseTax: number;
+    poCount: number;
+    paymentsInPeriod: number;
+  };
+  agingBuckets: Array<{
+    key: string;
+    label: string;
+    amount: number;
+    severity: string;
+  }>;
+  suppliers: Array<{
+    supplierId: string;
+    supplierName: string;
+    invoiceCount: number;
+    billed: number;
+    paid: number;
+    outstanding: number;
+    tax: number;
+    poCount: number;
+    aging: {
+      d0_30: number;
+      d30_60: number;
+      d60_90: number;
+      d90: number;
+    };
+  }>;
+};
+
+export type CashFlowReport = {
+  generatedAt: string;
+  tenantName: string;
+  currencyCode: string;
+  period: { from: string; to: string };
+  summary: {
+    cashIn: number;
+    cashOut: number;
+    netCash: number;
+    customerReceipts: number;
+    expenses: number;
+    supplierPayments: number;
+    refunds: number;
+    pettyCash: number;
+  };
+  operating: Array<{ key: string; label: string; amount: number }>;
+  inflowByMethod: Array<{ method: string; amount: number }>;
+  series: Array<{
+    date: string;
+    inflow: number;
+    outflow: number;
+    net: number;
+  }>;
+};
+
+export type ExpenseReport = {
+  generatedAt: string;
+  tenantName: string;
+  currencyCode: string;
+  period: { from: string; to: string };
+  summary: {
+    expenseCount: number;
+    total: number;
+    pettyCash: number;
+    categoryCount: number;
+  };
+  byCategory: Array<{
+    categoryId: string | null;
+    name: string;
+    amount: number;
+    count: number;
+    pct: number;
+  }>;
+  series: Array<{ date: string; amount: number }>;
+  items: Array<{
+    id: string;
+    date: string;
+    amount: number;
+    category: string;
+    branch: string | null;
+    paymentMethod: string;
+    isPettyCash: boolean;
+    notes: string | null;
+    createdBy: string | null;
+  }>;
+};
+
+export type DashboardFinanceReport = {
+  period: { from: string; to: string };
+  tax: {
+    outputTax: number;
+    inputTax: number;
+    netTaxPayable: number;
+  };
+  cashFlow: {
+    cashIn: number;
+    cashOut: number;
+    netCash: number;
+    series: Array<{
+      date: string;
+      inflow: number;
+      outflow: number;
+      net: number;
+    }>;
+  };
+  expenses: {
+    total: number;
+    byCategory: Array<{
+      categoryId: string | null;
+      name: string;
+      amount: number;
+      count: number;
+      pct: number;
+    }>;
+  };
+  suppliers: {
+    outstanding: number;
+    agingBuckets: Array<{
+      key: string;
+      label: string;
+      amount: number;
+      severity: string;
+    }>;
+  };
+};
+
+export type MonthlySalesReport = {
+  period: {
+    year: number;
+    month: number;
+    key: string;
+    label: string;
+    start: string;
+    end: string;
+    useFiscal: boolean;
+    fiscalStartMonth: number;
+  };
+  timezone: string;
+  currencyCode: string;
+  businessType: string;
+  tenantName: string;
+  summary: {
+    revenue: number;
+    orderCount: number;
+    avgDailySales: number;
+    avgOrderValue: number;
+    daysInMonth: number;
+  };
+  comparison: {
+    previousMonth: {
+      period: string;
+      revenue: number;
+      orderCount: number;
+      changePct: number | null;
+    };
+    sameMonthLastYear: {
+      period: string;
+      revenue: number;
+      orderCount: number;
+      changePct: number | null;
+    };
+  };
+  daily: Array<{
+    date: string;
+    sales: number;
+    orders: number;
+    weekday: number;
+    isWeekend: boolean;
+  }>;
+  weeks: Array<{
+    week: number;
+    label: string;
+    from: string;
+    to: string;
+    sales: number;
+    orders: number;
+    weekendSales: number;
+    weekdaySales: number;
+  }>;
+  bestDay: {
+    date: string;
+    sales: number;
+    orders: number;
+  } | null;
+  worstDay: {
+    date: string;
+    sales: number;
+    orders: number;
+  } | null;
+  target: {
+    amount: number | null;
+    achieved: number;
+    pct: number | null;
+  };
+  byCategory: Array<{
+    categoryId: string | null;
+    name: string;
+    revenue: number;
+    qty: number;
+    pct: number;
+  }>;
+  byBranch: Array<{
+    locationId: string;
+    name: string;
+    revenue: number;
+    orders: number;
+    pct: number;
+  }>;
+  customers: {
+    newAcquired: number;
+    returning: number;
+    withOrders: number;
+  };
+  locations: Array<{ id: string; name: string }>;
+  emailSchedule: {
+    enabled: boolean;
+    recipients: string[];
+    lastSentFor?: string | null;
+  };
+};
+
 export const reportsApi = {
+  dailySales(params: {
+    date: string;
+    locationId?: string;
+    employeeId?: string;
+    paymentMethod?: string;
+    registerSessionId?: string;
+    page?: number;
+    pageSize?: number;
+    sortBy?: string;
+    sortDir?: "asc" | "desc";
+  }) {
+    const qs = new URLSearchParams();
+    qs.set("date", params.date);
+    if (params.locationId) qs.set("locationId", params.locationId);
+    if (params.employeeId) qs.set("employeeId", params.employeeId);
+    if (params.paymentMethod) qs.set("paymentMethod", params.paymentMethod);
+    if (params.registerSessionId)
+      qs.set("registerSessionId", params.registerSessionId);
+    if (params.page) qs.set("page", String(params.page));
+    if (params.pageSize) qs.set("pageSize", String(params.pageSize));
+    if (params.sortBy) qs.set("sortBy", params.sortBy);
+    if (params.sortDir) qs.set("sortDir", params.sortDir);
+    return apiRequest<DailySalesReport>(`/reports/daily-sales?${qs}`, {
+      token: token(),
+    });
+  },
+  topSellingProducts(params: {
+    from?: string;
+    to?: string;
+    locationId?: string;
+    categoryId?: string;
+    rankBy?: TopSellingRankBy;
+    topN?: 10 | 20 | 50 | 100;
+    mealPeriod?: "all" | "breakfast" | "lunch" | "dinner";
+    includeCrossSell?: boolean;
+  }) {
+    const qs = new URLSearchParams();
+    if (params.from) qs.set("from", params.from);
+    if (params.to) qs.set("to", params.to);
+    if (params.locationId) qs.set("locationId", params.locationId);
+    if (params.categoryId) qs.set("categoryId", params.categoryId);
+    if (params.rankBy) qs.set("rankBy", params.rankBy);
+    if (params.topN) qs.set("topN", String(params.topN));
+    if (params.mealPeriod && params.mealPeriod !== "all")
+      qs.set("mealPeriod", params.mealPeriod);
+    if (params.includeCrossSell === false) qs.set("includeCrossSell", "false");
+    return apiRequest<TopSellingProductsReport>(
+      `/reports/top-selling-products?${qs}`,
+      { token: token() },
+    );
+  },
+  monthlySales(params: {
+    year?: number;
+    month?: number;
+    useFiscal?: boolean;
+    locationIds?: string[];
+    categoryId?: string;
+    compareTo?: "previous_month" | "same_month_last_year";
+  }) {
+    const qs = new URLSearchParams();
+    if (params.year) qs.set("year", String(params.year));
+    if (params.month) qs.set("month", String(params.month));
+    if (params.useFiscal) qs.set("useFiscal", "true");
+    if (params.locationIds?.length)
+      qs.set("locationIds", params.locationIds.join(","));
+    if (params.categoryId) qs.set("categoryId", params.categoryId);
+    if (params.compareTo) qs.set("compareTo", params.compareTo);
+    return apiRequest<MonthlySalesReport>(`/reports/monthly-sales?${qs}`, {
+      token: token(),
+    });
+  },
+  getMonthlyEmailSchedule() {
+    return apiRequest<{
+      enabled: boolean;
+      recipients: string[];
+      lastSentFor?: string | null;
+    }>("/reports/monthly-sales/email-schedule", { token: token() });
+  },
+  updateMonthlyEmailSchedule(body: {
+    enabled?: boolean;
+    recipients?: string[];
+  }) {
+    return apiRequest("/reports/monthly-sales/email-schedule", {
+      method: "PATCH",
+      body,
+      token: token(),
+    });
+  },
+  sendMonthlyScheduled(force?: boolean) {
+    const q = force ? "?force=true" : "";
+    return apiRequest<{
+      sent: boolean;
+      reason?: string;
+      periodKey?: string;
+      results?: Array<{ email: string; status: string }>;
+    }>(`/reports/monthly-sales/send-scheduled${q}`, {
+      method: "POST",
+      token: token(),
+    });
+  },
+  upsertMonthlyTarget(body: {
+    year: number;
+    month: number;
+    amount?: number | null;
+    setAsDefault?: boolean;
+  }) {
+    return apiRequest("/reports/monthly-sales/target", {
+      method: "PATCH",
+      body,
+      token: token(),
+    });
+  },
+  profitAndLoss(params: {
+    from?: string;
+    to?: string;
+    preset?: string;
+    locationIds?: string[];
+    compare?: boolean;
+    costingMethod?: "standard" | "weighted_average" | "fifo";
+  }) {
+    const qs = new URLSearchParams();
+    if (params.from) qs.set("from", params.from);
+    if (params.to) qs.set("to", params.to);
+    if (params.preset) qs.set("preset", params.preset);
+    if (params.locationIds?.length)
+      qs.set("locationIds", params.locationIds.join(","));
+    if (params.compare === false) qs.set("compare", "false");
+    if (params.compare === true) qs.set("compare", "true");
+    if (params.costingMethod) qs.set("costingMethod", params.costingMethod);
+    return apiRequest<ProfitAndLossReport>(
+      `/reports/profit-and-loss?${qs}`,
+      { token: token() },
+    );
+  },
+  inventoryCurrentStock(params?: InventoryReportParams) {
+    return apiRequest<InventoryCurrentStockReport>(
+      `/reports/inventory/current-stock${inventoryQs(params)}`,
+      { token: token() },
+    );
+  },
+  inventoryStockMovement(params?: InventoryReportParams) {
+    return apiRequest<InventoryStockMovementReport>(
+      `/reports/inventory/stock-movement${inventoryQs(params)}`,
+      { token: token() },
+    );
+  },
+  inventoryValuation(params?: InventoryReportParams) {
+    return apiRequest<InventoryValuationReport>(
+      `/reports/inventory/valuation${inventoryQs(params)}`,
+      { token: token() },
+    );
+  },
+  inventoryAdjustments(params?: InventoryReportParams) {
+    return apiRequest<InventoryAdjustmentsReport>(
+      `/reports/inventory/adjustments${inventoryQs(params)}`,
+      { token: token() },
+    );
+  },
+  inventoryReorderSuggestions(params?: InventoryReportParams) {
+    return apiRequest<InventoryReorderReport>(
+      `/reports/inventory/reorder-suggestions${inventoryQs(params)}`,
+      { token: token() },
+    );
+  },
+  inventoryExpiry(params?: InventoryReportParams) {
+    return apiRequest<InventoryExpiryReport>(
+      `/reports/inventory/expiry${inventoryQs(params)}`,
+      { token: token() },
+    );
+  },
+  slowMovingStock(params: {
+    inactiveDays?: 30 | 60 | 90;
+    locationId?: string;
+    categoryId?: string;
+    supplierId?: string;
+    minStockValue?: number;
+    velocityLookbackDays?: number;
+    limit?: number;
+  }) {
+    const qs = new URLSearchParams();
+    if (params.inactiveDays)
+      qs.set("inactiveDays", String(params.inactiveDays));
+    if (params.locationId) qs.set("locationId", params.locationId);
+    if (params.categoryId) qs.set("categoryId", params.categoryId);
+    if (params.supplierId) qs.set("supplierId", params.supplierId);
+    if (params.minStockValue != null && params.minStockValue > 0)
+      qs.set("minStockValue", String(params.minStockValue));
+    if (params.velocityLookbackDays)
+      qs.set("velocityLookbackDays", String(params.velocityLookbackDays));
+    if (params.limit) qs.set("limit", String(params.limit));
+    const q = qs.toString();
+    return apiRequest<SlowMovingStockReport>(
+      `/reports/inventory/slow-moving${q ? `?${q}` : ""}`,
+      { token: token() },
+    );
+  },
+  customerPurchaseHistory(params: CustomerReportsParams & { customerId: string }) {
+    return apiRequest<CustomerPurchaseHistoryReport>(
+      `/reports/customers/purchase-history${customerReportQs(params)}`,
+      { token: token() },
+    );
+  },
+  customerTop(params?: CustomerReportsParams) {
+    return apiRequest<CustomerTopReport>(
+      `/reports/customers/top${customerReportQs(params)}`,
+      { token: token() },
+    );
+  },
+  customerNewVsReturning(params?: CustomerReportsParams) {
+    return apiRequest<CustomerNewVsReturningReport>(
+      `/reports/customers/new-vs-returning${customerReportQs(params)}`,
+      { token: token() },
+    );
+  },
+  customerRfm(params?: CustomerReportsParams) {
+    return apiRequest<CustomerRfmReport>(
+      `/reports/customers/rfm${customerReportQs(params)}`,
+      { token: token() },
+    );
+  },
+  customerOutstanding(params?: CustomerReportsParams) {
+    return apiRequest<CustomerOutstandingReport>(
+      `/reports/customers/outstanding${customerReportQs(params)}`,
+      { token: token() },
+    );
+  },
+  customerLoyalty(params?: CustomerReportsParams) {
+    return apiRequest<CustomerLoyaltyReport>(
+      `/reports/customers/loyalty${customerReportQs(params)}`,
+      { token: token() },
+    );
+  },
+  employeeSales(params: {
+    from?: string;
+    to?: string;
+    locationId?: string;
+    employeeIds?: string[];
+    role?: string;
+    detailUserId?: string;
+    shiftSalesOnly?: boolean;
+    limit?: number;
+  }) {
+    const qs = new URLSearchParams();
+    if (params.from) qs.set("from", params.from);
+    if (params.to) qs.set("to", params.to);
+    if (params.locationId) qs.set("locationId", params.locationId);
+    if (params.employeeIds?.length)
+      qs.set("employeeIds", params.employeeIds.join(","));
+    if (params.role) qs.set("role", params.role);
+    if (params.detailUserId) qs.set("detailUserId", params.detailUserId);
+    if (params.shiftSalesOnly) qs.set("shiftSalesOnly", "true");
+    if (params.limit) qs.set("limit", String(params.limit));
+    const q = qs.toString();
+    return apiRequest<EmployeeSalesReport>(
+      `/reports/employee-sales${q ? `?${q}` : ""}`,
+      { token: token() },
+    );
+  },
+  taxReport(params?: FinanceReportParams) {
+    const qs = new URLSearchParams();
+    if (params?.from) qs.set("from", params.from);
+    if (params?.to) qs.set("to", params.to);
+    if (params?.locationId) qs.set("locationId", params.locationId);
+    const q = qs.toString();
+    return apiRequest<TaxReport>(`/reports/tax${q ? `?${q}` : ""}`, {
+      token: token(),
+    });
+  },
+  supplierReport(params?: FinanceReportParams) {
+    const qs = new URLSearchParams();
+    if (params?.from) qs.set("from", params.from);
+    if (params?.to) qs.set("to", params.to);
+    if (params?.locationId) qs.set("locationId", params.locationId);
+    const q = qs.toString();
+    return apiRequest<SupplierReport>(
+      `/reports/suppliers${q ? `?${q}` : ""}`,
+      { token: token() },
+    );
+  },
+  cashFlowReport(params?: FinanceReportParams) {
+    const qs = new URLSearchParams();
+    if (params?.from) qs.set("from", params.from);
+    if (params?.to) qs.set("to", params.to);
+    if (params?.locationId) qs.set("locationId", params.locationId);
+    const q = qs.toString();
+    return apiRequest<CashFlowReport>(
+      `/reports/cash-flow${q ? `?${q}` : ""}`,
+      { token: token() },
+    );
+  },
+  expenseReport(params?: FinanceReportParams) {
+    const qs = new URLSearchParams();
+    if (params?.from) qs.set("from", params.from);
+    if (params?.to) qs.set("to", params.to);
+    if (params?.locationId) qs.set("locationId", params.locationId);
+    const q = qs.toString();
+    return apiRequest<ExpenseReport>(
+      `/reports/expenses${q ? `?${q}` : ""}`,
+      { token: token() },
+    );
+  },
+  dashboardFinance(params?: FinanceReportParams) {
+    const qs = new URLSearchParams();
+    if (params?.from) qs.set("from", params.from);
+    if (params?.to) qs.set("to", params.to);
+    if (params?.locationId) qs.set("locationId", params.locationId);
+    const q = qs.toString();
+    return apiRequest<DashboardFinanceReport>(
+      `/reports/dashboard-finance${q ? `?${q}` : ""}`,
+      { token: token() },
+    );
+  },
   salesSummary(from?: string, to?: string, locationId?: string) {
     const qs = new URLSearchParams();
     if (from) qs.set("from", from);
@@ -3215,6 +4676,19 @@ export const notifyApi = {
       source: string | null;
       appName: string;
       ready: boolean;
+      channels?: {
+        whatsapp: boolean;
+        sms: boolean;
+        email: boolean;
+        emailMode?: string;
+        smsMode?: string;
+        note?: string;
+      };
+      birthdayReminders?: {
+        optional: boolean;
+        requiresMarketingOptIn: boolean;
+        templateKey: string;
+      };
     }>("/notify/config", { token: token() });
   },
 
@@ -3236,6 +4710,55 @@ export const notifyApi = {
     }>("/notify/send", {
       method: "POST",
       body,
+      token: token(),
+    });
+  },
+
+  sendInvoice(body: {
+    orderId: string;
+    channels?: Array<"email" | "sms" | "whatsapp">;
+  }) {
+    return apiRequest<{
+      orderId: string;
+      orderNumber: string;
+      results: Array<{
+        channel: string;
+        status: string;
+        error?: string;
+      }>;
+    }>("/notify/invoice", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+
+  birthdaysUpcoming(days = 30) {
+    return apiRequest<{
+      timezone: string;
+      windowDays: number;
+      count: number;
+      items: Array<{
+        id: string;
+        fullName: string;
+        phone: string;
+        email?: string | null;
+        dateOfBirth: string;
+        daysUntil: number;
+        marketingOptIn: boolean;
+        canSend: boolean;
+      }>;
+    }>(`/notify/birthdays/upcoming?days=${days}`, { token: token() });
+  },
+
+  sendBirthdaysToday(channels?: Array<"email" | "sms" | "whatsapp">) {
+    return apiRequest<{
+      sentFor: number;
+      results: Array<Record<string, unknown>>;
+      note: string;
+    }>("/notify/birthdays/send-today", {
+      method: "POST",
+      body: channels ? { channels } : {},
       token: token(),
     });
   },
@@ -3769,6 +5292,7 @@ export const suppliersApi = {
     poType?: string;
     linkedOrderId?: string;
     expectedDelivery?: string;
+    notes?: string;
     lines?: Array<{
       stockLevelId: string;
       qtyOrdered: number;

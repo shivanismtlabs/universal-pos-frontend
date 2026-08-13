@@ -7,6 +7,7 @@ import { ordersApi, posApi } from "@/lib/api";
 import { useBootstrap } from "@/lib/bootstrap";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ModeBadge } from "@/components/mode-badge";
 import {
   EmptyState,
@@ -22,11 +23,17 @@ import { ReceiptModal, type ReceiptData } from "@/components/receipt-modal";
 export default function OrdersPage() {
   const { money, commerceModes } = useBootstrap();
   const [kind, setKind] = useState<string>("all");
+  const [search, setSearch] = useState("");
+  const [appliedQ, setAppliedQ] = useState("");
   const [receiptOrderId, setReceiptOrderId] = useState<string | null>(null);
 
   const orders = useQuery({
-    queryKey: ["orders"],
-    queryFn: () => ordersApi.list({ limit: 80 }),
+    queryKey: ["orders", appliedQ],
+    queryFn: () =>
+      ordersApi.list({
+        limit: 80,
+        ...(appliedQ ? { q: appliedQ } : {}),
+      }),
   });
 
   const receiptQ = useQuery({
@@ -63,33 +70,71 @@ export default function OrdersPage() {
         }
       />
 
-      <div
-        role="tablist"
-        className="inline-flex flex-wrap rounded-lg border border-[var(--line)] bg-[#eef2f7] p-0.5"
-      >
-        {kinds.map((k) => (
-          <button
-            key={k}
-            type="button"
-            role="tab"
-            aria-selected={kind === k}
-            onClick={() => setKind(k)}
-            className={cn(
-              "rounded-md px-3 py-1.5 text-[0.8125rem] font-medium capitalize transition",
-              kind === k
-                ? "bg-white text-[#1a56db] shadow-sm"
-                : "text-[var(--muted)] hover:text-[var(--ink)]",
-            )}
-          >
-            {k === "all" ? "All" : k}
-          </button>
-        ))}
+      <div className="flex flex-wrap items-end gap-3">
+        <div
+          role="tablist"
+          className="inline-flex flex-wrap rounded-lg border border-[var(--line)] bg-[#eef2f7] p-0.5"
+        >
+          {kinds.map((k) => (
+            <button
+              key={k}
+              type="button"
+              role="tab"
+              aria-selected={kind === k}
+              onClick={() => setKind(k)}
+              className={cn(
+                "rounded-md px-3 py-1.5 text-[0.8125rem] font-medium capitalize transition",
+                kind === k
+                  ? "bg-white text-[#1a56db] shadow-sm"
+                  : "text-[var(--muted)] hover:text-[var(--ink)]",
+              )}
+            >
+              {k === "all" ? "All" : k}
+            </button>
+          ))}
+        </div>
+        <form
+          className="flex min-w-[220px] flex-1 flex-wrap items-end gap-2 sm:max-w-md"
+          onSubmit={(e) => {
+            e.preventDefault();
+            setAppliedQ(search.trim());
+          }}
+        >
+          <div className="min-w-0 flex-1">
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search product or customer…"
+              aria-label="Search product or customer"
+            />
+          </div>
+          <Button type="submit" variant="secondary" size="sm">
+            Search
+          </Button>
+          {appliedQ ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setSearch("");
+                setAppliedQ("");
+              }}
+            >
+              Clear
+            </Button>
+          ) : null}
+        </form>
       </div>
 
       {!rows.length ? (
         <EmptyState
-          title="No orders yet"
-          detail="Orders appear here after you check out at the counter. There is no create button on this page."
+          title={appliedQ ? "No matching orders" : "No orders yet"}
+          detail={
+            appliedQ
+              ? "Try another product name, customer, or order number."
+              : "Orders appear here after you check out at the counter. There is no create button on this page."
+          }
           action={
             <Button asChild>
               <Link href="/counter">Open counter</Link>
@@ -98,11 +143,12 @@ export default function OrdersPage() {
         />
       ) : (
         <section className="overflow-x-auto rounded-xl border border-[var(--line)] bg-white">
-          <table className="w-full min-w-[640px] text-left text-body">
+          <table className="w-full min-w-[760px] text-left text-body">
             <thead className="border-b border-[var(--line)] text-caption font-medium tracking-wide text-[var(--muted)] uppercase">
               <tr>
                 <th className="px-4 py-3">Order</th>
                 <th className="px-4 py-3">Mode</th>
+                <th className="px-4 py-3">Products</th>
                 <th className="px-4 py-3">Customer</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Balance</th>
@@ -122,6 +168,19 @@ export default function OrdersPage() {
                   </td>
                   <td className="px-4 py-3">
                     <ModeBadge mode={o.kind} />
+                  </td>
+                  <td className="max-w-[220px] px-4 py-3 text-[var(--muted)]">
+                    <p className="line-clamp-2 text-sm text-[var(--ink)]">
+                      {o.productSummary ||
+                        (o.productNames?.length
+                          ? o.productNames.join(", ")
+                          : "—")}
+                    </p>
+                    {o.itemCount != null && o.itemCount > 0 ? (
+                      <p className="text-xs text-[var(--muted)]">
+                        {o.itemCount} item{o.itemCount === 1 ? "" : "s"}
+                      </p>
+                    ) : null}
                   </td>
                   <td className="px-4 py-3 text-[var(--muted)]">
                     {o.customer?.fullName ?? "—"}

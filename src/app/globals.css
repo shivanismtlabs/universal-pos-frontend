@@ -310,7 +310,14 @@ textarea:focus {
 }
 
 @media print {
+  /* Reports / statements — A4 */
   @page {
+    size: A4;
+    margin: 12mm;
+  }
+
+  /* Thermal receipt slips (receipt modal uses page: receipt) */
+  @page receipt {
     size: 80mm auto;
     margin: 6mm 5mm;
   }
@@ -323,9 +330,33 @@ textarea:focus {
     padding: 0 !important;
     background: #fff !important;
     overflow: visible !important;
+    color: #0b1f33 !important;
   }
 
-  body > *:not(.receipt-print-root) {
+  /* Hide shell chrome for report PDF/Print */
+  aside.app-shell-aside,
+  header.app-shell-mobile-header {
+    display: none !important;
+  }
+
+  main,
+  .document-print-root {
+    display: block !important;
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+    background: #fff !important;
+    color: #0b1f33 !important;
+  }
+
+  .print\:hidden {
+    display: none !important;
+  }
+
+  /*
+   * Receipt modal portals onto body. Hide the Next app; print only the slip.
+   */
+  body:has(> .receipt-print-root) > *:not(.receipt-print-root) {
     display: none !important;
   }
 
@@ -337,6 +368,7 @@ textarea:focus {
     height: auto !important;
     background: #fff !important;
     padding: 0 !important;
+    page: receipt;
   }
 
   .receipt-sheet {
@@ -365,9 +397,5 @@ textarea:focus {
     color: #fff !important;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
-  }
-
-  .print\:hidden {
-    display: none !important;
   }
 }

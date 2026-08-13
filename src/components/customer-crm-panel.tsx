@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { customersApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useBootstrap } from "@/lib/bootstrap";
+import { useAuthStore } from "@/lib/auth-store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,6 +17,9 @@ type CrmTab =
   | "overview"
   | "orders"
   | "dues"
+  | "payments"
+  | "membership"
+  | "activity"
   | "loyalty"
   | "wallet"
   | "notes";
@@ -27,6 +31,9 @@ export function CustomerCrmPanel({ customerId }: { customerId: string }) {
   const [noteBody, setNoteBody] = useState("");
   const [walletAmt, setWalletAmt] = useState("100");
   const [walletNote, setWalletNote] = useState("");
+  const canManageWallet = useAuthStore((s) =>
+    (s.user?.roles ?? []).some((r) => r === "admin" || r === "manager"),
+  );
 
   const detail = useQuery({
     queryKey: ["customer-crm", customerId],
@@ -42,6 +49,21 @@ export function CustomerCrmPanel({ customerId }: { customerId: string }) {
     queryKey: ["customer-dues", customerId],
     queryFn: () => customersApi.listDues(customerId),
     enabled: tab === "dues" || tab === "overview",
+  });
+  const payments = useQuery({
+    queryKey: ["customer-payments", customerId],
+    queryFn: () => customersApi.listPayments(customerId),
+    enabled: tab === "payments",
+  });
+  const memberships = useQuery({
+    queryKey: ["customer-memberships", customerId],
+    queryFn: () => customersApi.listMemberships(customerId),
+    enabled: tab === "membership" || tab === "overview",
+  });
+  const activity = useQuery({
+    queryKey: ["customer-activity", customerId],
+    queryFn: () => customersApi.listActivity(customerId),
+    enabled: tab === "activity",
   });
   const loyalty = useQuery({
     queryKey: ["customer-loyalty", customerId],
@@ -94,7 +116,10 @@ export function CustomerCrmPanel({ customerId }: { customerId: string }) {
   const tabs: { id: CrmTab; label: string }[] = [
     { id: "overview", label: "Overview" },
     { id: "orders", label: "Purchases" },
+    { id: "payments", label: "Payments" },
     { id: "dues", label: "Due" },
+    { id: "membership", label: "Membership" },
+    { id: "activity", label: "Activity" },
     { id: "loyalty", label: "Loyalty" },
     { id: "wallet", label: "Wallet" },
     { id: "notes", label: "Notes" },
@@ -119,17 +144,25 @@ export function CustomerCrmPanel({ customerId }: { customerId: string }) {
   return (
     <section className="rounded-2xl border border-[#e5e7eb] bg-white">
       <div className="border-b border-[#eef2f8] px-5 py-4">
-        <p className="text-[0.65rem] font-bold tracking-[0.12em] text-[#1a56db] uppercase">
-          Customer profile
-        </p>
-        <h2 className="mt-1 text-xl font-semibold text-[#0b1f33]">
-          {detail.data.fullName}
-        </h2>
-        <p className="mt-0.5 text-sm text-[#5a6b7d]">
-          {detail.data.phone}
-          {detail.data.email ? ` · ${detail.data.email}` : ""}
-        </p>
-        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <p className="text-[0.65rem] font-bold tracking-[0.12em] text-[#1a56db] uppercase">
+              Customer profile
+            </p>
+            <h2 className="mt-1 text-xl font-semibold text-[#0b1f33]">
+              {detail.data.fullName}
+            </h2>
+            <p className="mt-0.5 text-sm text-[#5a6b7d]">
+              {detail.data.phone}
+              {detail.data.email ? ` · ${detail.data.email}` : ""}
+            </p>
+          </div>
+          <Button asChild size="sm" variant="secondary">
+            <Link href={`/customers/${customerId}`}>Open durable URL</Link>
+          </Button>
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+          <Kpi label="Total spent" value={money(s?.totalSpent ?? 0)} />
           <Kpi label="Orders" value={String(s?.orderCount ?? 0)} />
           <Kpi
             label="Open due"
@@ -137,11 +170,25 @@ export function CustomerCrmPanel({ customerId }: { customerId: string }) {
             warn={(s?.openDueTotal ?? 0) > 0}
           />
           <Kpi label="Loyalty pts" value={String(s?.loyaltyPoints ?? 0)} />
+          <Kpi label="Wallet" value={money(s?.storeCreditBalance ?? 0)} />
           <Kpi
-            label="Wallet"
-            value={money(s?.storeCreditBalance ?? 0)}
+            label="Credit left"
+            value={
+              s?.availableCredit == null
+                ? "Unlimited"
+                : money(s.availableCredit)
+            }
           />
         </div>
+        <p className="mt-2 text-[0.75rem] text-[#8b9bb0]">
+          Last visit:{" "}
+          {s?.lastVisitAt
+            ? `${formatDate(s.lastVisitAt)}${s.lastVisitOrder ? ` · ${s.lastVisitOrder}` : ""}`
+            : "—"}
+          {s?.activeMembership
+            ? ` · Member: ${s.activeMembership.planName}`
+            : ""}
+        </p>
       </div>
 
       <div className="flex flex-wrap gap-1 border-b border-[#eef2f8] px-3 pt-2">
@@ -174,17 +221,45 @@ export function CustomerCrmPanel({ customerId }: { customerId: string }) {
             {(detail.data.partyMemberships?.length ?? 0) > 0 ? (
               <div>
                 <p className="text-[0.7rem] font-semibold text-[#8b9bb0] uppercase">
-                  Groups
+                  Rental parties / groups
                 </p>
                 <ul className="mt-1 space-y-1">
                   {detail.data.partyMemberships!.map((m) => (
                     <li key={m.party.id} className="text-[#0b1f33]">
-                      {m.party.name}
+                      <Link
+                        href={`/parties?id=${m.party.id}`}
+                        className="font-medium text-[#1a56db] hover:underline"
+                      >
+                        {m.party.name}
+                      </Link>
                       {m.roleLabel ? ` · ${m.roleLabel}` : ""}
                     </li>
                   ))}
                 </ul>
+                <Link
+                  href="/parties"
+                  className="mt-2 inline-block text-xs font-semibold text-[#1a56db] hover:underline"
+                >
+                  Manage parties →
+                </Link>
               </div>
+            ) : (
+              <p className="text-xs text-[#8b9bb0]">
+                No rental party membership.{" "}
+                <Link href="/parties" className="text-[#1a56db] hover:underline">
+                  Open parties
+                </Link>
+              </p>
+            )}
+            {s?.activeMembership ? (
+              <p className="rounded-lg border border-[#e4e9f0] bg-[#f8fafc] px-3 py-2 text-sm">
+                Active membership:{" "}
+                <span className="font-semibold">
+                  {s.activeMembership.planName}
+                </span>{" "}
+                · renews{" "}
+                {formatDate(s.activeMembership.currentPeriodEnd)}
+              </p>
             ) : null}
             <div className="grid gap-3 sm:grid-cols-2">
               <MiniList
@@ -239,6 +314,12 @@ export function CustomerCrmPanel({ customerId }: { customerId: string }) {
               <span className="font-semibold text-[#b45309]">
                 {money(dues.data?.totalDue ?? 0)}
               </span>
+              {s?.creditLimit != null ? (
+                <>
+                  {" · "}Credit limit {money(s.creditLimit)} · Remaining{" "}
+                  {money(s.availableCredit ?? 0)}
+                </>
+              ) : null}
             </p>
             <DenseTable
               empty="No due payments"
@@ -258,6 +339,87 @@ export function CustomerCrmPanel({ customerId }: { customerId: string }) {
               ])}
             />
           </div>
+        ) : null}
+
+        {tab === "payments" ? (
+          <DenseTable
+            empty="No payments yet"
+            loading={payments.isLoading}
+            headers={["When", "Type", "Method", "Amount", "Order"]}
+            rows={(payments.data?.items ?? []).map((p) => [
+              formatDate(p.createdAt),
+              p.type,
+              p.method,
+              money(p.amount),
+              <Link
+                key="o"
+                href={`/orders/view?id=${p.orderId}`}
+                className="font-semibold text-[#1a56db] hover:underline"
+              >
+                {p.orderNumber}
+              </Link>,
+            ])}
+          />
+        ) : null}
+
+        {tab === "membership" ? (
+          <DenseTable
+            empty="No memberships — enroll from Subscriptions"
+            loading={memberships.isLoading}
+            headers={["Plan", "Status", "Price", "Period end", ""]}
+            rows={(memberships.data?.items ?? []).map((m) => [
+              m.product.name,
+              m.status,
+              money(m.price),
+              formatDate(m.currentPeriodEnd),
+              <Link
+                key="s"
+                href="/subscriptions"
+                className="text-[#1a56db] hover:underline"
+              >
+                Manage
+              </Link>,
+            ])}
+          />
+        ) : null}
+
+        {tab === "activity" ? (
+          <ul className="divide-y divide-[#eef2f8] text-sm">
+            {(activity.data?.items ?? []).map((a) => (
+              <li key={a.id} className="flex flex-wrap items-start justify-between gap-2 py-3">
+                <div className="min-w-0">
+                  <p className="font-medium text-[#0b1f33]">
+                    {a.href ? (
+                      <Link href={a.href} className="text-[#1a56db] hover:underline">
+                        {a.title}
+                      </Link>
+                    ) : (
+                      a.title
+                    )}
+                  </p>
+                  {a.detail ? (
+                    <p className="mt-0.5 line-clamp-2 text-[#5a6b7d]">{a.detail}</p>
+                  ) : null}
+                  <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+                    {formatDate(a.createdAt)} · {a.kind}
+                  </p>
+                </div>
+                {a.amount != null ? (
+                  <span className="tabular-nums font-medium text-[#0b1f33]">
+                    {a.kind.startsWith("loyalty")
+                      ? `${a.amount} pts`
+                      : money(a.amount)}
+                  </span>
+                ) : null}
+              </li>
+            ))}
+            {activity.isLoading ? (
+              <li className="py-8 text-center text-[#8b9bb0]">Loading…</li>
+            ) : null}
+            {!activity.isLoading && !activity.data?.items?.length ? (
+              <li className="py-8 text-center text-[#8b9bb0]">No activity yet</li>
+            ) : null}
+          </ul>
         ) : null}
 
         {tab === "loyalty" ? (
@@ -302,6 +464,7 @@ export function CustomerCrmPanel({ customerId }: { customerId: string }) {
                   value={walletAmt}
                   onChange={(e) => setWalletAmt(e.target.value)}
                   placeholder="100"
+                  disabled={!canManageWallet}
                 />
               </div>
               <div>
@@ -311,13 +474,18 @@ export function CustomerCrmPanel({ customerId }: { customerId: string }) {
                   value={walletNote}
                   onChange={(e) => setWalletNote(e.target.value)}
                   placeholder="Top-up / adjustment"
+                  disabled={!canManageWallet}
                 />
               </div>
               <div className="flex items-end gap-2">
                 <Button
                   type="button"
                   size="sm"
-                  disabled={adjustWallet.isPending || !Number(walletAmt)}
+                  disabled={
+                    !canManageWallet ||
+                    adjustWallet.isPending ||
+                    !Number(walletAmt)
+                  }
                   onClick={() =>
                     adjustWallet.mutate(Math.abs(Number(walletAmt)))
                   }
@@ -328,7 +496,11 @@ export function CustomerCrmPanel({ customerId }: { customerId: string }) {
                   type="button"
                   size="sm"
                   variant="secondary"
-                  disabled={adjustWallet.isPending || !Number(walletAmt)}
+                  disabled={
+                    !canManageWallet ||
+                    adjustWallet.isPending ||
+                    !Number(walletAmt)
+                  }
                   onClick={() =>
                     adjustWallet.mutate(-Math.abs(Number(walletAmt)))
                   }
@@ -337,6 +509,11 @@ export function CustomerCrmPanel({ customerId }: { customerId: string }) {
                 </Button>
               </div>
             </div>
+            {!canManageWallet ? (
+              <p className="text-xs text-[#8b9bb0]">
+                Wallet adjust requires manager or admin.
+              </p>
+            ) : null}
             <DenseTable
               empty="No wallet movements yet"
               loading={wallet.isLoading}

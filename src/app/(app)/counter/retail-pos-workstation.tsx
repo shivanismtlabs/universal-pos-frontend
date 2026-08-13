@@ -159,6 +159,11 @@ export default function RetailPosWorkstation({
   const [payAmount, setPayAmount] = useState("");
   const [giftCardCode, setGiftCardCode] = useState("");
   const [giftCardBalance, setGiftCardBalance] = useState<number | null>(null);
+  const [bankAccountName, setBankAccountName] = useState("");
+  const [bankAccountNumber, setBankAccountNumber] = useState("");
+  const [bankIfsc, setBankIfsc] = useState("");
+  const [bankName, setBankName] = useState("");
+  const [bankReference, setBankReference] = useState("");
   const [loyaltyPointsInput, setLoyaltyPointsInput] = useState("");
   const [loyaltyQuote, setLoyaltyQuote] = useState<{
     points: number;
@@ -554,11 +559,10 @@ export default function RetailPosWorkstation({
     }
     if (
       chargeAmount < 60 &&
-      (payMethod === "card" || payMethod === "upi") &&
-      !allowPartial
+      (payMethod === "card" || payMethod === "upi")
     ) {
       toast.error(
-        `Card/UPI minimum is ${money(60)} — use cash for smaller sales`,
+        `Card/UPI minimum is ${money(60)} — use cash/QR/bank for smaller amounts`,
       );
       return;
     }
@@ -569,6 +573,18 @@ export default function RetailPosWorkstation({
     if (payMethod === "gift_card" && !giftCardCode.trim()) {
       toast.error("Enter gift card code");
       return;
+    }
+    if (payMethod === "bank_transfer") {
+      if (
+        !bankAccountName.trim() ||
+        !bankAccountNumber.trim() ||
+        !bankReference.trim()
+      ) {
+        toast.error(
+          "Enter bank account name, account number, and reference / UTR",
+        );
+        return;
+      }
     }
     if (loyaltyPointsInput && !customerId) {
       toast.error("Select a customer to redeem loyalty points");
@@ -691,11 +707,11 @@ export default function RetailPosWorkstation({
         }
 
         const prepared = await posApi.prepareSale(cartPayload);
-        const amount = moneyNumber(prepared.balanceDue);
+        const stripeAmount = chargeAmount;
         try {
           const session = await paymentsApi.createStripeIntent({
             orderId: prepared.orderId,
-            amount,
+            amount: stripeAmount,
             method: payMethod,
             type: "payment",
           });
@@ -705,7 +721,7 @@ export default function RetailPosWorkstation({
             publishableKey: session.publishableKey,
             clientSecret: session.clientSecret,
             paymentIntentId: session.paymentIntentId,
-            amount,
+            amount: stripeAmount,
             description: session.description,
             method: payMethod,
           });
@@ -718,21 +734,39 @@ export default function RetailPosWorkstation({
       }
 
       const payAmt = chargeAmount;
+      const settleMethod =
+        payMethod === "store_credit"
+          ? "store_credit"
+          : payMethod === "gift_card"
+            ? "gift_card"
+            : payMethod === "bank_transfer"
+              ? "bank_transfer"
+              : payMethod === "qr"
+                ? "qr"
+                : payMethod === "wallet"
+                  ? "wallet"
+                  : payMethod === "emi"
+                    ? "emi"
+                    : "cash";
       const result = await posApi.saleCheckout({
         ...cartPayload,
         ...checkoutExtras,
         payments: [
           {
-            method:
-              payMethod === "store_credit"
-                ? "store_credit"
-                : payMethod === "gift_card"
-                  ? "gift_card"
-                  : "cash",
+            method: settleMethod,
             amount: payAmt,
             idempotencyKey: newIdempotencyKey("sale"),
             ...(payMethod === "gift_card"
               ? { giftCardCode: giftCardCode.trim() }
+              : {}),
+            ...(payMethod === "bank_transfer"
+              ? {
+                  bankAccountName: bankAccountName.trim(),
+                  bankAccountNumber: bankAccountNumber.trim(),
+                  bankIfsc: bankIfsc.trim() || undefined,
+                  bankName: bankName.trim() || undefined,
+                  bankReference: bankReference.trim(),
+                }
               : {}),
           },
         ],
@@ -752,6 +786,11 @@ export default function RetailPosWorkstation({
       setPayAmount("");
       setGiftCardCode("");
       setGiftCardBalance(null);
+      setBankAccountName("");
+      setBankAccountNumber("");
+      setBankIfsc("");
+      setBankName("");
+      setBankReference("");
       setLoyaltyPointsInput("");
       setLoyaltyQuote(null);
       setReceipt({
@@ -863,6 +902,8 @@ export default function RetailPosWorkstation({
     const receiptData = await posApi.finalizeStripeSale(orderId);
     setCart([]);
     setCashTendered("");
+    setAllowPartial(false);
+    setPayAmount("");
     setStripeCheckout(null);
     setStripeBusy(false);
     setReceipt({
@@ -873,7 +914,11 @@ export default function RetailPosWorkstation({
     void qc.invalidateQueries({ queryKey: ["pos-sale-catalog"] });
     void qc.invalidateQueries({ queryKey: ["dashboard-catalog"] });
     void qc.invalidateQueries({ queryKey: ["retail-skus"] });
-    toast.success(`Sale ${orderNumber} paid via Stripe`);
+    toast.success(
+      amount + 0.001 < totalDue
+        ? `Sale ${orderNumber} · partial ${money(amount)} via Stripe`
+        : `Sale ${orderNumber} paid via Stripe`,
+    );
     scanRef.current?.focus();
   }
 
@@ -1386,6 +1431,8 @@ export default function RetailPosWorkstation({
               onChange={(id) => setCustomerId(id)}
               allowWalkIn
               placeholder="Search customer book…"
+              showBalances
+              money={money}
             />
           </div>
 
@@ -1539,9 +1586,38 @@ export default function RetailPosWorkstation({
                 </p>
               </div>
               <div className="field-shell">
-                <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
-                  Coupon
-                </Label>
+                <div className="mb-1 flex items-center justify-between gap-1">
+                  <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
+                    Coupon
+                  </Label>
+                  {couponApplied || moneyNumber(discountAmount || 0) > 0 ? (
+                    <button
+                      type="button"
+                      className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-[#d9e0ea] text-[#5a6b7d] hover:bg-white hover:text-[#0b1f33]"
+                      title="Clear discount & coupon"
+                      onClick={() => {
+                        setCouponCode("");
+                        setCouponApplied(null);
+                        setDiscountAmount("");
+                      }}
+                    >
+                      <svg
+                        width="10"
+                        height="10"
+                        viewBox="0 0 12 12"
+                        fill="none"
+                        aria-hidden
+                      >
+                        <path
+                          d="M3 3l6 6M9 3L3 9"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </button>
+                  ) : null}
+                </div>
                 <div className="flex gap-1">
                   <Input
                     className="h-10 uppercase"
@@ -1580,6 +1656,33 @@ export default function RetailPosWorkstation({
                   >
                     Apply
                   </Button>
+                  {couponApplied ? (
+                    <button
+                      type="button"
+                      className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[#d9e0ea] bg-white text-[#5a6b7d] hover:bg-[#f4f6fa] hover:text-[#0b1f33]"
+                      title="Clear coupon & discount"
+                      onClick={() => {
+                        setCouponCode("");
+                        setCouponApplied(null);
+                        setDiscountAmount("");
+                      }}
+                    >
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 12 12"
+                        fill="none"
+                        aria-hidden
+                      >
+                        <path
+                          d="M3 3l6 6M9 3L3 9"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </button>
+                  ) : null}
                 </div>
                 <p className="text-[0.65rem] text-[#8b9bb0]">
                   {couponApplied
@@ -1781,9 +1884,41 @@ export default function RetailPosWorkstation({
               </div>
             ) : null}
             {payMethod === "bank_transfer" ? (
-              <p className="text-[0.7rem] text-[#5a6b7d]">
-                Confirm bank transfer received, then charge to settle the sale.
-              </p>
+              <div className="space-y-2 rounded-[10px] border border-[#d9e0ea] bg-white p-3">
+                <p className="text-[0.7rem] text-[#5a6b7d]">
+                  Enter payer bank details, then charge after you confirm the
+                  transfer.
+                </p>
+                <Input
+                  placeholder="Account holder name *"
+                  value={bankAccountName}
+                  onChange={(e) => setBankAccountName(e.target.value)}
+                />
+                <Input
+                  placeholder="Account number *"
+                  value={bankAccountNumber}
+                  onChange={(e) => setBankAccountNumber(e.target.value)}
+                  inputMode="numeric"
+                />
+                <div className="grid grid-cols-2 gap-2">
+                  <Input
+                    placeholder="IFSC / routing"
+                    className="uppercase"
+                    value={bankIfsc}
+                    onChange={(e) => setBankIfsc(e.target.value)}
+                  />
+                  <Input
+                    placeholder="Bank name"
+                    value={bankName}
+                    onChange={(e) => setBankName(e.target.value)}
+                  />
+                </div>
+                <Input
+                  placeholder="UTR / reference *"
+                  value={bankReference}
+                  onChange={(e) => setBankReference(e.target.value)}
+                />
+              </div>
             ) : null}
             {payMethod === "wallet" ? (
               <p className="text-[0.7rem] text-[#5a6b7d]">

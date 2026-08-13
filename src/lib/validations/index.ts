@@ -161,10 +161,25 @@ export const createCustomerSchema = z.object({
     .regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD")
     .optional()
     .or(z.literal("")),
+  dateOfBirth: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD")
+    .optional()
+    .or(z.literal("")),
   notes: z.string().max(2000).optional().or(z.literal("")),
   marketingOptIn: z.boolean(),
+  /** Empty = unlimited */
+  creditLimit: z.string().optional().or(z.literal("")),
 });
 export type CreateCustomerInput = z.infer<typeof createCustomerSchema>;
+
+export function parseCreditLimit(raw: string | undefined): number | null {
+  if (raw === undefined || raw === null || String(raw).trim() === "") {
+    return null;
+  }
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
 
 const optionalMeasure = z
   .union([z.string(), z.number()])

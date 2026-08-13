@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -11,6 +12,7 @@ import { ApiError } from "@/lib/api/client";
 import {
   createCustomerSchema,
   createMeasurementSchema,
+  parseCreditLimit,
   type CreateCustomerInput,
   type CreateMeasurementInput,
 } from "@/lib/validations";
@@ -22,6 +24,7 @@ import { formatDate } from "@/lib/utils";
 import { FadeIn } from "@/components/motion";
 import { cn } from "@/lib/utils";
 import { useBootstrap } from "@/lib/bootstrap";
+import { useAuthStore } from "@/lib/auth-store";
 import { PageHeader } from "@/components/page-header";
 import { EntityRowActions } from "@/components/entity-row-actions";
 import { CustomerCrmPanel } from "@/components/customer-crm-panel";
@@ -50,6 +53,8 @@ function MeasureValue({ label, value }: { label: string; value: unknown }) {
 }
 
 export default function CustomersPage() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
   const [q, setQ] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
   const [page, setPage] = useState(1);
@@ -58,7 +63,29 @@ export default function CustomersPage() {
   const qc = useQueryClient();
   const { hasModule } = useBootstrap();
   const rental = hasModule("rental");
+  const canLead = useAuthStore((s) =>
+    (s.user?.roles ?? []).some((r) => r === "admin" || r === "manager"),
+  );
   const pageSize = 30;
+
+  useEffect(() => {
+    const id = searchParams.get("id");
+    const qq = searchParams.get("q");
+    if (id) setSelectedId(id);
+    if (qq) {
+      setQ(qq);
+      setDebouncedQ(qq.trim());
+    }
+  }, [searchParams]);
+
+  function selectCustomer(id: string | null) {
+    setSelectedId(id);
+    const params = new URLSearchParams(searchParams.toString());
+    if (id) params.set("id", id);
+    else params.delete("id");
+    const qs = params.toString();
+    router.replace(qs ? `/customers?${qs}` : "/customers", { scroll: false });
+  }
 
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -118,8 +145,10 @@ export default function CustomersPage() {
       phone: "",
       email: "",
       eventDate: "",
+      dateOfBirth: "",
       notes: "",
       marketingOptIn: false,
+      creditLimit: "",
     },
   });
 
@@ -143,13 +172,15 @@ export default function CustomersPage() {
         phone: values.phone,
         email: values.email || undefined,
         eventDate: values.eventDate || undefined,
+        dateOfBirth: values.dateOfBirth || undefined,
         notes: values.notes || undefined,
         marketingOptIn: values.marketingOptIn,
+        creditLimit: parseCreditLimit(values.creditLimit),
       }),
     onSuccess: (row) => {
       toast.success("Customer created");
       form.reset();
-      setSelectedId(row.id);
+      selectCustomer(row.id);
       void qc.invalidateQueries({ queryKey: ["customers"] });
     },
     onError: (e) =>
@@ -166,8 +197,10 @@ export default function CustomersPage() {
         phone: values.phone,
         email: values.email || undefined,
         eventDate: values.eventDate || undefined,
+        dateOfBirth: values.dateOfBirth || undefined,
         notes: values.notes || undefined,
         marketingOptIn: values.marketingOptIn,
+        creditLimit: parseCreditLimit(values.creditLimit),
       });
     },
     onSuccess: () => {
@@ -178,11 +211,14 @@ export default function CustomersPage() {
         phone: "",
         email: "",
         eventDate: "",
+        dateOfBirth: "",
         notes: "",
         marketingOptIn: false,
+        creditLimit: "",
       });
       void qc.invalidateQueries({ queryKey: ["customers"] });
       void qc.invalidateQueries({ queryKey: ["customer", selectedId] });
+      void qc.invalidateQueries({ queryKey: ["customer-crm", selectedId] });
     },
     onError: (e) =>
       toast.error(
@@ -194,7 +230,7 @@ export default function CustomersPage() {
     mutationFn: (id: string) => customersApi.softDelete(id),
     onSuccess: (_res, id) => {
       toast.success("Customer removed");
-      if (selectedId === id) setSelectedId(null);
+      if (selectedId === id) selectCustomer(null);
       if (editingId === id) setEditingId(null);
       void qc.invalidateQueries({ queryKey: ["customers"] });
     },
@@ -210,9 +246,12 @@ export default function CustomersPage() {
     phone: string;
     email?: string | null;
     eventDate?: string | null;
+    dateOfBirth?: string | null;
     notes?: string | null;
+    marketingOptIn?: boolean;
+    creditLimit?: number | string | null;
   }) {
-    setSelectedId(c.id);
+    selectCustomer(c.id);
     setEditingId(c.id);
     form.reset({
       fullName: c.fullName,
@@ -221,8 +260,15 @@ export default function CustomersPage() {
       eventDate: c.eventDate
         ? String(c.eventDate).slice(0, 10)
         : "",
+      dateOfBirth: c.dateOfBirth
+        ? String(c.dateOfBirth).slice(0, 10)
+        : "",
       notes: c.notes ?? "",
-      marketingOptIn: false,
+      marketingOptIn: Boolean(c.marketingOptIn),
+      creditLimit:
+        c.creditLimit != null && String(c.creditLimit) !== ""
+          ? String(c.creditLimit)
+          : "",
     });
   }
 
@@ -300,7 +346,7 @@ export default function CustomersPage() {
                     >
                       <button
                         type="button"
-                        onClick={() => setSelectedId(c.id)}
+                        onClick={() => selectCustomer(c.id)}
                         className="flex min-w-0 flex-1 flex-col gap-1 px-2 py-2.5 text-left transition sm:flex-row sm:items-center sm:justify-between sm:gap-4"
                       >
                         <div className="min-w-0">
@@ -348,15 +394,19 @@ export default function CustomersPage() {
                       <div className="flex shrink-0 items-center pr-1">
                         <EntityRowActions
                           onEdit={() => startEdit(c)}
-                          onSoftDelete={() => {
-                            if (
-                              confirm(
-                                `Remove customer “${c.fullName}”? This is a soft delete.`,
-                              )
-                            ) {
-                              softDelete.mutate(c.id);
-                            }
-                          }}
+                          onSoftDelete={
+                            canLead
+                              ? () => {
+                                  if (
+                                    confirm(
+                                      `Remove customer “${c.fullName}”? This is a soft delete.`,
+                                    )
+                                  ) {
+                                    softDelete.mutate(c.id);
+                                  }
+                                }
+                              : undefined
+                          }
                           softDeleteTitle="Soft delete"
                           deleteHidden
                         />
@@ -463,9 +513,38 @@ export default function CustomersPage() {
                 <FieldError message={form.formState.errors.email?.message} />
               </div>
               ) : null}
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <Label>Birthday (optional)</Label>
+                  <Input
+                    className="mt-1.5"
+                    type="date"
+                    {...form.register("dateOfBirth")}
+                  />
+                  <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+                    Used for birthday reminders when marketing is on
+                  </p>
+                </div>
+                <label className="flex items-end gap-2 pb-2 text-sm text-[#5a6b7d]">
+                  <input type="checkbox" {...form.register("marketingOptIn")} />
+                  Marketing / birthday opt-in
+                </label>
+              </div>
               <div>
                 <Label>Notes</Label>
                 <Input className="mt-1.5" {...form.register("notes")} />
+              </div>
+              <div>
+                <Label>Credit limit (optional)</Label>
+                <Input
+                  className="mt-1.5"
+                  inputMode="decimal"
+                  placeholder="Blank = unlimited"
+                  {...form.register("creditLimit")}
+                />
+                <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+                  Blocks underpay at POS when open dues would exceed this amount
+                </p>
               </div>
               <div className="flex gap-2">
                 {editingId ? (
@@ -480,8 +559,10 @@ export default function CustomersPage() {
                         phone: "",
                         email: "",
                         eventDate: "",
+                        dateOfBirth: "",
                         notes: "",
                         marketingOptIn: false,
+                        creditLimit: "",
                       });
                     }}
                   >

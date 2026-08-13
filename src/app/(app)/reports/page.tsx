@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -167,6 +168,33 @@ export default function ReportsPage() {
         subtitle="Sales, product velocity, staff, tax, and balances — filter by store / location."
         action={
           <div className="flex flex-wrap items-end gap-2">
+            <Button asChild size="sm" variant="secondary" className="h-9">
+              <Link href="/reports/daily">Daily Sales</Link>
+            </Button>
+            <Button asChild size="sm" variant="secondary" className="h-9">
+              <Link href="/reports/monthly">Monthly Sales</Link>
+            </Button>
+            <Button asChild size="sm" variant="secondary" className="h-9">
+              <Link href="/reports/pnl">Profit & Loss</Link>
+            </Button>
+            <Button asChild size="sm" variant="secondary" className="h-9">
+              <Link href="/reports/inventory">Inventory</Link>
+            </Button>
+            <Button asChild size="sm" variant="secondary" className="h-9">
+              <Link href="/reports/top-products">Top products</Link>
+            </Button>
+            <Button asChild size="sm" variant="secondary" className="h-9">
+              <Link href="/reports/slow-moving">Slow-moving</Link>
+            </Button>
+            <Button asChild size="sm" variant="secondary" className="h-9">
+              <Link href="/reports/customers">Customers</Link>
+            </Button>
+            <Button asChild size="sm" variant="secondary" className="h-9">
+              <Link href="/reports/employees">Employees</Link>
+            </Button>
+            <Button asChild size="sm" variant="secondary" className="h-9">
+              <Link href="/reports/finance">Finance</Link>
+            </Button>
             <div>
               <Label className="text-xs">From</Label>
               <Input

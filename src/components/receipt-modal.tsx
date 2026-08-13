@@ -17,11 +17,17 @@ export type ReceiptData = {
     shopName?: string | null;
     taxId?: string | null;
   };
+  orderId?: string;
   orderNumber: string;
   kind?: string | null;
   cashier?: string | null;
   receiptFooter?: string | null;
-  customer?: { fullName: string; phone?: string | null } | null;
+  customer?: {
+    id?: string;
+    fullName: string;
+    phone?: string | null;
+    email?: string | null;
+  } | null;
   items: Array<{
     itemType: string;
     description?: string | null;
@@ -122,28 +128,54 @@ export function ReceiptModal({
   const [sending, setSending] = useState(false);
 
   async function sendChannels(channels: Array<"email" | "sms">) {
-    if (!data?.customer) {
-      toast.error("Attach a customer to send receipt");
+    if (!data?.customer?.id) {
+      toast.error("Attach a customer to send invoice");
+      return;
+    }
+    if (channels.includes("email") && !data.customer.email) {
+      toast.error("Customer has no email on file");
+      return;
+    }
+    if (channels.includes("sms") && !data.customer.phone) {
+      toast.error("Customer has no phone on file");
       return;
     }
     setSending(true);
     try {
-      for (const channel of channels) {
-        await notifyApi.send({
-          channel,
-          templateKey: "sale_receipt",
-          payload: {
-            orderNumber: data.orderNumber,
-            total: String(paidTotal),
-            balanceDue: String(balanceDue),
-            storeName: shopName,
-            customerName: data.customer.fullName,
-          },
-          // customerId unknown on receipt payload — phone/email from customer if API supports lookup by phone later
-          phone: data.customer.phone ?? undefined,
+      if (data.orderId) {
+        const res = await notifyApi.sendInvoice({
+          orderId: data.orderId,
+          channels,
         });
+        const ok = res.results.filter((r) =>
+          String(r.status).startsWith("sent"),
+        ).length;
+        toast.success(
+          ok
+            ? `Invoice sent on ${ok} channel(s)`
+            : "Invoice send attempted — check Notify logs",
+        );
+      } else {
+        for (const channel of channels) {
+          await notifyApi.send({
+            channel,
+            templateKey: "sale_invoice",
+            customerId: data.customer.id,
+            phone: data.customer.phone ?? undefined,
+            email: data.customer.email ?? undefined,
+            payload: {
+              orderNumber: data.orderNumber,
+              total: String(paidTotal),
+              balanceDue: String(balanceDue),
+              storeName: shopName,
+              customerName: data.customer.fullName,
+              subtotal: String(data.totals.subtotal),
+              taxTotal: String(data.totals.taxTotal),
+            },
+          });
+        }
+        toast.success("Invoice sent");
       }
-      toast.success("Receipt queued");
     } catch (e) {
       toast.error(
         e instanceof ApiError ? e.messages.join(", ") : "Send failed",

@@ -21,6 +21,8 @@ type FormValues = {
 const SALE_TEMPLATES = [
   { value: "payment_received", label: "Payment received" },
   { value: "order_ready_for_pickup", label: "Order ready for pickup" },
+  { value: "sale_invoice", label: "Sale invoice" },
+  { value: "birthday_wish", label: "Birthday wish" },
   { value: "custom", label: "Custom message" },
 ];
 
@@ -43,6 +45,87 @@ function StatusPill({ status }: { status: string }) {
     >
       {status.replaceAll("_", " ")}
     </span>
+  );
+}
+
+function BirthdayRemindersPanel() {
+  const qc = useQueryClient();
+  const upcoming = useQuery({
+    queryKey: ["notify-birthdays"],
+    queryFn: () => notifyApi.birthdaysUpcoming(30),
+  });
+  const sendToday = useMutation({
+    mutationFn: () => notifyApi.sendBirthdaysToday(["sms", "whatsapp", "email"]),
+    onSuccess: (res) => {
+      toast.success(
+        res.sentFor
+          ? `Birthday wishes queued for ${res.sentFor} customer(s)`
+          : "No opt-in birthdays today",
+      );
+      void qc.invalidateQueries({ queryKey: ["notify-logs"] });
+      void qc.invalidateQueries({ queryKey: ["notify-birthdays"] });
+    },
+    onError: (e) =>
+      toast.error(
+        e instanceof ApiError ? e.messages.join(", ") : "Send failed",
+      ),
+  });
+
+  const items = upcoming.data?.items ?? [];
+
+  return (
+    <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5 sm:p-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="display text-2xl text-[#111827]">
+            Birthday reminders
+          </h2>
+          <p className="mt-1 text-sm text-[#6b7280]">
+            Optional — only customers with a birthday on file and marketing
+            opt-in. Add DOB on the Customers screen.
+          </p>
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          disabled={sendToday.isPending}
+          onClick={() => sendToday.mutate()}
+        >
+          {sendToday.isPending ? "Sending…" : "Send today’s wishes"}
+        </Button>
+      </div>
+      <ul className="mt-4 max-h-48 divide-y divide-[#f3f4f6] overflow-y-auto text-sm">
+        {upcoming.isLoading ? (
+          <li className="py-3 text-[#6b7280]">Loading…</li>
+        ) : !items.length ? (
+          <li className="py-3 text-[#6b7280]">
+            No birthdays in the next 30 days
+          </li>
+        ) : (
+          items.slice(0, 20).map((c) => (
+            <li
+              key={c.id}
+              className="flex items-center justify-between gap-2 py-2"
+            >
+              <div>
+                <p className="font-medium text-[#111827]">{c.fullName}</p>
+                <p className="text-xs text-[#6b7280]">
+                  {c.dateOfBirth} · in {c.daysUntil}d · {c.phone}
+                </p>
+              </div>
+              <span
+                className={cn(
+                  "text-[0.65rem] font-semibold uppercase",
+                  c.canSend ? "text-emerald-700" : "text-[#9ca3af]",
+                )}
+              >
+                {c.canSend ? "Opted in" : "No opt-in"}
+              </span>
+            </li>
+          ))
+        )}
+      </ul>
+    </section>
   );
 }
 
@@ -118,13 +201,16 @@ export default function NotifyPage() {
           Notify
         </p>
         <h1 className="display mt-2 text-3xl text-[#111827] sm:text-4xl">
-          WhatsApp
+          Messages & reminders
         </h1>
         <p className="mt-2 max-w-xl text-sm leading-relaxed text-[#6b7280]">
-          Send pickup, fitting, and payment messages via Gupshup. Mock mode logs
-          the flow without delivering.
+          WhatsApp, email/SMS invoices, and optional birthday reminders.
+          Email/SMS use mock delivery until EMAIL_WEBHOOK_URL / SMS_WEBHOOK_URL
+          are set.
         </p>
       </header>
+
+      <BirthdayRemindersPanel />
 
       <div
         className={cn(

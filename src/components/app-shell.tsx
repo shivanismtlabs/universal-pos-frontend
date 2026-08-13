@@ -44,6 +44,7 @@ import { useBootstrap } from "@/lib/bootstrap";
 import { Button } from "@/components/ui/button";
 import { StationPinLock } from "@/components/station-pin-lock";
 import { SetPinDialog } from "@/components/set-pin-dialog";
+import { ShellEntitySearch } from "@/components/shell-entity-search";
 import { toast } from "sonner";
 import {
   canAccessPath,
@@ -286,6 +287,62 @@ const NAV_GROUPS: NavGroup[] = [
     icon: BarChart3,
     section: "Insights",
     children: [
+      {
+        href: "/reports/daily",
+        label: "Daily Sales",
+        icon: BarChart3,
+        module: "reports",
+      },
+      {
+        href: "/reports/monthly",
+        label: "Monthly Sales",
+        icon: BarChart3,
+        module: "reports",
+      },
+      {
+        href: "/reports/pnl",
+        label: "Profit & Loss",
+        icon: BarChart3,
+        module: "reports",
+      },
+      {
+        href: "/reports/top-products",
+        label: "Top-Selling Products",
+        icon: BarChart3,
+        module: "reports",
+      },
+      {
+        href: "/reports/slow-moving",
+        label: "Slow-Moving Stock",
+        icon: BarChart3,
+        module: "reports",
+        commerce: "sale" as const,
+      },
+      {
+        href: "/reports/customers",
+        label: "Customer Reports",
+        icon: BarChart3,
+        module: "reports",
+      },
+      {
+        href: "/reports/employees",
+        label: "Employee Sales",
+        icon: BarChart3,
+        module: "reports",
+      },
+      {
+        href: "/reports/finance",
+        label: "Finance Reports",
+        icon: BarChart3,
+        module: "reports",
+      },
+      {
+        href: "/reports/inventory",
+        label: "Inventory Reports",
+        icon: Package,
+        module: "reports",
+        commerce: "sale" as const,
+      },
       {
         href: "/reports",
         label: "Reports & CSV",
@@ -561,7 +618,7 @@ function SidebarBody({
     g.railLabel ?? g.label.split(" ")[0] ?? g.label;
 
   return (
-    <div className="flex h-full min-h-0 w-full bg-[#0b1016] text-[#e8edf4]">
+    <div className="flex h-full min-h-0 w-full bg-[#0b1016] text-[#e8edf4] print:bg-white print:text-[#0b1f33]">
       {/* —— Zoho icon rail —— */}
       <div className="flex w-[4.35rem] shrink-0 flex-col border-r border-white/[0.06] bg-[#06090e]">
         <div className="flex justify-center pt-2.5 pb-1">
@@ -685,12 +742,19 @@ function SidebarBody({
             <input
               id="shell-nav-search"
               type="search"
-              placeholder="Search"
+              placeholder="Product or customer…"
               value={navQuery}
               onChange={(e) => setNavQuery(e.target.value)}
               className="h-8 w-full rounded-lg border-0 bg-[#0a0e14] pr-2 pl-8 text-[0.78rem] text-[#e8edf4] outline-none ring-1 ring-white/10 placeholder:text-[#5a6573] focus:ring-[#1a56db]/50"
             />
           </div>
+          <ShellEntitySearch
+            query={navQuery}
+            onNavigate={() => {
+              setNavQuery("");
+              onNavigate?.();
+            }}
+          />
 
           {activeGroup?.id === "setup" ? (
             <Link
@@ -1071,14 +1135,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         }}
       />
       {/* Zoho dual dark nav: icon rail + secondary */}
-      <aside className="hidden h-dvh w-[17.5rem] shrink-0 flex-col md:flex">
+      <aside className="app-shell-aside hidden h-dvh w-[17.5rem] shrink-0 flex-col md:flex print:hidden">
         <Suspense fallback={<div className="h-full bg-[#0a0e14]" />}>
           <SidebarBody {...sidebarProps} />
         </Suspense>
       </aside>
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="flex shrink-0 items-center justify-between border-b border-[#d9e0ea] bg-white px-4 py-3 md:hidden">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden print:overflow-visible">
+        <header className="app-shell-mobile-header flex shrink-0 items-center justify-between border-b border-[#d9e0ea] bg-white px-4 py-3 md:hidden print:hidden">
           <div className="flex min-w-0 items-center gap-2.5">
             <div className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-[#1a56db] text-xs font-semibold text-white">
               {initial}
@@ -1149,11 +1213,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           className={cn(
             "min-h-0 flex-1 overflow-y-auto overscroll-contain bg-[#eef1f5]",
             "[scrollbar-gutter:stable]",
+            "print:overflow-visible print:bg-white print:h-auto print:max-h-none",
           )}
         >
           <div
             className={cn(
-              "px-4 py-5 sm:px-6 sm:py-6 lg:px-8",
+              "document-print-root px-4 py-5 sm:px-6 sm:py-6 lg:px-8",
+              "print:max-w-none print:px-0 print:py-0",
               wide ? "max-w-none" : "mx-auto w-full max-w-[72rem]",
             )}
           >

@@ -10,6 +10,7 @@ import {
   billingApi,
   documentsApi,
   inventoryApi,
+  notifyApi,
   ordersApi,
   paymentsApi,
   posApi,
@@ -110,6 +111,26 @@ function OrderDetailInner() {
     queryKey: ["order-receipt", id],
     queryFn: () => posApi.receipt(id),
     enabled: Boolean(id) && receiptOpen,
+  });
+
+  const sendInvoice = useMutation({
+    mutationFn: () =>
+      notifyApi.sendInvoice({
+        orderId: id,
+        channels: ["email", "sms"],
+      }),
+    onSuccess: (res) => {
+      const ok = res.results.filter((r) => r.status.startsWith("sent")).length;
+      toast.success(
+        ok
+          ? `Invoice sent on ${ok} channel(s)`
+          : "Invoice send attempted — check Notify logs",
+      );
+    },
+    onError: (e) =>
+      toast.error(
+        e instanceof ApiError ? e.messages.join(", ") : "Invoice send failed",
+      ),
   });
 
   const form = useForm<AddOrderItemInput>({
@@ -388,6 +409,22 @@ function OrderDetailInner() {
             onClick={() => setReceiptOpen(true)}
           >
             Print receipt
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={
+              sendInvoice.isPending || !data.customer?.id
+            }
+            title={
+              data.customer?.id
+                ? "Email / SMS invoice to customer"
+                : "Attach a customer to send invoice"
+            }
+            onClick={() => sendInvoice.mutate()}
+          >
+            {sendInvoice.isPending ? "Sending…" : "Email / SMS invoice"}
           </Button>
           <div className="text-right">
             <p className="text-caption font-medium tracking-wide text-[var(--muted)] uppercase">
