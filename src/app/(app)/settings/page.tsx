@@ -313,11 +313,16 @@ export default function SettingsPage() {
         );
       }
       setCounterErrors({});
+      // UPI lives under settings.pos so older API builds (without upiVpa DTO fields) still accept it
       return tenantsApi.updateMe({
         maxCashierDiscountPercent: parsed.data.maxDiscount,
         pinSwitchEnabled: parsed.data.pinSwitchEnabled,
-        upiVpa: parsed.data.upiVpa.trim(),
-        upiPayeeName: parsed.data.upiPayeeName?.trim() ?? "",
+        settings: {
+          pos: {
+            upiVpa: parsed.data.upiVpa.trim() || null,
+            upiPayeeName: parsed.data.upiPayeeName?.trim() || null,
+          },
+        },
       });
     },
     onSuccess: () => {
@@ -325,7 +330,14 @@ export default function SettingsPage() {
       invalidate();
     },
     onError: (e) => {
-      if (e instanceof ApiError || !(e instanceof Error)) toast.error(errMsg(e));
+      const raw = errMsg(e);
+      if (/upiVpa|upiPayeeName|upivpa/i.test(raw)) {
+        toast.error(
+          "Could not save UPI settings — update the API server, then try again",
+        );
+        return;
+      }
+      toast.error(raw);
     },
   });
 
