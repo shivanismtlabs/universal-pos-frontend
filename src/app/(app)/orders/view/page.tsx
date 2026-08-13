@@ -45,6 +45,7 @@ import { Suspense, useState } from "react";
 import { ModeBadge } from "@/components/mode-badge";
 import { PageBreadcrumb, PageSkeleton } from "@/components/page-header";
 import { ReceiptModal, type ReceiptData } from "@/components/receipt-modal";
+import { SaleReturnDialog } from "@/components/sale-return-dialog";
 
 export default function OrderDetailPage() {
   return (
@@ -68,6 +69,7 @@ function OrderDetailInner() {
   const [extendDate, setExtendDate] = useState("");
   const [extendPay, setExtendPay] = useState(true);
   const [receiptOpen, setReceiptOpen] = useState(false);
+  const [saleReturnOpen, setSaleReturnOpen] = useState(false);
 
   const order = useQuery({
     queryKey: ["order", id],
@@ -402,6 +404,17 @@ function OrderDetailInner() {
           </p>
         </div>
         <div className="flex flex-wrap items-start gap-3">
+          {allowRefund &&
+          data.kind === "sale" &&
+          data.status === "closed" ? (
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => setSaleReturnOpen(true)}
+            >
+              Sale return
+            </Button>
+          ) : null}
           <Button
             type="button"
             variant="secondary"
@@ -842,6 +855,7 @@ function OrderDetailInner() {
                 <td className="py-2.5">{p.status}</td>
                 <td className="py-2.5 text-right">
                   {allowRefund &&
+                  data.kind !== "sale" &&
                   p.status === "succeeded" &&
                   (p.type === "payment" || p.type === "deposit") ? (
                     <Button
@@ -857,6 +871,19 @@ function OrderDetailInner() {
                       }
                     >
                       Refund
+                    </Button>
+                  ) : allowRefund &&
+                    data.kind === "sale" &&
+                    data.status === "closed" &&
+                    p.status === "succeeded" &&
+                    (p.type === "payment" || p.type === "deposit") ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => setSaleReturnOpen(true)}
+                    >
+                      Sale return
                     </Button>
                   ) : null}
                 </td>
@@ -876,6 +903,14 @@ function OrderDetailInner() {
           change={receiptQ.data?.change}
           cashTendered={receiptQ.data?.cashTendered}
           onClose={() => setReceiptOpen(false)}
+        />
+      ) : null}
+
+      {saleReturnOpen ? (
+        <SaleReturnDialog
+          orderId={data.id}
+          orderNumber={data.orderNumber}
+          onClose={() => setSaleReturnOpen(false)}
         />
       ) : null}
     </div>

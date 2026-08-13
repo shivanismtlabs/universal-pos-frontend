@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { ordersApi, returnsApi } from "@/lib/api";
+import { ordersApi, posApi, returnsApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import {
   createReturnSchema,
@@ -18,6 +18,8 @@ import { FieldError } from "@/components/ui/form";
 import { formatDate, newIdempotencyKey, cn } from "@/lib/utils";
 import { useBootstrap } from "@/lib/bootstrap";
 import { SaleReturnDialog } from "@/components/sale-return-dialog";
+import { canApproveRefund } from "@/lib/roles";
+import { useAuthStore } from "@/lib/auth-store";
 
 function RentalReturnsDesk() {
   const qc = useQueryClient();
@@ -364,10 +366,15 @@ function RentalReturnsDesk() {
 
 function SaleReturnsDesk() {
   const { money } = useBootstrap();
+  const qc = useQueryClient();
+  const roles = useAuthStore((s) => s.user?.roles);
+  const canApprove = canApproveRefund(roles);
+  const [deskTab, setDeskTab] = useState<"new" | "pending" | "history">("new");
   const [q, setQ] = useState("");
   const [active, setActive] = useState<{
     id: string;
     orderNumber: string;
+    mode?: "return" | "exchange";
   } | null>(null);
 
   const recent = useQuery({
@@ -379,65 +386,231 @@ function SaleReturnsDesk() {
         limit: 40,
         q: q.trim() || undefined,
       }),
+    enabled: deskTab === "new",
+  });
+
+  const pending = useQuery({
+    queryKey: ["sale-returns-list", "pending"],
+    queryFn: () => posApi.listSaleReturns({ status: "pending", limit: 50 }),
+    enabled: deskTab === "pending",
+  });
+
+  const history = useQuery({
+    queryKey: ["sale-returns-list", "history"],
+    queryFn: () => posApi.listSaleReturns({ status: "all", limit: 50 }),
+    enabled: deskTab === "history",
+  });
+
+  const approve = useMutation({
+    mutationFn: (id: string) => posApi.approveSaleReturn(id),
+    onSuccess: () => {
+      toast.success("Return approved");
+      void qc.invalidateQueries({ queryKey: ["sale-returns-list"] });
+    },
+    onError: (e) =>
+      toast.error(e instanceof ApiError ? e.messages.join(", ") : "Failed"),
+  });
+
+  const reject = useMutation({
+    mutationFn: (id: string) => posApi.rejectSaleReturn(id),
+    onSuccess: () => {
+      toast.success("Return rejected");
+      void qc.invalidateQueries({ queryKey: ["sale-returns-list"] });
+    },
+    onError: (e) =>
+      toast.error(e instanceof ApiError ? e.messages.join(", ") : "Failed"),
   });
 
   const items = recent.data?.items ?? [];
+  const pendingItems = pending.data?.items ?? [];
+  const historyItems = (history.data?.items ?? []).filter(
+    (r) => r.status !== "pending",
+  );
 
   return (
     <div className="space-y-4">
-      <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5">
-        <h2 className="text-lg font-semibold text-[#111827]">
-          Closed sales — refund &amp; restock
-        </h2>
-        <p className="mt-1 text-sm text-[#6b7280]">
-          Cash/card/UPI refund or store credit (needs customer on original
-          sale). Stock returns to shelf.
-        </p>
-        <div className="mt-4 max-w-sm">
-          <Label>Search order # / customer</Label>
-          <Input
-            className="mt-1.5"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="ORD-…"
-          />
-        </div>
-        <ul className="mt-4 max-h-[28rem] divide-y divide-[#f3f4f6] overflow-y-auto text-sm">
-          {items.map((o) => (
-            <li
-              key={o.id}
-              className="flex flex-wrap items-center justify-between gap-2 py-3"
-            >
-              <div className="min-w-0">
-                <p className="font-semibold text-[#111827]">{o.orderNumber}</p>
-                <p className="truncate text-xs text-[#6b7280]">
-                  {o.customer?.fullName ?? "Walk-in"}
-                  {o.subtotal != null ? ` · ${money(o.subtotal)}` : ""}
-                </p>
-              </div>
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                onClick={() =>
-                  setActive({ id: o.id, orderNumber: o.orderNumber })
-                }
+      <div className="flex gap-1 rounded-[12px] bg-[#eef2f8] p-1 sm:w-fit">
+        {(
+          [
+            ["new", "New return"],
+            ["pending", "Pending approval"],
+            ["history", "History"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setDeskTab(id)}
+            className={cn(
+              "rounded-[9px] px-4 py-2 text-sm font-semibold transition",
+              deskTab === id
+                ? "bg-white text-[#0b1f33] shadow-sm"
+                : "text-[#5a6b7d]",
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {deskTab === "new" ? (
+        <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5">
+          <h2 className="text-lg font-semibold text-[#111827]">
+            Closed sales — refund, restock, or exchange
+          </h2>
+          <p className="mt-1 text-sm text-[#6b7280]">
+            Cashiers can request returns; managers approve. Exchange settles the
+            net difference.
+          </p>
+          <div className="mt-4 max-w-sm">
+            <Label>Search order # / customer</Label>
+            <Input
+              className="mt-1.5"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="ORD-…"
+            />
+          </div>
+          <ul className="mt-4 max-h-[28rem] divide-y divide-[#f3f4f6] overflow-y-auto text-sm">
+            {items.map((o) => (
+              <li
+                key={o.id}
+                className="flex flex-wrap items-center justify-between gap-2 py-3"
               >
-                Return…
-              </Button>
-            </li>
-          ))}
-          {!items.length && !recent.isLoading ? (
-            <li className="py-8 text-center text-[#6b7280]">
-              No closed sales found
-            </li>
-          ) : null}
-        </ul>
-      </section>
+                <div className="min-w-0">
+                  <p className="font-semibold text-[#111827]">{o.orderNumber}</p>
+                  <p className="truncate text-xs text-[#6b7280]">
+                    {o.customer?.fullName ?? "Walk-in"}
+                    {o.subtotal != null ? ` · ${money(o.subtotal)}` : ""}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    onClick={() =>
+                      setActive({
+                        id: o.id,
+                        orderNumber: o.orderNumber,
+                        mode: "return",
+                      })
+                    }
+                  >
+                    Return…
+                  </Button>
+                  {canApprove ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() =>
+                        setActive({
+                          id: o.id,
+                          orderNumber: o.orderNumber,
+                          mode: "exchange",
+                        })
+                      }
+                    >
+                      Exchange…
+                    </Button>
+                  ) : null}
+                </div>
+              </li>
+            ))}
+            {!items.length && !recent.isLoading ? (
+              <li className="py-8 text-center text-[#6b7280]">
+                No closed sales found
+              </li>
+            ) : null}
+          </ul>
+        </section>
+      ) : null}
+
+      {deskTab === "pending" ? (
+        <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5">
+          <h2 className="text-lg font-semibold text-[#111827]">
+            Pending approval
+          </h2>
+          <ul className="mt-4 divide-y divide-[#f3f4f6] text-sm">
+            {pendingItems.map((r) => (
+              <li
+                key={r.id}
+                className="flex flex-wrap items-center justify-between gap-3 py-3"
+              >
+                <div>
+                  <p className="font-semibold text-[#111827]">
+                    {r.orderNumber ?? r.orderId.slice(0, 8)}
+                  </p>
+                  <p className="text-xs text-[#6b7280]">
+                    {r.customerName ?? "—"} · {money(r.refundAmount ?? 0)} ·{" "}
+                    {r.reasonCode ?? "—"} · {r.receivedBy ?? "—"}
+                  </p>
+                </div>
+                {canApprove ? (
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={approve.isPending}
+                      onClick={() => approve.mutate(r.id)}
+                    >
+                      Approve
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      disabled={reject.isPending}
+                      onClick={() => reject.mutate(r.id)}
+                    >
+                      Reject
+                    </Button>
+                  </div>
+                ) : (
+                  <span className="text-xs font-medium text-amber-700">
+                    Awaiting manager
+                  </span>
+                )}
+              </li>
+            ))}
+            {!pendingItems.length && !pending.isLoading ? (
+              <li className="py-8 text-center text-[#6b7280]">
+                No pending returns
+              </li>
+            ) : null}
+          </ul>
+        </section>
+      ) : null}
+
+      {deskTab === "history" ? (
+        <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5">
+          <h2 className="text-lg font-semibold text-[#111827]">History</h2>
+          <ul className="mt-4 divide-y divide-[#f3f4f6] text-sm">
+            {historyItems.map((r) => (
+              <li key={r.id} className="flex justify-between gap-3 py-3">
+                <div>
+                  <p className="font-semibold text-[#111827]">
+                    {r.orderNumber ?? r.orderId.slice(0, 8)} · {r.status}
+                  </p>
+                  <p className="text-xs text-[#6b7280]">
+                    {money(r.refundAmount ?? 0)} · {r.reasonCode ?? "—"} ·{" "}
+                    {formatDate(r.createdAt)}
+                  </p>
+                </div>
+              </li>
+            ))}
+            {!historyItems.length && !history.isLoading ? (
+              <li className="py-8 text-center text-[#6b7280]">No history yet</li>
+            ) : null}
+          </ul>
+        </section>
+      ) : null}
+
       {active ? (
         <SaleReturnDialog
           orderId={active.id}
           orderNumber={active.orderNumber}
+          defaultMode={active.mode ?? "return"}
           onClose={() => setActive(null)}
         />
       ) : null}

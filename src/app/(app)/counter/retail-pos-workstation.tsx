@@ -8,6 +8,7 @@ import { loyaltyApi, paymentsApi, posApi, tenantsApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useBootstrap } from "@/lib/bootstrap";
 import { useAuthStore } from "@/lib/auth-store";
+import { canApproveRefund } from "@/lib/roles";
 import { moneyNumber, newIdempotencyKey, cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -979,6 +980,13 @@ export default function RetailPosWorkstation({
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {canApproveRefund(roles) ? (
+              <Link href="/returns">
+                <Button type="button" size="sm" variant="secondary">
+                  Returns desk
+                </Button>
+              </Link>
+            ) : null}
             {actingUser ? (
               <span className="rounded-md border border-[#d9e0ea] bg-white px-2.5 py-1.5 text-xs font-medium text-[#0b1f33]">
                 {actingUser.fullName}

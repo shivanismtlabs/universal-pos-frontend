@@ -2146,17 +2146,99 @@ export const posApi = {
     items: Array<{ stockLevelId: string; quantity: number }>;
     refundMethod: string;
     amount?: number;
+    reasonCode: string;
     reason?: string;
     idempotencyKey: string;
   }) {
     return apiRequest<{
       orderId: string;
       orderNumber: string;
-      refundPaymentId: string;
+      refundPaymentId: string | null;
       amount: string | number;
+      status?: string;
+      returnEventId?: string;
+      message?: string;
       storeCreditBalance?: number | null;
       restocked: Array<{ stockLevelId: string; quantity: number }>;
     }>("/pos/sale/returns", { method: "POST", body, token: token() });
+  },
+  listSaleReturns(params?: { status?: string; limit?: number }) {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set("status", params.status);
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const q = qs.toString();
+    return apiRequest<{
+      items: Array<{
+        id: string;
+        status: string;
+        reasonCode?: string | null;
+        notes?: string | null;
+        refundAmount: number | null;
+        refundMethod?: string | null;
+        orderId: string;
+        orderNumber?: string;
+        customerName?: string | null;
+        receivedBy?: string | null;
+        approvedBy?: string | null;
+        createdAt: string;
+      }>;
+    }>(`/pos/sale/returns${q ? `?${q}` : ""}`, { token: token() });
+  },
+  returnedQuantities(orderId: string) {
+    return apiRequest<{
+      orderId: string;
+      byStockLevelId: Record<string, number>;
+    }>(`/pos/sale/returns/returned-qty/${orderId}`, { token: token() });
+  },
+  approveSaleReturn(id: string) {
+    return apiRequest(`/pos/sale/returns/${id}/approve`, {
+      method: "POST",
+      token: token(),
+    });
+  },
+  rejectSaleReturn(id: string, reason?: string) {
+    return apiRequest(`/pos/sale/returns/${id}/reject`, {
+      method: "POST",
+      body: { reason },
+      token: token(),
+    });
+  },
+  listRefundReasons() {
+    return apiRequest<
+      Array<{ id: string; code: string; label: string; isActive: boolean }>
+    >("/pos/refund-reasons", { token: token() });
+  },
+  seedRefundReasons() {
+    return apiRequest("/pos/refund-reasons/seed", {
+      method: "POST",
+      token: token(),
+    });
+  },
+  saleExchange(body: {
+    orderId: string;
+    returnItems: Array<{ stockLevelId: string; quantity: number }>;
+    replaceItems: Array<{
+      stockLevelId: string;
+      quantity: number;
+      unitPrice?: number;
+    }>;
+    settleMethod: string;
+    reasonCode?: string;
+    reason?: string;
+    idempotencyKey: string;
+  }) {
+    return apiRequest<{
+      return: unknown;
+      replacement: {
+        orderId: string;
+        orderNumber: string;
+        replaceTotal: number;
+        returnAmount: number;
+        net: number;
+        balanceDue: number;
+      };
+      message: string;
+    }>("/pos/sale/exchange", { method: "POST", body, token: token() });
   },
 
   rentalSchema() {
@@ -4466,12 +4548,16 @@ export const expensesApi = {
     to?: string;
     locationId?: string;
     categoryId?: string;
+    status?: string;
+    pettyCash?: boolean;
   }) {
     const qs = new URLSearchParams();
     if (params?.from) qs.set("from", params.from);
     if (params?.to) qs.set("to", params.to);
     if (params?.locationId) qs.set("locationId", params.locationId);
     if (params?.categoryId) qs.set("categoryId", params.categoryId);
+    if (params?.status) qs.set("status", params.status);
+    if (params?.pettyCash) qs.set("pettyCash", "true");
     const q = qs.toString();
     return apiRequest<{
       items: Array<{
@@ -4481,8 +4567,13 @@ export const expensesApi = {
         paymentMethod: string;
         notes?: string | null;
         isPettyCash: boolean;
+        status: string;
+        receiptUrl?: string | null;
+        rejectReason?: string | null;
         category?: { id: string; name: string } | null;
         location?: { id: string; name: string } | null;
+        createdBy?: { id: string; fullName: string } | null;
+        approvedBy?: { id: string; fullName: string } | null;
       }>;
       total: number;
       count: number;
@@ -4496,10 +4587,40 @@ export const expensesApi = {
     paymentMethod?: string;
     notes?: string;
     isPettyCash?: boolean;
+    receiptBase64?: string;
   }) {
     return apiRequest("/expenses", {
       method: "POST",
       body,
+      token: token(),
+    });
+  },
+  uploadReceipt(id: string, imageBase64: string) {
+    return apiRequest<{ id: string; receiptUrl: string }>(
+      `/expenses/${id}/receipt`,
+      {
+        method: "POST",
+        body: { imageBase64 },
+        token: token(),
+      },
+    );
+  },
+  approve(id: string) {
+    return apiRequest(`/expenses/${id}/approve`, {
+      method: "POST",
+      token: token(),
+    });
+  },
+  reject(id: string, reason?: string) {
+    return apiRequest(`/expenses/${id}/reject`, {
+      method: "POST",
+      body: { reason },
+      token: token(),
+    });
+  },
+  void(id: string) {
+    return apiRequest(`/expenses/${id}/void`, {
+      method: "POST",
       token: token(),
     });
   },

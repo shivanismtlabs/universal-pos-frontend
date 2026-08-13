@@ -31,7 +31,7 @@ export const ROUTE_ROLES: Record<string, RoleCode[]> = {
   "/dashboard": ALL_ROLES,
   "/counter": ["admin", "manager", "cashier"],
   "/pos": ["admin", "manager", "cashier"],
-  "/returns": ["admin", "manager", "cashier", "inventory"],
+  "/returns": ["admin", "manager", "cashier", "inventory", "accountant"],
   "/orders": ["admin", "manager", "cashier", "fitter", "inventory", "accountant"],
   "/appointments": ["admin", "manager", "cashier", "fitter"],
   "/customers": ["admin", "manager", "cashier", "fitter"],
@@ -60,7 +60,7 @@ export const ROUTE_ROLES: Record<string, RoleCode[]> = {
   "/transfers": ["admin", "manager", "inventory"],
   "/settings": ["admin", "manager"],
   "/suppliers": ["admin", "manager", "inventory"],
-  "/expenses": ["admin", "manager", "accountant"],
+  "/expenses": ["admin", "manager", "accountant", "cashier"],
   "/loyalty": ["admin", "manager"],
   "/plan": ["admin"],
 };
@@ -125,7 +125,17 @@ export function defaultHomeForRoles(userRoles: string[] | undefined | null) {
 }
 
 export function canRefund(userRoles: string[] | undefined | null) {
-  return hasAnyRole(userRoles, ["admin", "manager"]);
+  return hasAnyRole(userRoles, [
+    "admin",
+    "manager",
+    "cashier",
+    "inventory",
+    "accountant",
+  ]);
+}
+
+export function canApproveRefund(userRoles: string[] | undefined | null) {
+  return hasAnyRole(userRoles, ["admin", "manager", "accountant"]);
 }
 
 export function canManageStaff(userRoles: string[] | undefined | null) {
