@@ -96,7 +96,7 @@ const createOrgSchema = z
 
 type CreateForm = z.infer<typeof createOrgSchema>;
 
-type IconType = ComponentType<{ className?: string }>;
+type IconType = ComponentType<{ className?: string; strokeWidth?: number }>;
 
 /**
  * Retail vs Grocery stay separate — genuinely different item extras:

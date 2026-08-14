@@ -1,14 +1,10 @@
 "use client";
 
 /**
- * In-app popup toasts for new inbox alerts.
- * Works on HTTP (unlike OS browser push, which needs HTTPS).
+ * New inbox / FCM alerts → floating popup cards (not toast/alert strips).
  */
 import { useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
-import { Bell } from "lucide-react";
 import { notifyApi } from "@/lib/api";
 import { useAuthStore } from "@/lib/auth-store";
 import {
@@ -16,6 +12,7 @@ import {
   registerWebPush,
   showOsNotification,
 } from "@/lib/firebase-messaging";
+import { useNotificationPopupsOptional } from "@/components/notification-popup";
 
 const SEEN_KEY = "upos_notif_seen_ids";
 
@@ -45,8 +42,8 @@ function popupKey(title: string, body: string) {
 }
 
 export function InboxPopupListener() {
-  const router = useRouter();
   const qc = useQueryClient();
+  const popups = useNotificationPopupsOptional();
   const accessToken = useAuthStore((s) => s.accessToken);
   const pinLocked = useAuthStore((s) => s.pinLocked);
   const primed = useRef(false);
@@ -73,20 +70,15 @@ export function InboxPopupListener() {
     if (prev && now - prev < 20_000) return;
     recentKeys.current.set(key, now);
 
-    toast(opts.title, {
-      description: opts.body,
-      icon: <Bell className="size-4 text-[#1a56db]" />,
-      duration: 10_000,
-      action: opts.href
-        ? {
-            label: "Open",
-            onClick: () => router.push(opts.href!),
-          }
-        : {
-            label: "Alerts",
-            onClick: () => router.push("/notifications"),
-          },
+    // Prefer floating popup card over sonner/toast “alert” strip
+    popups?.pushPopup({
+      id: opts.id,
+      title: opts.title,
+      body: opts.body,
+      href: opts.href,
     });
+
+    // OS system popup when HTTPS + permission (optional bonus)
     showOsNotification(opts.title, opts.body, opts.href ?? "/notifications");
     void qc.invalidateQueries({ queryKey: ["notify-unread"] });
   }

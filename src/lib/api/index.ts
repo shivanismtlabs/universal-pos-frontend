@@ -1992,6 +1992,9 @@ export const posApi = {
       bankAccountNumber?: string;
       bankIfsc?: string;
       bankName?: string;
+      emiTenureMonths?: number;
+      emiProvider?: string;
+      emiReference?: string;
     }>;
     cashTendered?: number;
     note?: string;

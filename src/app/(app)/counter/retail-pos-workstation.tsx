@@ -166,6 +166,9 @@ export default function RetailPosWorkstation({
   const [bankIfsc, setBankIfsc] = useState("");
   const [bankName, setBankName] = useState("");
   const [bankReference, setBankReference] = useState("");
+  const [emiTenureMonths, setEmiTenureMonths] = useState("6");
+  const [emiProvider, setEmiProvider] = useState("");
+  const [emiReference, setEmiReference] = useState("");
   const [loyaltyPointsInput, setLoyaltyPointsInput] = useState("");
   const [loyaltyQuote, setLoyaltyQuote] = useState<{
     points: number;
@@ -596,6 +599,21 @@ export default function RetailPosWorkstation({
         return;
       }
     }
+    if (payMethod === "emi") {
+      if (!customerId) {
+        toast.error("Select a customer for EMI");
+        return;
+      }
+      const tenure = Number(emiTenureMonths);
+      if (!Number.isFinite(tenure) || tenure < 1 || tenure > 36) {
+        toast.error("Choose EMI tenure (1–36 months)");
+        return;
+      }
+      if (!emiProvider.trim()) {
+        toast.error("Enter EMI provider / bank");
+        return;
+      }
+    }
     if (loyaltyPointsInput && !customerId) {
       toast.error("Select a customer to redeem loyalty points");
       return;
@@ -744,20 +762,7 @@ export default function RetailPosWorkstation({
       }
 
       const payAmt = chargeAmount;
-      const settleMethod =
-        payMethod === "store_credit"
-          ? "store_credit"
-          : payMethod === "gift_card"
-            ? "gift_card"
-            : payMethod === "bank_transfer"
-              ? "bank_transfer"
-              : payMethod === "qr"
-                ? "qr"
-                : payMethod === "wallet"
-                  ? "wallet"
-                  : payMethod === "emi"
-                    ? "emi"
-                    : "cash";
+      const settleMethod = payMethod;
       const result = await posApi.saleCheckout({
         ...cartPayload,
         ...checkoutExtras,
@@ -776,6 +781,13 @@ export default function RetailPosWorkstation({
                   bankIfsc: bankIfsc.trim() || undefined,
                   bankName: bankName.trim() || undefined,
                   bankReference: bankReference.trim(),
+                }
+              : {}),
+            ...(payMethod === "emi"
+              ? {
+                  emiTenureMonths: Number(emiTenureMonths),
+                  emiProvider: emiProvider.trim(),
+                  emiReference: emiReference.trim() || undefined,
                 }
               : {}),
           },
@@ -801,6 +813,9 @@ export default function RetailPosWorkstation({
       setBankIfsc("");
       setBankName("");
       setBankReference("");
+      setEmiTenureMonths("6");
+      setEmiProvider("");
+      setEmiReference("");
       setLoyaltyPointsInput("");
       setLoyaltyQuote(null);
       setReceipt({
@@ -1976,10 +1991,56 @@ export default function RetailPosWorkstation({
               </p>
             ) : null}
             {payMethod === "emi" ? (
-              <p className="text-[0.7rem] text-[#5a6b7d]">
-                Record EMI / installment collection at the counter (manual
-                confirm).
-              </p>
+              <div className="space-y-2 rounded-[10px] border border-[#d9e0ea] bg-white p-3">
+                <p className="text-[0.7rem] text-[#5a6b7d]">
+                  Confirm card / finance EMI with the provider, then record it
+                  here. Customer is required.
+                </p>
+                {!customerId ? (
+                  <p className="text-[0.75rem] text-amber-800">
+                    Select a customer above before charging EMI.
+                  </p>
+                ) : null}
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
+                      Tenure (months)
+                    </Label>
+                    <select
+                      className="mt-1 flex h-10 w-full rounded-md border border-[#d9e0ea] bg-white px-3 text-sm text-[#0b1f33]"
+                      value={emiTenureMonths}
+                      onChange={(e) => setEmiTenureMonths(e.target.value)}
+                    >
+                      {[3, 6, 9, 12, 18, 24].map((m) => (
+                        <option key={m} value={String(m)}>
+                          {m} months
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
+                      Approx / month
+                    </Label>
+                    <p className="mt-1 flex h-10 items-center rounded-md border border-[#eef2f8] bg-[#f8fafc] px-3 text-sm font-semibold tabular-nums text-[#0b1f33]">
+                      {money(
+                        chargeAmount /
+                          Math.max(1, Number(emiTenureMonths) || 1),
+                      )}
+                    </p>
+                  </div>
+                </div>
+                <Input
+                  placeholder="Provider / bank (HDFC, Bajaj, SBI…) *"
+                  value={emiProvider}
+                  onChange={(e) => setEmiProvider(e.target.value)}
+                />
+                <Input
+                  placeholder="Approval / reference (optional)"
+                  value={emiReference}
+                  onChange={(e) => setEmiReference(e.target.value)}
+                />
+              </div>
             ) : null}
             {payMethod === "gift_card" ? (
               <div className="flex gap-2">
@@ -2235,7 +2296,9 @@ export default function RetailPosWorkstation({
                 !registerSession ||
                 !online ||
                 ((payMethod === "card" || payMethod === "upi") &&
-                  !stripeConfig.data?.enabled)
+                  !stripeConfig.data?.enabled) ||
+                (payMethod === "emi" &&
+                  (!customerId || !emiProvider.trim()))
               }
               onClick={() => void checkout()}
             >

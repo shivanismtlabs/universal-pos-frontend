@@ -59,7 +59,13 @@ function moneyLabel(method: string) {
   if (m === "card" || m === "stripe") return "Card";
   if (m === "cash") return "Cash";
   if (m === "upi") return "UPI";
-  return method.charAt(0).toUpperCase() + method.slice(1);
+  if (m === "emi") return "EMI";
+  if (m === "qr") return "QR";
+  if (m === "wallet") return "Wallet";
+  if (m === "bank_transfer") return "Bank transfer";
+  if (m === "store_credit") return "Store credit";
+  if (m === "gift_card") return "Gift card";
+  return method.charAt(0).toUpperCase() + method.slice(1).replace(/_/g, " ");
 }
 
 export function ReceiptModal({
