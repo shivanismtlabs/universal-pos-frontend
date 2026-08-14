@@ -65,6 +65,18 @@ export const ROUTE_ROLES: Record<string, RoleCode[]> = {
   "/settings": ["admin", "manager"],
   "/settings/offline": ["admin", "manager", "cashier", "inventory"],
   "/settings/security": ["admin", "manager", "cashier"],
+  "/settings/accounting": ["admin", "manager", "accountant"],
+  "/accounting": ["admin", "manager", "accountant"],
+  "/accounting/accounts": ["admin", "manager", "accountant"],
+  "/accounting/journals": ["admin", "manager", "accountant"],
+  "/accounting/ledger": ["admin", "manager", "accountant"],
+  "/accounting/trial-balance": ["admin", "manager", "accountant"],
+  "/accounting/profit-loss": ["admin", "manager", "accountant"],
+  "/accounting/balance-sheet": ["admin", "manager", "accountant"],
+  "/accounting/gst": ["admin", "manager", "accountant"],
+  "/accounting/periods": ["admin", "manager", "accountant"],
+  "/accounting/mappings": ["admin", "manager", "accountant"],
+  "/accounting/integrations": ["admin", "manager", "accountant"],
   "/suppliers": ["admin", "manager", "inventory"],
   "/expenses": ["admin", "manager", "accountant", "cashier"],
   "/loyalty": ["admin", "manager"],
@@ -85,6 +97,12 @@ export const ROUTE_PERMISSIONS: Record<string, string[]> = {
   "/inventory": ["inventory.read", "inventory.write"],
   "/suppliers": ["suppliers.manage"],
   "/settings": ["settings.manage"],
+  "/accounting": [
+    "accounting.view",
+    "accounting.create",
+    "accounting.edit",
+    "accounting.post",
+  ],
   "/plan": ["plan.manage"],
 };
 
@@ -124,7 +142,7 @@ export function canAccessPath(
 
 export function defaultHomeForRoles(userRoles: string[] | undefined | null) {
   if (hasAnyRole(userRoles, ["admin", "manager", "cashier"])) return "/dashboard";
-  if (hasAnyRole(userRoles, ["accountant"])) return "/reports";
+  if (hasAnyRole(userRoles, ["accountant"])) return "/accounting";
   if (hasAnyRole(userRoles, ["fitter"])) return "/appointments";
   if (hasAnyRole(userRoles, ["inventory"])) return "/inventory";
   return "/dashboard";

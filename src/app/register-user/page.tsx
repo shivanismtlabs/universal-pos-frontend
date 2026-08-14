@@ -48,14 +48,13 @@ export default function RegisterUserPage() {
   const strength = passwordStrength(password, { email, slug });
 
   async function onSubmit(values: RegisterUserInput) {
-    const { confirmPassword: _c, ...rest } = values;
     try {
       const data = await authApi.registerUser({
-        tenantSlug: rest.tenantSlug.trim().toLowerCase(),
-        fullName: rest.fullName.trim(),
-        email: rest.email.trim().toLowerCase(),
-        password: rest.password,
-        phone: rest.phone || undefined,
+        tenantSlug: values.tenantSlug.trim().toLowerCase(),
+        fullName: values.fullName.trim(),
+        email: values.email.trim().toLowerCase(),
+        password: values.password,
+        phone: values.phone || undefined,
       });
       setSession({
         accessToken: data.accessToken,

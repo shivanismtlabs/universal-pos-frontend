@@ -7,6 +7,7 @@ const UUID =
   "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const CATALOG_UUID = new RegExp(`^/catalog/(${UUID})$`, "i");
 const ORDERS_UUID = new RegExp(`^/orders/(${UUID})$`, "i");
+const JOURNAL_UUID = new RegExp(`^/accounting/journals/(${UUID})$`, "i");
 
 export function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname;
@@ -24,9 +25,16 @@ export function middleware(request: NextRequest) {
     url.searchParams.set("id", order[1]);
     return NextResponse.redirect(url);
   }
+  const journal = path.match(JOURNAL_UUID);
+  if (journal) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/accounting/journals/view";
+    url.searchParams.set("id", journal[1]);
+    return NextResponse.redirect(url);
+  }
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/catalog/:path*", "/orders/:path*"],
+  matcher: ["/catalog/:path*", "/orders/:path*", "/accounting/journals/:path*"],
 };

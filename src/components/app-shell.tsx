@@ -35,6 +35,7 @@ import {
   LayoutGrid,
   Folder,
   Tag,
+  BookOpen,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -369,6 +370,26 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    id: "accounting",
+    label: "Accounting",
+    icon: BookOpen,
+    section: "Insights",
+    children: [
+      { href: "/accounting", label: "Overview", icon: BookOpen },
+      { href: "/accounting/accounts", label: "Chart of Accounts", icon: BookOpen },
+      { href: "/accounting/journals", label: "Journal Entries", icon: BookOpen },
+      { href: "/accounting/ledger", label: "Ledger", icon: BookOpen },
+      { href: "/accounting/trial-balance", label: "Trial Balance", icon: BookOpen },
+      { href: "/accounting/profit-loss", label: "Profit & Loss", icon: BookOpen },
+      { href: "/accounting/balance-sheet", label: "Balance Sheet", icon: BookOpen },
+      { href: "/accounting/gst", label: "GST Reports", icon: BookOpen },
+      { href: "/accounting/periods", label: "Accounting Periods", icon: BookOpen },
+      { href: "/accounting/mappings", label: "Account Mapping", icon: BookOpen },
+      { href: "/accounting/integrations", label: "Integrations", icon: BookOpen },
+      { href: "/settings/accounting", label: "Accounting settings", icon: Settings },
+    ],
+  },
+  {
     id: "setup",
     label: "Settings",
     railLabel: "Settings",
@@ -403,6 +424,12 @@ const NAV_GROUPS: NavGroup[] = [
         href: "/settings/security",
         label: "Security",
         icon: Settings,
+        folder: "Business",
+      },
+      {
+        href: "/settings/accounting",
+        label: "Accounting",
+        icon: BookOpen,
         folder: "Business",
       },
       {

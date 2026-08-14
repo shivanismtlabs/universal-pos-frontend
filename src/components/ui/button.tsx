@@ -26,6 +26,11 @@ const buttonVariants = cva(
           "border border-[#e4e9f0] bg-white text-[#0b1f33]",
           "hover:border-[#d5dde8] hover:bg-[#f8fafc]",
         ].join(" "),
+        /** Alias for shadcn-style `outline` — same look as secondary. */
+        outline: [
+          "border border-[#e4e9f0] bg-white text-[#0b1f33]",
+          "hover:border-[#d5dde8] hover:bg-[#f8fafc]",
+        ].join(" "),
         soft: [
           "bg-[#e8eefb] text-[#1341a8]",
           "hover:bg-[#dce6f8]",

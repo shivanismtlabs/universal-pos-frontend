@@ -15,7 +15,7 @@ import {
   AuthDivider,
   AuthGoogleButton,
 } from "@/components/auth-google-button";
-import { AuthShell } from "@/components/auth-shell";
+import AuthShell from "@/components/auth-shell";
 import { TotpChallengeForm, is2faChallenge } from "@/components/totp-challenge-form";
 import { FieldError } from "@/components/ui/form";
 import { Button } from "@/components/ui/button";

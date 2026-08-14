@@ -6736,3 +6736,209 @@ export const catalogApi = {
     }>(`/catalog/batches/expiring?days=${days}`, { token: token() });
   },
 };
+
+export const accountingApi = {
+  settings() {
+    return apiRequest<{
+      enabled: boolean;
+      basis: "cash" | "accrual";
+      baseCurrency: string;
+      fiscalYearStartMonth: number;
+      taxCountry: string;
+      inventoryAccountingEnabled: boolean;
+      cogsEnabled: boolean;
+    }>("/accounting/settings", { token: token() });
+  },
+  updateSettings(body: Record<string, unknown>) {
+    return apiRequest("/accounting/settings", {
+      method: "PATCH",
+      body,
+      token: token(),
+    });
+  },
+  overview() {
+    return apiRequest<{
+      settings: Record<string, unknown>;
+      cards: Record<string, string>;
+      pnl: Record<string, unknown>;
+    }>("/accounting/overview", { token: token() });
+  },
+  listAccounts(params?: Record<string, string | number | undefined>) {
+    const q = new URLSearchParams();
+    Object.entries(params ?? {}).forEach(([k, v]) => {
+      if (v != null && v !== "") q.set(k, String(v));
+    });
+    const s = q.toString();
+    return apiRequest<{ items: unknown[]; meta: unknown }>(
+      `/accounts${s ? `?${s}` : ""}`,
+      { token: token() },
+    );
+  },
+  tree() {
+    return apiRequest<unknown[]>("/accounts/tree", { token: token() });
+  },
+  getAccount(id: string) {
+    return apiRequest(`/accounts/${id}`, { token: token() });
+  },
+  createAccount(body: Record<string, unknown>) {
+    return apiRequest("/accounts", { method: "POST", body, token: token() });
+  },
+  updateAccount(id: string, body: Record<string, unknown>) {
+    return apiRequest(`/accounts/${id}`, {
+      method: "PATCH",
+      body,
+      token: token(),
+    });
+  },
+  listJournals(params?: Record<string, string | undefined>) {
+    const q = new URLSearchParams();
+    Object.entries(params ?? {}).forEach(([k, v]) => {
+      if (v) q.set(k, v);
+    });
+    const s = q.toString();
+    return apiRequest<{ items: unknown[]; meta: { total: number } }>(
+      `/journal-entries${s ? `?${s}` : ""}`,
+      { token: token() },
+    );
+  },
+  getJournal(id: string) {
+    return apiRequest(`/journal-entries/${id}`, { token: token() });
+  },
+  createJournal(body: Record<string, unknown>) {
+    return apiRequest("/journal-entries", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  postJournal(id: string) {
+    return apiRequest(`/journal-entries/${id}/post`, {
+      method: "POST",
+      token: token(),
+    });
+  },
+  reverseJournal(id: string, reason?: string) {
+    return apiRequest(`/journal-entries/${id}/reverse`, {
+      method: "POST",
+      body: { reason },
+      token: token(),
+    });
+  },
+  ledger(params: Record<string, string | undefined>) {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v) q.set(k, v);
+    });
+    return apiRequest(`/ledger?${q.toString()}`, { token: token() });
+  },
+  trialBalance(params: Record<string, string | undefined>) {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v) q.set(k, v);
+    });
+    return apiRequest(`/trial-balance?${q}`, { token: token() });
+  },
+  profitLoss(params: Record<string, string | undefined>) {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v) q.set(k, v);
+    });
+    return apiRequest(`/profit-loss?${q}`, { token: token() });
+  },
+  balanceSheet(params: Record<string, string | undefined>) {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v) q.set(k, v);
+    });
+    return apiRequest(`/balance-sheet?${q}`, { token: token() });
+  },
+  taxReports(params: Record<string, string | undefined>) {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v) q.set(k, v);
+    });
+    return apiRequest(`/tax-reports?${q}`, { token: token() });
+  },
+  periods() {
+    return apiRequest<unknown[]>("/accounting-periods", { token: token() });
+  },
+  createPeriod(body: Record<string, unknown>) {
+    return apiRequest("/accounting-periods", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  closePeriod(id: string) {
+    return apiRequest(`/accounting-periods/${id}/close`, {
+      method: "POST",
+      token: token(),
+    });
+  },
+  reopenPeriod(id: string) {
+    return apiRequest(`/accounting-periods/${id}/reopen`, {
+      method: "POST",
+      token: token(),
+    });
+  },
+  mappings(locationId?: string) {
+    const q = locationId ? `?locationId=${locationId}` : "";
+    return apiRequest<unknown[]>(`/account-mappings${q}`, { token: token() });
+  },
+  upsertMapping(body: Record<string, unknown>) {
+    return apiRequest("/account-mappings", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  integrations() {
+    return apiRequest<unknown[]>("/integrations", { token: token() });
+  },
+  connect(provider: string, config: Record<string, unknown>) {
+    return apiRequest(`/integrations/${provider}/connect`, {
+      method: "POST",
+      body: { config },
+      token: token(),
+    });
+  },
+  disconnect(provider: string) {
+    return apiRequest(`/integrations/${provider}/disconnect`, {
+      method: "POST",
+      token: token(),
+    });
+  },
+  test(provider: string) {
+    return apiRequest(`/integrations/${provider}/test`, {
+      method: "POST",
+      token: token(),
+    });
+  },
+  sync(provider: string) {
+    return apiRequest(`/integrations/${provider}/sync`, {
+      method: "POST",
+      token: token(),
+    });
+  },
+  integrationMappings(provider: string) {
+    return apiRequest(`/integrations/${provider}/mappings`, { token: token() });
+  },
+  upsertIntegrationMapping(provider: string, body: Record<string, unknown>) {
+    return apiRequest(`/integrations/${provider}/mappings`, {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  integrationLogs(provider: string) {
+    return apiRequest(`/integrations/${provider}/logs`, { token: token() });
+  },
+  tallyExport(body: { from: string; to: string }) {
+    return apiRequest("/integrations/tally/export", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+};
+

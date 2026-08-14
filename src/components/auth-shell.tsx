@@ -7,7 +7,7 @@ import { AuthHeroVisual } from "@/components/auth-hero-visual";
  * Auth layout: brand panel + form.
  * Sapphire / navy / cool gray brand system.
  */
-export function AuthShell({
+export default function AuthShell({
   children,
   title,
   subtitle,
@@ -51,3 +51,5 @@ export function AuthShell({
     </div>
   );
 }
+
+export { AuthShell };
