@@ -19,7 +19,9 @@ export function OfflineStatusBanner() {
   const [conn, setConn] = useState<ConnectivityState>(getConnectivityState());
   const [pending, setPending] = useState(0);
 
-  useEffect(() => subscribeConnectivity(setConn), []);
+  useEffect(() => {
+    return subscribeConnectivity(setConn);
+  }, []);
 
   useEffect(() => {
     if (!tenantId) return;

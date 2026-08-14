@@ -27,10 +27,12 @@ export function getLastReachableAt() {
   return lastOkAt;
 }
 
-export function subscribeConnectivity(fn: Listener) {
+export function subscribeConnectivity(fn: Listener): () => void {
   listeners.add(fn);
   fn(state);
-  return () => listeners.delete(fn);
+  return () => {
+    listeners.delete(fn);
+  };
 }
 
 export async function probeServerReachability(): Promise<boolean> {

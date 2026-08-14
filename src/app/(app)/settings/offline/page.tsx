@@ -32,7 +32,9 @@ export default function OfflineSettingsPage() {
   const [conn, setConn] = useState(getConnectivityState());
   const [progress, setProgress] = useState<SeedProgress | null>(null);
 
-  useEffect(() => subscribeConnectivity(setConn), []);
+  useEffect(() => {
+    return subscribeConnectivity(setConn);
+  }, []);
 
   useEffect(() => {
     if (!user?.id || !tenantId) return;

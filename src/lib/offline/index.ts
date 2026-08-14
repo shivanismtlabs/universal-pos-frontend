@@ -15,6 +15,7 @@ export {
   probeServerReachability,
   startConnectivityMonitor,
   isServerReachable,
+  type ConnectivityState,
 } from "./connectivity";
 
 export {
