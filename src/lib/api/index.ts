@@ -29,6 +29,8 @@ type AuthUserPayload = {
 export type PortalSessionResponse = {
   stage?: "select_org" | "app";
   requiresOrganizationSelection?: boolean;
+  requires2fa?: boolean;
+  totpToken?: string;
   identity?: {
     id: string;
     email: string;
@@ -58,6 +60,13 @@ export const authApi = {
     tenantSlug?: string;
   }) {
     return apiRequest<PortalSessionResponse>("/auth/login", {
+      method: "POST",
+      body,
+    });
+  },
+
+  login2fa(body: { totpToken: string; code: string }) {
+    return apiRequest<PortalSessionResponse>("/auth/login/2fa", {
       method: "POST",
       body,
     });
@@ -1010,6 +1019,7 @@ export const inventoryApi = {
     productId?: string;
     reorderPoint?: number;
     reorderQty?: number;
+    sellPrice?: number;
   }) {
     return apiRequest<{ stockLevelId: string; reorderPoint: number | null }>(
       "/inventory/reorder",
@@ -2659,6 +2669,14 @@ export const tenantsApi = {
         type?: string;
         isActive?: boolean;
         address?: string | null;
+        phone?: string | null;
+        email?: string | null;
+        businessHours?: string | null;
+        timezone?: string | null;
+        currencyCode?: string | null;
+        managerUserId?: string | null;
+        defaultWarehouseId?: string | null;
+        branchId?: string;
       }>
     >("/locations", { token: token() });
   },
@@ -2667,6 +2685,13 @@ export const tenantsApi = {
     code?: string;
     type?: string;
     address?: string;
+    phone?: string;
+    email?: string;
+    businessHours?: string;
+    timezone?: string;
+    currencyCode?: string;
+    managerUserId?: string;
+    defaultWarehouseId?: string;
   }) {
     return apiRequest("/locations", {
       method: "POST",
@@ -2682,6 +2707,13 @@ export const tenantsApi = {
       type?: string;
       address?: string | null;
       isActive?: boolean;
+      phone?: string;
+      email?: string;
+      businessHours?: string;
+      timezone?: string;
+      currencyCode?: string;
+      managerUserId?: string;
+      defaultWarehouseId?: string | null;
     },
   ) {
     return apiRequest(`/locations/${id}`, {
@@ -2689,6 +2721,38 @@ export const tenantsApi = {
       body,
       token: token(),
     });
+  },
+  branchDashboard(locationId: string) {
+    return apiRequest<{
+      branch: { id: string; name: string; code: string };
+      today: {
+        salesTotal: number;
+        orders: number;
+        refunds: number;
+        expensesTotal: number;
+        expensesCount: number;
+      };
+      inventory: {
+        value: number;
+        lowStock: number;
+        outOfStock: number;
+      };
+      registerOpen: boolean;
+    }>(`/locations/${locationId}/dashboard`, { token: token() });
+  },
+  multiStoreDashboard() {
+    return apiRequest<{
+      totalStores: number;
+      activeStores: number;
+      today: { salesTotal: number; orders: number };
+      byBranch: Array<{
+        locationId: string;
+        name: string;
+        code: string;
+        todaySales: number;
+        todayOrders: number;
+      }>;
+    }>("/multi-store/dashboard", { token: token() });
   },
   updateMe(body: {
     name?: string;
@@ -2715,6 +2779,113 @@ export const tenantsApi = {
       body,
       token: token(),
     });
+  },
+};
+
+export const securityApi = {
+  settings() {
+    return apiRequest<{
+      ipAllowlist: string[];
+      idleTimeoutMinutes: number;
+      encryptBackups: boolean;
+      encryption: {
+        passwordsHashed: boolean;
+        totpSecretsEncrypted: boolean;
+        backupEncryptionAvailable: boolean;
+        dedicatedDataKey: boolean;
+        note: string;
+      };
+    }>("/security/settings", { token: token() });
+  },
+  updateSettings(body: {
+    ipAllowlist?: string[];
+    idleTimeoutMinutes?: number;
+    encryptBackups?: boolean;
+  }) {
+    return apiRequest("/security/settings", {
+      method: "PATCH",
+      body,
+      token: token(),
+    });
+  },
+  auditLogs(params?: {
+    q?: string;
+    action?: string;
+    entityType?: string;
+    from?: string;
+    to?: string;
+    limit?: number;
+  }) {
+    const q = new URLSearchParams();
+    if (params?.q) q.set("q", params.q);
+    if (params?.action) q.set("action", params.action);
+    if (params?.entityType) q.set("entityType", params.entityType);
+    if (params?.from) q.set("from", params.from);
+    if (params?.to) q.set("to", params.to);
+    if (params?.limit) q.set("limit", String(params.limit));
+    const qs = q.toString();
+    return apiRequest<{
+      items: Array<{
+        id: string;
+        action: string;
+        label: string;
+        entityType: string;
+        entityId?: string | null;
+        ip?: string | null;
+        createdAt: string;
+        actor?: { id: string; name: string; email: string } | null;
+      }>;
+    }>(`/security/audit-logs${qs ? `?${qs}` : ""}`, { token: token() });
+  },
+  my2fa() {
+    return apiRequest<{ enabled: boolean; enabledAt?: string | null }>(
+      "/security/2fa",
+      { token: token() },
+    );
+  },
+  setup2fa() {
+    return apiRequest<{ secret: string; otpauthUrl: string; qrUrl: string }>(
+      "/security/2fa/setup",
+      { method: "POST", body: {}, token: token() },
+    );
+  },
+  enable2fa(code: string) {
+    return apiRequest<{ enabled: boolean; backupCodes: string[] }>(
+      "/security/2fa/enable",
+      { method: "POST", body: { code }, token: token() },
+    );
+  },
+  disable2fa(password: string) {
+    return apiRequest("/security/2fa/disable", {
+      method: "POST",
+      body: { password },
+      token: token(),
+    });
+  },
+  exportBackup() {
+    return apiRequest<Record<string, unknown>>("/security/backup/export", {
+      method: "POST",
+      body: {},
+      token: token(),
+    });
+  },
+  restoreBackup(backup: Record<string, unknown>) {
+    return apiRequest<{
+      ok: boolean;
+      productsUpserted: number;
+      customersUpserted: number;
+      categoriesUpserted: number;
+    }>("/security/backup/restore", {
+      method: "POST",
+      body: { backup },
+      token: token(),
+    });
+  },
+  myIp() {
+    return apiRequest<{ ip: string; userAgent?: string | null }>(
+      "/security/whoami-ip",
+      { token: token() },
+    );
   },
 };
 
@@ -5018,6 +5189,136 @@ export const notifyApi = {
     }>("/notify/config", { token: token() });
   },
 
+  inbox(params?: {
+    status?: string;
+    type?: string;
+    locationId?: string;
+    limit?: number;
+  }) {
+    const q = new URLSearchParams();
+    if (params?.status) q.set("status", params.status);
+    if (params?.type) q.set("type", params.type);
+    if (params?.locationId) q.set("locationId", params.locationId);
+    if (params?.limit) q.set("limit", String(params.limit));
+    const qs = q.toString();
+    return apiRequest<{
+      unreadCount: number;
+      items: Array<{
+        id: string;
+        type: string;
+        severity: string;
+        status: string;
+        title: string;
+        body: string;
+        href?: string | null;
+        locationId?: string | null;
+        location?: { id: string; name: string; code: string } | null;
+        payload?: Record<string, unknown>;
+        createdAt: string;
+        readAt?: string | null;
+        resolvedAt?: string | null;
+      }>;
+    }>(`/notify/inbox${qs ? `?${qs}` : ""}`, { token: token() });
+  },
+
+  unreadCount() {
+    return apiRequest<{ unreadCount: number }>("/notify/inbox/unread-count", {
+      token: token(),
+    });
+  },
+
+  markRead(id: string) {
+    return apiRequest(`/notify/inbox/${id}/read`, {
+      method: "PATCH",
+      token: token(),
+    });
+  },
+
+  markAllRead() {
+    return apiRequest<{ updated: number }>("/notify/inbox/mark-all-read", {
+      method: "POST",
+      body: {},
+      token: token(),
+    });
+  },
+
+  tenantNotificationSettings() {
+    return apiRequest<{
+      types: Array<{
+        code: string;
+        label: string;
+        description: string;
+        urgent: boolean;
+        enabled: boolean;
+        recipientRoles: string[];
+        digestMinutes: number;
+        reAlertHours: number;
+      }>;
+    }>("/notify/settings/types", { token: token() });
+  },
+
+  updateTenantNotificationSettings(types: Array<{ code: string; enabled: boolean }>) {
+    return apiRequest("/notify/settings/types", {
+      method: "PATCH",
+      body: { types },
+      token: token(),
+    });
+  },
+
+  myNotificationPrefs() {
+    return apiRequest<
+      Array<{
+        type: string;
+        label: string;
+        description: string;
+        enabled: boolean;
+        inApp: boolean;
+        email: boolean;
+        push: boolean;
+        sms: boolean;
+      }>
+    >("/notify/settings/preferences", { token: token() });
+  },
+
+  updateMyNotificationPrefs(
+    prefs: Array<{
+      type: string;
+      enabled?: boolean;
+      inApp?: boolean;
+      email?: boolean;
+      push?: boolean;
+      sms?: boolean;
+    }>,
+  ) {
+    return apiRequest("/notify/settings/preferences", {
+      method: "PATCH",
+      body: { prefs },
+      token: token(),
+    });
+  },
+
+  pushStatus() {
+    return apiRequest<{ firebaseConfigured: boolean }>("/notify/push/status", {
+      token: token(),
+    });
+  },
+
+  registerPushToken(tokenValue: string, platform: "web" | "android" | "ios" = "web") {
+    return apiRequest("/notify/push/register", {
+      method: "POST",
+      body: { token: tokenValue, platform },
+      token: token(),
+    });
+  },
+
+  unregisterPushToken(tokenValue: string) {
+    return apiRequest("/notify/push/unregister", {
+      method: "POST",
+      body: { token: tokenValue },
+      token: token(),
+    });
+  },
+
   send(body: {
     customerId?: string;
     phone?: string;
@@ -5856,6 +6157,21 @@ export const suppliersApi = {
 };
 
 export const syncApi = {
+  ping() {
+    return apiRequest<{ ok: boolean; ts: string }>("/sync/ping", {
+      token: token(),
+    });
+  },
+
+  snapshot(params: { locationId: string; since?: string }) {
+    const q = new URLSearchParams();
+    q.set("locationId", params.locationId);
+    if (params.since) q.set("since", params.since);
+    return apiRequest<OfflineSnapshot>(`/sync/snapshot?${q.toString()}`, {
+      token: token(),
+    });
+  },
+
   pushEvent(body: {
     deviceId: string;
     storeId: string;
@@ -5884,6 +6200,102 @@ export const syncApi = {
       }>;
     }>(`/sync/events${q ? `?${q}` : ""}`, { token: token() });
   },
+};
+
+export type OfflineSnapshot = {
+  serverTime: string;
+  location: {
+    id: string;
+    name: string;
+    code: string;
+    timezone?: string | null;
+  };
+  incremental: boolean;
+  since: string | null;
+  offlinePolicy: {
+    maxSaleAmount: number | null;
+    blockStoreCredit: boolean;
+    managerPinAbove: number | null;
+    saleHistoryMonths: number;
+  };
+  tax: { mode: string; currency: string };
+  counts: {
+    products: number;
+    stockLevels: number;
+    customers: number;
+    coupons: number;
+    categories: number;
+    staff: number;
+  };
+  products: Array<{
+    id: string;
+    name: string;
+    shortName?: string | null;
+    skuCode: string;
+    barcode?: string | null;
+    categoryId?: string | null;
+    kind: string;
+    status: string;
+    basePrice: number;
+    mrp?: number | null;
+    taxCode?: string | null;
+    unitOfMeasure: string;
+    trackQty: boolean;
+    canSell: boolean;
+    availableInPos: boolean;
+    photoUrl?: string | null;
+    updatedAt: string;
+  }>;
+  stockLevels: Array<{
+    id: string;
+    productId: string;
+    locationId: string;
+    sku: string;
+    qtyOnHand: number;
+    qtyDamaged: number;
+    reorderPoint?: number | null;
+    sellPrice: number;
+    updatedAt: string;
+  }>;
+  customers: Array<{
+    id: string;
+    name: string;
+    phone?: string | null;
+    email?: string | null;
+    creditLimit?: number | null;
+    storeCreditBalance: number;
+    loyaltyPoints: number;
+    updatedAt: string;
+  }>;
+  coupons: Array<{
+    id: string;
+    code: string;
+    description?: string | null;
+    discountType: string;
+    discountValue: number;
+    minOrderAmount?: number | null;
+    maxRedemptions?: number | null;
+    redemptionCount: number;
+    startsAt?: string | null;
+    endsAt?: string | null;
+    isActive: boolean;
+    updatedAt: string;
+  }>;
+  categories: Array<{
+    id: string;
+    name: string;
+    parentId?: string | null;
+    updatedAt: string;
+  }>;
+  staff: Array<{
+    id: string;
+    fullName: string;
+    email: string;
+    pinHash: string | null;
+    primaryLocationId?: string | null;
+    roles: string[];
+    updatedAt: string;
+  }>;
 };
 
 export const platformBillingApi = {

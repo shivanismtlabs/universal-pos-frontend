@@ -1,91 +1,92 @@
+/**
+ * Stable import path for POS screens — Dexie outbox with cached pending count.
+ */
 "use client";
 
-import { syncApi } from "@/lib/api";
+import { useAuthStore } from "@/lib/auth-store";
 import { newIdempotencyKey } from "@/lib/utils";
+import {
+  enqueueOfflineEvent as enqueueToDexie,
+  enqueueOfflineEventLegacy,
+  flushOfflineQueue as flushDexie,
+  getDeviceId,
+  isOnline,
+  pendingOfflineCount as pendingDexie,
+  type OfflineEvent,
+} from "@/lib/offline";
 
-const QUEUE_KEY = "universal-pos-offline-queue";
-const DEVICE_KEY = "universal-pos-device-id";
+export type { OfflineEvent };
+export { getDeviceId, isOnline };
 
-export type OfflineEvent = {
-  clientEventId: string;
-  eventType: string;
-  payload: Record<string, unknown>;
-  storeId: string;
-  createdAt: string;
-};
+let cachedPending = 0;
 
-function readQueue(): OfflineEvent[] {
-  if (typeof window === "undefined") return [];
-  try {
-    return JSON.parse(localStorage.getItem(QUEUE_KEY) ?? "[]") as OfflineEvent[];
-  } catch {
-    return [];
-  }
+function tenantId() {
+  return useAuthStore.getState().user?.tenantId ?? "";
 }
 
-function writeQueue(items: OfflineEvent[]) {
-  localStorage.setItem(QUEUE_KEY, JSON.stringify(items));
-}
-
-export function getDeviceId() {
-  if (typeof window === "undefined") return "server";
-  let id = localStorage.getItem(DEVICE_KEY);
-  if (!id) {
-    id = `dev-${newIdempotencyKey().slice(0, 12)}`;
-    localStorage.setItem(DEVICE_KEY, id);
-  }
-  return id;
-}
-
-export function isOnline() {
-  if (typeof navigator === "undefined") return true;
-  return navigator.onLine;
+async function refreshPendingCache() {
+  const tid = tenantId();
+  cachedPending = await pendingDexie(tid || undefined);
+  return cachedPending;
 }
 
 export function enqueueOfflineEvent(
   eventType: string,
   storeId: string,
   payload: Record<string, unknown>,
-) {
-  const items = readQueue();
+): OfflineEvent {
+  const tid = tenantId();
+  const clientEventId = newIdempotencyKey();
+  const createdAt = new Date().toISOString();
   const event: OfflineEvent = {
-    clientEventId: newIdempotencyKey(),
+    clientEventId,
     eventType,
     storeId,
     payload,
-    createdAt: new Date().toISOString(),
+    createdAt,
   };
-  items.push(event);
-  writeQueue(items);
+  cachedPending += 1;
+  if (!tid) {
+    enqueueOfflineEventLegacy(eventType, storeId, {
+      ...payload,
+      _clientEventId: clientEventId,
+    });
+    return event;
+  }
+  void enqueueToDexie(
+    tid,
+    eventType,
+    storeId,
+    payload,
+    null,
+    clientEventId,
+  ).catch(() => {
+    enqueueOfflineEventLegacy(eventType, storeId, payload);
+  });
   return event;
 }
 
+/** Sync snapshot — refresh via pendingOfflineCountAsync when accuracy matters. */
 export function pendingOfflineCount() {
-  return readQueue().length;
+  return cachedPending;
+}
+
+export async function pendingOfflineCountAsync() {
+  return refreshPendingCache();
 }
 
 export async function flushOfflineQueue() {
-  const items = readQueue();
-  if (!items.length || !isOnline()) return { synced: 0, remaining: items.length };
-
-  const remaining: OfflineEvent[] = [];
-  let synced = 0;
-  const deviceId = getDeviceId();
-
-  for (const item of items) {
-    try {
-      await syncApi.pushEvent({
-        deviceId,
-        storeId: item.storeId,
-        clientEventId: item.clientEventId,
-        eventType: item.eventType,
-        payload: item.payload,
-      });
-      synced += 1;
-    } catch {
-      remaining.push(item);
-    }
+  const tid = tenantId();
+  if (!tid) {
+    cachedPending = 0;
+    return { synced: 0, remaining: 0 };
   }
-  writeQueue(remaining);
-  return { synced, remaining: remaining.length };
+  const res = await flushDexie(tid);
+  cachedPending = res.remaining;
+  return res;
+}
+
+/** Call on shell mount to hydrate counter from Dexie. */
+export function hydrateOfflinePendingCount() {
+  void refreshPendingCache();
 }

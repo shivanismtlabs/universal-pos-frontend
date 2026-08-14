@@ -30,6 +30,7 @@ import { authApi, appsApi, type PortalSessionResponse } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useAuthStore } from "@/lib/auth-store";
 import { applyPortalResponse } from "@/lib/auth-portal";
+import { TotpChallengeForm, is2faChallenge } from "@/components/totp-challenge-form";
 import { cn } from "@/lib/utils";
 import {
   INDIAN_STATES,
@@ -153,6 +154,7 @@ export default function OrganizationsPage() {
   const [creating, setCreating] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [entering, setEntering] = useState<string | null>(null);
+  const [totpToken, setTotpToken] = useState<string | null>(null);
   const [showCustomFields, setShowCustomFields] = useState(false);
   const [customFields, setCustomFields] = useState<string[]>([""]);
 
@@ -255,6 +257,10 @@ export default function OrganizationsPage() {
     setEntering(tenantId);
     try {
       const data = await authApi.selectOrganization(tenantId);
+      if (is2faChallenge(data)) {
+        setTotpToken(data.totpToken);
+        return;
+      }
       await enterApp(data);
     } catch (e) {
       toast.error(
@@ -318,6 +324,22 @@ export default function OrganizationsPage() {
 
   return (
     <div className="min-h-dvh bg-[#eef2f7] text-[#0b1f33]">
+      {totpToken ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl">
+            <h2 className="text-lg font-semibold text-[#0b1f33]">
+              Two-factor authentication
+            </h2>
+            <div className="mt-4">
+              <TotpChallengeForm
+                totpToken={totpToken}
+                onVerified={enterApp}
+                onCancel={() => setTotpToken(null)}
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
       <div className="mx-auto max-w-3xl px-4 py-10 sm:py-14">
         <header className="mb-8 flex flex-wrap items-start justify-between gap-4">
           <div>

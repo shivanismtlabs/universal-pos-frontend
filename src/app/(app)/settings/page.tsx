@@ -1,9 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { tenantsApi, appsApi, iamApi, posApi, expensesApi } from "@/lib/api";
+import {
+  tenantsApi,
+  appsApi,
+  iamApi,
+  posApi,
+  expensesApi,
+  notifyApi,
+} from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useBootstrap } from "@/lib/bootstrap";
 import { useAuthStore } from "@/lib/auth-store";
@@ -24,7 +32,29 @@ import {
   zodMessages,
 } from "@/lib/validations";
 
-type Tab = "branding" | "tax" | "receipt" | "counter" | "returns" | "expenses";
+type Tab =
+  | "branding"
+  | "tax"
+  | "receipt"
+  | "counter"
+  | "returns"
+  | "expenses"
+  | "notifications";
+
+const TAB_IDS: Tab[] = [
+  "branding",
+  "tax",
+  "receipt",
+  "counter",
+  "returns",
+  "expenses",
+  "notifications",
+];
+
+function parseSettingsTab(raw: string | null): Tab {
+  if (raw && TAB_IDS.includes(raw as Tab)) return raw as Tab;
+  return "branding";
+}
 
 const BUSINESS_TYPES = [
   { id: "retail", label: "Retail" },
@@ -39,13 +69,20 @@ const BUSINESS_TYPES = [
  * Shop settings — branding, tax, receipt, counter policies.
  * Backend: PATCH /tenants/me
  */
-export default function SettingsPage() {
+function SettingsPageInner() {
   const qc = useQueryClient();
+  const search = useSearchParams();
   const roles = useAuthStore((s) => s.user?.roles);
   const canEdit = canManageStaff(roles);
   const { data: boot, refetch, productName, businessType } = useBootstrap();
-  const [tab, setTab] = useState<Tab>("branding");
+  const [tab, setTab] = useState<Tab>(() =>
+    parseSettingsTab(search.get("tab")),
+  );
   const [selectedBusinessType, setSelectedBusinessType] = useState("retail");
+
+  useEffect(() => {
+    setTab(parseSettingsTab(search.get("tab")));
+  }, [search]);
 
   const locationsQ = useQuery({
     queryKey: ["tenant-locations"],
@@ -455,6 +492,38 @@ export default function SettingsPage() {
     onError: (e) => toast.error(errMsg(e)),
   });
 
+  const notifTypesQ = useQuery({
+    queryKey: ["notify-tenant-settings"],
+    queryFn: () => notifyApi.tenantNotificationSettings(),
+    enabled: canEdit && tab === "notifications",
+  });
+
+  const [notifEnabled, setNotifEnabled] = useState<Record<string, boolean>>(
+    {},
+  );
+
+  useEffect(() => {
+    if (!notifTypesQ.data?.types) return;
+    const map: Record<string, boolean> = {};
+    for (const t of notifTypesQ.data.types) map[t.code] = t.enabled;
+    setNotifEnabled(map);
+  }, [notifTypesQ.data]);
+
+  const saveNotifications = useMutation({
+    mutationFn: () =>
+      notifyApi.updateTenantNotificationSettings(
+        Object.entries(notifEnabled).map(([code, enabled]) => ({
+          code,
+          enabled,
+        })),
+      ),
+    onSuccess: () => {
+      toast.success("Notification settings saved");
+      void qc.invalidateQueries({ queryKey: ["notify-tenant-settings"] });
+    },
+    onError: (e) => toast.error(errMsg(e)),
+  });
+
   const tabs = useMemo(
     () =>
       [
@@ -464,6 +533,7 @@ export default function SettingsPage() {
         { id: "counter" as const, label: "Counter" },
         { id: "returns" as const, label: "Returns" },
         { id: "expenses" as const, label: "Expenses" },
+        { id: "notifications" as const, label: "Notifications" },
       ] as const,
     [],
   );
@@ -1039,7 +1109,78 @@ export default function SettingsPage() {
           </div>
         </section>
       ) : null}
+
+      {tab === "notifications" ? (
+        <section className="space-y-4 rounded-2xl border border-[#e5e7eb] bg-white p-5">
+          <div>
+            <h2 className="text-sm font-semibold text-[#0b1f33]">
+              Notification types
+            </h2>
+            <p className="mt-1 text-xs text-[#6b7280]">
+              Enable or disable shop-wide alerts. Delivered in-app and via
+              Firebase Cloud Messaging (browser push) when configured. Staff can
+              mute channels from preferences. Low stock is on by default.
+            </p>
+          </div>
+          <ul className="divide-y divide-[#eef2f8] rounded-xl border border-[#eef2f8]">
+            {(notifTypesQ.data?.types ?? []).map((t) => (
+              <li
+                key={t.code}
+                className="flex items-start justify-between gap-3 px-3 py-3"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-[#0b1f33]">
+                    {t.label}
+                    {t.urgent ? (
+                      <span className="ml-2 rounded bg-[#fef3c7] px-1.5 py-0.5 text-[0.65rem] font-semibold text-[#b45309]">
+                        Urgent
+                      </span>
+                    ) : null}
+                  </p>
+                  <p className="mt-0.5 text-[0.75rem] text-[#6b7280]">
+                    {t.description}
+                  </p>
+                </div>
+                <label className="flex shrink-0 items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={notifEnabled[t.code] ?? t.enabled}
+                    onChange={(e) =>
+                      setNotifEnabled((m) => ({
+                        ...m,
+                        [t.code]: e.target.checked,
+                      }))
+                    }
+                  />
+                  {notifEnabled[t.code] ?? t.enabled ? "On" : "Off"}
+                </label>
+              </li>
+            ))}
+            {notifTypesQ.isLoading ? (
+              <li className="px-3 py-6 text-center text-sm text-[#8b9bb0]">
+                Loading…
+              </li>
+            ) : null}
+          </ul>
+          <Button
+            disabled={saveNotifications.isPending || notifTypesQ.isLoading}
+            onClick={() => saveNotifications.mutate()}
+          >
+            {saveNotifications.isPending
+              ? "Saving…"
+              : "Save notification settings"}
+          </Button>
+        </section>
+      ) : null}
     </div>
+  );
+}
+
+export default function SettingsPage() {
+  return (
+    <Suspense fallback={<p className="py-10 text-center text-sm text-[#6b7280]">Loading…</p>}>
+      <SettingsPageInner />
+    </Suspense>
   );
 }
 

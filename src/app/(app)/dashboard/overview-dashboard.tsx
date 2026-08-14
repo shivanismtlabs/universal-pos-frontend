@@ -19,9 +19,11 @@ import {
   reportsApi,
   servicesCommerceApi,
   subscriptionsApi,
+  tenantsApi,
 } from "@/lib/api";
 import { useBootstrap } from "@/lib/bootstrap";
 import { useAuthStore } from "@/lib/auth-store";
+import { useBranchStore } from "@/lib/branch-store";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -54,10 +56,21 @@ function formatDisplayName(fullName?: string | null) {
 export function OverviewDashboard({ embed = false }: { embed?: boolean }) {
   const { money, productName, hasMode } = useBootstrap();
   const user = useAuthStore((s) => s.user);
+  const branchId = useBranchStore((s) => s.currentLocationId);
   const hasSale = hasMode("sale");
   const hasSub = hasMode("subscription");
   const hasService = hasMode("service");
   const greetName = formatDisplayName(user?.fullName);
+
+  const branchDash = useQuery({
+    queryKey: ["branch-dashboard", branchId],
+    queryFn: () => tenantsApi.branchDashboard(branchId!),
+    enabled: Boolean(branchId),
+  });
+  const hqDash = useQuery({
+    queryKey: ["multi-store-dashboard"],
+    queryFn: () => tenantsApi.multiStoreDashboard(),
+  });
 
   const sales = useQuery({
     queryKey: ["reports-sales-summary"],
@@ -228,6 +241,74 @@ export function OverviewDashboard({ embed = false }: { embed?: boolean }) {
           </div>
         </header>
       ) : null}
+
+      {(branchDash.data || (hqDash.data && hqDash.data.totalStores > 1)) && (
+        <section className="space-y-3 rounded-[14px] border border-[#d9e0ea] bg-white p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-[0.65rem] font-bold tracking-[0.12em] text-[#1a56db] uppercase">
+                Multi-store
+              </p>
+              <h2 className="text-sm font-semibold text-[#0b1f33]">
+                {branchDash.data?.branch.name
+                  ? `Branch · ${branchDash.data.branch.name}`
+                  : "All branches"}
+              </h2>
+            </div>
+            <Button asChild size="sm" variant="secondary">
+              <Link href="/multi-store/dashboard">Multi-store dashboard</Link>
+            </Button>
+          </div>
+          {branchDash.data ? (
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <MiniStat
+                label="Today sales"
+                value={formatInr(branchDash.data.today.salesTotal)}
+              />
+              <MiniStat
+                label="Orders"
+                value={String(branchDash.data.today.orders)}
+              />
+              <MiniStat
+                label="Low stock"
+                value={String(branchDash.data.inventory.lowStock)}
+              />
+              <MiniStat
+                label="Inventory value"
+                value={formatInr(branchDash.data.inventory.value)}
+              />
+            </div>
+          ) : null}
+          {hqDash.data && hqDash.data.byBranch.length > 1 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-[0.8rem]">
+                <thead className="text-[0.65rem] tracking-wide text-[#8a9bb0] uppercase">
+                  <tr>
+                    <th className="py-1 pr-3 font-semibold">Branch</th>
+                    <th className="py-1 pr-3 font-semibold">Orders</th>
+                    <th className="py-1 font-semibold">Today sales</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {hqDash.data.byBranch.map((b) => (
+                    <tr key={b.locationId} className="border-t border-[#eef2f8]">
+                      <td className="py-1.5 pr-3 font-medium text-[#0b1f33]">
+                        {b.name}
+                      </td>
+                      <td className="py-1.5 pr-3 tabular-nums">
+                        {b.todayOrders}
+                      </td>
+                      <td className="py-1.5 tabular-nums">
+                        {formatInr(b.todaySales)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </section>
+      )}
 
       {hasSale && products === 0 ? (
         <section className="flex flex-wrap items-center justify-between gap-3 rounded-[14px] border border-[#bfd0f5] bg-[#eef4ff] px-4 py-3.5">
@@ -662,6 +743,19 @@ export function OverviewDashboard({ embed = false }: { embed?: boolean }) {
           </ul>
         </section>
       ) : null}
+    </div>
+  );
+}
+
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-[#eef2f8] bg-[#f8fafc] px-3 py-2">
+      <p className="text-[0.65rem] font-medium tracking-wide text-[#8a9bb0] uppercase">
+        {label}
+      </p>
+      <p className="mt-0.5 text-sm font-semibold tabular-nums text-[#0b1f33]">
+        {value}
+      </p>
     </div>
   );
 }

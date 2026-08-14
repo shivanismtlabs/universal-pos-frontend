@@ -38,14 +38,31 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { authApi } from "@/lib/api";
+import { authApi, notifyApi } from "@/lib/api";
 import { useAuthStore } from "@/lib/auth-store";
 import { useBootstrap } from "@/lib/bootstrap";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { StationPinLock } from "@/components/station-pin-lock";
 import { SetPinDialog } from "@/components/set-pin-dialog";
 import { ShellEntitySearch } from "@/components/shell-entity-search";
+import { BranchSelector } from "@/components/branch-selector";
+import { OfflineStatusBanner } from "@/components/offline-status-banner";
+import { SessionIdleWatcher } from "@/components/session-idle-watcher";
 import { toast } from "sonner";
+import { registerWebPush } from "@/lib/firebase-messaging";
+import {
+  getDeviceId,
+  startConnectivityMonitor,
+  unlockOfflineCrypto,
+  pullOfflineSnapshot,
+  isServerReachable,
+} from "@/lib/offline";
+import {
+  flushOfflineQueue,
+  hydrateOfflinePendingCount,
+} from "@/lib/offline-queue";
+import { useBranchStore } from "@/lib/branch-store";
 import {
   canAccessPath,
   defaultHomeForRoles,
@@ -359,9 +376,33 @@ const NAV_GROUPS: NavGroup[] = [
     section: "Business settings",
     children: [
       {
+        href: "/stores",
+        label: "Stores / Branches",
+        icon: Building2,
+        folder: "Business",
+      },
+      {
+        href: "/multi-store/dashboard",
+        label: "Multi-store dashboard",
+        icon: LayoutGrid,
+        folder: "Business",
+      },
+      {
         href: "/settings",
         label: "Profile",
         icon: Building2,
+        folder: "Business",
+      },
+      {
+        href: "/settings/offline",
+        label: "Offline & sync",
+        icon: Package,
+        folder: "Business",
+      },
+      {
+        href: "/settings/security",
+        label: "Security",
+        icon: Settings,
         folder: "Business",
       },
       {
@@ -617,6 +658,13 @@ function SidebarBody({
   const railCaption = (g: NavGroup) =>
     g.railLabel ?? g.label.split(" ")[0] ?? g.label;
 
+  const unreadQ = useQuery({
+    queryKey: ["notify-unread"],
+    queryFn: () => notifyApi.unreadCount(),
+    refetchInterval: 60_000,
+  });
+  const unread = unreadQ.data?.unreadCount ?? 0;
+
   return (
     <div className="flex h-full min-h-0 w-full bg-[#0b1016] text-[#e8edf4] print:bg-white print:text-[#0b1f33]">
       {/* —— Zoho icon rail —— */}
@@ -677,12 +725,20 @@ function SidebarBody({
 
           <div className="min-h-2 flex-1" />
 
-          <div
-            className="flex w-full flex-col items-center gap-0.5 rounded-md px-0.5 py-2 text-[#8b96a5] opacity-40"
-            title="Notifications (soon)"
+          <Link
+            href="/notifications"
+            onClick={onNavigate}
+            title="Notifications"
+            className="relative flex w-full flex-col items-center gap-0.5 rounded-md px-0.5 py-2 text-[#8b96a5] transition hover:bg-white/[0.06] hover:text-white"
           >
             <Bell className="h-[1.15rem] w-[1.15rem]" strokeWidth={1.75} />
-          </div>
+            {unread > 0 ? (
+              <span className="absolute top-1 right-1.5 grid min-w-[1rem] place-items-center rounded-full bg-[#dc2626] px-0.5 text-[0.55rem] font-bold text-white">
+                {unread > 9 ? "9+" : unread}
+              </span>
+            ) : null}
+            <span className="text-[0.55rem] font-medium">Alerts</span>
+          </Link>
 
           {railBottom.map((g) => {
             const Icon = g.icon;
@@ -1003,6 +1059,39 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       });
   }, [accessToken, pinLocked]);
 
+  /** Register Firebase Cloud Messaging token after login (no-op if unset) */
+  useEffect(() => {
+    if (!accessToken || pinLocked) return;
+    void registerWebPush();
+  }, [accessToken, pinLocked]);
+
+  /** Offline local-first: crypto unlock, connectivity ping, hydrate outbox, light pull */
+  useEffect(() => {
+    if (!accessToken || pinLocked || !user?.tenantId || !user.id) return;
+    void unlockOfflineCrypto({
+      tenantId: user.tenantId,
+      deviceId: getDeviceId(),
+      userId: user.id,
+    });
+    hydrateOfflinePendingCount();
+    const stop = startConnectivityMonitor(30_000);
+    return () => {
+      stop();
+    };
+  }, [accessToken, pinLocked, user?.tenantId, user?.id]);
+
+  useEffect(() => {
+    if (!accessToken || pinLocked || !user?.tenantId) return;
+    const locationId = useBranchStore.getState().currentLocationId;
+    if (!locationId || !isServerReachable()) return;
+    void flushOfflineQueue().then(() => hydrateOfflinePendingCount());
+    void pullOfflineSnapshot({
+      tenantId: user.tenantId,
+      locationId,
+      full: false,
+    }).catch(() => undefined);
+  }, [accessToken, pinLocked, user?.tenantId]);
+
   useEffect(() => {
     if (pinLocked || !user || !pinSwitchEnabled) return;
     if (user.pinSet === false) {
@@ -1118,6 +1207,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {pinLocked && stationToken ? (
         <StationPinLock open locationId={acting?.storeId} />
       ) : null}
+      <SessionIdleWatcher />
       <SetPinDialog
         open={showSetPin && !pinLocked}
         title="Set your counter PIN"
@@ -1156,15 +1246,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            className="rounded-lg border border-[#d9e0ea] p-2 text-[#2c3e50]"
-            onClick={() => setOpen(true)}
-            aria-label="Open menu"
-          >
-            <Menu className="h-5 w-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <BranchSelector className="hidden xs:inline-flex sm:inline-flex" />
+            <button
+              type="button"
+              className="rounded-lg border border-[#d9e0ea] p-2 text-[#2c3e50]"
+              onClick={() => setOpen(true)}
+              aria-label="Open menu"
+            >
+              <Menu className="h-5 w-5" />
+            </button>
+          </div>
         </header>
+
+        <div className="hidden shrink-0 items-center justify-between gap-3 border-b border-[#d9e0ea] bg-white px-4 py-2 sm:px-6 md:flex lg:px-8 print:hidden">
+          <p className="text-[0.75rem] text-[#5a6b7d]">
+            Operating branch — sales, stock, and expenses use this location
+          </p>
+          <BranchSelector />
+        </div>
 
         <AnimatePresence>
           {open ? (
@@ -1216,6 +1316,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             "print:overflow-visible print:bg-white print:h-auto print:max-h-none",
           )}
         >
+          <div className="print:hidden">
+            <OfflineStatusBanner />
+          </div>
           <div
             className={cn(
               "document-print-root px-4 py-5 sm:px-6 sm:py-6 lg:px-8",

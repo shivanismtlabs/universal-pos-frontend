@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { loyaltyApi, paymentsApi, posApi, tenantsApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useBootstrap } from "@/lib/bootstrap";
+import { useBranchStore } from "@/lib/branch-store";
 import { useAuthStore } from "@/lib/auth-store";
 import { canApproveRefund } from "@/lib/roles";
 import { moneyNumber, newIdempotencyKey, cn } from "@/lib/utils";
@@ -207,8 +208,14 @@ export default function RetailPosWorkstation({
     queryKey: ["locations"],
     queryFn: () => tenantsApi.listLocations(),
   });
+  const branchLocationId = useBranchStore((s) => s.currentLocationId);
   const locationId =
-    locations.data?.find((l) => l.code === "MAIN")?.id ??
+    (branchLocationId &&
+    locations.data?.some((l) => l.id === branchLocationId && l.isActive !== false)
+      ? branchLocationId
+      : null) ??
+    locations.data?.find((l) => l.code === "MAIN" && l.isActive !== false)?.id ??
+    locations.data?.find((l) => l.isActive !== false)?.id ??
     locations.data?.[0]?.id;
 
   useEffect(() => {

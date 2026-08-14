@@ -16,6 +16,7 @@ import {
   AuthGoogleButton,
 } from "@/components/auth-google-button";
 import { AuthShell } from "@/components/auth-shell";
+import { TotpChallengeForm, is2faChallenge } from "@/components/totp-challenge-form";
 import { FieldError } from "@/components/ui/form";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -118,6 +119,7 @@ export default function LoginForm() {
 
   const [bioBusy, setBioBusy] = useState(false);
   const [bioSupported, setBioSupported] = useState(false);
+  const [totpToken, setTotpToken] = useState<string | null>(null);
   useEffect(() => setBioSupported(canUseBiometrics()), []);
 
   async function finishAuth(
@@ -153,6 +155,10 @@ export default function LoginForm() {
         password: values.password,
       });
       rememberBioEmail(values.email);
+      if (is2faChallenge(data)) {
+        setTotpToken(data.totpToken);
+        return;
+      }
       await finishAuth(data);
     } catch (e) {
       const lock = readLock();
@@ -222,10 +228,17 @@ export default function LoginForm() {
       <AuthGoogleButton
         mode="login"
         onCredential={onGoogle}
-        disabled={locked || isSubmitting}
+        disabled={locked || isSubmitting || Boolean(totpToken)}
       />
       <AuthDivider />
 
+      {totpToken ? (
+        <TotpChallengeForm
+          totpToken={totpToken}
+          onVerified={finishAuth}
+          onCancel={() => setTotpToken(null)}
+        />
+      ) : (
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
         <div className="space-y-1.5">
           <Label htmlFor="email">Email address</Label>
@@ -307,6 +320,7 @@ export default function LoginForm() {
           </Link>
         </p>
       </form>
+      )}
     </AuthShell>
   );
 }

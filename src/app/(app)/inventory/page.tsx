@@ -17,6 +17,7 @@ import {
 import { ApiError } from "@/lib/api/client";
 import { canWriteCatalog } from "@/lib/roles";
 import { useAuthStore } from "@/lib/auth-store";
+import { useBranchStore } from "@/lib/branch-store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -72,6 +73,8 @@ function InventoryPageInner() {
   /** URL is source of truth — avoids stale state when opening /inventory?tab=alerts */
   const tab = parseTab(search.get("tab"));
   const [locationId, setLocationId] = useState("");
+  const branchId = useBranchStore((s) => s.currentLocationId);
+  const setBranchId = useBranchStore((s) => s.setCurrentLocationId);
 
   function selectTab(next: Tab) {
     const qs = next === "levels" ? "" : `?tab=${next}`;
@@ -85,6 +88,9 @@ function InventoryPageInner() {
 
   const activeLoc =
     locationId ||
+    (branchId && locations.data?.some((l) => l.id === branchId)
+      ? branchId
+      : "") ||
     locations.data?.find((l) => l.isActive !== false)?.id ||
     locations.data?.[0]?.id ||
     "";
@@ -136,7 +142,10 @@ function InventoryPageInner() {
           <select
             className="block h-9 min-w-[180px] rounded-md border border-[#dce3ec] px-2 text-sm"
             value={activeLoc}
-            onChange={(e) => setLocationId(e.target.value)}
+            onChange={(e) => {
+              setLocationId(e.target.value);
+              setBranchId(e.target.value);
+            }}
           >
             {(locations.data ?? []).map((l) => (
               <option key={l.id} value={l.id}>
@@ -219,6 +228,7 @@ function LevelsTab({
   const [reorderId, setReorderId] = useState<string | null>(null);
   const [rp, setRp] = useState("");
   const [rq, setRq] = useState("");
+  const [sp, setSp] = useState("");
 
   const saveReorder = useMutation({
     mutationFn: () =>
@@ -227,9 +237,10 @@ function LevelsTab({
         stockLevelId: reorderId!,
         reorderPoint: rp === "" ? undefined : Number(rp),
         reorderQty: rq === "" ? undefined : Number(rq),
+        sellPrice: sp === "" ? undefined : Number(sp),
       }),
     onSuccess: () => {
-      toast.success("Reorder levels saved");
+      toast.success("Branch price & reorder saved");
       setReorderId(null);
       void qc.invalidateQueries({ queryKey: ["inv-levels"] });
     },
@@ -262,6 +273,7 @@ function LevelsTab({
               <th className="px-3 py-2">Product</th>
               <th className="px-3 py-2">SKU</th>
               <th className="px-3 py-2 text-right">On hand</th>
+              <th className="px-3 py-2 text-right">Price</th>
               <th className="px-3 py-2 text-right">Damaged</th>
               <th className="px-3 py-2 text-right">Reorder @</th>
               <th className="px-3 py-2">Status</th>
@@ -275,6 +287,9 @@ function LevelsTab({
                 <td className="px-3 py-2 font-mono text-xs">{r.sku}</td>
                 <td className="px-3 py-2 text-right tabular-nums">
                   {r.qtyOnHand} {r.sellUnit}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">
+                  ₹{Number(r.sellPrice ?? 0).toLocaleString("en-IN")}
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums text-amber-800">
                   {r.qtyDamaged}
@@ -302,8 +317,11 @@ function LevelsTab({
                         setRq(
                           r.reorderQty != null ? String(r.reorderQty) : "",
                         );
+                        setSp(
+                          r.sellPrice != null ? String(r.sellPrice) : "",
+                        );
                       }}
-                      editTitle="Edit reorder levels"
+                      editTitle="Edit branch price & reorder"
                     />
                   ) : null}
                 </td>
@@ -311,7 +329,10 @@ function LevelsTab({
             ))}
             {!levels.data?.items?.length ? (
               <tr>
-                <td colSpan={7} className="px-3 py-8 text-center text-[#5a6b7d]">
+                <td
+                  colSpan={8}
+                  className="px-3 py-8 text-center text-[#5a6b7d]"
+                >
                   No stock levels at this location
                 </td>
               </tr>
@@ -323,7 +344,17 @@ function LevelsTab({
       {reorderId ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
           <div className="w-full max-w-sm space-y-3 rounded-lg bg-white p-4 shadow-lg">
-            <h3 className="font-semibold">Set reorder levels</h3>
+            <h3 className="font-semibold">Branch price & reorder</h3>
+            <div>
+              <Label>Sell price (this branch)</Label>
+              <Input
+                type="number"
+                min={0}
+                step="0.01"
+                value={sp}
+                onChange={(e) => setSp(e.target.value)}
+              />
+            </div>
             <div>
               <Label>Reorder point</Label>
               <Input
