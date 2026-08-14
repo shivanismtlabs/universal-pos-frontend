@@ -11,10 +11,11 @@ import { appsApi, authApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useAuthStore } from "@/lib/auth-store";
 import { loginSchema, type LoginInput } from "@/lib/validations";
-import {
-  AuthDivider,
-  AuthGoogleButton,
-} from "@/components/auth-google-button";
+// Google sign-in UI — keep imports/handlers, hide the buttons for now.
+// import {
+//   AuthDivider,
+//   AuthGoogleButton,
+// } from "@/components/auth-google-button";
 import AuthShell from "@/components/auth-shell";
 import { TotpChallengeForm, is2faChallenge } from "@/components/totp-challenge-form";
 import { FieldError } from "@/components/ui/form";
@@ -177,18 +178,19 @@ export default function LoginForm() {
     }
   }
 
-  async function onGoogle(idToken: string) {
-    try {
-      const data = await authApi.googleAuth({ idToken, mode: "login" });
-      await finishAuth(data);
-    } catch (e) {
-      toast.error(
-        e instanceof ApiError
-          ? e.messages.join(", ")
-          : "Google sign-in failed",
-      );
-    }
-  }
+  // Restore with AuthGoogleButton when Google sign-in design is enabled again.
+  // async function onGoogle(idToken: string) {
+  //   try {
+  //     const data = await authApi.googleAuth({ idToken, mode: "login" });
+  //     await finishAuth(data);
+  //   } catch (e) {
+  //     toast.error(
+  //       e instanceof ApiError
+  //         ? e.messages.join(", ")
+  //         : "Google sign-in failed",
+  //     );
+  //   }
+  // }
 
   async function onBiometric() {
     const email = getValues("email")?.trim().toLowerCase();
@@ -225,12 +227,14 @@ export default function LoginForm() {
       title="Sign in"
       subtitle="Access your Universal POS account. You’ll choose or create an organization next."
     >
+      {/* Google sign-in — design hidden for now, do not delete.
       <AuthGoogleButton
         mode="login"
         onCredential={onGoogle}
         disabled={locked || isSubmitting || Boolean(totpToken)}
       />
       <AuthDivider />
+      */}
 
       {totpToken ? (
         <TotpChallengeForm

@@ -23,12 +23,14 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
     <QueryClientProvider client={client}>
       {children}
       <Toaster
-        theme="dark"
+        theme="light"
         position="top-right"
+        richColors
+        closeButton
         toastOptions={{
           classNames: {
             toast:
-              "bg-white border border-[#e5e7eb] text-[#111827] shadow-md rounded-xl",
+              "bg-white border border-[#d9e0ea] text-[#0b1f33] shadow-lg rounded-lg",
           },
         }}
       />

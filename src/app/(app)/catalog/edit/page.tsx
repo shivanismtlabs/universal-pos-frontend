@@ -455,16 +455,6 @@ function EditCatalogProductPage() {
               }
             />
           </div>
-          <div>
-            <Label>Image URL (optional)</Label>
-            <Input
-              value={form.photoUrl}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, photoUrl: e.target.value }))
-              }
-              placeholder="https://… or leave blank and upload below"
-            />
-          </div>
           {(product.data.images?.length || form.photoUrl) ? (
             <div className="sm:col-span-2">
               <Label>Current images</Label>
@@ -485,8 +475,7 @@ function EditCatalogProductPage() {
                   ))}
               </div>
               <p className="mt-1 text-[0.75rem] text-[#8a9bb0]">
-                Upload below to add more. Existing images are kept unless you
-                clear the image URL.
+                Upload below to add more images.
               </p>
             </div>
           ) : null}

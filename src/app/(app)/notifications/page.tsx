@@ -16,7 +16,9 @@ import { PageSkeleton } from "@/components/page-header";
 import { useState } from "react";
 import {
   isFirebaseWebConfigured,
+  pushFailureMessage,
   registerWebPush,
+  canUseOsNotifications,
 } from "@/lib/firebase-messaging";
 
 export default function NotificationsPage() {
@@ -70,7 +72,8 @@ export default function NotificationsPage() {
             Notification center
           </h1>
           <p className="mt-0.5 text-[0.8rem] text-[#5a6b7d]">
-            {inbox.data?.unreadCount ?? 0} unread · in-app + Firebase push
+            {inbox.data?.unreadCount ?? 0} unread · in-app popups
+            {canUseOsNotifications() ? " + browser push" : " (browser OS push needs HTTPS)"}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -85,14 +88,7 @@ export default function NotificationsPage() {
                 void registerWebPush()
                   .then((r) => {
                     if (r.ok) toast.success("Browser push enabled");
-                    else if (r.reason === "permission_denied")
-                      toast.error("Notification permission denied");
-                    else
-                      toast.message(
-                        r.reason === "not_configured"
-                          ? "Firebase not configured"
-                          : "Push not available on this browser",
-                      );
+                    else toast.error(pushFailureMessage(r.reason));
                   })
                   .finally(() => setPushBusy(false));
               }}

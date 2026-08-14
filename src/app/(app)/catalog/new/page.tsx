@@ -79,7 +79,6 @@ export default function NewCatalogProductPage() {
     taxCode: "",
     taxRatePercent: "5",
     unitOfMeasure: "pcs",
-    photoUrl: "",
     trackInventory: true,
     trackSerial: false,
     trackBatch: false,
@@ -198,11 +197,7 @@ export default function NewCatalogProductPage() {
         throw new Error(msg);
       }
       setFieldErrors({});
-      const uploaded = imagePickerRef.current?.getUploadDataUrls() ?? [];
-      const photos = [
-        ...uploaded,
-        ...(form.photoUrl.trim() ? [form.photoUrl.trim()] : []),
-      ];
+      const photos = imagePickerRef.current?.getUploadDataUrls() ?? [];
       return catalogApi.createProduct({
         name: form.name.trim(),
         shortName: form.shortName.trim() || undefined,
@@ -345,16 +340,6 @@ export default function NewCatalogProductPage() {
               onChange={(e) =>
                 setForm((f) => ({ ...f, shortName: e.target.value }))
               }
-            />
-          </div>
-          <div>
-            <Label>Image URL (optional)</Label>
-            <Input
-              value={form.photoUrl}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, photoUrl: e.target.value }))
-              }
-              placeholder="https://… or leave blank and upload below"
             />
           </div>
           <div className="sm:col-span-2">

@@ -1,23 +1,32 @@
 import { NextResponse } from "next/server";
 
+function envClean(v?: string | null) {
+  if (!v) return "";
+  return v
+    .trim()
+    .replace(/^["']/, "")
+    .replace(/["']$/, "")
+    .replace(/,$/, "")
+    .trim();
+}
+
 /**
  * Serves the FCM service worker with Firebase web config injected from env.
  * Path: /firebase-messaging-sw.js
  */
 export function GET() {
-  const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY ?? "";
+  const apiKey = envClean(process.env.NEXT_PUBLIC_FIREBASE_API_KEY);
+  const projectId = envClean(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID);
   const authDomain =
-    process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN ??
-    (process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID
-      ? `${process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID}.firebaseapp.com`
-      : "");
-  const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ?? "";
+    envClean(process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN) ||
+    (projectId ? `${projectId}.firebaseapp.com` : "");
   const storageBucket =
-    process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ??
+    envClean(process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET) ||
     (projectId ? `${projectId}.appspot.com` : "");
-  const messagingSenderId =
-    process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID ?? "";
-  const appId = process.env.NEXT_PUBLIC_FIREBASE_APP_ID ?? "";
+  const messagingSenderId = envClean(
+    process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  );
+  const appId = envClean(process.env.NEXT_PUBLIC_FIREBASE_APP_ID);
 
   const body = `/* Universal POS — Firebase Messaging SW */
 importScripts('https://www.gstatic.com/firebasejs/11.0.2/firebase-app-compat.js');

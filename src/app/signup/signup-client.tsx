@@ -16,10 +16,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FieldError } from "@/components/ui/form";
 import { AuthShell } from "@/components/auth-shell";
-import {
-  AuthDivider,
-  AuthGoogleButton,
-} from "@/components/auth-google-button";
+// Google sign-up UI — keep for later, hide the buttons for now.
+// import {
+//   AuthDivider,
+//   AuthGoogleButton,
+// } from "@/components/auth-google-button";
 import {
   phoneSchema,
   strongPasswordSchema,
@@ -124,30 +125,33 @@ export default function SignupClient() {
     }
   }
 
-  async function onGoogle(idToken: string) {
-    try {
-      const data = await authApi.googleAuth({ idToken, mode: "register" });
-      applyPortalResponse(data);
-      toast.success("Signed in with Google — choose or create a shop");
-      router.replace("/organizations");
-    } catch (e) {
-      toast.error(
-        e instanceof ApiError ? e.messages.join(", ") : "Google sign-up failed",
-      );
-    }
-  }
+  // Restore with AuthGoogleButton when Google sign-up design is enabled again.
+  // async function onGoogle(idToken: string) {
+  //   try {
+  //     const data = await authApi.googleAuth({ idToken, mode: "register" });
+  //     applyPortalResponse(data);
+  //     toast.success("Signed in with Google — choose or create a shop");
+  //     router.replace("/organizations");
+  //   } catch (e) {
+  //     toast.error(
+  //       e instanceof ApiError ? e.messages.join(", ") : "Google sign-up failed",
+  //     );
+  //   }
+  // }
 
   return (
     <AuthShell
       title="Start your free trial"
       subtitle="Create your account first. You’ll set up the company / store next — same flow as modern POS platforms."
     >
+      {/* Google sign-up — design hidden for now, do not delete.
       <AuthGoogleButton
         mode="register"
         onCredential={onGoogle}
         disabled={isSubmitting}
       />
       <AuthDivider label="or sign up with email" />
+      */}
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-3.5" noValidate>
         <div className="space-y-1.5">

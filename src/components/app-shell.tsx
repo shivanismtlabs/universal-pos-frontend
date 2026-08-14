@@ -50,8 +50,8 @@ import { ShellEntitySearch } from "@/components/shell-entity-search";
 import { BranchSelector } from "@/components/branch-selector";
 import { OfflineStatusBanner } from "@/components/offline-status-banner";
 import { SessionIdleWatcher } from "@/components/session-idle-watcher";
+import { InboxPopupListener } from "@/components/inbox-popup-listener";
 import { toast } from "sonner";
-import { registerWebPush } from "@/lib/firebase-messaging";
 import {
   getDeviceId,
   startConnectivityMonitor,
@@ -688,7 +688,8 @@ function SidebarBody({
   const unreadQ = useQuery({
     queryKey: ["notify-unread"],
     queryFn: () => notifyApi.unreadCount(),
-    refetchInterval: 60_000,
+    refetchInterval: 12_000,
+    refetchOnWindowFocus: true,
   });
   const unread = unreadQ.data?.unreadCount ?? 0;
 
@@ -1086,12 +1087,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       });
   }, [accessToken, pinLocked]);
 
-  /** Register Firebase Cloud Messaging token after login (no-op if unset) */
-  useEffect(() => {
-    if (!accessToken || pinLocked) return;
-    void registerWebPush();
-  }, [accessToken, pinLocked]);
-
   /** Offline local-first: crypto unlock, connectivity ping, hydrate outbox, light pull */
   useEffect(() => {
     if (!accessToken || pinLocked || !user?.tenantId || !user.id) return;
@@ -1235,6 +1230,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <StationPinLock open locationId={acting?.storeId} />
       ) : null}
       <SessionIdleWatcher />
+      <InboxPopupListener />
       <SetPinDialog
         open={showSetPin && !pinLocked}
         title="Set your counter PIN"
