@@ -22,7 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FieldError } from "@/components/ui/form";
 import { PageHeader } from "@/components/page-header";
-import { canUseBiometrics, registerDeviceBiometric } from "@/lib/webauthn";
+import { canUseBiometrics, biometricBlockReason, registerDeviceBiometric } from "@/lib/webauthn";
 import {
   expenseCategoryNameSchema,
   settingsBrandSchema,
@@ -1187,7 +1187,11 @@ export default function SettingsPage() {
 function BiometricSetup() {
   const qc = useQueryClient();
   const [supported, setSupported] = useState(false);
-  useEffect(() => setSupported(canUseBiometrics()), []);
+  const [blockReason, setBlockReason] = useState<string | null>(null);
+  useEffect(() => {
+    setSupported(canUseBiometrics());
+    setBlockReason(biometricBlockReason());
+  }, []);
 
   const creds = useQuery({
     queryKey: ["webauthn-creds"],
@@ -1222,10 +1226,15 @@ function BiometricSetup() {
     <div className="mt-3 space-y-2">
       {!supported ? (
         <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900 ring-1 ring-amber-100">
-          Open Universal POS over HTTPS (or localhost) on a browser that supports
-          passkeys / Windows Hello / Touch ID.
+          {blockReason ||
+            "Open Universal POS over HTTPS (or localhost) on a browser that supports passkeys / Windows Hello / Touch ID."}
         </p>
-      ) : null}
+      ) : (
+        <p className="text-xs text-[#5a6b7d]">
+          Register once on this device, then use fingerprint / Windows Hello on
+          the sign-in page with the same email.
+        </p>
+      )}
       <Button
         type="button"
         variant="secondary"

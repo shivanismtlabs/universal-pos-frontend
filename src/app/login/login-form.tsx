@@ -4,6 +4,7 @@ import { applyPortalResponse } from "@/lib/auth-portal";
 import {
   biometricLogin,
   canUseBiometrics,
+  biometricBlockReason,
   readRememberedBioEmail,
   rememberBioEmail,
 } from "@/lib/webauthn";
@@ -120,8 +121,12 @@ export default function LoginForm() {
 
   const [bioBusy, setBioBusy] = useState(false);
   const [bioSupported, setBioSupported] = useState(false);
+  const [bioBlockReason, setBioBlockReason] = useState<string | null>(null);
   const [totpToken, setTotpToken] = useState<string | null>(null);
-  useEffect(() => setBioSupported(canUseBiometrics()), []);
+  useEffect(() => {
+    setBioSupported(canUseBiometrics());
+    setBioBlockReason(biometricBlockReason());
+  }, []);
 
   async function finishAuth(
     data: Awaited<ReturnType<typeof authApi.login>>,
@@ -200,7 +205,8 @@ export default function LoginForm() {
     }
     if (!canUseBiometrics()) {
       toast.error(
-        "Biometrics need a secure context (HTTPS or localhost) and a supported browser",
+        biometricBlockReason() ||
+          "Biometrics need HTTPS (or localhost) and a supported browser",
       );
       return;
     }
@@ -309,8 +315,9 @@ export default function LoginForm() {
               : "Sign in with fingerprint / biometrics"}
           </Button>
         ) : (
-          <p className="text-center text-[0.72rem] text-[#8b9bb0]">
-            Biometric login available on HTTPS with a supporting browser
+          <p className="text-center text-[0.72rem] leading-snug text-[#8b9bb0]">
+            {bioBlockReason ||
+              "Biometric login available on HTTPS (or localhost) with Windows Hello / Touch ID"}
           </p>
         )}
 
