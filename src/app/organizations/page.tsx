@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ComponentType } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentType, Suspense } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { motion } from "motion/react";
@@ -17,8 +17,7 @@ import {
   UtensilsCrossed,
   Scissors,
   Wrench,
-  LayoutGrid,
-  Check,
+  HelpCircle,
   Trash2,
   Package,
   CreditCard,
@@ -34,7 +33,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { FieldError } from "@/components/ui/form";
-import { authApi, appsApi, type PortalSessionResponse } from "@/lib/api";
+import { authApi, appsApi, tenantsApi, type PortalSessionResponse } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useAuthStore } from "@/lib/auth-store";
 import { applyPortalResponse } from "@/lib/auth-portal";
@@ -49,7 +48,8 @@ import { phoneSchema } from "@/lib/validations";
 
 const createOrgSchema = z
   .object({
-    businessType: z.string().min(1, "Select a business type"),
+    businessType: z.string().min(1, "Pick a starting setup, or My business isn’t listed"),
+    businessLabel: z.string().trim().max(80).optional().or(z.literal("")),
     organizationName: z
       .string()
       .trim()
@@ -135,14 +135,38 @@ const BUSINESS_TYPES: Array<{
   {
     id: "service",
     label: "Service business",
-    detail: "Billable services (gym, repair, consultancy…)",
+    detail: "Billable services (consultancy, detailing…)",
     Icon: Wrench,
   },
   {
+    id: "gym",
+    label: "Gym / fitness",
+    detail: "Memberships, check-in, optional PT bookings",
+    Icon: Users,
+  },
+  {
+    id: "rental",
+    label: "Rental",
+    detail: "Issue / return with deposits — not a permanent sale",
+    Icon: Package,
+  },
+  {
+    id: "repair",
+    label: "Repair shop",
+    detail: "Customer assets + jobs + parts/labor",
+    Icon: Wrench,
+  },
+  {
+    id: "pet_grooming",
+    label: "Pet grooming",
+    detail: "Appointments + optional retail products",
+    Icon: Scissors,
+  },
+  {
     id: "other",
-    label: "Other / general",
-    detail: "Universal blank slate — add your own item fields",
-    Icon: LayoutGrid,
+    label: "Not listed",
+    detail: "Any business — catalog, counter, customers, reports",
+    Icon: HelpCircle,
   },
 ];
 
@@ -195,7 +219,23 @@ const PLATFORM_HIGHLIGHTS: Array<{
 ];
 
 export default function OrganizationsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="grid min-h-dvh place-items-center bg-[#eef2f7] text-sm text-[#5a6b7d]">
+          Loading…
+        </div>
+      }
+    >
+      <OrganizationsPageInner />
+    </Suspense>
+  );
+}
+
+function OrganizationsPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const completeSetup = searchParams.get("setup") === "1";
   const qc = useQueryClient();
   const identityToken = useAuthStore((s) => s.identityToken);
   const identity = useAuthStore((s) => s.identity);
@@ -203,6 +243,8 @@ export default function OrganizationsPage() {
   const clear = useAuthStore((s) => s.clear);
   /** Wait for client + zustand rehydrate before using tokens (prevents crash/redirect thrash) */
   const [hydrated, setHydrated] = useState(false);
+  /** Drop leftover shop JWT only once when opening the identity org picker */
+  const clearedStaleShopRef = useRef(false);
   const [orgs, setOrgs] = useState<
     NonNullable<PortalSessionResponse["organizations"]>
   >([]);
@@ -213,12 +255,14 @@ export default function OrganizationsPage() {
   const [totpToken, setTotpToken] = useState<string | null>(null);
   const [showCustomFields, setShowCustomFields] = useState(false);
   const [customFields, setCustomFields] = useState<string[]>([""]);
+  const user = useAuthStore((s) => s.user);
 
   const form = useForm<CreateForm>({
     resolver: zodResolver(createOrgSchema),
     mode: "onBlur",
     defaultValues: {
-      businessType: "retail",
+      businessType: "",
+      businessLabel: "",
       organizationName: "",
       phone: "",
       addressLine1: "",
@@ -258,17 +302,54 @@ export default function OrganizationsPage() {
 
   useEffect(() => {
     if (!hydrated) return;
-    if (accessToken) {
+
+    // Live/old signup: shop already exists — show org profile form (business type, etc.)
+    if (accessToken && completeSetup) {
+      setShowCreate(true);
+      setLoading(false);
+      return;
+    }
+
+    /**
+     * One-time only: identity org picker + leftover shop JWT from a previous visit.
+     * Must NOT re-run after Open/Create — that briefly has identityToken + accessToken
+     * and was wiping the new session (stuck on this page after "Welcome to your shop").
+     */
+    if (
+      !clearedStaleShopRef.current &&
+      identityToken &&
+      accessToken &&
+      !completeSetup &&
+      !user
+    ) {
+      clearedStaleShopRef.current = true;
+      useAuthStore.setState({
+        accessToken: null,
+        stationToken: null,
+        refreshToken: null,
+        user: null,
+        tenantSlug: "",
+      });
+      return;
+    }
+
+    // Just opened / created a shop — go to app (keep identityToken for Switch org)
+    if (accessToken && user) {
+      clearedStaleShopRef.current = true;
       router.replace("/dashboard");
       return;
     }
-    if (!identityToken) {
+
+    if (!identityToken && !accessToken) {
       router.replace("/login");
       return;
     }
-    void refreshList();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount once after hydrate
-  }, [hydrated, identityToken, accessToken]);
+
+    if (identityToken && !accessToken) {
+      void refreshList();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- hydrate + auth transitions
+  }, [hydrated, identityToken, accessToken, completeSetup, user]);
 
   useEffect(() => {
     if (!isOther) {
@@ -298,6 +379,7 @@ export default function OrganizationsPage() {
   async function enterApp(data: PortalSessionResponse) {
     const dest = applyPortalResponse(data);
     if (dest === "app") {
+      clearedStaleShopRef.current = true;
       try {
         const boot = await appsApi.bootstrap();
         qc.setQueryData(["tenant-bootstrap"], boot);
@@ -306,7 +388,9 @@ export default function OrganizationsPage() {
       }
       toast.success("Welcome to your shop");
       router.replace("/dashboard");
+      return;
     }
+    toast.message("Select an organization to continue");
   }
 
   async function onSelect(tenantId: string) {
@@ -338,27 +422,101 @@ export default function OrganizationsPage() {
               .map((label) => ({ label }))
           : undefined;
 
-      const data = await authApi.createOrganization({
-        organizationName: values.organizationName.trim(),
-        businessType: values.businessType,
-        customItemFields:
-          customItemFields && customItemFields.length
-            ? customItemFields
-            : undefined,
-        phone: values.phone?.trim() || undefined,
-        addressLine1: values.addressLine1.trim() || undefined,
-        city: values.city.trim() || undefined,
-        state: values.state.trim() || undefined,
-        postalCode: values.postalCode.trim() || undefined,
-        countryCode: "IN",
+      // Path A: identity portal → create brand-new organization
+      if (identityToken && !completeSetup) {
+        const data = await authApi.createOrganization({
+          organizationName: values.organizationName.trim(),
+          businessType: values.businessType,
+          businessLabel: values.businessLabel?.trim() || undefined,
+          customItemFields:
+            customItemFields && customItemFields.length
+              ? customItemFields
+              : undefined,
+          phone: values.phone?.trim() || undefined,
+          addressLine1: values.addressLine1.trim() || undefined,
+          city: values.city.trim() || undefined,
+          state: values.state.trim() || undefined,
+          postalCode: values.postalCode.trim() || undefined,
+          countryCode: "IN",
+          currencyCode: values.currencyCode || "INR",
+          locale: "en-IN",
+          fiscalYearStart: values.fiscalYearStart || undefined,
+          inventoryStartDate: values.inventoryStartDate || undefined,
+          taxId: values.taxId?.trim() || undefined,
+          storeName: values.storeName?.trim() || undefined,
+        });
+        await enterApp(data);
+        return;
+      }
+
+      // Path B: shop already provisioned (older live signup) — complete profile
+      if (!accessToken) {
+        throw new Error("Session expired — sign in again");
+      }
+
+      const addressLine = [
+        values.addressLine1.trim(),
+        values.city.trim(),
+        values.state.trim(),
+        values.postalCode.trim(),
+      ]
+        .filter(Boolean)
+        .join(", ");
+
+      await tenantsApi.updateMe({
+        name: values.organizationName.trim(),
         currencyCode: values.currencyCode || "INR",
         locale: "en-IN",
-        fiscalYearStart: values.fiscalYearStart || undefined,
-        inventoryStartDate: values.inventoryStartDate || undefined,
         taxId: values.taxId?.trim() || undefined,
-        storeName: values.storeName?.trim() || undefined,
+        settings: {
+          organizationProfile: {
+            phone: values.phone?.trim() || null,
+            addressLine1: values.addressLine1.trim(),
+            city: values.city.trim(),
+            state: values.state.trim(),
+            postalCode: values.postalCode.trim(),
+            fiscalYearStart: values.fiscalYearStart,
+            inventoryStartDate: values.inventoryStartDate,
+            completedAt: new Date().toISOString(),
+          },
+          ...(values.businessLabel?.trim()
+            ? { businessLabel: values.businessLabel.trim() }
+            : {}),
+          ...(customItemFields?.length
+            ? { customItemFields }
+            : {}),
+        },
       });
-      await enterApp(data);
+
+      await appsApi.setBusinessConfig({
+        businessType: values.businessType,
+        applyDefaultModes: true,
+        businessLabel: values.businessLabel?.trim() || undefined,
+      });
+
+      try {
+        const locs = await tenantsApi.listLocations();
+        const main = Array.isArray(locs) ? locs[0] : undefined;
+        if (main?.id) {
+          await tenantsApi.updateLocation(main.id, {
+            name: values.storeName?.trim() || main.name || "Main Store",
+            phone: values.phone?.trim() || undefined,
+            address: addressLine || undefined,
+          });
+        }
+      } catch {
+        /* location update optional on older APIs */
+      }
+
+      try {
+        const boot = await appsApi.bootstrap();
+        qc.setQueryData(["tenant-bootstrap"], boot);
+      } catch {
+        /* AppShell retries */
+      }
+
+      toast.success("Organization profile saved");
+      router.replace("/dashboard");
     } catch (e) {
       toast.error(
         e instanceof ApiError
@@ -405,84 +563,64 @@ export default function OrganizationsPage() {
     return (
       <div className="min-h-dvh bg-[#eef2f7] text-[#0b1f33]">
         {totpOverlay}
-        <div className="mx-auto grid min-h-dvh max-w-[1180px] lg:grid-cols-[minmax(300px,0.92fr)_minmax(0,1.2fr)]">
-          <aside className="relative flex flex-col overflow-hidden bg-[#0a0e14] px-6 py-8 text-[#e8edf4] sm:px-8 sm:py-10 lg:px-9 lg:py-12">
+        <div className="grid min-h-dvh w-full lg:grid-cols-[220px_minmax(0,1fr)]">
+          <aside className="relative hidden flex-col overflow-hidden bg-[#0a0e14] px-5 py-6 text-[#e8edf4] lg:flex">
             <div
-              className="pointer-events-none absolute inset-0 opacity-[0.55]"
+              className="pointer-events-none absolute inset-0 opacity-[0.45]"
               style={{
                 background:
-                  "radial-gradient(ellipse 80% 50% at 20% 0%, rgba(26,86,219,0.35), transparent 55%), radial-gradient(ellipse 60% 40% at 90% 100%, rgba(26,86,219,0.12), transparent 50%)",
+                  "radial-gradient(ellipse 80% 50% at 20% 0%, rgba(26,86,219,0.35), transparent 55%)",
               }}
             />
             <div className="relative z-10 flex h-full flex-col">
-              <motion.div
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.35 }}
-              >
-                <p className="text-[0.7rem] font-semibold tracking-[0.16em] text-[#7eb0ff] uppercase">
-                  Universal POS
-                </p>
-                <h1 className="mt-3 max-w-sm text-[1.55rem] font-bold leading-tight tracking-tight text-white sm:text-[1.75rem]">
-                  Everything you need to run commerce
-                </h1>
-                <p className="mt-2.5 max-w-sm text-[0.875rem] leading-relaxed text-[#9aa6b5]">
-                  One platform for any business — set up your organization once,
-                  then sell, stock, and report from the same workspace.
-                </p>
-              </motion.div>
-
-              <ul className="relative z-10 mt-8 flex-1 space-y-3.5">
-                {PLATFORM_HIGHLIGHTS.map((item, i) => {
+              <p className="text-[0.65rem] font-semibold tracking-[0.16em] text-[#7eb0ff] uppercase">
+                Universal POS
+              </p>
+              <h1 className="mt-2 text-[1.15rem] font-bold leading-snug tracking-tight text-white">
+                Run commerce in one workspace
+              </h1>
+              <ul className="mt-6 flex-1 space-y-3.5">
+                {PLATFORM_HIGHLIGHTS.map((item) => {
                   const Icon = item.Icon;
                   return (
-                    <motion.li
-                      key={item.title}
-                      initial={{ opacity: 0, x: -8 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ duration: 0.28, delay: 0.05 + i * 0.04 }}
-                      className="flex gap-3"
-                    >
-                      <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-md bg-[#1a56db]/25 text-[#8eb6ff] ring-1 ring-[#1a56db]/35">
+                    <li key={item.title} className="flex items-center gap-3">
+                      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-[#1a56db]/25 text-[#8eb6ff]">
                         <Icon className="h-3.5 w-3.5" strokeWidth={2} />
                       </span>
-                      <span className="min-w-0">
-                        <span className="block text-[0.875rem] font-semibold text-white">
-                          {item.title}
-                        </span>
-                        <span className="mt-0.5 block text-[0.75rem] leading-snug text-[#8b96a5]">
-                          {item.detail}
-                        </span>
+                      <span className="text-[0.875rem] font-medium text-[#e8edf4]">
+                        {item.title}
                       </span>
-                    </motion.li>
+                    </li>
                   );
                 })}
               </ul>
-
-              <p className="relative z-10 mt-8 border-t border-white/[0.08] pt-5 text-[0.75rem] text-[#7a8696]">
-                Premium trial includes inventory, billing, and reports. Switch
-                plans anytime from your shop.
+              <p className="mt-auto border-t border-white/[0.08] pt-3 text-[0.7rem] leading-snug text-[#7a8696]">
+                Same POS for any business. Templates only pre-fill extras.
               </p>
             </div>
           </aside>
 
           <main className="flex min-h-dvh flex-col bg-[#f4f6fa]">
-            <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[#e4e9f0] bg-white px-5 py-3.5 sm:px-8">
+            <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[#e4e9f0] bg-white px-4 py-2.5 sm:px-6">
               <div className="min-w-0">
                 <p className="text-[0.65rem] font-bold tracking-[0.12em] text-[#1a56db] uppercase lg:hidden">
                   Universal POS
                 </p>
-                <h2 className="text-[1.05rem] font-semibold text-[#0b1f33] sm:text-[1.15rem]">
-                  Set up your organization
+                <h2 className="text-[1rem] font-semibold text-[#0b1f33]">
+                  {completeSetup
+                    ? "Complete your organization"
+                    : "Set up your organization"}
                 </h2>
-                <p className="mt-0.5 truncate text-[0.75rem] text-[#5a6b7d]">
+                <p className="truncate text-[0.72rem] text-[#5a6b7d]">
                   {identity
                     ? `${identity.fullName} · ${identity.email}`
-                    : "Enter your business profile to get started"}
+                    : completeSetup
+                      ? "Name, address, and starting setup — then open shop"
+                      : "Enter your business profile to get started"}
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {orgs.length ? (
+                {orgs.length && !completeSetup ? (
                   <Button
                     type="button"
                     size="sm"
@@ -504,28 +642,22 @@ export default function OrganizationsPage() {
               </div>
             </header>
 
-            <div className="flex-1 overflow-y-auto px-5 py-6 sm:px-8 sm:py-8">
+            <div className="flex-1 overflow-y-auto p-3 sm:p-4">
               <motion.div
-                initial={{ opacity: 0, y: 10 }}
+                initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.32, delay: 0.06 }}
-                className="mx-auto max-w-xl rounded-xl border border-[#e4e9f0] bg-white p-5 shadow-[0_8px_30px_-18px_rgba(11,31,51,0.35)] sm:p-6"
+                transition={{ duration: 0.25 }}
+                className="min-h-full w-full rounded-xl border border-[#e4e9f0] bg-white px-4 py-3.5 shadow-[0_8px_30px_-18px_rgba(11,31,51,0.35)] sm:px-6 sm:py-4"
               >
-                <p className="text-sm text-[#5a6b7d]">
-                  Choose your business type, then enter organization and address
-                  details — like Zoho POS organization setup.
-                </p>
-
                 <form
-                  className="mt-5 grid gap-3 sm:grid-cols-2"
+                  className="mx-auto grid max-w-2xl gap-2.5 sm:grid-cols-2"
                   onSubmit={form.handleSubmit(onCreate)}
                   noValidate
                 >
                   <div className="sm:col-span-2">
-                    <Label>Business type *</Label>
-                    <p className="mt-0.5 mb-2 text-[0.72rem] text-[#8b9bb0]">
-                      One Universal POS — each type only changes config extras,
-                      not a separate app.
+                    <Label>Starting setup *</Label>
+                    <p className="mb-1.5 mt-0.5 text-[0.7rem] text-[#8b9bb0]">
+                      Closest match, or Not listed — POS still runs.
                     </p>
                     <input
                       type="hidden"
@@ -533,14 +665,15 @@ export default function OrganizationsPage() {
                         required: true,
                       })}
                     />
-                    <ul className="grid gap-2 sm:grid-cols-2">
+                    <ul className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
                       {BUSINESS_TYPES.map((bt) => {
                         const on = selectedBusinessType === bt.id;
                         const Icon = bt.Icon;
                         return (
-                          <li key={bt.id}>
+                          <li key={bt.id} className={bt.id === "other" ? "col-span-2 sm:col-span-1" : undefined}>
                             <button
                               type="button"
+                              title={bt.detail}
                               onClick={() =>
                                 form.setValue("businessType", bt.id, {
                                   shouldValidate: true,
@@ -548,111 +681,102 @@ export default function OrganizationsPage() {
                                 })
                               }
                               className={cn(
-                                "relative flex h-full w-full flex-col rounded-lg border px-3 py-2.5 pr-9 text-left transition",
+                                "flex h-9 w-full items-center gap-1.5 rounded-md border px-2 text-left transition",
                                 on
-                                  ? "border-[#1a56db] bg-[#e8eefb] shadow-[0_0_0_1px_#1a56db]"
-                                  : "border-[#d9e0ea] bg-white hover:border-[#c5d0e0]",
+                                  ? "border-[#1a56db] bg-[#e8eefb] text-[#0b1f33]"
+                                  : bt.id === "other"
+                                    ? "border-dashed border-[#c5d0e0] bg-[#fafbfc] text-[#0b1f33] hover:border-[#1a56db]/40"
+                                    : "border-[#e4e9f0] bg-white text-[#0b1f33] hover:border-[#c5d0e0]",
                               )}
                             >
-                              <span
+                              <Icon
                                 className={cn(
-                                  "absolute top-2 right-2 grid h-5 w-5 place-items-center rounded-full border text-white",
-                                  on
-                                    ? "border-[#1a56db] bg-[#1a56db]"
-                                    : "border-[#cfd8e6] bg-white",
+                                  "h-3.5 w-3.5 shrink-0",
+                                  on ? "text-[#1a56db]" : "text-[#5a6b7d]",
                                 )}
-                                aria-hidden
-                              >
-                                {on ? (
-                                  <Check
-                                    className="h-3 w-3"
-                                    strokeWidth={3}
-                                  />
-                                ) : null}
-                              </span>
-                              <span
-                                className={cn(
-                                  "mb-1.5 grid h-8 w-8 place-items-center rounded-md",
-                                  on
-                                    ? "bg-white text-[#1a56db]"
-                                    : "bg-[#f4f6fa] text-[#5a6b7d]",
-                                )}
-                              >
-                                <Icon className="h-4 w-4" />
-                              </span>
-                              <span className="text-sm font-semibold text-[#0b1f33]">
+                              />
+                              <span className="truncate text-[0.78rem] font-medium">
                                 {bt.label}
-                              </span>
-                              <span className="mt-0.5 text-[0.72rem] leading-snug text-[#5a6b7d]">
-                                {bt.detail}
                               </span>
                             </button>
                           </li>
                         );
                       })}
                     </ul>
+                    {selectedBusinessType ? (
+                      <p className="mt-1 text-[0.7rem] text-[#5a6b7d]">
+                        {
+                          BUSINESS_TYPES.find((b) => b.id === selectedBusinessType)
+                            ?.detail
+                        }
+                      </p>
+                    ) : null}
+                    <FieldError
+                      message={form.formState.errors.businessType?.message}
+                    />
 
                     {isOther ? (
-                      <div className="mt-3 rounded-lg border border-dashed border-[#c5d0e0] bg-[#fafbfc] px-3 py-2.5">
+                      <div className="mt-2 flex flex-wrap items-end gap-2">
+                        <div className="min-w-[12rem] flex-1">
+                          <Label htmlFor="business-label">Your business</Label>
+                          <Input
+                            id="business-label"
+                            className="mt-0.5 h-9"
+                            placeholder="e.g. Swimming academy"
+                            {...form.register("businessLabel")}
+                          />
+                        </div>
                         <button
                           type="button"
-                          className="text-sm font-semibold text-[#1a56db] hover:underline"
+                          className="mb-0.5 text-xs font-semibold text-[#1a56db] hover:underline"
                           onClick={() => setShowCustomFields((v) => !v)}
                         >
-                          {showCustomFields
-                            ? "− Hide custom fields"
-                            : "+ Add custom field"}
+                          {showCustomFields ? "Hide fields" : "+ Custom fields"}
                         </button>
-                        <p className="mt-0.5 text-[0.72rem] text-[#8b9bb0]">
-                          Optional — e.g. Membership tier, Session mins. Shown
-                          on New Item as extras.
-                        </p>
-                        {showCustomFields ? (
-                          <ul className="mt-2 space-y-2">
-                            {customFields.map((val, idx) => (
-                              <li
-                                key={idx}
-                                className="flex items-center gap-2"
-                              >
-                                <Input
-                                  placeholder={`Custom field ${idx + 1}`}
-                                  value={val}
-                                  onChange={(e) => {
-                                    const next = [...customFields];
-                                    next[idx] = e.target.value;
-                                    setCustomFields(next);
-                                  }}
-                                />
-                                {customFields.length > 1 ? (
-                                  <button
-                                    type="button"
-                                    className="shrink-0 rounded-md p-2 text-[#8b9bb0] hover:bg-white hover:text-[#c81e1e]"
-                                    onClick={() =>
-                                      setCustomFields((rows) =>
-                                        rows.filter((_, i) => i !== idx),
-                                      )
-                                    }
-                                    aria-label="Remove field"
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </button>
-                                ) : null}
-                              </li>
-                            ))}
-                            {customFields.length < 8 ? (
+                      </div>
+                    ) : null}
+                    {isOther && showCustomFields ? (
+                      <ul className="mt-2 space-y-1.5">
+                        {customFields.map((val, idx) => (
+                          <li key={idx} className="flex items-center gap-2">
+                            <Input
+                              className="h-9"
+                              placeholder={`Custom field ${idx + 1}`}
+                              value={val}
+                              onChange={(e) => {
+                                const next = [...customFields];
+                                next[idx] = e.target.value;
+                                setCustomFields(next);
+                              }}
+                            />
+                            {customFields.length > 1 ? (
                               <button
                                 type="button"
-                                className="text-xs font-semibold text-[#1a56db]"
+                                className="shrink-0 rounded-md p-1.5 text-[#8b9bb0] hover:bg-[#f4f6fa] hover:text-[#c81e1e]"
                                 onClick={() =>
-                                  setCustomFields((rows) => [...rows, ""])
+                                  setCustomFields((rows) =>
+                                    rows.filter((_, i) => i !== idx),
+                                  )
                                 }
+                                aria-label="Remove field"
                               >
-                                + Another field
+                                <Trash2 className="h-4 w-4" />
                               </button>
                             ) : null}
-                          </ul>
+                          </li>
+                        ))}
+                        {customFields.length < 8 ? (
+                          <button
+                            type="button"
+                            className="text-xs font-semibold text-[#1a56db]"
+                            onClick={() =>
+                              setCustomFields((rows) => [...rows, ""])
+                            }
+                          >
+                            + Another field
+                          </button>
                         ) : null}
-                      </div>
+                      </ul>
                     ) : null}
                   </div>
 
@@ -797,11 +921,17 @@ export default function OrganizationsPage() {
                     />
                   </div>
 
-                  <div className="flex flex-wrap gap-2 sm:col-span-2 sm:pt-2">
+                  <div className="flex flex-wrap gap-2 sm:col-span-2 sm:pt-0.5">
                     <Button type="submit" disabled={creating}>
-                      {creating ? "Creating…" : "Get started"}
+                      {creating
+                        ? completeSetup
+                          ? "Saving…"
+                          : "Creating…"
+                        : completeSetup
+                          ? "Save & open shop"
+                          : "Get started"}
                     </Button>
-                    {orgs.length ? (
+                    {orgs.length && !completeSetup ? (
                       <Button
                         type="button"
                         variant="secondary"

@@ -124,6 +124,8 @@ export const authApi = {
     businessType: string;
     /** Other profile: custom item field labels → business_configs.item_fields */
     customItemFields?: Array<{ label: string }>;
+    /** When type is Other / unlisted — what they call the business */
+    businessLabel?: string;
     phone?: string;
     addressLine1?: string;
     city?: string;
@@ -1277,6 +1279,104 @@ export const ordersApi = {
   removeItem(orderId: string, itemId: string) {
     return apiRequest(`/orders/${orderId}/items/${itemId}`, {
       method: "DELETE",
+      token: token(),
+    });
+  },
+};
+
+export const resourcesApi = {
+  list(params?: { page?: number; limit?: number; type?: string; q?: string }) {
+    const qs = new URLSearchParams();
+    if (params?.page) qs.set("page", String(params.page));
+    if (params?.limit) qs.set("limit", String(params.limit));
+    if (params?.type) qs.set("type", params.type);
+    if (params?.q) qs.set("q", params.q);
+    const q = qs.toString();
+    return apiRequest<{
+      data: Array<{
+        id: string;
+        name: string;
+        type: string;
+        capacity: number;
+        status: string;
+        locationId?: string | null;
+      }>;
+      meta: { page: number; limit: number; total: number };
+    }>(`/resources${q ? `?${q}` : ""}`, { token: token() });
+  },
+  create(body: {
+    name: string;
+    type: string;
+    capacity?: number;
+    locationId?: string;
+    meta?: Record<string, unknown>;
+  }) {
+    return apiRequest<{
+      id: string;
+      name: string;
+      type: string;
+      capacity: number;
+      status: string;
+    }>("/resources", { method: "POST", body, token: token() });
+  },
+};
+
+export const jobsApi = {
+  listJobs(params?: {
+    page?: number;
+    limit?: number;
+    status?: string;
+    customerId?: string;
+  }) {
+    const qs = new URLSearchParams();
+    if (params?.page) qs.set("page", String(params.page));
+    if (params?.limit) qs.set("limit", String(params.limit));
+    if (params?.status) qs.set("status", params.status);
+    if (params?.customerId) qs.set("customerId", params.customerId);
+    const q = qs.toString();
+    return apiRequest<{
+      data: Array<{
+        id: string;
+        title: string;
+        status: string;
+        estimatedCost?: number | null;
+        customer?: { fullName: string; phone?: string };
+        asset?: { id: string; name: string; identifier?: string | null };
+      }>;
+      meta: { page: number; limit: number; total: number };
+    }>(`/jobs${q ? `?${q}` : ""}`, { token: token() });
+  },
+  createAsset(body: {
+    customerId: string;
+    name: string;
+    assetType: string;
+    identifier?: string;
+    meta?: Record<string, unknown>;
+  }) {
+    return apiRequest<{
+      id: string;
+      name: string;
+      assetType: string;
+      identifier?: string | null;
+    }>("/assets", { method: "POST", body, token: token() });
+  },
+  createJob(body: {
+    customerId: string;
+    title: string;
+    assetId?: string;
+    problem?: string;
+    estimatedCost?: number;
+    lines?: Array<{
+      description: string;
+      kind?: string;
+      qty?: number;
+      unitPrice?: number;
+      productId?: string;
+    }>;
+  }) {
+    return apiRequest<{ id: string; title: string; status: string }>("/jobs", {
+      method: "POST",
+      body,
       token: token(),
     });
   },
@@ -2995,16 +3095,58 @@ export const appsApi = {
   setBusinessConfig(body: {
     businessType: string;
     applyDefaultModes?: boolean;
+    applyDefaultCapabilities?: boolean;
+    businessLabel?: string;
   }) {
     return apiRequest<{
       businessType: string;
       config: Record<string, unknown>;
       commerceModes: string[];
+      capabilities?: string[];
     }>("/tenants/me/business-config", {
       method: "POST",
       body,
       token: token(),
     });
+  },
+  setCapabilities(body: { capabilities: string[] }) {
+    return apiRequest<{
+      capabilities: string[];
+      screens: string[];
+    }>("/tenants/me/capabilities", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  recommendSetup(body: {
+    businessType?: string;
+    sells?: string[];
+    needs?: string[];
+  }) {
+    return apiRequest<{
+      businessType: string;
+      label: string;
+      commerceModes: string[];
+      capabilities: string[];
+      screens: string[];
+      billingStyle: string;
+      gettingStartedHints: string[];
+    }>("/commerce/recommend-setup", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  listCapabilities() {
+    return apiRequest<{
+      capabilities: Array<{
+        code: string;
+        label: string;
+        description: string;
+      }>;
+      codes: string[];
+    }>("/commerce/capabilities", { token: token() });
   },
   createCatalogItem(body: {
     mode: string;

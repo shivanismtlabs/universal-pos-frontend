@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { Lock, ShieldCheck, X } from "lucide-react";
 import { authApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useAuthStore } from "@/lib/auth-store";
@@ -190,63 +191,28 @@ export function StationPinLock({
 
   if (!pinEnabled) {
     return (
-      <div className="fixed inset-0 z-[80] flex items-center justify-center bg-[#0b1f33]/70 p-4 backdrop-blur-sm">
-        <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
-          <h2 className="text-lg font-bold text-[#0b1f33]">PIN switch off</h2>
-          <p className="mt-2 text-sm text-[#5a6b7d]">
-            This shop has PIN staff-switch disabled. Sign in again with email
-            and password.
-          </p>
-          <Button
-            className="mt-4 w-full"
-            onClick={() => {
-              clear();
-              window.location.href = "/login";
-            }}
-          >
-            Full sign-in
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-[#0b1f33]/70 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-2xl border border-[#d9e0ea] bg-[#f4f6fa] p-5 shadow-xl sm:p-6">
-        <div className="mb-4 text-center">
-          <p className="text-[0.7rem] font-semibold uppercase tracking-wide text-[#5a6b7d]">
-            Counter locked
-          </p>
-          <h2 className="mt-1 text-xl font-bold text-[#0b1f33]">
-            {forgotOpen ? "Forgot PIN" : "Switch staff"}
-          </h2>
-          <p className="mt-1 text-sm text-[#5a6b7d]">
-            {forgotOpen
-              ? "We’ll email a 6-digit OTP to your staff account email."
-              : "Pick your name, then enter your PIN. Cart stays on screen."}
-          </p>
-          {stationUser ? (
-            <p className="mt-2 text-xs text-[#5a6b7d]">
-              Station unlocked by {stationUser.fullName}
-            </p>
-          ) : null}
-        </div>
-
-        {!locationId ? (
-          <p className="text-center text-sm text-[#c81e1e]">
-            No store location available for PIN switch.
-          </p>
-        ) : staffQ.isLoading ? (
-          <p className="text-center text-sm text-[#5a6b7d]">Loading staff…</p>
-        ) : staff.length === 0 ? (
-          <div className="space-y-3 text-center">
+      <div className="fixed inset-0 z-[80] flex items-center justify-center bg-[#0b1f33]/75 p-4 backdrop-blur-[2px]">
+        <div className="w-full max-w-sm overflow-hidden rounded-2xl border border-[#d9e0ea] bg-white shadow-[0_24px_64px_rgba(11,31,51,0.28)]">
+          <div className="border-b border-[#e8eef5] bg-[#f8fafc] px-5 py-4">
+            <div className="flex items-center gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#e8eefb] text-[#1a56db]">
+                <Lock className="h-5 w-5" />
+              </span>
+              <div>
+                <h2 className="text-base font-semibold text-[#0b1f33]">
+                  PIN switch off
+                </h2>
+                <p className="text-xs text-[#5a6b7d]">Staff PIN is disabled</p>
+              </div>
+            </div>
+          </div>
+          <div className="space-y-4 p-5">
             <p className="text-sm text-[#5a6b7d]">
-              No staff with a PIN at this location yet. Ask a manager to set PINs
-              under Staff.
+              This shop has PIN staff-switch disabled. Sign in again with email
+              and password.
             </p>
             <Button
-              variant="secondary"
+              className="w-full"
               onClick={() => {
                 clear();
                 window.location.href = "/login";
@@ -255,150 +221,263 @@ export function StationPinLock({
               Full sign-in
             </Button>
           </div>
-        ) : forgotOpen ? (
-          <form onSubmit={resetPinWithOtp} className="space-y-3">
-            <div className="rounded-xl border border-[#d9e0ea] bg-white px-3 py-2.5">
-              <p className="text-xs text-[#5a6b7d]">Resetting PIN for</p>
-              <p className="font-semibold text-[#0b1f33]">
-                {selected?.fullName ?? "Select staff"}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-[#0b1f33]/75 p-4 backdrop-blur-[2px]">
+      <div className="w-full max-w-2xl overflow-hidden rounded-2xl border border-[#d9e0ea] bg-white shadow-[0_24px_64px_rgba(11,31,51,0.28)]">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-3 border-b border-[#e8eef5] bg-[#f8fafc] px-5 py-4 sm:px-6">
+          <div className="flex items-center gap-3">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#1a56db] text-white shadow-[0_2px_8px_rgba(26,86,219,0.35)]">
+              {forgotOpen ? (
+                <ShieldCheck className="h-5 w-5" />
+              ) : (
+                <Lock className="h-5 w-5" />
+              )}
+            </span>
+            <div>
+              <p className="text-[0.65rem] font-semibold uppercase tracking-[0.08em] text-[#5a6b7d]">
+                Universal POS · Counter
               </p>
-              {maskedEmail ? (
-                <p className="text-xs text-[#5a6b7d]">Email: {maskedEmail}</p>
-              ) : null}
-              {devCode ? (
-                <p className="text-xs text-[#1a56db]">Dev OTP: {devCode}</p>
-              ) : null}
+              <h2 className="text-lg font-semibold tracking-tight text-[#0b1f33]">
+                {forgotOpen ? "Reset PIN" : "Switch staff"}
+              </h2>
+              <p className="mt-0.5 text-sm text-[#5a6b7d]">
+                {forgotOpen
+                  ? "We’ll email a 6-digit OTP to your staff account."
+                  : "Select your name, then enter your PIN. Cart stays on screen."}
+              </p>
             </div>
-            {!otpSent ? (
-              <Button
-                type="button"
-                className="w-full"
-                disabled={forgotBusy || !selectedId}
-                onClick={() => void sendPinOtp()}
-              >
-                {forgotBusy ? "Sending…" : "Send OTP"}
-              </Button>
-            ) : (
-              <>
-                <div className="space-y-1">
-                  <Label htmlFor="pin-otp">6-digit OTP</Label>
-                  <Input
-                    id="pin-otp"
-                    inputMode="numeric"
-                    maxLength={6}
-                    value={otp}
-                    onChange={(ev) =>
-                      setOtp(ev.target.value.replace(/\D/g, "").slice(0, 6))
-                    }
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="pin-new">New PIN (4–6 digits)</Label>
-                  <Input
-                    id="pin-new"
-                    type="password"
-                    inputMode="numeric"
-                    maxLength={6}
-                    value={newPin}
-                    onChange={(ev) =>
-                      setNewPin(ev.target.value.replace(/\D/g, "").slice(0, 6))
-                    }
-                  />
-                </div>
-                <Button type="submit" className="w-full" disabled={forgotBusy}>
-                  {forgotBusy ? "Saving…" : "Set new PIN"}
-                </Button>
-                <button
-                  type="button"
-                  className="w-full text-center text-xs font-medium text-[#1a56db] hover:underline"
-                  disabled={forgotBusy}
-                  onClick={() => void sendPinOtp()}
-                >
-                  Resend OTP
-                </button>
-              </>
-            )}
-            <button
-              type="button"
-              className="w-full text-center text-xs font-medium text-[#5a6b7d] hover:underline"
-              onClick={() => {
-                setForgotOpen(false);
-                setOtpSent(false);
-                setOtp("");
-                setNewPin("");
-              }}
-            >
-              Back to PIN unlock
-            </button>
-          </form>
-        ) : (
-          <>
-            <ul className="mb-4 max-h-40 space-y-1.5 overflow-y-auto">
-              {staff.map((s) => {
-                const initial = s.fullName.trim().charAt(0).toUpperCase() || "?";
-                const active = s.id === selectedId;
-                return (
-                  <li key={s.id}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedId(s.id);
-                        setError(null);
-                      }}
-                      className={cn(
-                        "flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition",
-                        active
-                          ? "border-[#1a56db] bg-[#e8eefb]"
-                          : "border-[#d9e0ea] bg-white hover:bg-white/80",
-                      )}
-                    >
-                      <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#0b1f33] text-sm font-bold text-white">
-                        {initial}
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block truncate font-semibold text-[#0b1f33]">
-                          {s.fullName}
-                        </span>
-                        <span className="block truncate text-xs text-[#5a6b7d]">
-                          {(s.roles ?? []).join(", ") || "staff"}
-                        </span>
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-
-            <div className="flex justify-center">
-              <PinPad
-                error={error}
-                remainingAttempts={
-                  fails >= 3 ? Math.max(0, 5 - fails) : null
-                }
-                onSubmit={onPin}
-                onCancel={dismissible ? onDismiss : undefined}
-              />
-            </div>
-
-            <div className="mt-3 text-center">
+          </div>
+          <div className="flex shrink-0 items-start gap-2">
+            {stationUser ? (
+              <p className="hidden rounded-lg border border-[#e4e9f0] bg-white px-2.5 py-1.5 text-right text-[0.7rem] text-[#5a6b7d] sm:block">
+                Station by
+                <span className="mt-0.5 block font-medium text-[#0b1f33]">
+                  {stationUser.fullName}
+                </span>
+              </p>
+            ) : null}
+            {dismissible ? (
               <button
                 type="button"
-                className="text-xs font-medium text-[#1a56db] hover:underline"
+                onClick={onDismiss}
+                className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#e4e9f0] bg-white text-[#5a6b7d] transition hover:bg-[#eef3fb] hover:text-[#0b1f33]"
+                aria-label="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="p-5 sm:p-6">
+          {!locationId ? (
+            <p className="text-center text-sm text-[#c81e1e]">
+              No store location available for PIN switch.
+            </p>
+          ) : staffQ.isLoading ? (
+            <p className="py-10 text-center text-sm text-[#5a6b7d]">
+              Loading staff…
+            </p>
+          ) : staff.length === 0 ? (
+            <div className="space-y-3 py-6 text-center">
+              <p className="text-sm text-[#5a6b7d]">
+                No staff with a PIN at this location yet. Ask a manager to set
+                PINs under Staff.
+              </p>
+              <Button
+                variant="secondary"
                 onClick={() => {
-                  if (!selectedId) {
-                    toast.error("Select your name first");
-                    return;
-                  }
-                  setForgotOpen(true);
+                  clear();
+                  window.location.href = "/login";
                 }}
               >
-                Forgot PIN?
-              </button>
+                Full sign-in
+              </Button>
             </div>
-          </>
-        )}
+          ) : forgotOpen ? (
+            <form
+              onSubmit={resetPinWithOtp}
+              className="mx-auto max-w-sm space-y-3"
+            >
+              <div className="rounded-xl border border-[#e4e9f0] bg-[#f8fafc] px-3.5 py-3">
+                <p className="text-xs text-[#5a6b7d]">Resetting PIN for</p>
+                <p className="font-semibold text-[#0b1f33]">
+                  {selected?.fullName ?? "Select staff"}
+                </p>
+                {maskedEmail ? (
+                  <p className="text-xs text-[#5a6b7d]">Email: {maskedEmail}</p>
+                ) : null}
+                {devCode ? (
+                  <p className="text-xs font-medium text-[#1a56db]">
+                    Dev OTP: {devCode}
+                  </p>
+                ) : null}
+              </div>
+              {!otpSent ? (
+                <Button
+                  type="button"
+                  className="w-full"
+                  disabled={forgotBusy || !selectedId}
+                  onClick={() => void sendPinOtp()}
+                >
+                  {forgotBusy ? "Sending…" : "Send OTP"}
+                </Button>
+              ) : (
+                <>
+                  <div className="space-y-1">
+                    <Label htmlFor="pin-otp">6-digit OTP</Label>
+                    <Input
+                      id="pin-otp"
+                      inputMode="numeric"
+                      maxLength={6}
+                      value={otp}
+                      onChange={(ev) =>
+                        setOtp(ev.target.value.replace(/\D/g, "").slice(0, 6))
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="pin-new">New PIN (4–6 digits)</Label>
+                    <Input
+                      id="pin-new"
+                      type="password"
+                      inputMode="numeric"
+                      maxLength={6}
+                      value={newPin}
+                      onChange={(ev) =>
+                        setNewPin(
+                          ev.target.value.replace(/\D/g, "").slice(0, 6),
+                        )
+                      }
+                    />
+                  </div>
+                  <Button type="submit" className="w-full" disabled={forgotBusy}>
+                    {forgotBusy ? "Saving…" : "Set new PIN"}
+                  </Button>
+                  <button
+                    type="button"
+                    className="w-full text-center text-xs font-medium text-[#1a56db] hover:underline"
+                    disabled={forgotBusy}
+                    onClick={() => void sendPinOtp()}
+                  >
+                    Resend OTP
+                  </button>
+                </>
+              )}
+              <button
+                type="button"
+                className="w-full text-center text-xs font-medium text-[#5a6b7d] hover:underline"
+                onClick={() => {
+                  setForgotOpen(false);
+                  setOtpSent(false);
+                  setOtp("");
+                  setNewPin("");
+                }}
+              >
+                Back to PIN unlock
+              </button>
+            </form>
+          ) : (
+            <div className="grid gap-5 sm:grid-cols-[minmax(0,1fr)_minmax(260px,300px)] sm:gap-6">
+              {/* Staff list */}
+              <div>
+                <p className="mb-2 text-[0.7rem] font-semibold uppercase tracking-[0.06em] text-[#5a6b7d]">
+                  Staff at this counter
+                </p>
+                <ul className="max-h-56 space-y-1.5 overflow-y-auto pr-0.5 sm:max-h-[320px]">
+                  {staff.map((s) => {
+                    const initial =
+                      s.fullName.trim().charAt(0).toUpperCase() || "?";
+                    const active = s.id === selectedId;
+                    return (
+                      <li key={s.id}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedId(s.id);
+                            setError(null);
+                          }}
+                          className={cn(
+                            "flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition",
+                            active
+                              ? "border-[#1a56db] bg-[#e8eefb] shadow-[0_0_0_1px_#1a56db]"
+                              : "border-[#e4e9f0] bg-white hover:border-[#c5d0e0] hover:bg-[#f8fafc]",
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              "flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold",
+                              active
+                                ? "bg-[#1a56db] text-white"
+                                : "bg-[#0b1f33] text-white",
+                            )}
+                          >
+                            {initial}
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block truncate font-semibold text-[#0b1f33]">
+                              {s.fullName}
+                            </span>
+                            <span className="block truncate text-xs text-[#5a6b7d]">
+                              {(s.roles ?? []).join(", ") || "staff"}
+                            </span>
+                          </span>
+                          {active ? (
+                            <span className="ml-auto shrink-0 text-[0.65rem] font-semibold uppercase tracking-wide text-[#1a56db]">
+                              Selected
+                            </span>
+                          ) : null}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
 
-        <div className="mt-4 flex justify-center">
+              {/* PIN pad panel */}
+              <div className="rounded-xl border border-[#e4e9f0] bg-[#f8fafc] p-4 sm:p-5">
+                <div className="mb-3 text-center">
+                  <p className="text-xs text-[#5a6b7d]">Signing in as</p>
+                  <p className="truncate text-sm font-semibold text-[#0b1f33]">
+                    {selected?.fullName ?? "Select staff"}
+                  </p>
+                </div>
+                <div className="flex justify-center">
+                  <PinPad
+                    error={error}
+                    remainingAttempts={
+                      fails >= 3 ? Math.max(0, 5 - fails) : null
+                    }
+                    onSubmit={onPin}
+                  />
+                </div>
+                <div className="mt-3 text-center">
+                  <button
+                    type="button"
+                    className="text-xs font-medium text-[#1a56db] hover:underline"
+                    onClick={() => {
+                      if (!selectedId) {
+                        toast.error("Select your name first");
+                        return;
+                      }
+                      setForgotOpen(true);
+                    }}
+                  >
+                    Forgot PIN?
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-center border-t border-[#e8eef5] bg-[#f8fafc] px-5 py-3">
           <button
             type="button"
             className="text-xs font-medium text-[#5a6b7d] underline-offset-2 hover:text-[#0b1f33] hover:underline"

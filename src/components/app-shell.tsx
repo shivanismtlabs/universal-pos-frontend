@@ -76,6 +76,8 @@ type NavLeaf = {
   icon: LucideIcon;
   module?: string;
   commerce?: string;
+  /** Capability code — prefer over businessType gates */
+  capability?: string;
   /** Zoho nested folder under secondary panel (e.g. Business → Profile) */
   folder?: string;
 };
@@ -257,7 +259,28 @@ const NAV_GROUPS: NavGroup[] = [
         label: "Appointments",
         icon: CalendarDays,
         module: "appointments",
+        capability: "BOOKING",
         commerce: "service",
+      },
+      {
+        href: "/resources",
+        label: "Resources",
+        icon: LayoutGrid,
+        module: "resources",
+        capability: "RESOURCE",
+      },
+      {
+        href: "/jobs",
+        label: "Jobs",
+        icon: ClipboardList,
+        module: "jobs",
+        capability: "REPAIR_JOB",
+      },
+      {
+        href: "/customers?tab=memberships",
+        label: "Memberships",
+        icon: TicketPercent,
+        capability: "MEMBERSHIP",
       },
     ],
   },
@@ -474,9 +497,11 @@ function leafAllowed(
   roles: string[],
   hasModule: (code: string) => boolean,
   hasMode: (code: string) => boolean,
+  hasCapability: (code: string) => boolean,
 ) {
   if (item.module && !hasModule(item.module)) return false;
   if (item.commerce && !hasMode(item.commerce)) return false;
+  if (item.capability && !hasCapability(item.capability)) return false;
   const path = hrefPath(item.href);
   const allowed = ROUTE_ROLES[path as keyof typeof ROUTE_ROLES];
   if (!allowed) return true;
@@ -565,6 +590,7 @@ function SidebarBody({
   productName,
   hasModule,
   hasMode,
+  hasCapability,
 }: {
   onNavigate?: () => void;
   onLogout: () => void;
@@ -576,6 +602,7 @@ function SidebarBody({
   tagline: string;
   hasModule: (code: string) => boolean;
   hasMode: (code: string) => boolean;
+  hasCapability: (code: string) => boolean;
   commerceModes: string[];
   modeLabel: string;
 }) {
@@ -588,17 +615,18 @@ function SidebarBody({
   const groups = useMemo(() => {
     return NAV_GROUPS.map((g) => {
       const children = (g.children ?? []).filter((c) =>
-        leafAllowed(c, roles, hasModule, hasMode),
+        leafAllowed(c, roles, hasModule, hasMode, hasCapability),
       );
       if (g.href) {
         const leaf: NavLeaf = { href: g.href, label: g.label, icon: g.icon };
-        if (!leafAllowed(leaf, roles, hasModule, hasMode)) return null;
+        if (!leafAllowed(leaf, roles, hasModule, hasMode, hasCapability))
+          return null;
         return { ...g, children: [] as NavLeaf[] };
       }
       if (!children.length) return null;
       return { ...g, children };
     }).filter(Boolean) as Array<NavGroup & { children: NavLeaf[] }>;
-  }, [roles, hasModule, hasMode]);
+  }, [roles, hasModule, hasMode, hasCapability]);
 
   const pathGroupId = useMemo(
     () => groupActiveFromPath(pathname, groups),
@@ -1018,6 +1046,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     tagline,
     hasModule,
     hasMode,
+    hasCapability,
     commerceModes,
     isLoading,
     isError,
@@ -1137,11 +1166,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       router.replace("/dashboard");
       return;
     }
+    if (item?.capability && !hasCapability(item.capability)) {
+      toast.message("Not enabled for this shop’s capabilities");
+      router.replace("/dashboard");
+      return;
+    }
     if (item?.commerce && !hasMode(item.commerce)) {
       toast.message("Not enabled for this shop’s commerce modes");
       router.replace("/dashboard");
     }
-  }, [pathname, roles, permissions, router, hasModule, hasMode, isLoading, pinLocked]);
+  }, [
+    pathname,
+    roles,
+    permissions,
+    router,
+    hasModule,
+    hasMode,
+    hasCapability,
+    isLoading,
+    pinLocked,
+  ]);
 
   useEffect(() => {
     const html = document.documentElement;
@@ -1220,6 +1264,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     tagline,
     hasModule,
     hasMode,
+    hasCapability,
     commerceModes,
     modeLabel,
   };

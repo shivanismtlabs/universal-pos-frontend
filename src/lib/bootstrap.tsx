@@ -48,6 +48,9 @@ type BootstrapContextValue = {
   hasScreen: (screen: string) => boolean;
   requireCustomerOnBill: boolean;
   allowParkCart: boolean;
+  /** Tenant capability gate — prefer over businessType */
+  hasCapability: (code: string) => boolean;
+  capabilities: string[];
 };
 
 const BootstrapContext = createContext<BootstrapContextValue | null>(null);
@@ -125,6 +128,21 @@ export function BootstrapProvider({ children }: { children: ReactNode }) {
     (screen: string) => screenEnabled(businessConfig, screen),
     [businessConfig],
   );
+  const capabilities = useMemo(
+    () =>
+      (data?.capabilities?.enabled?.length
+        ? data.capabilities.enabled
+        : data?.business?.capabilities) ?? [],
+    [data?.capabilities?.enabled, data?.business?.capabilities],
+  );
+  const hasCapability = useCallback(
+    (code: string) =>
+      capabilities.includes(code) ||
+      // Soft fallback while tenants migrate: screen + module already gate many flows
+      (code === "BOOKING" && hasMode("service")) ||
+      (code === "INVENTORY" && hasMode("sale")),
+    [capabilities, hasMode],
+  );
   const requireCustomerOnBill = billingRequiresCustomer(businessConfig);
   const allowParkCart = billingAllowsPark(businessConfig);
 
@@ -159,6 +177,8 @@ export function BootstrapProvider({ children }: { children: ReactNode }) {
       hasScreen,
       requireCustomerOnBill,
       allowParkCart,
+      hasCapability,
+      capabilities,
     }),
     [
       data,
@@ -184,6 +204,8 @@ export function BootstrapProvider({ children }: { children: ReactNode }) {
       hasScreen,
       requireCustomerOnBill,
       allowParkCart,
+      hasCapability,
+      capabilities,
     ],
   );
 

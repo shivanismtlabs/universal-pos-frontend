@@ -72,11 +72,31 @@ export default function NotificationsPage() {
             Notification center
           </h1>
           <p className="mt-0.5 text-[0.8rem] text-[#5a6b7d]">
-            {inbox.data?.unreadCount ?? 0} unread · in-app popups
-            {canUseOsNotifications() ? " + browser push" : " (browser OS push needs HTTPS)"}
+            {inbox.data?.unreadCount ?? 0} unread · in-app popup + toast
+            {canUseOsNotifications()
+              ? " · browser OS push available"
+              : " · Firebase/OS popup needs HTTPS (not http://IP)"}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              window.dispatchEvent(
+                new CustomEvent("upos:notify-test", {
+                  detail: {
+                    title: "Test notification",
+                    body: "Agar yeh popup / toast dikhe to in-app alerts OK hain.",
+                    href: "/notifications",
+                  },
+                }),
+              );
+            }}
+          >
+            Test popup
+          </Button>
           {isFirebaseWebConfigured() ? (
             <Button
               type="button"

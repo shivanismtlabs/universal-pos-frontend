@@ -13,8 +13,9 @@ type PinPadProps = {
   /** Show remaining attempts only when low (≤2) */
   remainingAttempts?: number | null;
   onSubmit: (pin: string) => void | Promise<void>;
-  onCancel?: () => void;
   className?: string;
+  /** Primary action label when PIN length ≥ 4 */
+  submitLabel?: string;
 };
 
 export function PinPad({
@@ -23,8 +24,8 @@ export function PinPad({
   error,
   remainingAttempts,
   onSubmit,
-  onCancel,
   className,
+  submitLabel = "Unlock",
 }: PinPadProps) {
   const [pin, setPin] = useState("");
   const [shake, setShake] = useState(false);
@@ -67,23 +68,26 @@ export function PinPad({
   }
 
   const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"];
+  const slots = Math.max(pin.length, 4);
 
   return (
-    <div className={cn("w-full max-w-[280px]", className)}>
+    <div className={cn("w-full max-w-[300px]", className)}>
       <motion.div
-        animate={shake ? { x: [0, -6, 6, -4, 4, 0] } : { x: 0 }}
+        animate={shake ? { x: [0, -7, 7, -5, 5, 0] } : { x: 0 }}
         transition={{ duration: 0.4 }}
-        className={cn(
-          "mb-4 flex h-12 items-center justify-center gap-2 rounded-xl border border-[#cfd8e6] bg-white px-3 shadow-[inset_0_1px_2px_rgba(11,31,51,0.06)]",
-          error && "border-[#c81e1e]",
-        )}
+        className="mb-3 flex items-center justify-center gap-3 py-1"
+        aria-live="polite"
       >
-        {Array.from({ length: Math.max(pin.length, 4) }).map((_, i) => (
+        {Array.from({ length: slots }).map((_, i) => (
           <span
             key={i}
             className={cn(
-              "h-2.5 w-2.5 rounded-full",
-              i < pin.length ? "bg-[#0b1f33]" : "bg-[#d9e0ea]",
+              "h-3 w-3 rounded-full border-2 transition-colors duration-150",
+              i < pin.length
+                ? error
+                  ? "border-[#c81e1e] bg-[#c81e1e]"
+                  : "border-[#1a56db] bg-[#1a56db]"
+                : "border-[#c5d0e0] bg-transparent",
             )}
           />
         ))}
@@ -104,7 +108,7 @@ export function PinPad({
         </p>
       )}
 
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-3 gap-2.5">
         {keys.map((k, idx) => {
           if (k === "") {
             return <div key={`empty-${idx}`} />;
@@ -116,7 +120,7 @@ export function PinPad({
                 type="button"
                 disabled={busy || disabled}
                 onClick={backspace}
-                className="flex h-14 items-center justify-center rounded-xl border border-[#cfd8e6] bg-white text-[#0b1f33] shadow-sm transition hover:bg-[#e8eefb] disabled:opacity-50"
+                className="flex h-14 items-center justify-center rounded-xl border border-[#d5dde8] bg-[#f8fafc] text-[#0b1f33] transition hover:border-[#c5d0e0] hover:bg-[#eef3fb] active:scale-[0.97] disabled:opacity-50"
                 aria-label="Backspace"
               >
                 <Delete className="h-5 w-5" />
@@ -129,7 +133,7 @@ export function PinPad({
               type="button"
               disabled={busy || disabled}
               onClick={() => press(k)}
-              className="flex h-14 items-center justify-center rounded-xl border border-[#cfd8e6] bg-white text-xl font-semibold text-[#0b1f33] shadow-sm transition hover:bg-[#e8eefb] active:bg-[#d9e0ea] disabled:opacity-50"
+              className="flex h-14 items-center justify-center rounded-xl border border-[#d5dde8] bg-white text-[1.35rem] font-semibold tabular-nums text-[#0b1f33] shadow-[0_1px_0_rgba(11,31,51,0.04)] transition hover:border-[#1a56db]/35 hover:bg-[#f0f4fc] active:scale-[0.97] active:bg-[#e8eefb] disabled:opacity-50"
             >
               {k}
             </button>
@@ -137,30 +141,16 @@ export function PinPad({
         })}
       </div>
 
-      <div className="mt-3 flex gap-2">
-        {pin.length >= 4 ? (
-          <Button
-            type="button"
-            className="h-11 flex-1"
-            disabled={busy || disabled}
-            onClick={() => void commit(pin)}
-          >
-            {busy ? "Checking…" : "Unlock"}
-          </Button>
-        ) : null}
-        {onCancel ? (
-          <Button
-            type="button"
-            variant="secondary"
-            className="h-11 flex-1"
-            disabled={busy}
-            onClick={onCancel}
-          >
-            Cancel
-          </Button>
-        ) : null}
-      </div>
-
+      {pin.length >= 4 ? (
+        <Button
+          type="button"
+          className="mt-3.5 h-11 w-full"
+          disabled={busy || disabled}
+          onClick={() => void commit(pin)}
+        >
+          {busy ? "Checking…" : submitLabel}
+        </Button>
+      ) : null}
     </div>
   );
 }

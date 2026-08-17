@@ -61,6 +61,7 @@ export type BootstrapBusiness = {
   itemMetaFields: MetaFieldDef[];
   orderMetaFields: MetaFieldDef[];
   customerMetaFields: MetaFieldDef[];
+  capabilities?: string[];
 };
 
 export function fieldsForEntity(

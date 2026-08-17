@@ -62,6 +62,13 @@ export type TenantBootstrap = {
     offlinePos?: boolean;
     whatsapp?: boolean;
     loyalty?: boolean;
+    enabled?: string[];
+    screens?: string[];
+    catalog?: Array<{
+      code: string;
+      label: string;
+      description: string;
+    }>;
   };
   commerce?: {
     setupComplete?: boolean;

@@ -763,39 +763,85 @@ export default function RetailPosWorkstation({
 
       const payAmt = chargeAmount;
       const settleMethod = payMethod;
-      const result = await posApi.saleCheckout({
+      const idempotencyKey = newIdempotencyKey("sale");
+      const basePayment: {
+        method: typeof settleMethod;
+        amount: number;
+        idempotencyKey: string;
+        giftCardCode?: string;
+        bankAccountName?: string;
+        bankAccountNumber?: string;
+        bankIfsc?: string;
+        bankName?: string;
+        bankReference?: string;
+        emiTenureMonths?: number;
+        emiProvider?: string;
+        emiReference?: string;
+      } = {
+        method: settleMethod,
+        amount: payAmt,
+        idempotencyKey,
+        ...(payMethod === "gift_card"
+          ? { giftCardCode: giftCardCode.trim() }
+          : {}),
+        ...(payMethod === "bank_transfer"
+          ? {
+              bankAccountName: bankAccountName.trim(),
+              bankAccountNumber: bankAccountNumber.trim(),
+              bankIfsc: bankIfsc.trim() || undefined,
+              bankName: bankName.trim() || undefined,
+              bankReference: bankReference.trim(),
+            }
+          : {}),
+        ...(payMethod === "emi"
+          ? {
+              emiTenureMonths: Number(emiTenureMonths),
+              emiProvider: emiProvider.trim(),
+              emiReference: emiReference.trim() || undefined,
+              // Also map onto bank* so older APIs (pre-EMI DTO) still accept the payload
+              bankName: emiProvider.trim(),
+              bankReference:
+                emiReference.trim() ||
+                `EMI${Number(emiTenureMonths)}m`,
+            }
+          : {}),
+      };
+
+      const checkoutBody = {
         ...cartPayload,
         ...checkoutExtras,
-        payments: [
-          {
-            method: settleMethod,
-            amount: payAmt,
-            idempotencyKey: newIdempotencyKey("sale"),
-            ...(payMethod === "gift_card"
-              ? { giftCardCode: giftCardCode.trim() }
-              : {}),
-            ...(payMethod === "bank_transfer"
-              ? {
-                  bankAccountName: bankAccountName.trim(),
-                  bankAccountNumber: bankAccountNumber.trim(),
-                  bankIfsc: bankIfsc.trim() || undefined,
-                  bankName: bankName.trim() || undefined,
-                  bankReference: bankReference.trim(),
-                }
-              : {}),
-            ...(payMethod === "emi"
-              ? {
-                  emiTenureMonths: Number(emiTenureMonths),
-                  emiProvider: emiProvider.trim(),
-                  emiReference: emiReference.trim() || undefined,
-                }
-              : {}),
-          },
-        ],
+        payments: [basePayment],
         ...(payMethod === "cash"
           ? { cashTendered: tenderedNum > 0 ? tenderedNum : payAmt }
           : {}),
-      });
+      };
+
+      let result;
+      try {
+        result = await posApi.saleCheckout(checkoutBody);
+      } catch (firstErr) {
+        const msg =
+          firstErr instanceof ApiError
+            ? firstErr.messages.join(", ")
+            : String(firstErr);
+        // Live/old API: forbidNonWhitelisted rejects emiTenureMonths/emiProvider/emiReference
+        if (
+          payMethod === "emi" &&
+          /emiTenureMonths|emiProvider|emiReference/i.test(msg)
+        ) {
+          const { emiTenureMonths: _t, emiProvider: _p, emiReference: _r, ...legacy } =
+            basePayment;
+          result = await posApi.saleCheckout({
+            ...checkoutBody,
+            payments: [legacy],
+          });
+          toast.message(
+            "EMI saved via compatibility mode — deploy latest API for full EMI fields",
+          );
+        } else {
+          throw firstErr;
+        }
+      }
 
       setCart([]);
       setDiscountAmount("");

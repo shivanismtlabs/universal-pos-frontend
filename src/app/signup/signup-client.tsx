@@ -115,9 +115,15 @@ export default function SignupClient() {
         password: values.password,
         ...(values.phone?.trim() ? { phone: values.phone.trim() } : {}),
       });
-      applyPortalResponse(data);
-      toast.success("Account created — set up your organization");
-      router.replace("/organizations");
+      const dest = applyPortalResponse(data);
+      if (dest === "orgs") {
+        toast.success("Account created — set up your organization");
+        router.replace("/organizations");
+        return;
+      }
+      // Older live API auto-creates a shop — still collect business type / org details
+      toast.success("Account created — complete your organization profile");
+      router.replace("/organizations?setup=1");
     } catch (e) {
       toast.error(
         e instanceof ApiError ? e.messages.join(", ") : "Sign up failed",
