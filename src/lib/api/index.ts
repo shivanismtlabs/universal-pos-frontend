@@ -1173,6 +1173,7 @@ export const ordersApi = {
         pickupDate?: string | null;
         returnDueDate?: string | null;
         eventDate?: string | null;
+        createdAt?: string;
         rentalExt?: {
           lifecycle: string;
           pickupDate?: string | null;
@@ -1327,6 +1328,7 @@ export const resourcesApi = {
     type: string;
     capacity?: number;
     locationId?: string;
+    status?: string;
     meta?: Record<string, unknown>;
   }) {
     return apiRequest<{

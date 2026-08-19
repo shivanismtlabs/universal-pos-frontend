@@ -6,18 +6,17 @@ import {
   useMemo,
   useRef,
   useState,
-  type ReactNode,
 } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { X } from "lucide-react";
 import {
   catalogApi,
   type CatalogProductKind,
   type CatalogProductStatus,
 } from "@/lib/api";
+import { PageHeader } from "@/components/page-header";
 import { ApiError } from "@/lib/api/client";
 import { useBootstrap } from "@/lib/bootstrap";
 import { Button } from "@/components/ui/button";
@@ -60,49 +59,10 @@ const KINDS: { id: CatalogProductKind; label: string }[] = [
   { id: "rental", label: "Rental" },
 ];
 
-const fieldControl =
-  "h-9 w-full rounded-md border border-[#d9e0ea] bg-white px-2.5 text-sm text-[#0b1f33] outline-none focus:border-[#1a56db]";
-
-function FieldRow({
-  label,
-  required,
-  children,
-  error,
-  stacked,
-}: {
-  label: string;
-  required?: boolean;
-  children: ReactNode;
-  error?: string;
-  stacked?: boolean;
-}) {
-  return (
-    <div
-      className={
-        stacked
-          ? "space-y-1.5"
-          : "grid grid-cols-[6.75rem_minmax(0,1fr)] items-center gap-x-4 gap-y-1"
-      }
-    >
-      <label
-        className={[
-          "text-[0.8125rem] font-medium",
-          required ? "text-[#c81e1e]" : "text-[#3d4f61]",
-          stacked ? "" : "text-left",
-        ].join(" ")}
-      >
-        {label}
-        {required ? " *" : ""}
-      </label>
-      <div className="min-w-0">
-        {children}
-        {error ? (
-          <p className="mt-1 text-[0.75rem] text-[#c81e1e]">{error}</p>
-        ) : null}
-      </div>
-    </div>
-  );
-}
+const fieldSelect =
+  "mt-1 w-full rounded-lg border border-[#e5e7eb] bg-white px-3 py-2 text-sm";
+const textareaClass =
+  "mt-1 min-h-[72px] w-full rounded-lg border border-[#e5e7eb] bg-white px-3 py-2 text-sm";
 
 export default function EditCatalogProductRoute() {
   return (
@@ -434,176 +394,174 @@ function EditCatalogProductPage() {
   }
 
   return (
-    <div className="pb-16">
-      <header className="mb-5 flex items-center justify-between border-b border-[#e8edf4] pb-3">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight text-[#0b1f33]">
-            Edit Item
-          </h1>
-          <p className="mt-0.5 font-mono text-xs text-[#5a6b7d]">
-            {product.data.skuCode}
-          </p>
-        </div>
-        <Link
-          href={`/catalog/view?id=${id}`}
-          className="grid h-8 w-8 place-items-center rounded-md text-[#5a6b7d] transition hover:bg-[#f4f6fa] hover:text-[#0b1f33]"
-          aria-label="Close"
-        >
-          <X className="h-5 w-5" strokeWidth={1.75} />
-        </Link>
-      </header>
+    <div className="mx-auto max-w-3xl space-y-6">
+      <PageHeader
+        title="Edit Item"
+        subtitle={
+          product.data.skuCode
+            ? `SKU ${product.data.skuCode}`
+            : "Update catalog definition, pricing, and inventory flags"
+        }
+        action={
+          <Button variant="ghost" asChild>
+            <Link href={`/catalog/view?id=${id}`}>Cancel</Link>
+          </Button>
+        }
+      />
 
-      <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-8">
-        <div className="min-w-0 max-w-[36rem] flex-1 space-y-3.5">
-          <FieldRow label="Name" required error={fieldErrors.name}>
-            <Input
-              className="h-9"
-              value={form.name}
-              onChange={(e) => {
-                clearFieldError("name");
-                setForm((f) => ({ ...f, name: e.target.value }));
-              }}
-            />
-          </FieldRow>
-          <FieldRow label="Type" required>
-            <div className="flex flex-wrap gap-x-4 gap-y-2">
-              {KINDS.map((k) => (
-                <label
-                  key={k.id}
-                  className="flex items-center gap-1.5 text-[0.8125rem] text-[#0b1f33]"
-                >
-                  <input
-                    type="radio"
-                    className="accent-[#1a56db]"
-                    checked={form.kind === k.id}
-                    onChange={() => applyKindDefaults(k.id)}
-                  />
-                  {k.label}
-                </label>
-              ))}
-            </div>
-          </FieldRow>
-          <FieldRow label="Category">
-            <select
-              className={fieldControl}
-              value={form.categoryId}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, categoryId: e.target.value }))
-              }
-            >
-              <option value="">Select a category</option>
-              {(cats.data ?? []).map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.parent ? `${c.parent.name} › ` : ""}
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </FieldRow>
-          <FieldRow label="Brand">
-            <select
-              className={fieldControl}
-              value={form.brandId}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, brandId: e.target.value }))
-              }
-            >
-              <option value="">Select or add brand</option>
-              {(brands.data ?? []).map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-            </select>
-          </FieldRow>
-          <FieldRow label="Short name">
-            <Input
-              className="h-9"
-              value={form.shortName}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, shortName: e.target.value }))
-              }
-            />
-          </FieldRow>
-          <FieldRow label="Status">
-            <select
-              className={fieldControl}
-              value={form.status}
-              onChange={(e) =>
-                setForm((f) => ({
-                  ...f,
-                  status: e.target.value as typeof f.status,
-                }))
-              }
-            >
-              <option value="active">Active</option>
-              <option value="draft">Draft</option>
-              <option value="inactive">Inactive</option>
-            </select>
-          </FieldRow>
-        </div>
-        <div className="w-full shrink-0 space-y-3 lg:w-[22.5rem]">
-          {(product.data.images?.length || form.photoUrl) ? (
+      <section className="space-y-5 rounded-2xl border border-[#e5e7eb] bg-white p-5">
+        <div className="grid gap-5 lg:grid-cols-[1fr_220px]">
+          <div className="space-y-3">
             <div>
-              <p className="mb-1.5 text-[0.75rem] font-medium text-[#3d4f61]">
-                Current images
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {(product.data.images?.length
-                  ? product.data.images
-                  : [form.photoUrl]
-                )
-                  .filter(Boolean)
-                  .slice(0, 8)
-                  .map((src, i, arr) => (
-                    <ProductThumb
-                      key={src}
-                      src={src}
-                      label={form.name}
-                      className="rounded border border-[#e4e9f0]"
-                      count={i === 0 ? arr.length : undefined}
-                      onClick={() => setLightboxIndex(i)}
-                    />
-                  ))}
-              </div>
+              <Label>Name *</Label>
+              <Input
+                className="mt-1"
+                value={form.name}
+                onChange={(e) => {
+                  clearFieldError("name");
+                  setForm((f) => ({ ...f, name: e.target.value }));
+                }}
+                placeholder="Item name"
+              />
+              <FieldError message={fieldErrors.name} />
             </div>
-          ) : null}
-          <ProductImagePicker ref={imagePickerRef} variant="item" />
+            <div>
+              <Label>Type *</Label>
+              <select
+                className={fieldSelect}
+                value={form.kind}
+                onChange={(e) =>
+                  applyKindDefaults(e.target.value as CatalogProductKind)
+                }
+              >
+                {KINDS.map((k) => (
+                  <option key={k.id} value={k.id}>
+                    {k.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label>Category</Label>
+              <select
+                className={fieldSelect}
+                value={form.categoryId}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, categoryId: e.target.value }))
+                }
+              >
+                <option value="">Select a category</option>
+                {(cats.data ?? []).map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.parent ? `${c.parent.name} › ` : ""}
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label>Brand</Label>
+              <select
+                className={fieldSelect}
+                value={form.brandId}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, brandId: e.target.value }))
+                }
+              >
+                <option value="">Select or add brand</option>
+                {(brands.data ?? []).map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label>Short name</Label>
+              <Input
+                className="mt-1"
+                value={form.shortName}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, shortName: e.target.value }))
+                }
+              />
+            </div>
+            <div>
+              <Label>Status</Label>
+              <select
+                className={fieldSelect}
+                value={form.status}
+                onChange={(e) =>
+                  setForm((f) => ({
+                    ...f,
+                    status: e.target.value as CatalogProductStatus,
+                  }))
+                }
+              >
+                <option value="active">Active</option>
+                <option value="draft">Draft</option>
+                <option value="inactive">Inactive</option>
+              </select>
+            </div>
+          </div>
+          <div className="space-y-3">
+            {(product.data.images?.length || form.photoUrl) ? (
+              <div>
+                <Label>Current images</Label>
+                <div className="mt-1 flex flex-wrap gap-2">
+                  {(product.data.images?.length
+                    ? product.data.images
+                    : [form.photoUrl]
+                  )
+                    .filter(Boolean)
+                    .slice(0, 8)
+                    .map((src, i, arr) => (
+                      <ProductThumb
+                        key={src}
+                        src={src}
+                        label={form.name}
+                        className="rounded-lg border border-[#e5e7eb]"
+                        count={i === 0 ? arr.length : undefined}
+                        onClick={() => setLightboxIndex(i)}
+                      />
+                    ))}
+                </div>
+              </div>
+            ) : null}
+            <ProductImagePicker
+              ref={imagePickerRef}
+              variant="item"
+              label="Upload item photos"
+            />
+          </div>
         </div>
-      </div>
 
-      <div className="mt-6 max-w-[36rem] space-y-3.5">
-        <FieldRow label="Short description" stacked>
+        <div>
+          <Label>Short description</Label>
           <Input
-            className="h-9"
+            className="mt-1"
             value={form.shortDescription}
             onChange={(e) =>
               setForm((f) => ({ ...f, shortDescription: e.target.value }))
             }
           />
-        </FieldRow>
-        <FieldRow label="Full description" stacked>
+        </div>
+        <div>
+          <Label>Full description</Label>
           <textarea
-            className="min-h-[72px] w-full rounded-md border border-[#d9e0ea] px-2.5 py-1.5 text-sm"
+            className={textareaClass}
             value={form.description}
             onChange={(e) =>
               setForm((f) => ({ ...f, description: e.target.value }))
             }
           />
-        </FieldRow>
-      </div>
+        </div>
 
-      <section className="mt-7 max-w-[36rem] border-t border-[#e8edf4] pt-5">
-        <h2 className="mb-4 text-[0.95rem] font-semibold text-[#0b1f33]">
-          Item Details
-        </h2>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2">
           <div>
-            <label className="text-[0.8125rem] font-medium text-[#c81e1e]">
-              Unit *
-            </label>
+            <Label>Unit *</Label>
             <select
-              className={`${fieldControl} mt-1.5`}
+              className={fieldSelect}
               value={form.unitOfMeasure}
               onChange={(e) =>
                 setForm((f) => ({ ...f, unitOfMeasure: e.target.value }))
@@ -617,17 +575,10 @@ function EditCatalogProductPage() {
             </select>
           </div>
           <div>
-            <label className="text-[0.8125rem] font-medium text-[#3d4f61]">
-              SKU
-            </label>
-            {fieldErrors.skuCode ? (
-              <p className="mt-1 text-[0.75rem] text-[#c81e1e]">
-                {fieldErrors.skuCode}
-              </p>
-            ) : null}
-            <div className="mt-1.5 flex">
+            <Label>SKU</Label>
+            <div className="mt-1 flex">
               <Input
-                className="h-9 rounded-r-none"
+                className="rounded-r-none"
                 value={form.skuCode}
                 onChange={(e) => {
                   clearFieldError("skuCode");
@@ -638,25 +589,18 @@ function EditCatalogProductPage() {
               <Button
                 type="button"
                 variant="secondary"
-                className="h-9 shrink-0 rounded-l-none border-l-0"
+                className="h-10 shrink-0 rounded-l-none border-l-0"
                 onClick={() => genSku.mutate()}
               >
                 Generate
               </Button>
             </div>
+            <FieldError message={fieldErrors.skuCode} />
           </div>
-        </div>
-      </section>
-
-      <section className="mt-8 border-t border-[#e8edf4] pt-5">
-        <h2 className="mb-4 text-[0.95rem] font-semibold text-[#0b1f33]">
-          Identification
-        </h2>
-        <div className="grid max-w-3xl gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2">
             <Label>Internal code</Label>
             <Input
-              className="mt-1 max-w-sm"
+              className="mt-1"
               value={form.internalCode}
               onChange={(e) =>
                 setForm((f) => ({ ...f, internalCode: e.target.value }))
@@ -665,7 +609,7 @@ function EditCatalogProductPage() {
           </div>
           <div className="sm:col-span-2">
             <Label>Barcode</Label>
-            <div className="mt-1 flex gap-1">
+            <div className="mt-1 flex gap-2">
               <div className="min-w-0 flex-1">
                 <BarcodeScanInput
                   value={form.barcode}
@@ -682,7 +626,6 @@ function EditCatalogProductPage() {
                   showSubmitButton={false}
                   showHint={false}
                   className="space-y-0"
-                  inputClassName="h-10"
                 />
               </div>
               <Button
@@ -698,7 +641,7 @@ function EditCatalogProductPage() {
             {barcodeError ? (
               <p className="mt-1 text-xs text-rose-600">{barcodeError}</p>
             ) : (
-              <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+              <p className="mt-1 text-[0.7rem] leading-snug text-[#6b7280]">
                 Code 128 · USB scanner works in this field · empty = auto on
                 save
               </p>
@@ -712,14 +655,6 @@ function EditCatalogProductPage() {
               showPrint
             />
           </div>
-        </div>
-      </section>
-
-      <section className="mt-8 border-t border-[#e8edf4] pt-5">
-        <h2 className="mb-4 text-[0.95rem] font-semibold text-[#0b1f33]">
-          Pricing &amp; tax
-        </h2>
-        <div className="grid max-w-3xl gap-4 sm:grid-cols-2">
           <div>
             <Label>Selling price (Rate)</Label>
             <Input
@@ -781,10 +716,6 @@ function EditCatalogProductPage() {
               placeholder="e.g. 5 or 18"
             />
             <FieldError message={fieldErrors.taxRatePercent} />
-            <p className="mt-1 text-[0.7rem] text-[#8a9bb0]">
-              Applied at counter checkout (Settings can still mark prices
-              tax-inclusive).
-            </p>
           </div>
           <div>
             <Label>Tax code / HSN / SAC</Label>
@@ -798,13 +729,8 @@ function EditCatalogProductPage() {
             />
           </div>
         </div>
-      </section>
 
-      <section className="mt-8 border-t border-[#e8edf4] pt-5">
-        <h2 className="mb-4 text-[0.95rem] font-semibold text-[#0b1f33]">
-          Inventory tracking
-        </h2>
-        <div className="grid max-w-3xl gap-2 sm:grid-cols-2">
+        <div className="grid gap-2 sm:grid-cols-2">
           {(
             [
               ["trackInventory", "Track inventory"],
@@ -828,109 +754,104 @@ function EditCatalogProductPage() {
             </label>
           ))}
         </div>
-      </section>
 
-      {itemMetaFields.length ? (
-        <section className="mt-8 border-t border-[#e8edf4] pt-5">
-          <h2 className="mb-2 text-[0.95rem] font-semibold text-[#0b1f33]">
-            Shop extras
-          </h2>
-          <p className="text-[0.75rem] text-[#5a6b7d]">
-            Extra fields for{" "}
-            <span className="font-medium text-[#0b1f33]">{profileLabel}</span>
-            {" — "}
-            set when the organization was created (custom or profile defaults).
-          </p>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            {itemMetaFields.map((field) => (
-              <div
-                key={field.key}
-                className={
-                  field.type === "text" || field.type === "textarea"
-                    ? "sm:col-span-2"
-                    : undefined
-                }
-              >
-                <Label>
-                  {field.label}
-                  {field.required ? " *" : ""}
-                </Label>
-                {field.type === "select" && field.options?.length ? (
-                  <select
-                    className="mt-1 h-9 w-full rounded-md border border-[#dce3ec] px-2 text-sm"
-                    value={extraFields[field.key] ?? ""}
-                    onChange={(e) =>
-                      setExtraFields((prev) => ({
-                        ...prev,
-                        [field.key]: e.target.value,
-                      }))
-                    }
-                  >
-                    <option value="">— Select —</option>
-                    {field.options.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                ) : field.type === "number" ? (
-                  <Input
-                    className="mt-1"
-                    type="number"
-                    value={extraFields[field.key] ?? ""}
-                    onChange={(e) =>
-                      setExtraFields((prev) => ({
-                        ...prev,
-                        [field.key]: e.target.value,
-                      }))
-                    }
-                    placeholder={field.hint}
-                  />
-                ) : field.type === "text" || field.type === "textarea" ? (
-                  <textarea
-                    className="mt-1 min-h-[72px] w-full rounded-md border border-[#dce3ec] px-2 py-1.5 text-sm"
-                    value={extraFields[field.key] ?? ""}
-                    onChange={(e) =>
-                      setExtraFields((prev) => ({
-                        ...prev,
-                        [field.key]: e.target.value,
-                      }))
-                    }
-                    placeholder={field.hint}
-                  />
-                ) : (
-                  <Input
-                    className="mt-1"
-                    value={extraFields[field.key] ?? ""}
-                    onChange={(e) =>
-                      setExtraFields((prev) => ({
-                        ...prev,
-                        [field.key]: e.target.value,
-                      }))
-                    }
-                    placeholder={field.hint}
-                  />
-                )}
-                {field.hint && field.type !== "text" && field.type !== "textarea" ? (
-                  <p className="mt-1 text-[0.7rem] text-[#8a9bb0]">{field.hint}</p>
-                ) : null}
-              </div>
-            ))}
+        {itemMetaFields.length ? (
+          <div className="space-y-3">
+            <p className="text-xs text-[#6b7280]">
+              Extra fields for{" "}
+              <span className="font-medium text-[#0b1f33]">{profileLabel}</span>{" "}
+              — set when the organization was created.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {itemMetaFields.map((field) => (
+                <div
+                  key={field.key}
+                  className={
+                    field.type === "text" || field.type === "textarea"
+                      ? "sm:col-span-2"
+                      : undefined
+                  }
+                >
+                  <Label>
+                    {field.label}
+                    {field.required ? " *" : ""}
+                  </Label>
+                  {field.type === "select" && field.options?.length ? (
+                    <select
+                      className={fieldSelect}
+                      value={extraFields[field.key] ?? ""}
+                      onChange={(e) =>
+                        setExtraFields((prev) => ({
+                          ...prev,
+                          [field.key]: e.target.value,
+                        }))
+                      }
+                    >
+                      <option value="">Select</option>
+                      {field.options.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  ) : field.type === "number" ? (
+                    <Input
+                      className="mt-1"
+                      type="number"
+                      value={extraFields[field.key] ?? ""}
+                      onChange={(e) =>
+                        setExtraFields((prev) => ({
+                          ...prev,
+                          [field.key]: e.target.value,
+                        }))
+                      }
+                      placeholder={field.hint}
+                    />
+                  ) : field.type === "text" || field.type === "textarea" ? (
+                    <textarea
+                      className={textareaClass}
+                      value={extraFields[field.key] ?? ""}
+                      onChange={(e) =>
+                        setExtraFields((prev) => ({
+                          ...prev,
+                          [field.key]: e.target.value,
+                        }))
+                      }
+                      placeholder={field.hint}
+                    />
+                  ) : (
+                    <Input
+                      className="mt-1"
+                      value={extraFields[field.key] ?? ""}
+                      onChange={(e) =>
+                        setExtraFields((prev) => ({
+                          ...prev,
+                          [field.key]: e.target.value,
+                        }))
+                      }
+                      placeholder={field.hint}
+                    />
+                  )}
+                  {field.hint &&
+                  field.type !== "text" &&
+                  field.type !== "textarea" ? (
+                    <p className="mt-1 text-[0.7rem] leading-snug text-[#6b7280]">
+                      {field.hint}
+                    </p>
+                  ) : null}
+                </div>
+              ))}
+            </div>
           </div>
-        </section>
-      ) : null}
+        ) : null}
 
-      <div className="mt-8 flex gap-2">
         <Button
           disabled={!form.name.trim() || save.isPending}
           onClick={() => save.mutate()}
         >
           {save.isPending ? "Saving…" : "Save"}
         </Button>
-        <Button variant="secondary" asChild>
-          <Link href={`/catalog/view?id=${id}`}>Cancel</Link>
-        </Button>
-      </div>
+      </section>
 
       <ImageLightbox
         open={lightboxIndex != null}

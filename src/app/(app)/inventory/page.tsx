@@ -23,7 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { EntityRowActions } from "@/components/entity-row-actions";
-import { PageSkeleton } from "@/components/page-header";
+import { PageHeader, PageSkeleton } from "@/components/page-header";
 import { FieldError } from "@/components/ui/form";
 import {
   stockMoveSchema,
@@ -56,6 +56,11 @@ function parseTab(raw: string | null): Tab {
   if (raw && TAB_IDS.includes(raw as Tab)) return raw as Tab;
   return "levels";
 }
+
+const fieldSelect =
+  "mt-1 w-full rounded-lg border border-[#e5e7eb] bg-white px-3 py-2 text-sm";
+const formCard =
+  "space-y-5 rounded-2xl border border-[#e5e7eb] bg-white p-5";
 
 export default function InventoryPage() {
   return (
@@ -110,75 +115,69 @@ function InventoryPageInner() {
   ];
 
   return (
-    <div className="space-y-3">
-      <header className="flex flex-wrap items-end justify-between gap-3 border-b border-[#eef1f4] pb-3">
-        <div>
-          <p className="text-[0.65rem] font-bold tracking-[0.12em] text-[#1a56db] uppercase">
-            Inventory
-          </p>
-          <h1 className="mt-0.5 text-[1.4rem] font-semibold text-[#0b1f33]">
-            Inventory management
-          </h1>
-          <p className="mt-0.5 text-[0.8rem] text-[#5a6b7d]">
-            Multi-location stock · transfers · purchases · audits
-          </p>
-            </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="ghost" asChild>
-            <Link href="/transfers">Stock transfer</Link>
-          </Button>
-          <Button variant="ghost" asChild>
-            <Link href="/suppliers">Suppliers & POs</Link>
-          </Button>
-          <Button variant="ghost" asChild>
-            <Link href="/adjustments">Adjustments history</Link>
-          </Button>
+    <div className="mx-auto max-w-3xl space-y-6">
+      <PageHeader
+        title="Inventory"
+        subtitle="Stock on hand, receipts, issues, damage, and physical counts"
+        action={
+          <div className="flex flex-wrap gap-2">
+            <Button variant="ghost" asChild>
+              <Link href="/transfers">Stock transfer</Link>
+            </Button>
+            <Button variant="ghost" asChild>
+              <Link href="/suppliers">Suppliers & POs</Link>
+            </Button>
+            <Button variant="ghost" asChild>
+              <Link href="/adjustments">Adjustments history</Link>
+            </Button>
           </div>
-      </header>
+        }
+      />
 
-      <div className="flex flex-wrap items-end gap-2">
-        <div>
-          <Label className="text-[0.7rem]">Location</Label>
-          <select
-            className="block h-9 min-w-[180px] rounded-md border border-[#dce3ec] px-2 text-sm"
-            value={activeLoc}
-            onChange={(e) => {
-              setLocationId(e.target.value);
-              setBranchId(e.target.value);
-            }}
-          >
-            {(locations.data ?? []).map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-                {l.type ? ` (${l.type})` : ""}
-              </option>
-            ))}
-          </select>
-                </div>
-        {locations.data && locations.data.length > 1 ? (
-          <p className="pb-2 text-[0.75rem] text-[#8b9bb0]">
-            Stock is per location — switch the dropdown if this store looks empty.
-          </p>
-        ) : null}
-                </div>
-
-      <div className="flex flex-wrap gap-1 border-b border-[#eef1f4]">
-              {tabs.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-            onClick={() => selectTab(t.id)}
-                  className={cn(
-              "px-3 py-2 text-sm font-medium border-b-2 -mb-px",
-                    tab === t.id
-                ? "border-[#1a56db] text-[#1a56db]"
-                : "border-transparent text-[#5a6b7d]",
-                  )}
-                >
-                  {t.label}
-                </button>
+      <section className={formCard}>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <Label>Location *</Label>
+            <select
+              className={fieldSelect}
+              value={activeLoc}
+              onChange={(e) => {
+                setLocationId(e.target.value);
+                setBranchId(e.target.value);
+              }}
+            >
+              {(locations.data ?? []).map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                  {l.type ? ` (${l.type})` : ""}
+                </option>
               ))}
-            </div>
+            </select>
+            {locations.data && locations.data.length > 1 ? (
+              <p className="mt-1 text-[0.72rem] text-[#6b7280]">
+                Stock is per location — switch here if this store looks empty.
+              </p>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-1 border-b border-[#e5e7eb]">
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => selectTab(t.id)}
+              className={cn(
+                "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
+                tab === t.id
+                  ? "border-[#1a56db] text-[#1a56db]"
+                  : "border-transparent text-[#6b7280]",
+              )}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
 
       {tab === "levels" && activeLoc ? (
         <LevelsTab locationId={activeLoc} canWrite={canWrite} />
@@ -200,7 +199,8 @@ function InventoryPageInner() {
       ) : null}
       {tab === "ledger" ? <LedgerTab locationId={activeLoc} /> : null}
       {tab === "warehouses" ? <WarehousesTab canWrite={canWrite} /> : null}
-          </div>
+      </section>
+    </div>
   );
 }
 
@@ -249,24 +249,28 @@ function LevelsTab({
   });
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap gap-2">
-        <Input
-          className="max-w-xs"
-          placeholder="Search SKU / name"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
-        <label className="flex items-center gap-2 text-sm">
+    <div className="space-y-5">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <Label>Search</Label>
+          <Input
+            className="mt-1"
+            placeholder="SKU or name"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+        </div>
+        <label className="flex items-end gap-2 pb-2 text-sm text-[#0b1f33]">
           <input
             type="checkbox"
+            className="accent-[#1a56db]"
             checked={lowOnly}
             onChange={(e) => setLowOnly(e.target.checked)}
           />
           Low stock only
         </label>
-                </div>
-      <div className="overflow-x-auto rounded-md border border-[#e4e9f0] bg-white">
+      </div>
+      <div className="overflow-x-auto rounded-lg border border-[#e5e7eb]">
         <table className="w-full min-w-[720px] text-sm">
           <thead className="bg-[#f7f9fb] text-left text-[0.7rem] uppercase text-[#5a6b7d]">
             <tr>
@@ -342,46 +346,65 @@ function LevelsTab({
                 </div>
 
       {reorderId ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-          <div className="w-full max-w-sm space-y-3 rounded-lg bg-white p-4 shadow-lg">
-            <h3 className="font-semibold">Branch price & reorder</h3>
-                <div>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4">
+          <div className="w-full max-w-md space-y-5 rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-lg">
+            <div>
+              <h3 className="text-base font-semibold text-[#0b1f33]">
+                Branch price & reorder
+              </h3>
+              <p className="mt-1 text-[0.8rem] text-[#6b7280]">
+                Applies only at this location.
+              </p>
+            </div>
+            <div>
               <Label>Sell price (this branch)</Label>
-                  <Input
+              <Input
+                className="mt-1"
                 type="number"
                 min={0}
                 step="0.01"
                 value={sp}
                 onChange={(e) => setSp(e.target.value)}
-                  />
-                </div>
-                  <div>
-              <Label>Reorder point</Label>
-                    <Input
-                      type="number"
-                min={0}
-                value={rp}
-                onChange={(e) => setRp(e.target.value)}
-                    />
-                </div>
-                <div>
-              <Label>Reorder qty</Label>
-                  <Input
-                    type="number"
-                min={0}
-                value={rq}
-                onChange={(e) => setRq(e.target.value)}
-                  />
-                </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="secondary" onClick={() => setReorderId(null)}>
-                Cancel
-                </Button>
-              <Button onClick={() => saveReorder.mutate()}>Save</Button>
-                </div>
-                </div>
-                </div>
-            ) : null}
+              />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <Label>Reorder point</Label>
+                <Input
+                  className="mt-1"
+                  type="number"
+                  min={0}
+                  value={rp}
+                  onChange={(e) => setRp(e.target.value)}
+                />
+              </div>
+              <div>
+                <Label>Reorder qty</Label>
+                <Input
+                  className="mt-1"
+                  type="number"
+                  min={0}
+                  value={rq}
+                  onChange={(e) => setRq(e.target.value)}
+                />
+              </div>
+            </div>
+            <Button
+              disabled={saveReorder.isPending}
+              onClick={() => saveReorder.mutate()}
+            >
+              {saveReorder.isPending ? "Saving…" : "Save"}
+            </Button>
+            <Button
+              variant="ghost"
+              className="ml-2"
+              onClick={() => setReorderId(null)}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -412,21 +435,21 @@ function AlertsTab({
   }, [alerts.data, q]);
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#e4e9f0] bg-white px-4 py-2.5">
+    <div className="space-y-5">
+      <div>
+        <Label>Search</Label>
         <Input
-          className="h-9 max-w-sm flex-1 text-[0.8125rem]"
-          placeholder="Search name or SKU"
+          className="mt-1"
+          placeholder="Name or SKU"
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
-        <span className="text-[0.75rem] text-[#8b9bb0]">
-          {rows.length} alert{rows.length === 1 ? "" : "s"} · at or below
-          reorder
-        </span>
-                </div>
+        <p className="mt-1 text-[0.72rem] text-[#6b7280]">
+          {rows.length} alert{rows.length === 1 ? "" : "s"} at or below reorder.
+        </p>
+      </div>
 
-      <section className="overflow-hidden rounded-xl border border-[#e4e9f0] bg-white shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
+      <div className="overflow-x-auto rounded-lg border border-[#e5e7eb]">
         <div className="max-h-[min(60dvh,32rem)] overflow-auto">
           <table className="w-full min-w-[640px] border-collapse text-left text-[0.8125rem]">
             <thead className="sticky top-0 z-[1] bg-[#f8fafc] text-[0.65rem] font-semibold tracking-[0.06em] text-[#5a6b7d] uppercase">
@@ -483,7 +506,7 @@ function AlertsTab({
             </tbody>
           </table>
           </div>
-      </section>
+      </div>
       </div>
   );
 }
@@ -549,24 +572,24 @@ function MoveTab({
   }
 
   return (
-    <div className="max-w-md space-y-3 rounded-md border border-[#e4e9f0] bg-white p-4">
-      <h3 className="font-semibold">
-        {mode === "in" ? "Stock In" : "Stock Out"}
-      </h3>
-      {!locationId ? (
-        <FieldError message="Select a location" />
-      ) : null}
-          <div>
-        <Label>Item</Label>
+    <div className="space-y-5">
+      <p className="text-xs text-[#6b7280]">
+        {mode === "in"
+          ? "Receive stock into this location. Historical ledgers keep the original movement."
+          : "Issue stock from this location. Historical ledgers keep the original movement."}
+      </p>
+      {!locationId ? <FieldError message="Select a location" /> : null}
+      <div>
+        <Label>Item *</Label>
         <select
-          className="h-9 w-full rounded-md border border-[#dce3ec] px-2 text-sm"
+          className={fieldSelect}
           value={stockLevelId}
           onChange={(e) => {
             setStockLevelId(e.target.value);
             setFieldErrors((f) => ({ ...f, stockLevelId: "" }));
           }}
         >
-          <option value="">Select…</option>
+          <option value="">Select item</option>
           {(levels.data?.items ?? []).map((i) => (
             <option key={i.stockLevelId} value={i.stockLevelId}>
               {i.name} ({i.sku}) — {i.qtyOnHand}
@@ -574,40 +597,41 @@ function MoveTab({
           ))}
         </select>
         <FieldError message={fieldErrors.stockLevelId} />
-          </div>
-            <div>
-        <Label>Quantity</Label>
-              <Input
-          type="number"
-          min={0.001}
-          step="any"
-          value={qty}
-                onChange={(e) => {
-            setQty(e.target.value);
-            setFieldErrors((f) => ({ ...f, qty: "" }));
-                }}
-              />
-        <FieldError message={fieldErrors.qty} />
-            </div>
-            <div>
-        <Label>Reason</Label>
-              <Input
-          value={reason}
-                onChange={(e) => {
-            setReason(e.target.value);
-            setFieldErrors((f) => ({ ...f, reason: "" }));
-                }}
-          placeholder={
-            mode === "in" ? "GRN, found stock, return…" : "Write-off, usage…"
-          }
-              />
-        <FieldError message={fieldErrors.reason} />
-            </div>
-      <Button
-        disabled={run.isPending}
-        onClick={() => run.mutate()}
-      >
-        {mode === "in" ? "Receive stock" : "Issue stock"}
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <Label>Quantity *</Label>
+          <Input
+            className="mt-1"
+            type="number"
+            min={0.001}
+            step="any"
+            value={qty}
+            onChange={(e) => {
+              setQty(e.target.value);
+              setFieldErrors((f) => ({ ...f, qty: "" }));
+            }}
+          />
+          <FieldError message={fieldErrors.qty} />
+        </div>
+        <div>
+          <Label>Reason</Label>
+          <Input
+            className="mt-1"
+            value={reason}
+            onChange={(e) => {
+              setReason(e.target.value);
+              setFieldErrors((f) => ({ ...f, reason: "" }));
+            }}
+            placeholder={
+              mode === "in" ? "GRN, found stock, return…" : "Write-off, usage…"
+            }
+          />
+          <FieldError message={fieldErrors.reason} />
+        </div>
+      </div>
+      <Button disabled={run.isPending} onClick={() => run.mutate()}>
+        {run.isPending ? "Saving…" : "Save"}
       </Button>
     </div>
   );
@@ -708,81 +732,80 @@ function DamageTab({
   return (
     <div className="space-y-4">
       {canWrite ? (
-        <div className="grid max-w-3xl gap-3 rounded-xl border border-[#e4e9f0] bg-white p-4 sm:grid-cols-2">
-          <h3 className="sm:col-span-2 text-sm font-semibold text-[#0b1f33]">
-            Mark damaged
-          </h3>
-          <div className="sm:col-span-2">
-            <Label>Item</Label>
-              <select
-              className="mt-1 h-9 w-full rounded-md border border-[#dce3ec] px-2 text-sm"
+        <div className="space-y-5">
+          <p className="text-xs text-[#6b7280]">
+            Move sellable quantity into damaged. Historical orders keep their
+            original stock snapshot.
+          </p>
+          <div>
+            <Label>Item *</Label>
+            <select
+              className={fieldSelect}
               value={stockLevelId}
-                onChange={(e) => {
+              onChange={(e) => {
                 setStockLevelId(e.target.value);
                 setFieldErrors((f) => ({ ...f, stockLevelId: "" }));
               }}
             >
-              <option value="">Select item…</option>
+              <option value="">Select item</option>
               {(levels.data?.items ?? []).map((i) => (
                 <option key={i.stockLevelId} value={i.stockLevelId}>
                   {i.name} — sellable {i.qtyOnHand} {i.sellUnit}
-                  </option>
-                ))}
-              </select>
+                </option>
+              ))}
+            </select>
             <FieldError message={fieldErrors.stockLevelId} />
-            </div>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
             <div>
-            <Label>Qty</Label>
+              <Label>Quantity *</Label>
               <Input
-              className="mt-1"
-              type="number"
-              min={0.001}
-              step="any"
-              value={qty}
+                className="mt-1"
+                type="number"
+                min={0.001}
+                step="any"
+                value={qty}
                 onChange={(e) => {
-                setQty(e.target.value);
-                setFieldErrors((f) => ({ ...f, qty: "" }));
+                  setQty(e.target.value);
+                  setFieldErrors((f) => ({ ...f, qty: "" }));
                 }}
               />
-            <FieldError message={fieldErrors.qty} />
+              <FieldError message={fieldErrors.qty} />
             </div>
-          <div>
-            <Label>Reason</Label>
-            <Input
-              className="mt-1"
-              placeholder="Broken, expired, quarantine…"
-              value={reason}
-              onChange={(e) => {
-                setReason(e.target.value);
-                setFieldErrors((f) => ({ ...f, reason: "" }));
-              }}
-            />
-            <FieldError message={fieldErrors.reason} />
+            <div>
+              <Label>Reason</Label>
+              <Input
+                className="mt-1"
+                placeholder="Broken, expired…"
+                value={reason}
+                onChange={(e) => {
+                  setReason(e.target.value);
+                  setFieldErrors((f) => ({ ...f, reason: "" }));
+                }}
+              />
+              <FieldError message={fieldErrors.reason} />
+            </div>
           </div>
-          <div className="sm:col-span-2">
-          <Button
-              disabled={mark.isPending}
-              onClick={() => mark.mutate()}
-            >
-              Quarantine
+          <Button disabled={mark.isPending} onClick={() => mark.mutate()}>
+            {mark.isPending ? "Saving…" : "Save"}
           </Button>
-        </div>
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#e4e9f0] bg-white px-4 py-2.5">
+      <div>
+        <Label>Search</Label>
         <Input
-          className="h-9 max-w-sm flex-1 text-[0.8125rem]"
+          className="mt-1"
           placeholder="Search damaged items"
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
-        <span className="text-[0.75rem] text-[#8b9bb0]">
+        <p className="mt-1 text-[0.72rem] text-[#6b7280]">
           {damaged.length} item{damaged.length === 1 ? "" : "s"}
-        </span>
-                    </div>
+        </p>
+      </div>
 
-      <section className="overflow-hidden rounded-xl border border-[#e4e9f0] bg-white shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
+      <div className="overflow-x-auto rounded-lg border border-[#e5e7eb]">
         <div className="max-h-[min(60dvh,32rem)] overflow-auto">
           <table className="w-full min-w-[720px] border-collapse text-left text-[0.8125rem]">
             <thead className="sticky top-0 z-[1] bg-[#f8fafc] text-[0.65rem] font-semibold tracking-[0.06em] text-[#5a6b7d] uppercase">
@@ -874,7 +897,7 @@ function DamageTab({
             </tbody>
           </table>
         </div>
-      </section>
+      </div>
     </div>
   );
 }
@@ -946,16 +969,16 @@ function AuditTab({
   });
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {canWrite ? (
         <Button onClick={() => create.mutate()} disabled={create.isPending}>
-          Start physical stock audit
+          {create.isPending ? "Starting…" : "Start physical stock audit"}
         </Button>
       ) : null}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-md border border-[#e4e9f0] bg-white">
+      <div className="space-y-5">
+        <div className="overflow-x-auto rounded-lg border border-[#e5e7eb]">
           <table className="w-full text-sm">
-            <thead className="bg-[#f7f9fb] text-left text-[0.7rem] uppercase text-[#5a6b7d]">
+            <thead className="bg-[#f8fafc] text-left text-[0.7rem] uppercase text-[#6b7280]">
               <tr>
                 <th className="px-3 py-2">Session</th>
                 <th className="px-3 py-2">Status</th>
@@ -966,7 +989,7 @@ function AuditTab({
               {(list.data ?? []).map((c) => (
                 <tr
                   key={c.id}
-                  className="border-t cursor-pointer hover:bg-[#fafcfe]"
+                  className="cursor-pointer border-t border-[#e5e7eb] hover:bg-[#f8fafc]"
                   onClick={() => setActiveId(c.id)}
                 >
                   <td className="px-3 py-2">
@@ -980,30 +1003,33 @@ function AuditTab({
           </table>
         </div>
         {activeId && detail.data ? (
-          <div className="space-y-2 rounded-md border border-[#e4e9f0] bg-white p-3">
-            <h3 className="font-semibold">Count lines</h3>
-            <div className="max-h-[360px] overflow-y-auto">
+          <div className="space-y-5">
+            <p className="text-xs text-[#6b7280]">
+              Counted quantity is saved against the system snapshot for this
+              session.
+            </p>
+            <div className="max-h-[360px] overflow-y-auto rounded-lg border border-[#e5e7eb]">
               <table className="w-full text-sm">
-                <thead className="text-left text-[0.7rem] uppercase text-[#5a6b7d]">
+                <thead className="bg-[#f8fafc] text-left text-[0.7rem] uppercase text-[#6b7280]">
                   <tr>
-                    <th className="py-1">Item</th>
-                    <th className="py-1 text-right">System</th>
-                    <th className="py-1 text-right">Counted</th>
+                    <th className="px-3 py-2">Item</th>
+                    <th className="px-3 py-2 text-right">System</th>
+                    <th className="px-3 py-2 text-right">Counted</th>
                   </tr>
                 </thead>
                 <tbody>
                   {detail.data.lines.map((l) => (
-                    <tr key={l.id} className="border-t">
-                      <td className="py-1.5">
+                    <tr key={l.id} className="border-t border-[#e5e7eb]">
+                      <td className="px-3 py-2">
                         {l.product?.name}
-                        <div className="font-mono text-[0.65rem] text-[#8a9bb0]">
+                        <div className="font-mono text-[0.65rem] text-[#6b7280]">
                           {l.product?.skuCode}
                         </div>
                       </td>
-                      <td className="py-1.5 text-right">{l.systemQty}</td>
-                      <td className="py-1.5 text-right">
+                      <td className="px-3 py-2 text-right">{l.systemQty}</td>
+                      <td className="px-3 py-2 text-right">
                         <Input
-                          className="ml-auto h-8 w-20 text-right"
+                          className="ml-auto h-9 w-24 text-right"
                           disabled={detail.data.status === "completed"}
                           value={
                             countsLocal[l.stockLevelId] ??
@@ -1025,11 +1051,17 @@ function AuditTab({
               </table>
             </div>
             {detail.data.status !== "completed" && canWrite ? (
-              <div className="flex gap-2">
-                <Button variant="secondary" onClick={() => save.mutate()}>
-                  Save counts
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  disabled={save.isPending}
+                  onClick={() => save.mutate()}
+                >
+                  {save.isPending ? "Saving…" : "Save"}
                 </Button>
-                <Button onClick={() => complete.mutate()}>
+                <Button
+                  variant="ghost"
+                  onClick={() => complete.mutate()}
+                >
                   Complete & apply
                 </Button>
               </div>
@@ -1054,30 +1086,33 @@ function LedgerTab({ locationId }: { locationId: string }) {
   });
 
   return (
-    <div className="space-y-2">
-      <select
-        className="h-9 rounded-md border border-[#dce3ec] px-2 text-sm"
-        value={type}
-        onChange={(e) => setType(e.target.value)}
-      >
-        <option value="">All types</option>
-        {[
-          "stock_in",
-          "stock_out",
-          "adjustment",
-          "transfer_in",
-          "transfer_out",
-          "purchase_receive",
-          "purchase_return",
-          "damage",
-          "audit",
-        ].map((t) => (
-          <option key={t} value={t}>
-            {t}
-          </option>
-        ))}
-      </select>
-      <div className="overflow-x-auto rounded-md border border-[#e4e9f0] bg-white">
+    <div className="space-y-5">
+      <div>
+        <Label>Movement type</Label>
+        <select
+          className={fieldSelect}
+          value={type}
+          onChange={(e) => setType(e.target.value)}
+        >
+          <option value="">All types</option>
+          {[
+            "stock_in",
+            "stock_out",
+            "adjustment",
+            "transfer_in",
+            "transfer_out",
+            "purchase_receive",
+            "purchase_return",
+            "damage",
+            "audit",
+          ].map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="overflow-x-auto rounded-lg border border-[#e5e7eb]">
         <table className="w-full min-w-[640px] text-sm">
           <thead className="bg-[#f7f9fb] text-left text-[0.7rem] uppercase text-[#5a6b7d]">
             <tr>
@@ -1146,37 +1181,63 @@ function WarehousesTab({ canWrite }: { canWrite: boolean }) {
   });
 
   return (
-    <div className="grid gap-4 md:grid-cols-[280px_1fr]">
+    <div className="space-y-5">
       {canWrite ? (
-        <div className="space-y-2 rounded-md border border-[#e4e9f0] bg-white p-4">
-          <h3 className="font-semibold">Add location / warehouse</h3>
-          <Label>Name</Label>
-          <Input value={name} onChange={(e) => setName(e.target.value)} />
-          <Label>Code</Label>
-          <Input value={code} onChange={(e) => setCode(e.target.value)} />
-          <Label>Type</Label>
-          <select
-            className="h-9 w-full rounded-md border border-[#dce3ec] px-2 text-sm"
-            value={type}
-            onChange={(e) => setType(e.target.value)}
-          >
-            <option value="store">Store</option>
-            <option value="branch">Branch</option>
-            <option value="warehouse">Warehouse</option>
-            <option value="office">Office</option>
-            <option value="other">Other</option>
-          </select>
-          <Label>Address</Label>
-          <Input value={address} onChange={(e) => setAddress(e.target.value)} />
+        <div className="space-y-5">
+          <p className="text-xs text-[#6b7280]">
+            Locations hold stock. Street addresses stay on each location.
+          </p>
+          <div>
+            <Label>Name *</Label>
+            <Input
+              className="mt-1"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Main store"
+            />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <Label>Code</Label>
+              <Input
+                className="mt-1"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                placeholder="MAIN"
+              />
+            </div>
+            <div>
+              <Label>Type</Label>
+              <select
+                className={fieldSelect}
+                value={type}
+                onChange={(e) => setType(e.target.value)}
+              >
+                <option value="store">Store</option>
+                <option value="branch">Branch</option>
+                <option value="warehouse">Warehouse</option>
+                <option value="office">Office</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <Label>Address</Label>
+            <Input
+              className="mt-1"
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+            />
+          </div>
           <Button
             disabled={!name.trim() || create.isPending}
             onClick={() => create.mutate()}
           >
-            Create
+            {create.isPending ? "Saving…" : "Save"}
           </Button>
         </div>
       ) : null}
-      <div className="overflow-hidden rounded-md border border-[#e4e9f0] bg-white">
+      <div className="overflow-x-auto rounded-lg border border-[#e5e7eb]">
         <table className="w-full text-sm">
           <thead className="bg-[#f7f9fb] text-left text-[0.7rem] uppercase text-[#5a6b7d]">
             <tr>

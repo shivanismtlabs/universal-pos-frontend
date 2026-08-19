@@ -667,10 +667,6 @@ export default function RetailPosWorkstation({
       toast.error("Enter gift card code");
       return;
     }
-    if (payMethod === "emi") {
-      toast.error("EMI provider is not configured");
-      return;
-    }
     if (payMethod === "bank_transfer") {
       if (
         !bankAccountName.trim() ||

@@ -29,9 +29,10 @@ function PosGate() {
   const hasSub = hasMode("subscription");
 
   // Determine initial tab from ?view= param or smart default
-  const viewParam = params.get("view") as CounterView | null;
+  const viewParam = params.get("view");
   function defaultView(): CounterView {
-    if (viewParam === "rental" || viewParam === "rent") return hasRent ? "rental" : defaultFallback();
+    if (viewParam === "rental" || viewParam === "rent")
+      return hasRent ? "rental" : defaultFallback();
     if (viewParam === "service") return hasSvc ? "service" : defaultFallback();
     if (viewParam === "subscription") return hasSub ? "subscription" : defaultFallback();
     return defaultFallback();
@@ -62,11 +63,11 @@ function PosGate() {
     );
   }
 
-  const tabs: Array<{ id: CounterView; label: string; show: boolean }> = [
-    { id: "sale", label: "Sell", show: hasSale },
-    { id: "rental", label: "Rent", show: hasRent },
-    { id: "service", label: "Services", show: hasSvc },
-    { id: "subscription", label: "Plans / Memberships", show: hasSub },
+  const tabs = [
+    { id: "sale" as const, label: "Sell", show: hasSale },
+    { id: "rental" as const, label: "Rent", show: hasRent },
+    { id: "service" as const, label: "Services", show: hasSvc },
+    { id: "subscription" as const, label: "Plans / Memberships", show: hasSub },
   ].filter((t) => t.show);
 
   // Ensure active view is valid for current modes

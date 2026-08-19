@@ -721,16 +721,7 @@ function ServiceRefundDesk() {
   const orders = useQuery({
     queryKey: ["returns-service-orders"],
     queryFn: () =>
-      ordersApi.list({ kind: "service_order", status: "completed", limit: 50 }) as Promise<{
-        items: Array<{
-          id: string;
-          orderNumber: string;
-          createdAt: string;
-          balanceDue: string | number;
-          subtotal: string | number;
-          customer: { id: string; fullName: string } | null;
-        }>;
-      }>,
+      ordersApi.list({ kind: "service_order", status: "completed", limit: 50 }),
   });
 
   const [selectedId, setSelectedId] = useState("");
@@ -742,8 +733,8 @@ function ServiceRefundDesk() {
       return posApi.saleReturn({
         orderId: selectedId,
         items: [],
-        refundAll: true,
-        refundToMethod: "store_credit",
+        refundMethod: "store_credit",
+        reasonCode: "service_refund",
         reason: reason.trim() || "service_refund",
         idempotencyKey: `svcref-${selectedId}-${Date.now()}`,
       });
@@ -835,12 +826,11 @@ export default function ReturnsPage() {
     );
   }
 
-  const availableTabs: Array<{ id: ReturnTab; label: string; show: boolean }> =
-    [
-      { id: "sale", label: "Sale refunds", show: hasSale },
-      { id: "rental", label: "Rental receive", show: hasRental },
-      { id: "service", label: "Service refunds", show: hasSvc },
-      { id: "subscription", label: "Cancel subscription", show: hasSub },
+  const availableTabs = [
+      { id: "sale" as const, label: "Sale refunds", show: hasSale },
+      { id: "rental" as const, label: "Rental receive", show: hasRental },
+      { id: "service" as const, label: "Service refunds", show: hasSvc },
+      { id: "subscription" as const, label: "Cancel subscription", show: hasSub },
     ].filter((t) => t.show);
 
   if (!availableTabs.length) {
