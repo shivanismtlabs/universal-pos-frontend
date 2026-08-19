@@ -15,14 +15,14 @@ function identityToken() {
 }
 
 type AuthUserPayload = {
-  id: string;
-  email: string;
-  fullName: string;
-  roles: string[];
+        id: string;
+        email: string;
+        fullName: string;
+        roles: string[];
   permissions?: string[];
-  storeId?: string | null;
+        storeId?: string | null;
   locationId?: string | null;
-  tenantId: string;
+        tenantId: string;
   pinSet?: boolean;
 };
 
@@ -139,6 +139,12 @@ export const authApi = {
     taxId?: string;
     storeName?: string;
     tenantSlug?: string;
+    email?: string;
+    website?: string;
+    addressLine2?: string;
+    timezone?: string;
+    organizationType?: string;
+    pan?: string;
   }) {
     return apiRequest<PortalSessionResponse>("/auth/organizations", {
       method: "POST",
@@ -1156,6 +1162,7 @@ export const ordersApi = {
         orderNumber: string;
         status: string;
         kind?: string;
+        meta?: Record<string, unknown> | null;
         balanceDue: string | number;
         subtotal: string | number;
         depositTotal?: string | number;
@@ -1190,6 +1197,7 @@ export const ordersApi = {
       orderNumber: string;
       status: string;
       kind?: string;
+      meta?: Record<string, unknown> | null;
       locationId?: string;
       subtotal: string | number;
       taxTotal: string | number;
@@ -1285,12 +1293,21 @@ export const ordersApi = {
 };
 
 export const resourcesApi = {
-  list(params?: { page?: number; limit?: number; type?: string; q?: string }) {
+  list(params?: {
+    page?: number;
+    limit?: number;
+    type?: string;
+    q?: string;
+    locationId?: string;
+    status?: string;
+  }) {
     const qs = new URLSearchParams();
     if (params?.page) qs.set("page", String(params.page));
     if (params?.limit) qs.set("limit", String(params.limit));
     if (params?.type) qs.set("type", params.type);
     if (params?.q) qs.set("q", params.q);
+    if (params?.locationId) qs.set("locationId", params.locationId);
+    if (params?.status) qs.set("status", params.status);
     const q = qs.toString();
     return apiRequest<{
       data: Array<{
@@ -1300,6 +1317,7 @@ export const resourcesApi = {
         capacity: number;
         status: string;
         locationId?: string | null;
+        meta?: Record<string, unknown> | null;
       }>;
       meta: { page: number; limit: number; total: number };
     }>(`/resources${q ? `?${q}` : ""}`, { token: token() });
@@ -1318,6 +1336,13 @@ export const resourcesApi = {
       capacity: number;
       status: string;
     }>("/resources", { method: "POST", body, token: token() });
+  },
+  update(id: string, body: Record<string, unknown>) {
+    return apiRequest(`/resources/${id}`, {
+      method: "PATCH",
+      body,
+      token: token(),
+    });
   },
 };
 
@@ -1405,9 +1430,13 @@ export const appointmentsApi = {
         aptType: string;
         status: string;
         startsAt: string;
+        endsAt?: string | null;
         fittingNotes?: string | null;
+        notes?: string | null;
+        meta?: { serviceName?: string } | null;
         customer?: { fullName: string; phone: string };
         store?: { name: string };
+        resource?: { id: string; name: string; type: string } | null;
       }>;
       meta: { page: number; limit: number; total: number; totalPages: number };
     }>(`/appointments${q ? `?${q}` : ""}`, { token: token() });
@@ -1563,7 +1592,23 @@ export const paymentsApi = {
       enabled: boolean;
       publishableKey: string | null;
       mode: string;
+      webhookConfigured?: boolean;
     }>("/payments/stripe/config", { token: token() });
+  },
+
+  methods() {
+    return apiRequest<{
+      items: Array<{
+        method: string;
+        displayName: string;
+        primary: boolean;
+        configured: boolean;
+        available: boolean;
+        reason?: string;
+        requiresProvider: boolean;
+        supportsOffline: boolean;
+      }>;
+    }>("/payments/methods", { token: token() });
   },
 
   createStripeIntent(body: {
@@ -1571,6 +1616,7 @@ export const paymentsApi = {
     amount: number;
     type?: string;
     method?: string;
+    idempotencyKey?: string;
   }) {
     return apiRequest<{
       publishableKey: string;
@@ -1676,6 +1722,7 @@ export const posApi = {
       categories: Array<{ id: string; name: string }>;
       items: Array<{
         id: string;
+        productId?: string;
         sku: string;
         sellPrice: string | number;
         qtyOnHand: number;
@@ -1688,9 +1735,9 @@ export const posApi = {
     return apiRequest<{ id: string; name: string; parentId?: string | null }>(
       "/pos/sale/categories",
       {
-        method: "POST",
-        body,
-        token: token(),
+      method: "POST",
+      body,
+      token: token(),
       },
     );
   },
@@ -2012,6 +2059,7 @@ export const posApi = {
     lowStock?: boolean;
     maxQty?: number;
     forPurchase?: boolean;
+    categoryId?: string;
   }) {
     const qs = new URLSearchParams();
     if (params?.locationId) qs.set("locationId", params.locationId);
@@ -2021,6 +2069,7 @@ export const posApi = {
     if (params?.lowStock) qs.set("lowStock", "1");
     if (params?.maxQty) qs.set("maxQty", String(params.maxQty));
     if (params?.forPurchase) qs.set("forPurchase", "1");
+    if (params?.categoryId) qs.set("categoryId", params.categoryId);
     const q = qs.toString();
     return apiRequest<{
       locationId: string;
@@ -2049,6 +2098,23 @@ export const posApi = {
         taxCode?: string | null;
         taxRatePercent?: number | null;
         category?: { id: string; name: string } | null;
+        kind?: string;
+        requiresVariant?: boolean;
+        variantOptions?: Array<{
+          id: string;
+          skuCode: string;
+          barcode?: string | null;
+          label: string;
+        }>;
+        requiresBatch?: boolean;
+        batchOptions?: Array<{
+          id: string;
+          batchCode: string;
+          qtyOnHand: number;
+          expiresAt?: string | null;
+        }>;
+        requiresSerial?: boolean;
+        location?: { id: string; name: string; code?: string | null };
       }>;
     }>(`/pos/sale/catalog${q ? `?${q}` : ""}`, { token: token() });
   },
@@ -2057,6 +2123,7 @@ export const posApi = {
     if (locationId) qs.set("locationId", locationId);
     return apiRequest<{
       id: string;
+      productId?: string;
       sku: string;
       sellPrice: string | number;
       qtyOnHand: number;
@@ -2071,6 +2138,21 @@ export const posApi = {
       taxCode?: string | null;
       taxRatePercent?: number | null;
       category?: { id: string; name: string } | null;
+      requiresVariant?: boolean;
+      variantOptions?: Array<{
+        id: string;
+        skuCode: string;
+        barcode?: string | null;
+        label: string;
+      }>;
+      requiresBatch?: boolean;
+      batchOptions?: Array<{
+        id: string;
+        batchCode: string;
+        qtyOnHand: number;
+        expiresAt?: string | null;
+      }>;
+      requiresSerial?: boolean;
     }>(`/pos/sale/lookup?${qs}`, { token: token() });
   },
   saleCheckout(body: {
@@ -2080,6 +2162,9 @@ export const posApi = {
       stockLevelId: string;
       quantity: number;
       unitPrice?: number;
+      variantId?: string;
+      batchId?: string;
+      serialNumber?: string;
     }>;
     payments: Array<{
       method: string;
@@ -2104,6 +2189,7 @@ export const posApi = {
     allowPartial?: boolean;
     sendReceipt?: boolean;
     sendReceiptChannels?: Array<"email" | "sms" | "whatsapp">;
+    meta?: Record<string, unknown>;
   }) {
     return apiRequest<{
       order: {
@@ -2133,9 +2219,13 @@ export const posApi = {
       stockLevelId: string;
       quantity: number;
       unitPrice?: number;
+      variantId?: string;
+      batchId?: string;
+      serialNumber?: string;
     }>;
     note?: string;
     discountAmount?: number;
+    meta?: Record<string, unknown>;
   }) {
     return apiRequest<{
       orderId: string;
@@ -2779,6 +2869,7 @@ export const tenantsApi = {
         currencyCode?: string | null;
         managerUserId?: string | null;
         defaultWarehouseId?: string | null;
+        parentLocationId?: string | null;
         branchId?: string;
       }>
     >("/locations", { token: token() });
@@ -2795,6 +2886,7 @@ export const tenantsApi = {
     currencyCode?: string;
     managerUserId?: string;
     defaultWarehouseId?: string;
+    parentLocationId?: string;
   }) {
     return apiRequest("/locations", {
       method: "POST",
@@ -2817,6 +2909,7 @@ export const tenantsApi = {
       currencyCode?: string;
       managerUserId?: string;
       defaultWarehouseId?: string | null;
+      parentLocationId?: string | null;
     },
   ) {
     return apiRequest(`/locations/${id}`, {
@@ -3238,6 +3331,49 @@ export const appsApi = {
   },
 };
 
+export type CustomFieldEntityKey =
+  | "customer"
+  | "product"
+  | "order"
+  | "service_job"
+  | "rental"
+  | "subscription";
+
+export const customFieldsApi = {
+  listDefinitions(entity?: CustomFieldEntityKey) {
+    const q = entity ? `?entity=${encodeURIComponent(entity)}` : "";
+    return apiRequest<
+      Array<{
+        id: string;
+        entity: CustomFieldEntityKey;
+        fieldKey: string;
+        label: string;
+        dataType: string;
+        required: boolean;
+        options?: unknown;
+        moduleCode?: string | null;
+        sortOrder?: number | null;
+      }>
+    >(`/custom-fields/definitions${q}`, { token: token() });
+  },
+  createDefinition(body: {
+    entity: CustomFieldEntityKey;
+    fieldKey: string;
+    label: string;
+    dataType: string;
+    required?: boolean;
+    options?: unknown;
+    moduleCode?: string;
+    sortOrder?: number;
+  }) {
+    return apiRequest("/custom-fields/definitions", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+};
+
 /** Customer memberships (commerce subscription mode — not SaaS /plan) */
 export const subscriptionsApi = {
   summary() {
@@ -3340,6 +3476,35 @@ export const subscriptionsApi = {
   cancel(id: string) {
     return apiRequest(`/subscriptions/${id}/cancel`, {
       method: "POST",
+      token: token(),
+    });
+  },
+  checkInStatus(id: string) {
+    return apiRequest<{
+      subscriptionId: string;
+      status: string;
+      isCheckedIn: boolean;
+      customer: { id: string; fullName: string; phone: string; email?: string | null };
+      plan: { id: string; title: string; sku: string; price: string | number };
+      startsAt: string;
+      currentPeriodEnd: string;
+      cancelledAt: string | null;
+      lastVisitAt: string | null;
+      currentSessionStartedAt: string | null;
+      history: Array<{ id: string; action: string; at: string; note?: string | null }>;
+    }>(`/subscriptions/${id}/check-in`, { token: token() });
+  },
+  checkIn(id: string, body?: { locationId?: string; note?: string }) {
+    return apiRequest(`/subscriptions/${id}/check-in`, {
+      method: "POST",
+      body: body ?? {},
+      token: token(),
+    });
+  },
+  checkOut(id: string, body?: { locationId?: string; note?: string }) {
+    return apiRequest(`/subscriptions/${id}/check-out`, {
+      method: "POST",
+      body: body ?? {},
       token: token(),
     });
   },
@@ -4763,6 +4928,136 @@ export const reportsApi = {
       `/reports/dashboard-finance${q ? `?${q}` : ""}`,
       { token: token() },
     );
+  },
+  reportPacks() {
+    return apiRequest<{
+      sale: boolean;
+      rental: boolean;
+      service: boolean;
+      subscription: boolean;
+      inventory: boolean;
+      kitchen: boolean;
+      commerceModes: string[];
+    }>("/reports/packs", { token: token() });
+  },
+  rentalOps(from?: string, to?: string, locationId?: string) {
+    const qs = new URLSearchParams();
+    if (from) qs.set("from", from);
+    if (to) qs.set("to", to);
+    if (locationId) qs.set("locationId", locationId);
+    const q = qs.toString();
+    return apiRequest<{
+      from: string | null;
+      to: string | null;
+      locationId: string | null;
+      summary: {
+        orderCount: number;
+        revenue: number;
+        tax: number;
+        balanceDue: number;
+        overdueCount: number;
+        utilizationPct: number | null;
+        availableUnits: number;
+        unitsOut: number;
+        unitsTotal: number;
+        openDeposits: number;
+        openDepositUnits: number;
+        damageEvents: number;
+        damageCharges: number;
+        cleaningQueue: number;
+      };
+      byLifecycle: Array<{ lifecycle: string; count: number }>;
+      byUnitStatus: Array<{ status: string; count: number }>;
+      overdue: Array<{
+        orderId: string;
+        orderNumber: string;
+        customerName: string;
+        phone: string | null;
+        locationName: string;
+        lifecycle: string;
+        pickupDate: string | null;
+        returnDueDate: string | null;
+        balanceDue: number;
+      }>;
+    }>(`/reports/rental-ops${q ? `?${q}` : ""}`, { token: token() });
+  },
+  subscriptionsReport(from?: string, to?: string, locationId?: string) {
+    const qs = new URLSearchParams();
+    if (from) qs.set("from", from);
+    if (to) qs.set("to", to);
+    if (locationId) qs.set("locationId", locationId);
+    const q = qs.toString();
+    return apiRequest<{
+      from: string | null;
+      to: string | null;
+      locationId: string | null;
+      summary: {
+        active: number;
+        startedInPeriod: number;
+        cancelledInPeriod: number;
+        checkInsInPeriod: number;
+        monthlyRecurring: number;
+        churnPct: number;
+      };
+      byStatus: Array<{ status: string; count: number; priceSum: number }>;
+      upcomingRenewals: Array<{
+        id: string;
+        planName: string;
+        customerName: string;
+        phone: string;
+        renewsAt: string;
+        price: number;
+        billingPeriodDays: number;
+      }>;
+    }>(`/reports/subscriptions${q ? `?${q}` : ""}`, { token: token() });
+  },
+  listReportSchedules() {
+    return apiRequest<{
+      schedules: Array<{
+        id: string;
+        reportKey: string;
+        cadence: "daily" | "weekly" | "monthly";
+        recipients: string[];
+        enabled: boolean;
+        lastSentFor: string | null;
+      }>;
+      availableKeys: string[];
+      packs: {
+        sale: boolean;
+        rental: boolean;
+        subscription: boolean;
+        inventory: boolean;
+      };
+    }>("/reports/schedules", { token: token() });
+  },
+  upsertReportSchedules(items: Array<{
+    id?: string;
+    reportKey: string;
+    cadence: "daily" | "weekly" | "monthly";
+    recipients: string[];
+    enabled?: boolean;
+  }>) {
+    return apiRequest("/reports/schedules", {
+      method: "PATCH",
+      body: { items },
+      token: token(),
+    });
+  },
+  sendReportSchedules(force?: boolean) {
+    const q = force ? "?force=true" : "";
+    return apiRequest<{
+      today: string;
+      sent: number;
+      results: Array<{
+        id: string;
+        reportKey: string;
+        sent: boolean;
+        reason?: string;
+      }>;
+    }>(`/reports/schedules/send${q}`, {
+      method: "POST",
+      token: token(),
+    });
   },
   salesSummary(from?: string, to?: string, locationId?: string) {
     const qs = new URLSearchParams();
@@ -6560,6 +6855,8 @@ export type CatalogProductListItem = {
   costPrice?: number | null;
   mrp?: number | null;
   unitOfMeasure?: string;
+  stockOnHand?: number | null;
+  sellUnit?: string | null;
   trackInventory?: boolean;
   trackSerial?: boolean;
   trackBatch?: boolean;
@@ -6579,6 +6876,7 @@ export const catalogApi = {
     kind?: CatalogProductKind;
     status?: CatalogProductStatus;
     availableInPos?: boolean;
+    locationId?: string;
   }) {
     const qs = new URLSearchParams();
     if (params?.q) qs.set("q", params.q);
@@ -6588,6 +6886,7 @@ export const catalogApi = {
     if (params?.status) qs.set("status", params.status);
     if (params?.availableInPos != null)
       qs.set("availableInPos", String(params.availableInPos));
+    if (params?.locationId) qs.set("locationId", params.locationId);
     const q = qs.toString();
     return apiRequest<{ items: CatalogProductListItem[] }>(
       `/catalog/products${q ? `?${q}` : ""}`,

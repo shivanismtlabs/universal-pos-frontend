@@ -1,9 +1,10 @@
 "use client";
 
 /**
- * Multi-store / branches — Location CRUD (branch ≡ location).
+ * Locations / branches — Organization → Location hierarchy (Zoho-style).
  */
 import { useMemo, useState } from "react";
+import { usePathname } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Building2, Plus, Pencil } from "lucide-react";
@@ -29,8 +30,54 @@ type LocForm = {
   timezone: string;
   currencyCode: string;
   managerUserId: string;
+  parentLocationId: string;
   isActive: boolean;
 };
+
+type StoreRow = {
+  id: string;
+  name: string;
+  code?: string | null;
+  type?: string;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  businessHours?: string | null;
+  timezone?: string | null;
+  currencyCode?: string | null;
+  managerUserId?: string | null;
+  parentLocationId?: string | null;
+  isActive?: boolean;
+};
+
+function descendantIds(id: string, rows: StoreRow[]): string[] {
+  const kids = rows.filter((r) => r.parentLocationId === id);
+  return kids.flatMap((k) => [k.id, ...descendantIds(k.id, rows)]);
+}
+
+function flattenLocationTree(rows: StoreRow[]) {
+  const ids = new Set(rows.map((r) => r.id));
+  const byParent = new Map<string | null, StoreRow[]>();
+  for (const r of rows) {
+    const raw = r.parentLocationId || null;
+    const key = raw && ids.has(raw) ? raw : null;
+    const list = byParent.get(key) ?? [];
+    list.push(r);
+    byParent.set(key, list);
+  }
+  const out: Array<{ row: StoreRow; depth: number }> = [];
+  const walk = (parentId: string | null, depth: number) => {
+    const kids = [...(byParent.get(parentId) ?? [])].sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
+    for (const k of kids) {
+      out.push({ row: k, depth });
+      walk(k.id, depth + 1);
+    }
+  };
+  walk(null, 0);
+  return out;
+}
 
 const emptyForm = (): LocForm => ({
   name: "",
@@ -43,11 +90,14 @@ const emptyForm = (): LocForm => ({
   timezone: "Asia/Kolkata",
   currencyCode: "INR",
   managerUserId: "",
+  parentLocationId: "",
   isActive: true,
 });
 
 export default function StoresPage() {
   const qc = useQueryClient();
+  const pathname = usePathname();
+  const inSettings = pathname.startsWith("/settings/locations");
   const roles = useAuthStore((s) => s.user?.roles);
   const canEdit = canManageStaff(roles);
   const setCurrent = useBranchStore((s) => s.setCurrentLocationId);
@@ -55,6 +105,7 @@ export default function StoresPage() {
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [statusTab, setStatusTab] = useState<"all" | "active">("all");
   const [form, setForm] = useState<LocForm>(emptyForm);
   const [errors, setErrors] = useState<Partial<Record<keyof LocForm, string>>>(
     {},
@@ -88,8 +139,24 @@ export default function StoresPage() {
       setErrors(nextErr);
       if (Object.keys(nextErr).length) throw new Error("validation");
 
-      const body = {
+      if (editingId) {
+        return tenantsApi.updateLocation(editingId, {
+          name: form.name.trim(),
+          type: form.type,
+          address: form.address.trim() || undefined,
+          phone: form.phone.trim() || undefined,
+          email: form.email.trim() || undefined,
+          businessHours: form.businessHours.trim() || undefined,
+          timezone: form.timezone.trim() || undefined,
+          currencyCode: form.currencyCode.trim() || undefined,
+          managerUserId: form.managerUserId || undefined,
+          parentLocationId: form.parentLocationId || null,
+          isActive: form.isActive,
+        });
+      }
+      return tenantsApi.createLocation({
         name: form.name.trim(),
+        code: form.code.trim().toUpperCase(),
         type: form.type,
         address: form.address.trim() || undefined,
         phone: form.phone.trim() || undefined,
@@ -98,20 +165,17 @@ export default function StoresPage() {
         timezone: form.timezone.trim() || undefined,
         currencyCode: form.currencyCode.trim() || undefined,
         managerUserId: form.managerUserId || undefined,
-        ...(editingId
-          ? { isActive: form.isActive }
-          : { code: form.code.trim().toUpperCase() }),
-      };
-
-      if (editingId) {
-        return tenantsApi.updateLocation(editingId, body);
-      }
-      return tenantsApi.createLocation(body);
+        ...(form.parentLocationId
+          ? { parentLocationId: form.parentLocationId }
+          : {}),
+      });
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["stores-branches"] });
       void qc.invalidateQueries({ queryKey: ["branch-selector-locations"] });
+      void qc.invalidateQueries({ queryKey: ["locations"] });
       void qc.invalidateQueries({ queryKey: ["bootstrap"] });
+      void qc.invalidateQueries({ queryKey: ["tenant-locations"] });
       toast.success(editingId ? "Branch updated" : "Branch created");
       setShowForm(false);
       setEditingId(null);
@@ -130,20 +194,7 @@ export default function StoresPage() {
     setShowForm(true);
   }
 
-  function openEdit(row: {
-    id: string;
-    name: string;
-    code?: string | null;
-    type?: string;
-    address?: string | null;
-    phone?: string | null;
-    email?: string | null;
-    businessHours?: string | null;
-    timezone?: string | null;
-    currencyCode?: string | null;
-    managerUserId?: string | null;
-    isActive?: boolean;
-  }) {
+  function openEdit(row: StoreRow) {
     setEditingId(row.id);
     setForm({
       name: row.name,
@@ -156,41 +207,72 @@ export default function StoresPage() {
       timezone: row.timezone ?? "Asia/Kolkata",
       currencyCode: row.currencyCode ?? "INR",
       managerUserId: row.managerUserId ?? "",
+      parentLocationId: row.parentLocationId ?? "",
       isActive: row.isActive !== false,
     });
     setErrors({});
     setShowForm(true);
   }
 
-  const rows = list.data ?? [];
+  const allRows = (list.data ?? []) as StoreRow[];
+  const rows = allRows.filter((r) =>
+    statusTab === "active" ? r.isActive !== false : true,
+  );
+  const tree = flattenLocationTree(rows);
+  const blockedParentIds = editingId
+    ? new Set([editingId, ...descendantIds(editingId, allRows)])
+    : new Set<string>();
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-[0.7rem] font-semibold tracking-[0.12em] text-[#8a9bb0] uppercase">
-            Multi-store
+            Business
           </p>
           <h1 className="text-xl font-semibold text-[#0b1f33]">
-            Stores / Branches
+            {inSettings ? "Locations" : "Stores"}
           </h1>
           <p className="mt-0.5 text-sm text-[#5a6b7d]">
-            One catalog for the business. Stock, pricing, and sales stay
-            branch-wise.
+            Organization → location tree. Catalog is shared; stock and sales stay
+            per store. Nest a branch under HQ (or another location) with Parent
+            location.
           </p>
         </div>
         {canEdit ? (
           <Button type="button" onClick={openCreate}>
             <Plus className="mr-1 size-4" />
-            Add branch
+            Add location
           </Button>
         ) : null}
+      </div>
+
+      <div
+        role="tablist"
+        className="inline-flex gap-0.5 rounded-md border border-[#e2e8f0] bg-[#f1f5f9] p-0.5"
+      >
+        {(["all", "active"] as const).map((id) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={statusTab === id}
+            onClick={() => setStatusTab(id)}
+            className={
+              statusTab === id
+                ? "rounded-[5px] bg-white px-2.5 py-1.5 text-[0.75rem] font-semibold text-[#0b1f33] shadow-sm"
+                : "rounded-[5px] px-2.5 py-1.5 text-[0.75rem] font-medium text-[#5a6b7d]"
+            }
+          >
+            {id === "all" ? "All" : "Active"}
+          </button>
+        ))}
       </div>
 
       {showForm ? (
         <div className="rounded-xl border border-[#d9e0ea] bg-white p-4 shadow-sm">
           <h2 className="mb-3 text-sm font-semibold text-[#0b1f33]">
-            {editingId ? "Edit branch" : "New branch"}
+            {editingId ? "Edit location" : "New location"}
           </h2>
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1">
@@ -226,6 +308,29 @@ export default function StoresPage() {
                 <option value="warehouse">Warehouse</option>
                 <option value="other">Other</option>
               </select>
+            </div>
+            <div className="space-y-1">
+              <Label>Parent location</Label>
+              <select
+                className="h-9 w-full rounded-md border border-[#d9e0ea] bg-white px-2 text-sm"
+                value={form.parentLocationId}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, parentLocationId: e.target.value }))
+                }
+              >
+                <option value="">— Organization (top level) —</option>
+                {allRows
+                  .filter((r) => !blockedParentIds.has(r.id))
+                  .map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}
+                      {r.code ? ` (${r.code})` : ""}
+                    </option>
+                  ))}
+              </select>
+              <p className="text-[0.7rem] text-[#8a9bb0]">
+                Optional HQ / parent branch. Prevents circular trees.
+              </p>
             </div>
             <div className="space-y-1">
               <Label>Manager</Label>
@@ -339,26 +444,31 @@ export default function StoresPage() {
         <table className="w-full text-left text-sm">
           <thead className="border-b border-[#e8eef5] bg-[#f8fafc] text-[0.7rem] tracking-wide text-[#8a9bb0] uppercase">
             <tr>
-              <th className="px-3 py-2.5 font-semibold">Branch</th>
+              <th className="px-3 py-2.5 font-semibold">Location</th>
               <th className="px-3 py-2.5 font-semibold">Code</th>
               <th className="px-3 py-2.5 font-semibold">Type</th>
+              <th className="px-3 py-2.5 font-semibold">Parent</th>
               <th className="px-3 py-2.5 font-semibold">Status</th>
               <th className="px-3 py-2.5 font-semibold">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 ? (
+            {tree.length === 0 ? (
               <tr>
                 <td
-                  colSpan={5}
+                  colSpan={6}
                   className="px-3 py-10 text-center text-[#8a9bb0]"
                 >
                   <Building2 className="mx-auto mb-2 size-8 opacity-40" />
-                  No branches yet
+                  No locations yet
                 </td>
               </tr>
             ) : (
-              rows.map((r) => (
+              tree.map(({ row: r, depth }) => {
+                const parentName = r.parentLocationId
+                  ? allRows.find((x) => x.id === r.parentLocationId)?.name
+                  : null;
+                return (
                 <tr
                   key={r.id}
                   className={cn(
@@ -367,9 +477,20 @@ export default function StoresPage() {
                   )}
                 >
                   <td className="px-3 py-2.5">
-                    <div className="font-medium text-[#0b1f33]">{r.name}</div>
+                    <div
+                      className="font-medium text-[#0b1f33]"
+                      style={{ paddingLeft: depth * 16 }}
+                    >
+                      {depth > 0 ? (
+                        <span className="mr-1 text-[#8a9bb0]">↳</span>
+                      ) : null}
+                      {r.name}
+                    </div>
                     {r.address ? (
-                      <div className="text-[0.75rem] text-[#8a9bb0]">
+                      <div
+                        className="text-[0.75rem] text-[#8a9bb0]"
+                        style={{ paddingLeft: depth * 16 }}
+                      >
                         {r.address}
                       </div>
                     ) : null}
@@ -378,6 +499,9 @@ export default function StoresPage() {
                     {r.code}
                   </td>
                   <td className="px-3 py-2.5 capitalize">{r.type ?? "store"}</td>
+                  <td className="px-3 py-2.5 text-[0.8rem] text-[#5a6b7d]">
+                    {parentName ?? "—"}
+                  </td>
                   <td className="px-3 py-2.5">
                     <span
                       className={cn(
@@ -416,7 +540,8 @@ export default function StoresPage() {
                     </div>
                   </td>
                 </tr>
-              ))
+              );
+              })
             )}
           </tbody>
         </table>

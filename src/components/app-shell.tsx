@@ -16,7 +16,13 @@ import {
   CalendarDays,
   PackageCheck,
   MessageCircle,
-  BarChart3,
+  FileLineChart,
+  FileSpreadsheet,
+  CalendarRange,
+  TrendingUp,
+  TrendingDown,
+  Landmark,
+  User,
   UserCog,
   Truck,
   Box,
@@ -36,6 +42,18 @@ import {
   Folder,
   Tag,
   BookOpen,
+  NotebookPen,
+  ScrollText,
+  Scale,
+  Sheet,
+  Receipt,
+  Plug,
+  Link2,
+  Library,
+  MapPin,
+  Percent,
+  Repeat,
+  CalendarClock,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -67,7 +85,6 @@ import { useBranchStore } from "@/lib/branch-store";
 import {
   canAccessPath,
   defaultHomeForRoles,
-  ROUTE_ROLES,
 } from "@/lib/roles";
 
 type NavLeaf = {
@@ -93,6 +110,10 @@ type NavGroup = {
   section?: string;
   /** Short rail caption (default: first word of label) */
   railLabel?: string;
+  /** Hide whole group unless this commerce mode is on */
+  commerce?: string;
+  /** Hide unless bootstrap.group exists and is not hideLayer */
+  groupOnly?: boolean;
 };
 
 /** Zoho dual-nav groups — rail icons + secondary panel lists */
@@ -103,6 +124,14 @@ const NAV_GROUPS: NavGroup[] = [
     icon: Home,
     href: "/dashboard",
     section: "Workspace",
+  },
+  {
+    id: "group",
+    label: "All Businesses",
+    icon: Building2,
+    href: "/group",
+    section: "Workspace",
+    groupOnly: true,
   },
   {
     id: "inventory",
@@ -168,13 +197,6 @@ const NAV_GROUPS: NavGroup[] = [
         icon: ArrowRightLeft,
         module: "catalog",
       },
-      {
-        href: "/suppliers",
-        label: "Suppliers & purchases",
-        icon: Truck,
-        commerce: "sale",
-        module: "inventory",
-      },
     ],
   },
   {
@@ -209,6 +231,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Purchases",
     icon: Truck,
     section: "Commerce",
+    commerce: "sale",
     children: [
       {
         href: "/suppliers",
@@ -223,11 +246,6 @@ const NAV_GROUPS: NavGroup[] = [
         icon: Truck,
         commerce: "sale",
         module: "inventory",
-      },
-      {
-        href: "/expenses",
-        label: "Expenses",
-        icon: Wallet,
       },
     ],
   },
@@ -266,8 +284,13 @@ const NAV_GROUPS: NavGroup[] = [
         href: "/resources",
         label: "Resources",
         icon: LayoutGrid,
-        module: "resources",
         capability: "RESOURCE",
+      },
+      {
+        href: "/kitchen",
+        label: "Kitchen / KOT",
+        icon: ClipboardList,
+        capability: "KOT",
       },
       {
         href: "/jobs",
@@ -281,6 +304,12 @@ const NAV_GROUPS: NavGroup[] = [
         label: "Memberships",
         icon: TicketPercent,
         capability: "MEMBERSHIP",
+      },
+      {
+        href: "/check-in",
+        label: "Check-in",
+        icon: CalendarDays,
+        capability: "CHECK_IN",
       },
     ],
   },
@@ -325,56 +354,56 @@ const NAV_GROUPS: NavGroup[] = [
   {
     id: "docs",
     label: "Reports",
-    icon: BarChart3,
+    icon: FileLineChart,
     section: "Insights",
     children: [
       {
         href: "/reports/daily",
         label: "Daily Sales",
-        icon: BarChart3,
+        icon: CalendarDays,
         module: "reports",
       },
       {
         href: "/reports/monthly",
         label: "Monthly Sales",
-        icon: BarChart3,
+        icon: CalendarRange,
         module: "reports",
       },
       {
         href: "/reports/pnl",
         label: "Profit & Loss",
-        icon: BarChart3,
+        icon: Landmark,
         module: "reports",
       },
       {
         href: "/reports/top-products",
         label: "Top-Selling Products",
-        icon: BarChart3,
+        icon: TrendingUp,
         module: "reports",
       },
       {
         href: "/reports/slow-moving",
         label: "Slow-Moving Stock",
-        icon: BarChart3,
+        icon: TrendingDown,
         module: "reports",
-        commerce: "sale" as const,
+        capability: "INVENTORY",
       },
       {
         href: "/reports/customers",
         label: "Customer Reports",
-        icon: BarChart3,
+        icon: Users,
         module: "reports",
       },
       {
         href: "/reports/employees",
         label: "Employee Sales",
-        icon: BarChart3,
+        icon: User,
         module: "reports",
       },
       {
         href: "/reports/finance",
         label: "Finance Reports",
-        icon: BarChart3,
+        icon: Wallet,
         module: "reports",
       },
       {
@@ -382,12 +411,32 @@ const NAV_GROUPS: NavGroup[] = [
         label: "Inventory Reports",
         icon: Package,
         module: "reports",
-        commerce: "sale" as const,
+        capability: "INVENTORY",
+      },
+      {
+        href: "/reports/rental",
+        label: "Rental / assets",
+        icon: Repeat,
+        module: "reports",
+        commerce: "rental" as const,
+      },
+      {
+        href: "/reports/subscriptions",
+        label: "Plans & memberships",
+        icon: CalendarClock,
+        module: "reports",
+        commerce: "subscription" as const,
+      },
+      {
+        href: "/reports/schedules",
+        label: "Scheduled emails",
+        icon: CalendarRange,
+        module: "reports",
       },
       {
         href: "/reports",
         label: "Reports & CSV",
-        icon: BarChart3,
+        icon: FileSpreadsheet,
         module: "reports",
       },
     ],
@@ -399,17 +448,31 @@ const NAV_GROUPS: NavGroup[] = [
     section: "Insights",
     children: [
       { href: "/accounting", label: "Overview", icon: BookOpen },
-      { href: "/accounting/accounts", label: "Chart of Accounts", icon: BookOpen },
-      { href: "/accounting/journals", label: "Journal Entries", icon: BookOpen },
-      { href: "/accounting/ledger", label: "Ledger", icon: BookOpen },
-      { href: "/accounting/trial-balance", label: "Trial Balance", icon: BookOpen },
-      { href: "/accounting/profit-loss", label: "Profit & Loss", icon: BookOpen },
-      { href: "/accounting/balance-sheet", label: "Balance Sheet", icon: BookOpen },
-      { href: "/accounting/gst", label: "GST Reports", icon: BookOpen },
-      { href: "/accounting/periods", label: "Accounting Periods", icon: BookOpen },
-      { href: "/accounting/mappings", label: "Account Mapping", icon: BookOpen },
-      { href: "/accounting/integrations", label: "Integrations", icon: BookOpen },
+      { href: "/accounting/accounts", label: "Chart of Accounts", icon: Library },
+      { href: "/accounting/journals", label: "Journal Entries", icon: NotebookPen },
+      { href: "/accounting/ledger", label: "Ledger", icon: ScrollText },
+      { href: "/accounting/trial-balance", label: "Trial Balance", icon: Scale },
+      { href: "/accounting/profit-loss", label: "Profit & Loss", icon: Landmark },
+      { href: "/accounting/balance-sheet", label: "Balance Sheet", icon: Sheet },
+      { href: "/accounting/gst", label: "GST Reports", icon: Receipt },
+      { href: "/accounting/periods", label: "Accounting Periods", icon: CalendarRange },
+      { href: "/accounting/mappings", label: "Account Mapping", icon: Link2 },
+      { href: "/accounting/integrations", label: "Integrations", icon: Plug },
       { href: "/settings/accounting", label: "Accounting settings", icon: Settings },
+    ],
+  },
+  {
+    id: "stores",
+    label: "Stores",
+    railLabel: "Stores",
+    icon: Building2,
+    section: "Locations",
+    children: [
+      {
+        href: "/multi-store/dashboard",
+        label: "Multi-store dashboard",
+        icon: LayoutGrid,
+      },
     ],
   },
   {
@@ -420,21 +483,75 @@ const NAV_GROUPS: NavGroup[] = [
     section: "Business settings",
     children: [
       {
-        href: "/stores",
-        label: "Stores / Branches",
+        href: "/settings",
+        label: "Profile",
         icon: Building2,
         folder: "Business",
       },
       {
-        href: "/multi-store/dashboard",
-        label: "Multi-store dashboard",
+        href: "/settings/locations",
+        label: "Locations",
+        icon: MapPin,
+        folder: "Business",
+      },
+      {
+        href: "/settings/tax",
+        label: "Tax",
+        icon: Percent,
+        folder: "Business",
+      },
+      {
+        href: "/settings/notifications",
+        label: "Notifications",
+        icon: Bell,
+        folder: "Business",
+      },
+      {
+        href: "/settings/receipt",
+        label: "Receipt",
+        icon: Receipt,
+        folder: "Business",
+      },
+      {
+        href: "/settings/counter",
+        label: "Counter",
+        icon: CreditCard,
+        folder: "Business",
+      },
+      {
+        href: "/settings/returns",
+        label: "Returns",
+        icon: Package,
+        folder: "Business",
+      },
+      {
+        href: "/settings/expenses",
+        label: "Expense categories",
+        icon: Wallet,
+        folder: "Business",
+      },
+      {
+        href: "/settings/custom-fields",
+        label: "Custom fields",
+        icon: Library,
+        folder: "Business",
+      },
+      {
+        href: "/settings/capabilities",
+        label: "Commerce modes & features",
         icon: LayoutGrid,
         folder: "Business",
       },
       {
-        href: "/settings",
-        label: "Profile",
-        icon: Building2,
+        href: "/settings/payment-methods",
+        label: "Payment methods",
+        icon: CreditCard,
+        folder: "Business",
+      },
+      {
+        href: "/expenses",
+        label: "Expenses",
+        icon: Wallet,
         folder: "Business",
       },
       {
@@ -495,6 +612,7 @@ const NAV_CATALOG = flatCatalog();
 function leafAllowed(
   item: NavLeaf,
   roles: string[],
+  permissions: string[],
   hasModule: (code: string) => boolean,
   hasMode: (code: string) => boolean,
   hasCapability: (code: string) => boolean,
@@ -502,10 +620,7 @@ function leafAllowed(
   if (item.module && !hasModule(item.module)) return false;
   if (item.commerce && !hasMode(item.commerce)) return false;
   if (item.capability && !hasCapability(item.capability)) return false;
-  const path = hrefPath(item.href);
-  const allowed = ROUTE_ROLES[path as keyof typeof ROUTE_ROLES];
-  if (!allowed) return true;
-  return allowed.some((r) => roles.includes(r));
+  return canAccessPath(hrefPath(item.href), roles, permissions);
 }
 
 function hrefPath(href: string) {
@@ -539,6 +654,11 @@ function isLeafActive(pathname: string, search: string, href: string) {
       return !haveTab || haveTab === "levels";
     }
     return haveTab === wantTab;
+  }
+
+  // `/settings` is Profile only — do not highlight it for /settings/tax, etc.
+  if (base === "/settings") {
+    return pathname === "/settings";
   }
 
   return pathname === base || pathname.startsWith(`${base}/`);
@@ -587,6 +707,7 @@ function SidebarBody({
   userName,
   userEmail,
   roles,
+  permissions,
   productName,
   hasModule,
   hasMode,
@@ -598,6 +719,7 @@ function SidebarBody({
   userName?: string;
   userEmail?: string;
   roles: string[];
+  permissions: string[];
   productName: string;
   tagline: string;
   hasModule: (code: string) => boolean;
@@ -611,22 +733,26 @@ function SidebarBody({
   const search = searchParams?.toString() ? `?${searchParams.toString()}` : "";
   const router = useRouter();
   const [navQuery, setNavQuery] = useState("");
+  const { data: boot } = useBootstrap();
+  const showGroup = Boolean(boot?.group && !boot.group.hideLayer);
 
   const groups = useMemo(() => {
     return NAV_GROUPS.map((g) => {
+      if (g.groupOnly && !showGroup) return null;
+      if (g.commerce && !hasMode(g.commerce)) return null;
       const children = (g.children ?? []).filter((c) =>
-        leafAllowed(c, roles, hasModule, hasMode, hasCapability),
+        leafAllowed(c, roles, permissions, hasModule, hasMode, hasCapability),
       );
       if (g.href) {
         const leaf: NavLeaf = { href: g.href, label: g.label, icon: g.icon };
-        if (!leafAllowed(leaf, roles, hasModule, hasMode, hasCapability))
+        if (!leafAllowed(leaf, roles, permissions, hasModule, hasMode, hasCapability))
           return null;
         return { ...g, children: [] as NavLeaf[] };
       }
       if (!children.length) return null;
       return { ...g, children };
     }).filter(Boolean) as Array<NavGroup & { children: NavLeaf[] }>;
-  }, [roles, hasModule, hasMode, hasCapability]);
+  }, [roles, permissions, hasModule, hasMode, hasCapability, showGroup]);
 
   const pathGroupId = useMemo(
     () => groupActiveFromPath(pathname, groups),
@@ -1014,7 +1140,7 @@ function SidebarBody({
               className="w-full rounded-md px-2 py-1.5 text-left text-[0.72rem] font-medium text-[#a8b3c0] transition hover:bg-white/[0.05] hover:text-white"
               onClick={onSwitchOrg}
             >
-              Switch organization
+              Switch shop
             </button>
           ) : null}
           <button
@@ -1153,7 +1279,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (pinLocked || !roles.length || isLoading) return;
     if (!canAccessPath(pathname, roles, permissions)) {
-      const home = defaultHomeForRoles(roles);
+      const home = defaultHomeForRoles(roles, permissions);
       toast.error("You don’t have access to that page");
       router.replace(home);
       return;
@@ -1222,6 +1348,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   function switchOrganization() {
+    qc.clear();
+    useBranchStore.getState().bindTenant(null);
+    if (!identityToken) {
+      toast.message("Sign in again to pick another shop");
+      void logout();
+      return;
+    }
     useAuthStore.getState().clearTenantSession();
     router.replace("/organizations");
   }
@@ -1254,12 +1387,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const acting = user ?? stationUser;
   const sidebarProps = {
     onLogout: () => void logout(),
-    onSwitchOrg: identityToken
-      ? () => switchOrganization()
-      : undefined,
+    onSwitchOrg: () => switchOrganization(),
     userName: acting?.fullName,
     userEmail: acting?.email,
     roles,
+    permissions,
     productName,
     tagline,
     hasModule,

@@ -248,6 +248,9 @@ export function ItemsImportDialog({
       void qc.invalidateQueries({ queryKey: ["pos-sale-products"] });
       void qc.invalidateQueries({ queryKey: ["pos-sale-categories"] });
       void qc.invalidateQueries({ queryKey: ["pos-sale-floor"] });
+      void qc.invalidateQueries({ queryKey: ["catalog-products"] });
+      void qc.invalidateQueries({ queryKey: ["catalog-products-home"] });
+      void qc.invalidateQueries({ queryKey: ["pos-sale-catalog"] });
       toast.success(
         `Imported ${res.imported} item${res.imported === 1 ? "" : "s"}${
           res.failed ? ` · ${res.failed} failed` : ""

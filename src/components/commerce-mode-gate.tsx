@@ -6,7 +6,10 @@ import { toast } from "sonner";
 import { appsApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useBootstrap } from "@/lib/bootstrap";
+import { useAuthStore } from "@/lib/auth-store";
+import { canManageStaff, hasAnyPermission } from "@/lib/roles";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 const FALLBACK_PROFILES = [
@@ -74,6 +77,7 @@ export function CommerceModeGate({ children }: { children: React.ReactNode }) {
   const {
     data,
     isLoading,
+    isError,
     commerceSetupComplete,
     commerceModes,
     businessType,
@@ -82,6 +86,12 @@ export function CommerceModeGate({ children }: { children: React.ReactNode }) {
   const qc = useQueryClient();
   const catalog =
     data?.business?.catalog?.length ? data.business.catalog : FALLBACK_PROFILES;
+  const roles = useAuthStore((s) => s.user?.roles);
+  const permissions = useAuthStore((s) => s.user?.permissions);
+  const canSetup =
+    canManageStaff(roles) ||
+    hasAnyPermission(permissions, ["settings.manage"]);
+  const [profileFilter, setProfileFilter] = useState("");
 
   const registered =
     data?.commerce?.registeredModes ?? Object.keys(MODE_COPY);
@@ -152,8 +162,40 @@ export function CommerceModeGate({ children }: { children: React.ReactNode }) {
     );
   }
 
+  if (isError) {
+    return (
+      <div className="grid min-h-dvh place-items-center bg-[#f4f6fa] px-4">
+        <div className="w-full max-w-md rounded-xl border border-[#d9e0ea] bg-white p-6 text-center">
+          <h1 className="text-lg font-semibold text-[#0b1f33]">
+            Could not load this shop
+          </h1>
+          <p className="mt-2 text-sm text-[#5a6b7d]">
+            Your account may still be missing permissions. Ask an admin to
+            check Roles &amp; permissions, then sign in again.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   if (commerceSetupComplete && commerceModes.length > 0) {
     return <>{children}</>;
+  }
+
+  if (!canSetup) {
+    return (
+      <div className="grid min-h-dvh place-items-center bg-[#f4f6fa] px-4">
+        <div className="w-full max-w-md rounded-xl border border-[#d9e0ea] bg-white p-6 text-center">
+          <h1 className="text-lg font-semibold text-[#0b1f33]">
+            Shop setup is not finished
+          </h1>
+          <p className="mt-2 text-sm text-[#5a6b7d]">
+            Ask the shop owner to complete business profile and capabilities.
+            Attendance and other tools unlock after that.
+          </p>
+        </div>
+      </div>
+    );
   }
 
   function toggle(mode: string) {
@@ -164,9 +206,19 @@ export function CommerceModeGate({ children }: { children: React.ReactNode }) {
     );
   }
 
+  const visibleProfiles = catalog.filter((p) => {
+    const q = profileFilter.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      p.label.toLowerCase().includes(q) ||
+      (p.description ?? "").toLowerCase().includes(q) ||
+      p.id.toLowerCase().includes(q)
+    );
+  });
+
   return (
-    <div className="grid min-h-dvh place-items-center bg-[#f4f6fa] px-4 py-10">
-      <div className="w-full max-w-lg rounded-xl border border-[#d9e0ea] bg-white p-6 shadow-[0_12px_32px_-24px_rgba(11,31,51,0.2)]">
+    <div className="grid min-h-dvh place-items-center bg-[#f4f6fa] px-4 py-8">
+      <div className="w-full max-w-2xl rounded-xl border border-[#d9e0ea] bg-white p-6 shadow-[0_12px_32px_-24px_rgba(11,31,51,0.2)]">
         <p className="text-[0.65rem] font-semibold tracking-[0.14em] text-[#1a56db] uppercase">
           Setup · step {step === "profile" ? "1" : "2"} of 2
         </p>
@@ -180,8 +232,16 @@ export function CommerceModeGate({ children }: { children: React.ReactNode }) {
               Profile is config-only (extra fields & billing style). Core stays
               the same — Item, Order, Payment, Customer, Inventory.
             </p>
-            <ul className="mt-6 max-h-[22rem] space-y-2 overflow-y-auto">
-              {catalog.map((p) => {
+            {catalog.length > 6 ? (
+              <Input
+                className="mt-4"
+                placeholder="Search profiles"
+                value={profileFilter}
+                onChange={(e) => setProfileFilter(e.target.value)}
+              />
+            ) : null}
+            <ul className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {visibleProfiles.map((p) => {
                 const on = profileId === p.id;
                 return (
                   <li key={p.id}>
@@ -189,7 +249,7 @@ export function CommerceModeGate({ children }: { children: React.ReactNode }) {
                       type="button"
                       onClick={() => setProfileId(p.id)}
                       className={cn(
-                        "flex w-full items-start gap-3 rounded-lg border px-3.5 py-3 text-left transition",
+                        "flex h-full w-full items-start gap-2.5 rounded-lg border px-3 py-2.5 text-left transition",
                         on
                           ? "border-[#1a56db] bg-[#e8eefb]"
                           : "border-[#d9e0ea] bg-white hover:border-[#c5d0e0]",
@@ -197,17 +257,17 @@ export function CommerceModeGate({ children }: { children: React.ReactNode }) {
                     >
                       <span
                         className={cn(
-                          "mt-0.5 h-4 w-4 shrink-0 rounded-full border-2",
+                          "mt-0.5 h-3.5 w-3.5 shrink-0 rounded-full border-2",
                           on
                             ? "border-[#1a56db] bg-[#1a56db]"
                             : "border-[#cfd8e6] bg-white",
                         )}
                       />
-                      <span>
+                      <span className="min-w-0">
                         <span className="block text-sm font-semibold text-[#0b1f33]">
                           {p.label}
                         </span>
-                        <span className="mt-0.5 block text-[0.8125rem] text-[#5a6b7d]">
+                        <span className="mt-0.5 block text-[0.72rem] leading-snug text-[#5a6b7d]">
                           {p.description}
                         </span>
                       </span>
@@ -216,8 +276,13 @@ export function CommerceModeGate({ children }: { children: React.ReactNode }) {
                 );
               })}
             </ul>
+            {visibleProfiles.length === 0 ? (
+              <p className="mt-3 text-center text-sm text-[#8a9bb0]">
+                No profiles match that search.
+              </p>
+            ) : null}
             <Button
-              className="mt-6 w-full"
+              className="mt-5 w-full"
               disabled={!profileId || saveProfile.isPending}
               onClick={() => saveProfile.mutate()}
             >

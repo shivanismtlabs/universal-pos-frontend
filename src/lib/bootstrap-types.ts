@@ -33,12 +33,21 @@ export type BootstrapTenant = {
     productName?: string;
     tagline?: string;
     primaryColor?: string;
+    logoUrl?: string;
   } | null;
   settings?: Record<string, unknown> | null;
 };
 
 export type TenantBootstrap = {
   tenant: BootstrapTenant;
+  group?: {
+    id: string;
+    name: string;
+    role: string;
+    entitlements: string[] | unknown;
+    tenantCount: number;
+    hideLayer: boolean;
+  } | null;
   plan: {
     code: string;
     name: string;

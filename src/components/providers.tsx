@@ -26,7 +26,8 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
         {children}
         <Toaster
           theme="light"
-          position="top-right"
+          position="bottom-right"
+          offset={16}
           closeButton
           toastOptions={{
             classNames: {

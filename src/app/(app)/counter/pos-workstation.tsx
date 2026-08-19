@@ -24,7 +24,7 @@ import { ReceiptModal } from "@/components/receipt-modal";
 import {
   formatDate,
   moneyNumber,
-  newIdempotencyKey,
+  stablePaymentAttemptKey,
   todayYmd,
   toYmd,
   cn,
@@ -292,25 +292,9 @@ export default function PosWorkstation() {
       throw new Error("Enter a valid amount");
     }
     if (!stripeConfig.data?.enabled) {
-      await posApi.checkout({
-        orderId: selectedId,
-        markReady: Boolean(opts?.markReady),
-        payments: [
-          {
-            method,
-            amount: amt,
-            type: payType,
-            idempotencyKey: newIdempotencyKey("off"),
-          },
-        ],
-      });
-      toast.success(
-        opts?.markReady
-          ? `${method.toUpperCase()} recorded · ticket ready`
-          : `${method.toUpperCase()} payment recorded`,
+      throw new Error(
+        "Stripe is not configured — card/UPI cannot be marked paid without a provider",
       );
-      invalidate();
-      return;
     }
 
     setStripeBusy(true);
@@ -320,6 +304,10 @@ export default function PosWorkstation() {
         amount: amt,
         type: payType,
         method,
+        idempotencyKey: stablePaymentAttemptKey(
+          `${selectedId}:${amt}:${payType}:${method}`,
+          "rent-stripe",
+        ),
       });
       setStripeCheckout({
         publishableKey: session.publishableKey,
@@ -399,7 +387,10 @@ export default function PosWorkstation() {
             method: "cash",
             amount: amt,
             type: payType,
-            idempotencyKey: newIdempotencyKey("cash"),
+            idempotencyKey: stablePaymentAttemptKey(
+              `${selectedId}:${amt}:${payType}:cash`,
+              "cash",
+            ),
           },
         ],
       });
@@ -888,10 +879,9 @@ export default function PosWorkstation() {
         <ul className="max-h-[14rem] divide-y divide-[#eef2f8] overflow-y-auto">
           {floorUnits.map((u) => (
             <li key={u.id}>
-              <button
-                type="button"
+              <div
                 onClick={() => void applyUnit(u)}
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition hover:bg-[#f8fafc]"
+                className="flex w-full cursor-pointer items-center gap-2.5 px-3 py-2 text-left transition hover:bg-[#f8fafc]"
               >
                 <ProductThumb
                   src={u.image ?? u.photoUrl}
@@ -925,7 +915,7 @@ export default function PosWorkstation() {
                 <span className="inline-flex h-7 items-center rounded-md bg-[#1a56db] px-2 text-[0.65rem] font-semibold text-white">
                   ADD
                 </span>
-              </button>
+              </div>
             </li>
           ))}
           {!floorUnits.length ? (

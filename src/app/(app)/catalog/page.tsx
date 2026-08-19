@@ -19,7 +19,6 @@ import {
 import {
   catalogApi,
   type CatalogProductKind,
-  type CatalogProductStatus,
 } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
@@ -28,7 +27,10 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { ModeBadge } from "@/components/mode-badge";
 import { ProductThumb } from "@/components/product-thumb";
+import { ImageLightbox } from "@/components/image-lightbox";
 import { FieldError } from "@/components/ui/form";
+import { useAuthStore } from "@/lib/auth-store";
+import { useBranchStore } from "@/lib/branch-store";
 import {
   createBrandSchema,
   createCategorySchema,
@@ -44,14 +46,6 @@ const KINDS: { value: CatalogProductKind | ""; label: string }[] = [
   { value: "digital", label: "Digital" },
   { value: "bundle", label: "Bundle" },
   { value: "rental", label: "Rental" },
-];
-
-const STATUSES: { value: CatalogProductStatus | ""; label: string }[] = [
-  { value: "", label: "All status" },
-  { value: "active", label: "Active" },
-  { value: "inactive", label: "Inactive" },
-  { value: "draft", label: "Draft" },
-  { value: "archived", label: "Archived" },
 ];
 
 type Tab = "products" | "brands" | "categories" | "stock";
@@ -96,7 +90,7 @@ function CatalogPageInner() {
           </p>
           <h1 className="mt-0.5 text-[1.4rem] font-semibold tracking-tight text-[#0b1f33]">
             Product catalog
-          </h1>
+        </h1>
           <p className="mt-0.5 text-[0.8rem] text-[#5a6b7d]">
             What you sell · rent · service — stock quantities live under Stock
             levels
@@ -154,7 +148,7 @@ function CatalogPageInner() {
             </Button>
           </div>
         </div>
-      ) : null}
+              ) : null}
     </div>
   );
 }
@@ -162,38 +156,61 @@ function CatalogPageInner() {
 function ProductsPanel() {
   const router = useRouter();
   const qc = useQueryClient();
+  const tenantId = useAuthStore((s) => s.user?.tenantId);
+  const locationId = useBranchStore((s) => s.currentLocationId);
   const [q, setQ] = useState("");
   const [kind, setKind] = useState<CatalogProductKind | "">("");
-  const [status, setStatus] = useState<CatalogProductStatus | "">("");
+  const [statusFilter, setStatusFilter] = useState<
+    "" | "active" | "inactive" | "low"
+  >("");
   const [categoryId, setCategoryId] = useState("");
   const [brandId, setBrandId] = useState("");
 
   const [page, setPage] = useState(1);
   const pageSize = 25;
+  const [lightbox, setLightbox] = useState<{
+    images: string[];
+    index: number;
+    label: string;
+  } | null>(null);
 
   const cats = useQuery({
-    queryKey: ["catalog-categories"],
+    queryKey: ["catalog-categories", tenantId],
     queryFn: () => catalogApi.listCategories(),
   });
   const brands = useQuery({
-    queryKey: ["catalog-brands"],
+    queryKey: ["catalog-brands", tenantId],
     queryFn: () => catalogApi.listBrands(),
   });
   const list = useQuery({
-    queryKey: ["catalog-products", q, kind, status, categoryId, brandId],
+    queryKey: [
+      "catalog-products",
+      tenantId,
+      locationId,
+      q,
+      kind,
+      statusFilter,
+      categoryId,
+      brandId,
+    ],
     queryFn: () =>
       catalogApi.listProducts({
         q: q || undefined,
         kind: kind || undefined,
-        status: status || undefined,
+        status:
+          statusFilter === "active" || statusFilter === "inactive"
+            ? statusFilter
+            : undefined,
         categoryId: categoryId || undefined,
         brandId: brandId || undefined,
+        locationId: locationId || undefined,
       }),
+    refetchOnMount: "always",
   });
 
   useEffect(() => {
     setPage(1);
-  }, [q, kind, status, categoryId, brandId]);
+  }, [q, kind, statusFilter, categoryId, brandId]);
 
   const dup = useMutation({
     mutationFn: (id: string) => catalogApi.duplicate(id),
@@ -230,13 +247,40 @@ function ProductsPanel() {
       toast.error(e instanceof ApiError ? e.message : "Delete failed"),
   });
 
-  const allItems = list.data?.items ?? [];
-  const totalPages = Math.max(1, Math.ceil(allItems.length / pageSize));
-  const items = allItems.slice((page - 1) * pageSize, page * pageSize);
+  const allItems = Array.isArray(list.data)
+    ? list.data
+    : (list.data?.items ?? []);
+  const categoryChips = useMemo(() => {
+    const fromApi = (cats.data ?? []).filter((c) => c.isActive !== false);
+    if (fromApi.length) {
+      return fromApi.map((c) => ({
+        id: c.id,
+        name: c.parent?.name ? `${c.parent.name} › ${c.name}` : c.name,
+      }));
+    }
+    const map = new Map<string, string>();
+    for (const p of allItems) {
+      if (p.category?.id) map.set(p.category.id, p.category.name);
+    }
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+  }, [cats.data, allItems]);
+
+  const filteredItems =
+    statusFilter === "low"
+      ? allItems.filter(
+          (p) =>
+            p.trackInventory !== false &&
+            p.stockOnHand != null &&
+            p.stockOnHand <= 5 &&
+            p.stockOnHand > 0,
+        )
+      : allItems;
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
+  const items = filteredItems.slice((page - 1) * pageSize, page * pageSize);
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-end gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-[200px] flex-1">
           <Search className="pointer-events-none absolute top-2.5 left-2.5 size-4 text-[#8a9bb0]" />
           <Input
@@ -246,19 +290,38 @@ function ProductsPanel() {
             onChange={(e) => setQ(e.target.value)}
           />
         </div>
-        <select
-          className="h-9 rounded-md border border-[#dce3ec] bg-white px-2 text-sm"
-          value={categoryId}
-          onChange={(e) => setCategoryId(e.target.value)}
+        <div
+          role="tablist"
+          aria-label="Status filter"
+          className="inline-flex flex-wrap gap-0.5 rounded-md border border-[#e2e8f0] bg-[#f1f5f9] p-0.5"
         >
-          <option value="">All categories</option>
-          {(cats.data ?? []).map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.parent ? `${c.parent.name} › ` : ""}
-              {c.name}
-            </option>
-          ))}
-        </select>
+          {(
+            [
+              { id: "", label: "All" },
+              { id: "active", label: "Active" },
+              { id: "inactive", label: "Inactive" },
+              { id: "low", label: "Low stock" },
+            ] as const
+          ).map((t) => {
+            const on = statusFilter === t.id;
+                    return (
+                      <button
+                key={t.label}
+                        type="button"
+                role="tab"
+                aria-selected={on}
+                onClick={() => setStatusFilter(t.id)}
+                className={
+                  on
+                    ? "rounded-[5px] bg-white px-2.5 py-1.5 text-[0.75rem] font-semibold text-[#0b1f33] shadow-sm"
+                    : "rounded-[5px] px-2.5 py-1.5 text-[0.75rem] font-medium text-[#5a6b7d] hover:text-[#0b1f33]"
+                }
+              >
+                {t.label}
+                      </button>
+                    );
+                  })}
+                </div>
         <select
           className="h-9 rounded-md border border-[#dce3ec] bg-white px-2 text-sm"
           value={brandId}
@@ -282,26 +345,45 @@ function ProductsPanel() {
             </option>
           ))}
         </select>
-        <select
-          className="h-9 rounded-md border border-[#dce3ec] bg-white px-2 text-sm"
-          value={status}
-          onChange={(e) =>
-            setStatus(e.target.value as CatalogProductStatus | "")
-          }
-        >
-          {STATUSES.map((s) => (
-            <option key={s.label} value={s.value}>
-              {s.label}
-            </option>
-          ))}
-        </select>
         <Button asChild>
           <Link href="/catalog/new">
             <Plus className="mr-1 size-4" />
             Add Product
           </Link>
-        </Button>
+              </Button>
       </div>
+
+      {categoryChips.length ? (
+        <div className="flex min-w-0 gap-1 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <button
+            type="button"
+            onClick={() => setCategoryId("")}
+            className={cn(
+              "shrink-0 rounded-lg px-3 py-2 text-xs font-semibold transition",
+              !categoryId
+                ? "bg-[#1a56db] text-white shadow-sm"
+                : "bg-white text-[#5a6b7d] ring-1 ring-[#d9e0ea] hover:text-[#0b1f33]",
+            )}
+          >
+            All
+          </button>
+          {categoryChips.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => setCategoryId(c.id)}
+              className={cn(
+                "max-w-[12rem] shrink-0 truncate rounded-lg px-3 py-2 text-xs font-semibold transition",
+                categoryId === c.id
+                  ? "bg-[#1a56db] text-white shadow-sm"
+                  : "bg-white text-[#5a6b7d] ring-1 ring-[#d9e0ea] hover:text-[#0b1f33]",
+              )}
+            >
+              {c.name}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       <div className="overflow-x-auto rounded-md border border-[#e4e9f0] bg-white">
         <table className="w-full min-w-[820px] text-left text-sm">
@@ -312,7 +394,9 @@ function ProductsPanel() {
               <th className="px-3 py-2.5">SKU</th>
               <th className="px-3 py-2.5">Category</th>
               <th className="px-3 py-2.5">Type</th>
-              <th className="px-3 py-2.5 text-right">Price</th>
+              <th className="px-3 py-2.5 text-right">Rate</th>
+              <th className="px-3 py-2.5 text-right">Stock on Hand</th>
+              <th className="px-3 py-2.5">Unit</th>
               <th className="px-3 py-2.5">Status</th>
               <th className="px-3 py-2.5 text-right">Actions</th>
             </tr>
@@ -320,20 +404,33 @@ function ProductsPanel() {
           <tbody>
             {list.isLoading ? (
               <tr>
-                <td colSpan={8} className="px-3 py-8 text-center text-[#5a6b7d]">
+                <td colSpan={10} className="px-3 py-8 text-center text-[#5a6b7d]">
                   Loading catalog…
+                </td>
+              </tr>
+            ) : list.isError ? (
+              <tr>
+                <td colSpan={10} className="px-3 py-8 text-center text-[#c81e1e]">
+                  Could not load items.{" "}
+                  <button
+                    type="button"
+                    className="font-semibold underline"
+                    onClick={() => void list.refetch()}
+                  >
+                    Retry
+                  </button>
                 </td>
               </tr>
             ) : items.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-3 py-8 text-center text-[#5a6b7d]">
+                <td colSpan={10} className="px-3 py-8 text-center text-[#5a6b7d]">
                   No products yet. Add your first item.
                 </td>
               </tr>
             ) : (
               items.map((p) => (
                 <tr
-                  key={p.id}
+                key={p.id}
                   className="border-b border-[#f0f3f7] hover:bg-[#fafcfe]"
                 >
                   <td className="px-3 py-2">
@@ -342,6 +439,20 @@ function ProductsPanel() {
                       label={p.name}
                       size="md"
                       className="rounded-lg"
+                      count={p.images?.length}
+                      onClick={
+                        (p.images?.length || p.photoUrl)
+                          ? () =>
+                              setLightbox({
+                                images:
+                                  p.images?.length
+                                    ? p.images
+                                    : [p.photoUrl!],
+                                index: 0,
+                                label: p.name,
+                              })
+                          : undefined
+                      }
                     />
                   </td>
                   <td className="px-3 py-2">
@@ -368,6 +479,16 @@ function ProductsPanel() {
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">
                     {Number(p.basePrice).toFixed(2)}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-[#5a6b7d]">
+                    {p.trackInventory === false
+                      ? "—"
+                      : p.stockOnHand == null
+                        ? "—"
+                        : p.stockOnHand}
+                  </td>
+                  <td className="px-3 py-2 text-[#5a6b7d]">
+                    {p.sellUnit || p.unitOfMeasure || "pcs"}
                   </td>
                   <td className="px-3 py-2">
                     <StatusPill status={p.status} />
@@ -447,9 +568,16 @@ function ProductsPanel() {
             >
               Next
             </Button>
-          </div>
-        </div>
+                  </div>
+                </div>
       ) : null}
+      <ImageLightbox
+        open={Boolean(lightbox)}
+        images={lightbox?.images ?? []}
+        startIndex={lightbox?.index ?? 0}
+        label={lightbox?.label}
+        onClose={() => setLightbox(null)}
+      />
     </div>
   );
 }
@@ -463,7 +591,7 @@ function StatusPill({ status }: { status: string }) {
   };
   return (
     <span
-      className={cn(
+                  className={cn(
         "inline-flex rounded px-1.5 py-0.5 text-[0.7rem] font-medium capitalize",
         styles[status] ?? "bg-slate-100 text-slate-600",
       )}
@@ -550,7 +678,7 @@ function BrandsPanel() {
       toast.error(e instanceof ApiError ? e.message : "Delete failed"),
   });
 
-  return (
+                        return (
     <div className="grid gap-4 md:grid-cols-[280px_1fr]">
       <div className="space-y-2 rounded-md border border-[#e4e9f0] bg-white p-4">
         <div className="flex items-center gap-2 text-sm font-semibold text-[#0b1f33]">
@@ -609,7 +737,7 @@ function BrandsPanel() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          onClick={() => {
+                            onClick={() => {
                             setEditId(null);
                             setEditErrors({});
                           }}
@@ -661,7 +789,7 @@ function BrandsPanel() {
                   No brands yet
                 </td>
               </tr>
-            ) : null}
+                  ) : null}
           </tbody>
         </table>
       </div>
@@ -776,18 +904,18 @@ function CategoriesPanel() {
         />
         <FieldError message={fieldErrors.name} />
         <Label>Parent (optional)</Label>
-        <select
+                  <select
           className="h-9 w-full rounded-md border border-[#dce3ec] px-2 text-sm"
           value={parentId}
           onChange={(e) => setParentId(e.target.value)}
         >
           <option value="">— Top level —</option>
           {roots.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
         <Button
           disabled={create.isPending}
           onClick={() => create.mutate()}
@@ -811,15 +939,15 @@ function CategoriesPanel() {
                 <td className="px-3 py-2 font-medium">
                   {editId === c.id ? (
                     <div className="flex max-w-xs flex-col gap-1">
-                      <div className="flex gap-2">
-                        <Input
+                  <div className="flex gap-2">
+                    <Input
                           value={editName}
                           onChange={(e) => {
                             setEditName(e.target.value);
                             setEditErrors((f) => ({ ...f, name: "" }));
-                          }}
-                        />
-                        <Button
+                      }}
+                    />
+                    <Button
                           size="sm"
                           disabled={update.isPending}
                           onClick={() => update.mutate()}
@@ -835,10 +963,10 @@ function CategoriesPanel() {
                           }}
                         >
                           Cancel
-                        </Button>
-                      </div>
+                    </Button>
+                  </div>
                       <FieldError message={editErrors.name} />
-                    </div>
+                </div>
                   ) : (
                     <>
                       {c.name}
@@ -887,7 +1015,7 @@ function CategoriesPanel() {
             ))}
           </tbody>
         </table>
-      </div>
+        </div>
     </div>
   );
 }

@@ -484,7 +484,7 @@ export const updateSaleProductSchema = z
         });
       }
     }
-  });
+});
 
 export const createProductStyleSchema = z.object({
   name: z.string().min(2).max(255),
@@ -531,8 +531,18 @@ export const createAppointmentSchema = z.object({
   storeId: z.string().uuid("Select a store"),
   customerId: z.string().uuid("Select a customer"),
   orderId: z.string().uuid().optional().or(z.literal("")),
-  aptType: z.enum(["fitting", "pickup", "return"]),
+  aptType: z.enum([
+    "fitting",
+    "pickup",
+    "return",
+    "service",
+    "consultation",
+    "other",
+  ]),
+  serviceName: z.string().max(200).optional().or(z.literal("")),
+  resourceId: z.string().uuid().optional().or(z.literal("")),
   startsAt: z.string().min(1, "Start time required"),
+  endsAt: z.string().optional().or(z.literal("")),
   fittingNotes: z.string().max(2000).optional().or(z.literal("")),
 });
 export type CreateAppointmentInput = z.infer<typeof createAppointmentSchema>;
@@ -830,4 +840,4 @@ export const resetPasswordSchema = z
   .refine((v) => v.password === v.confirm, {
     message: "Passwords do not match",
     path: ["confirm"],
-  });
+});

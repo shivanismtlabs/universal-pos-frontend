@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { ordersApi, posApi, returnsApi } from "@/lib/api";
+import { ordersApi, posApi, returnsApi, subscriptionsApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import {
   createReturnSchema,
@@ -638,13 +638,196 @@ function SaleReturnsDesk() {
   );
 }
 
+/** Subscription cancellation panel — inside unified returns desk */
+function SubscriptionCancelDesk() {
+  const qc = useQueryClient();
+  const { money } = useBootstrap();
+
+  const subs = useQuery({
+    queryKey: ["returns-subscriptions"],
+    queryFn: () =>
+      subscriptionsApi.list({ status: "active", limit: 80 }) as Promise<{
+        items: Array<{
+          id: string;
+          status: string;
+          currentPeriodEnd: string;
+          price: string | number;
+          customer: { id: string; fullName: string; phone: string };
+          plan: { id: string; title: string };
+        }>;
+      }>,
+  });
+
+  const cancel = useMutation({
+    mutationFn: (id: string) => subscriptionsApi.cancel(id),
+    onSuccess: () => {
+      toast.success("Subscription cancelled");
+      void qc.invalidateQueries({ queryKey: ["returns-subscriptions"] });
+    },
+    onError: (e: unknown) =>
+      toast.error(
+        e instanceof Error ? e.message : "Could not cancel subscription",
+      ),
+  });
+
+  const items = subs.data?.items ?? [];
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-[#6b7280]">
+        Cancel an active subscription / membership. The subscription will
+        remain active until its current period ends.
+      </p>
+      {subs.isLoading ? (
+        <p className="text-sm text-[#6b7280]">Loading…</p>
+      ) : items.length === 0 ? (
+        <p className="py-8 text-center text-sm text-[#6b7280]">
+          No active subscriptions found.
+        </p>
+      ) : (
+        <ul className="divide-y divide-[#eef2f8] rounded-xl border border-[#e5e7eb] bg-white">
+          {items.map((s) => (
+            <li key={s.id} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
+              <div className="min-w-0">
+                <p className="font-semibold text-[#0b1f33]">
+                  {s.customer.fullName}
+                </p>
+                <p className="text-[0.75rem] text-[#5a6b7d]">
+                  {s.plan.title} · {money(Number(s.price))} ·{" "}
+                  renews {new Date(s.currentPeriodEnd).toLocaleDateString()}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="shrink-0 rounded-lg bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100"
+                onClick={() => cancel.mutate(s.id)}
+                disabled={cancel.isPending}
+              >
+                Cancel
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** Service order refund panel — inside unified returns desk */
+function ServiceRefundDesk() {
+  const qc = useQueryClient();
+  const { money } = useBootstrap();
+
+  const orders = useQuery({
+    queryKey: ["returns-service-orders"],
+    queryFn: () =>
+      ordersApi.list({ kind: "service_order", status: "completed", limit: 50 }) as Promise<{
+        items: Array<{
+          id: string;
+          orderNumber: string;
+          createdAt: string;
+          balanceDue: string | number;
+          subtotal: string | number;
+          customer: { id: string; fullName: string } | null;
+        }>;
+      }>,
+  });
+
+  const [selectedId, setSelectedId] = useState("");
+  const [reason, setReason] = useState("");
+
+  const doRefund = useMutation({
+    mutationFn: async () => {
+      if (!selectedId) throw new Error("Select an order to refund");
+      return posApi.saleReturn({
+        orderId: selectedId,
+        items: [],
+        refundAll: true,
+        refundToMethod: "store_credit",
+        reason: reason.trim() || "service_refund",
+        idempotencyKey: `svcref-${selectedId}-${Date.now()}`,
+      });
+    },
+    onSuccess: () => {
+      toast.success("Service refund recorded as store credit");
+      setSelectedId("");
+      setReason("");
+      void qc.invalidateQueries({ queryKey: ["returns-service-orders"] });
+    },
+    onError: (e: unknown) =>
+      toast.error(e instanceof Error ? e.message : "Refund failed"),
+  });
+
+  const items = orders.data?.items ?? [];
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-[#6b7280]">
+        Issue a refund or store credit for a completed service order.
+      </p>
+      {orders.isLoading ? (
+        <p className="text-sm text-[#6b7280]">Loading…</p>
+      ) : (
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-semibold text-[#5a6b7d] uppercase tracking-wide mb-1">
+              Select service order
+            </label>
+            <select
+              className="h-10 w-full rounded-lg border border-[#e5e7eb] bg-white px-3 text-sm"
+              value={selectedId}
+              onChange={(e) => setSelectedId(e.target.value)}
+            >
+              <option value="">— choose order —</option>
+              {items.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.orderNumber} · {o.customer?.fullName ?? "Walk-in"} ·{" "}
+                  {money(Number(o.subtotal))}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-[#5a6b7d] uppercase tracking-wide mb-1">
+              Reason (optional)
+            </label>
+            <input
+              type="text"
+              className="h-10 w-full rounded-lg border border-[#e5e7eb] bg-white px-3 text-sm"
+              placeholder="Cancellation reason"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+            />
+          </div>
+          <button
+            type="button"
+            className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+            disabled={!selectedId || doRefund.isPending}
+            onClick={() => doRefund.mutate()}
+          >
+            {doRefund.isPending ? "Processing…" : "Refund as store credit"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+type ReturnTab = "sale" | "rental" | "service" | "subscription";
+
 export default function ReturnsPage() {
   const { hasMode, isLoading } = useBootstrap();
   const hasSale = hasMode("sale");
   const hasRental = hasMode("rental");
-  const [tab, setTab] = useState<"sale" | "rental">(
-    hasRental && !hasSale ? "rental" : "sale",
-  );
+  const hasSvc = hasMode("service");
+  const hasSub = hasMode("subscription");
+
+  const [tab, setTab] = useState<ReturnTab>(() => {
+    if (hasSale) return "sale";
+    if (hasRental) return "rental";
+    if (hasSvc) return "service";
+    return "subscription";
+  });
 
   if (isLoading) {
     return (
@@ -652,11 +835,19 @@ export default function ReturnsPage() {
     );
   }
 
-  if (!hasSale && !hasRental) {
+  const availableTabs: Array<{ id: ReturnTab; label: string; show: boolean }> =
+    [
+      { id: "sale", label: "Sale refunds", show: hasSale },
+      { id: "rental", label: "Rental receive", show: hasRental },
+      { id: "service", label: "Service refunds", show: hasSvc },
+      { id: "subscription", label: "Cancel subscription", show: hasSub },
+    ].filter((t) => t.show);
+
+  if (!availableTabs.length) {
     return (
       <div className="rounded-xl border border-[#d9e0ea] bg-white p-8 text-center">
         <p className="text-sm font-semibold text-[#0b1f33]">
-          Returns need Sale or Rental mode
+          No commerce modes enabled
         </p>
         <p className="mt-1.5 text-sm text-[#5a6b7d]">
           Enable commerce modes in shop setup.
@@ -665,53 +856,50 @@ export default function ReturnsPage() {
     );
   }
 
-  const showTabs = hasSale && hasRental;
-  const effective = showTabs
+  const activeTab = availableTabs.some((t) => t.id === tab)
     ? tab
-    : hasSale
-      ? "sale"
-      : "rental";
+    : (availableTabs[0]?.id ?? "sale");
+
+  const showTabs = availableTabs.length > 1;
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 sm:space-y-8">
       <header>
         <p className="text-sm tracking-[0.2em] text-[#0b1f33] uppercase">
-          Returns
+          Returns &amp; Cancellations
         </p>
         <h1 className="display mt-2 text-3xl text-[#111827] sm:text-4xl">
           Returns desk
         </h1>
         <p className="mt-2 max-w-xl text-sm leading-relaxed text-[#6b7280]">
-          Sale refunds with restock / store credit, or rental unit receive &amp;
-          deposit settle.
+          Sale refunds · rental returns · service refunds · subscription
+          cancellations — all in one place.
         </p>
         {showTabs ? (
-          <div className="mt-4 flex gap-1 rounded-[12px] bg-[#eef2f8] p-1 sm:w-fit">
-            {(
-              [
-                ["sale", "Sale refunds"],
-                ["rental", "Rental receive"],
-              ] as const
-            ).map(([id, label]) => (
+          <div className="mt-4 flex flex-wrap gap-1 rounded-[12px] bg-[#eef2f8] p-1 sm:w-fit">
+            {availableTabs.map((t) => (
               <button
-                key={id}
+                key={t.id}
                 type="button"
-                onClick={() => setTab(id)}
+                onClick={() => setTab(t.id)}
                 className={cn(
                   "rounded-[9px] px-4 py-2 text-sm font-semibold transition",
-                  tab === id
+                  activeTab === t.id
                     ? "bg-white text-[#0b1f33] shadow-sm"
                     : "text-[#5a6b7d]",
                 )}
               >
-                {label}
+                {t.label}
               </button>
             ))}
           </div>
         ) : null}
       </header>
 
-      {effective === "sale" ? <SaleReturnsDesk /> : <RentalReturnsDesk />}
+      {activeTab === "sale" ? <SaleReturnsDesk /> : null}
+      {activeTab === "rental" ? <RentalReturnsDesk /> : null}
+      {activeTab === "service" ? <ServiceRefundDesk /> : null}
+      {activeTab === "subscription" ? <SubscriptionCancelDesk /> : null}
     </div>
   );
 }

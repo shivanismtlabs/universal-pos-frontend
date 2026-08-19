@@ -205,7 +205,7 @@ export async function unregisterWebPush(): Promise<void> {
 export function pushFailureMessage(reason?: string) {
   switch (reason) {
     case "insecure_origin":
-      return "OS popups need HTTPS (http://IP pe browser push block hota hai). In-app popups still work.";
+      return "Browser OS popups need HTTPS. This site is HTTP, so the OS blocks them — in-app alerts still work.";
     case "permission_denied":
       return "Notification permission denied";
     case "not_configured":

@@ -65,6 +65,48 @@ export function newIdempotencyKey(prefix = "pos") {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
+const ATTEMPT_STORAGE = "upos_payment_attempt";
+
+/** Reuse the same key for retries of the same cart/tender until success. */
+export function stablePaymentAttemptKey(
+  fingerprint: string,
+  prefix = "pos",
+): string {
+  const storageKey = `${ATTEMPT_STORAGE}:${prefix}`;
+  try {
+    const raw = sessionStorage.getItem(storageKey);
+    if (raw) {
+      const parsed = JSON.parse(raw) as { fingerprint?: string; key?: string };
+      if (parsed.fingerprint === fingerprint && parsed.key) return parsed.key;
+    }
+  } catch {
+    /* ignore */
+  }
+  const key = newIdempotencyKey(prefix);
+  try {
+    sessionStorage.setItem(
+      storageKey,
+      JSON.stringify({ fingerprint, key }),
+    );
+  } catch {
+    /* ignore */
+  }
+  return key;
+}
+
+export function clearPaymentAttemptKey() {
+  try {
+    const toRemove: string[] = [];
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const k = sessionStorage.key(i);
+      if (k?.startsWith(ATTEMPT_STORAGE)) toRemove.push(k);
+    }
+    for (const k of toRemove) sessionStorage.removeItem(k);
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Resolve product image path from API (`/v1/uploads/…`) or absolute URL */
 export function mediaUrl(path?: string | null) {
   if (!path) return null;
@@ -83,6 +125,10 @@ export function mediaUrl(path?: string | null) {
     trimmed.startsWith("data:") ||
     trimmed.startsWith("blob:")
   ) {
+    return trimmed;
+  }
+  // Same-origin proxy (next.config rewrites /v1/uploads → API)
+  if (typeof window !== "undefined" && trimmed.startsWith("/v1/uploads/")) {
     return trimmed;
   }
   const origin = getApiOrigin();

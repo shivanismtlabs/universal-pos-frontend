@@ -35,6 +35,13 @@ export function applyPortalResponse(data: PortalSessionResponse): "orgs" | "app"
       },
       tenantSlug: data.tenant?.slug ?? "",
     });
+    if (data.identityToken && data.identity) {
+      useAuthStore.getState().attachIdentity({
+        identityToken: data.identityToken,
+        identityRefreshToken: data.identityRefreshToken,
+        identity: data.identity,
+      });
+    }
     return "app";
   }
 

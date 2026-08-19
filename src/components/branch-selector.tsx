@@ -14,11 +14,18 @@ import { cn } from "@/lib/utils";
 export function BranchSelector({ className }: { className?: string }) {
   const currentLocationId = useBranchStore((s) => s.currentLocationId);
   const setCurrentLocationId = useBranchStore((s) => s.setCurrentLocationId);
+  const bindTenant = useBranchStore((s) => s.bindTenant);
   const authStoreId = useAuthStore((s) => s.user?.storeId);
+  const tenantId = useAuthStore((s) => s.user?.tenantId);
+
+  useEffect(() => {
+    bindTenant(tenantId ?? null);
+  }, [tenantId, bindTenant]);
 
   const locations = useQuery({
-    queryKey: ["branch-selector-locations"],
+    queryKey: ["locations", tenantId],
     queryFn: () => tenantsApi.listLocations(),
+    enabled: Boolean(tenantId),
   });
 
   const active = useMemo(
@@ -39,9 +46,10 @@ export function BranchSelector({ className }: { className?: string }) {
     if (prefer) setCurrentLocationId(prefer);
   }, [active, authStoreId, currentLocationId, setCurrentLocationId]);
 
-  if (active.length <= 1) {
+  if (!active.length) return null;
+
+  if (active.length === 1) {
     const only = active[0];
-    if (!only) return null;
     return (
       <div
         className={cn(
@@ -68,7 +76,7 @@ export function BranchSelector({ className }: { className?: string }) {
         className="max-w-[13rem] truncate border-0 bg-transparent text-[0.75rem] font-medium text-[#0b1f33] outline-none"
         value={currentLocationId ?? ""}
         onChange={(e) => setCurrentLocationId(e.target.value || null)}
-        aria-label="Current branch"
+        aria-label="Current shop / branch"
       >
         {active.map((l) => (
           <option key={l.id} value={l.id}>

@@ -122,6 +122,8 @@ function invalidateSale(qc: ReturnType<typeof useQueryClient>) {
   void qc.invalidateQueries({ queryKey: ["dashboard-catalog"] });
   void qc.invalidateQueries({ queryKey: ["retail-skus"] });
   void qc.invalidateQueries({ queryKey: ["categories"] });
+  void qc.invalidateQueries({ queryKey: ["catalog-products"] });
+  void qc.invalidateQueries({ queryKey: ["catalog-products-home"] });
 }
 
 /** Renders one BusinessConfig item meta field in Zoho label|control rows */
@@ -272,6 +274,7 @@ export function SaleStockPanel({
         categoryId: filterCat || undefined,
         locationId: floor.data?.locationId,
       }),
+    refetchOnMount: "always",
   });
 
   const categoriesQ = useQuery({
@@ -349,6 +352,8 @@ export function SaleStockPanel({
         .map((s) => s.trim())
         .filter(Boolean);
 
+      const photos = imagePickerRef.current?.getUploadDataUrls() ?? [];
+
       const res = await posApi.addSaleProduct({
         title: parsed.data.title,
         description: parsed.data.description || undefined,
@@ -358,6 +363,7 @@ export function SaleStockPanel({
         price: parsed.data.price,
         qty: parsed.data.qty,
         locationId: floor.data?.locationId,
+        image: photos[0],
         manufacturer: parsed.data.manufacturer || undefined,
         barcode: parsed.data.barcode || undefined,
         costPrice: parsed.data.costPrice,
@@ -408,7 +414,7 @@ export function SaleStockPanel({
           return out;
         })(),
       });
-      for (const dataUrl of imagePickerRef.current?.getUploadDataUrls() ?? []) {
+      for (const dataUrl of photos.slice(1)) {
         await posApi.uploadSaleProductImage(res.stockLevel.id, dataUrl);
       }
       return res;
@@ -665,11 +671,11 @@ export function SaleStockPanel({
                         [
                           ["goods", "Goods"],
                           ["service", "Service"],
-                        ] as const
+          ] as const
                       ).map(([id, label]) => (
-                        <button
+          <button
                           key={id}
-                          type="button"
+            type="button"
                           onClick={() =>
                             setForm((f) => ({
                               ...f,
@@ -686,10 +692,10 @@ export function SaleStockPanel({
                           )}
                         >
                           {label}
-                        </button>
-                      ))}
+          </button>
+        ))}
                     </div>
-                  </div>
+      </div>
 
                   <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
                     <Label className="sm:pt-2.5">Name *</Label>
@@ -968,14 +974,14 @@ export function SaleStockPanel({
                     <Label className="sm:pt-2.5">Manufacturer</Label>
                     <Input
                       value={form.manufacturer}
-                      onChange={(e) =>
-                        setForm((f) => ({
-                          ...f,
+                        onChange={(e) =>
+                          setForm((f) => ({
+                            ...f,
                           manufacturer: e.target.value,
-                        }))
-                      }
-                    />
-                  </div>
+                          }))
+                        }
+                      />
+                    </div>
                 </div>
               </section>
 
@@ -1005,18 +1011,18 @@ export function SaleStockPanel({
                           Rate per{" "}
                           {priceUnitLabel(normalizeSellUnit(form.sellUnit))}
                         </p>
-                      )}
-                    </div>
+                          )}
+                        </div>
                   </div>
                   <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
                     <Label className="sm:pt-2.5">Cost Price</Label>
-                    <Input
+                          <Input
                       inputMode="decimal"
                       placeholder="0.00"
                       value={form.costPrice}
                       onChange={(e) =>
-                        setForm((f) => ({
-                          ...f,
+                                  setForm((f) => ({
+                                    ...f,
                           costPrice: e.target.value,
                         }))
                       }
@@ -1033,8 +1039,8 @@ export function SaleStockPanel({
                       ).map(([id, label]) => (
                         <button
                           key={id}
-                          type="button"
-                          onClick={() =>
+                              type="button"
+                              onClick={() =>
                             setForm((f) => ({ ...f, taxPreference: id }))
                           }
                           className={cn(
@@ -1150,10 +1156,10 @@ export function SaleStockPanel({
                             ) : (
                               <p className="mt-1 text-[0.65rem] text-[#8b9bb0]">
                                 Minimum 1 — 0 / 0.1 / 0.2 not allowed
-                              </p>
-                            )}
-                          </div>
+                            </p>
+                          )}
                         </div>
+                      </div>
                         <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
                           <Label className="sm:pt-2.5">
                             Opening stock value
@@ -1169,7 +1175,7 @@ export function SaleStockPanel({
                               }))
                             }
                           />
-                        </div>
+                    </div>
                         <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
                           <Label className="sm:pt-2.5">Reorder Point</Label>
                           <Input
@@ -1269,19 +1275,19 @@ export function SaleStockPanel({
                           <div>
                             <Label className="text-[0.7rem]">
                               Auto-discount days before expiry
-                            </Label>
-                            <Input
+                    </Label>
+                    <Input
                               className="mt-1"
                               inputMode="numeric"
                               value={form.expiryAutoDiscountDays}
-                              onChange={(e) =>
-                                setForm((f) => ({
-                                  ...f,
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
                                   expiryAutoDiscountDays: e.target.value,
-                                }))
-                              }
-                            />
-                          </div>
+                        }))
+                      }
+                    />
+                  </div>
                           <div>
                             <Label className="text-[0.7rem]">Discount %</Label>
                             <Input
@@ -1295,7 +1301,7 @@ export function SaleStockPanel({
                                 }))
                               }
                             />
-                          </div>
+            </div>
                         </div>
                       ) : null}
                     </>
@@ -1396,14 +1402,14 @@ export function SaleStockPanel({
                       </div>
                     </div>
                   </div>
-                </section>
+          </section>
               ) : null}
 
               {/* —— 6. Modifiers (restaurant / café style) —— */}
               <section className="py-7">
                 <h3 className="text-[0.78rem] font-bold tracking-[0.04em] text-[#21263c] uppercase">
                   Modifiers / add-ons
-                </h3>
+            </h3>
                 <p className="mt-1 text-[0.72rem] text-[#6b7c93]">
                   Optional labels (e.g. Extra cheese, No onion). Full modifier
                   pricing pack later — saved on item for now.
@@ -1452,7 +1458,7 @@ export function SaleStockPanel({
               ) : null}
 
               <div className="flex flex-wrap gap-2 pt-6">
-                <Button
+              <Button
                   type="button"
                   disabled={addProduct.isPending || !categories.length}
                   onClick={() => addProduct.mutate()}
@@ -1461,12 +1467,12 @@ export function SaleStockPanel({
                 </Button>
                 <Button
                   type="button"
-                  variant="secondary"
+                variant="secondary"
                   onClick={() => setPanel("products")}
-                >
+              >
                   Cancel
-                </Button>
-              </div>
+              </Button>
+            </div>
             </div>
 
             {/* Right: images + categories (Zoho layout) */}
@@ -1567,7 +1573,7 @@ export function SaleStockPanel({
                     onClick={() => setImportOpen(true)}
                   >
                     Import Items
-                  </Button>
+            </Button>
                   <Button size="sm" onClick={() => setPanel("add")}>
                     + New Item
                   </Button>
@@ -1611,19 +1617,19 @@ export function SaleStockPanel({
               })}
             </div>
 
-            <Select
+              <Select
               wrapperClassName="w-full sm:w-[11.5rem] shrink-0"
-              value={filterCat}
-              onChange={(e) => setFilterCat(e.target.value)}
+                value={filterCat}
+                onChange={(e) => setFilterCat(e.target.value)}
               aria-label="Category"
-            >
-              <option value="">All categories</option>
-              {categoryOptions.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </Select>
+              >
+                <option value="">All categories</option>
+                {categoryOptions.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </Select>
 
             <div className="relative min-w-0 w-full flex-1 sm:max-w-xs">
               <Search
@@ -1693,21 +1699,21 @@ export function SaleStockPanel({
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#eef1f4]">
-                {items.map((item) => {
-                  const isEdit = editingId === item.id;
+            {items.map((item) => {
+              const isEdit = editingId === item.id;
                   const images = galleryOf(item);
                   const photosOpen = photosOpenId === item.id;
                   const cover = images[0] ?? null;
                   const low = item.isActive && Number(item.qty) <= 5;
-                  return (
+              return (
                     <tr key={item.id} className="align-top hover:bg-[#fafbfc]">
                       <td className="px-4 py-3 sm:px-5" colSpan={isEdit ? 8 : 1}>
-                        {!isEdit ? (
+                  {!isEdit ? (
                           <div className="flex min-w-0 items-center gap-3">
-                            <ProductThumb
+                          <ProductThumb
                               src={cover}
-                              label={item.title}
-                              size="md"
+                            label={item.title}
+                            size="md"
                               count={images.length}
                               onClick={
                                 images.length
@@ -1720,15 +1726,15 @@ export function SaleStockPanel({
                                   : undefined
                               }
                             />
-                            <div className="min-w-0">
+                        <div className="min-w-0">
                               <p className="truncate font-semibold text-[#0b1f33]">
-                                {item.title}
+                            {item.title}
                               </p>
                               {canWrite ? (
                                 <button
                                   type="button"
                                   className="mt-0.5 text-[0.72rem] font-medium text-[#1a56db] hover:underline"
-                                  onClick={() =>
+                          onClick={() =>
                                     setPhotosOpenId((id) =>
                                       id === item.id ? null : item.id,
                                     )
@@ -1739,55 +1745,55 @@ export function SaleStockPanel({
                                     : "Add photos"}
                                 </button>
                               ) : null}
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="grid gap-3 rounded-xl border border-[#e8edf4] bg-[#f7f9fc] p-3 sm:grid-cols-2">
-                            <div className="field-shell">
-                              <Label>Title</Label>
-                              <Input
-                                value={draft?.title ?? ""}
-                                onChange={(e) =>
-                                  setDraft((d) =>
-                                    d ? { ...d, title: e.target.value } : d,
-                                  )
-                                }
-                              />
-                            </div>
-                            <div className="field-shell">
-                              <Label>Category</Label>
-                              <Select
-                                value={draft?.categoryId ?? ""}
-                                onChange={(e) =>
-                                  setDraft((d) =>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid gap-3 rounded-xl border border-[#e8edf4] bg-[#f7f9fc] p-3 sm:grid-cols-2">
+                      <div className="field-shell">
+                        <Label>Title</Label>
+                        <Input
+                          value={draft?.title ?? ""}
+                          onChange={(e) =>
+                            setDraft((d) =>
+                              d ? { ...d, title: e.target.value } : d,
+                            )
+                          }
+                        />
+                      </div>
+                      <div className="field-shell">
+                        <Label>Category</Label>
+                        <Select
+                          value={draft?.categoryId ?? ""}
+                          onChange={(e) =>
+                            setDraft((d) =>
                                     d
                                       ? { ...d, categoryId: e.target.value }
                                       : d,
-                                  )
-                                }
-                              >
-                                {categoryOptions.map((c) => (
-                                  <option key={c.id} value={c.id}>
-                                    {c.name}
-                                  </option>
-                                ))}
-                              </Select>
-                            </div>
-                            <div className="field-shell sm:col-span-2">
-                              <Label>Description</Label>
-                              <textarea
-                                className={textareaClass}
-                                value={draft?.description ?? ""}
-                                onChange={(e) =>
-                                  setDraft((d) =>
+                            )
+                          }
+                        >
+                          {categoryOptions.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.name}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                      <div className="field-shell sm:col-span-2">
+                        <Label>Description</Label>
+                        <textarea
+                          className={textareaClass}
+                          value={draft?.description ?? ""}
+                          onChange={(e) =>
+                            setDraft((d) =>
                                     d
                                       ? { ...d, description: e.target.value }
                                       : d,
-                                  )
-                                }
-                              />
-                            </div>
-                            <div className="field-shell">
+                            )
+                          }
+                        />
+                      </div>
+                      <div className="field-shell">
                               <Label>Sell unit</Label>
                               <Select
                                 value={draft?.sellUnit ?? "pcs"}
@@ -1816,22 +1822,22 @@ export function SaleStockPanel({
                               <Label>
                                 Rate ({priceUnitLabel(draft?.sellUnit)})
                               </Label>
-                              <Input
-                                type="number"
+                        <Input
+                          type="number"
                                 step="0.01"
                                 min="0"
-                                value={draft?.price ?? ""}
-                                onChange={(e) =>
-                                  setDraft((d) =>
-                                    d ? { ...d, price: e.target.value } : d,
-                                  )
-                                }
-                              />
-                            </div>
-                            <div className="field-shell">
+                          value={draft?.price ?? ""}
+                          onChange={(e) =>
+                            setDraft((d) =>
+                              d ? { ...d, price: e.target.value } : d,
+                            )
+                          }
+                        />
+                      </div>
+                      <div className="field-shell">
                               <Label>Stock on hand</Label>
-                              <Input
-                                type="number"
+                        <Input
+                          type="number"
                                 min={0}
                                 step={
                                   draft?.sellUnit === "kg" ||
@@ -1839,33 +1845,33 @@ export function SaleStockPanel({
                                     ? "0.001"
                                     : "1"
                                 }
-                                value={draft?.qty ?? ""}
-                                onChange={(e) =>
-                                  setDraft((d) =>
-                                    d ? { ...d, qty: e.target.value } : d,
-                                  )
-                                }
-                              />
-                            </div>
-                            <div className="flex gap-2 sm:col-span-2">
-                              <Button
-                                disabled={updateProduct.isPending}
-                                onClick={() => updateProduct.mutate()}
-                              >
-                                Save
-                              </Button>
-                              <Button
-                                variant="secondary"
-                                onClick={() => {
-                                  setEditingId(null);
-                                  setDraft(null);
-                                }}
-                              >
-                                Cancel
-                              </Button>
-                            </div>
-                          </div>
-                        )}
+                          value={draft?.qty ?? ""}
+                          onChange={(e) =>
+                            setDraft((d) =>
+                              d ? { ...d, qty: e.target.value } : d,
+                            )
+                          }
+                        />
+                      </div>
+                      <div className="flex gap-2 sm:col-span-2">
+                        <Button
+                          disabled={updateProduct.isPending}
+                          onClick={() => updateProduct.mutate()}
+                        >
+                          Save
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          onClick={() => {
+                            setEditingId(null);
+                            setDraft(null);
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                         {canWrite && photosOpen && !isEdit ? (
                           <div className="mt-2 rounded-xl border border-[#e8edf4] bg-[#f7f9fc] px-3 py-2.5">
                             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -2035,9 +2041,9 @@ export function SaleStockPanel({
                         </>
                       ) : null}
                     </tr>
-                  );
-                })}
-                {!items.length && !products.isLoading ? (
+              );
+            })}
+            {!items.length && !products.isLoading ? (
                   <tr>
                     <td
                       colSpan={8}
@@ -2053,7 +2059,7 @@ export function SaleStockPanel({
                       </button>
                     </td>
                   </tr>
-                ) : null}
+            ) : null}
               </tbody>
             </table>
           </div>
@@ -2077,14 +2083,14 @@ export function SaleStockPanel({
                   + Add Category
                 </Button>
               ) : null}
-              <Button
+            <Button
                 size="sm"
                 variant="secondary"
                 onClick={() => setPanel("products")}
-              >
+            >
                 ← Back to items
-              </Button>
-            </div>
+            </Button>
+          </div>
           </div>
           <div className="p-4 sm:p-5">
           <ul className="divide-y divide-[#eef2f8]">

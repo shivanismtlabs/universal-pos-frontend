@@ -195,6 +195,15 @@ export default function ReportsPage() {
             <Button asChild size="sm" variant="secondary" className="h-9">
               <Link href="/reports/finance">Finance</Link>
             </Button>
+            <Button asChild size="sm" variant="secondary" className="h-9">
+              <Link href="/reports/rental">Rental / assets</Link>
+            </Button>
+            <Button asChild size="sm" variant="secondary" className="h-9">
+              <Link href="/reports/subscriptions">Plans</Link>
+            </Button>
+            <Button asChild size="sm" variant="secondary" className="h-9">
+              <Link href="/reports/schedules">Email schedule</Link>
+            </Button>
             <div>
               <Label className="text-xs">From</Label>
               <Input

@@ -33,7 +33,7 @@ function rowTone(s: string) {
 }
 
 export default function SlowMovingStockReportPage() {
-  const { money, businessType, hasMode } = useBootstrap();
+  const { money, hasCapability, hasMode } = useBootstrap();
   const hasPhysicalGoods = hasMode("sale");
 
   const [inactiveDays, setInactiveDays] = useState<30 | 60 | 90>(60);
@@ -83,7 +83,7 @@ export default function SlowMovingStockReportPage() {
 
   const title =
     data?.title ??
-    (businessType === "restaurant"
+    (hasCapability("KOT") || hasCapability("KITCHEN")
       ? "Slow-Moving Menu Items"
       : "Slow-Moving / Dead Stock");
 

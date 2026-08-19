@@ -28,7 +28,7 @@ export function ProductThumb({
 }: {
   src?: string | null;
   label?: string;
-  size?: "sm" | "md" | "lg" | "xl";
+  size?: "sm" | "md" | "lg" | "xl" | "fill";
   className?: string;
   onClick?: () => void;
   count?: number;
@@ -40,7 +40,9 @@ export function ProductThumb({
         ? "h-16 w-16"
         : size === "xl"
           ? "h-20 w-20 sm:h-24 sm:w-24"
-          : "h-12 w-12";
+          : size === "fill"
+            ? "h-full w-full"
+            : "h-12 w-12";
 
   const resolved = mediaUrl(src);
   const fallback = svgCover(label);
@@ -48,13 +50,25 @@ export function ProductThumb({
   const clickable = Boolean(onClick && resolved);
 
   return (
-    <button
-      type="button"
+    <div
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      title={clickable ? "View image" : undefined}
       onClick={(e) => {
         if (!clickable) return;
         e.stopPropagation();
         onClick?.();
       }}
+      onKeyDown={
+        clickable
+          ? (e) => {
+              if (e.key !== "Enter" && e.key !== " ") return;
+              e.preventDefault();
+              e.stopPropagation();
+              onClick?.();
+            }
+          : undefined
+      }
       className={cn(
         "relative grid shrink-0 place-items-center overflow-hidden rounded-xl border border-[#e2e8f0] bg-[#e8eefb] text-[#64748b] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.4)]",
         dim,
@@ -63,7 +77,6 @@ export function ProductThumb({
         !clickable && "cursor-default",
         className,
       )}
-      title={clickable ? "View image" : undefined}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
@@ -81,6 +94,6 @@ export function ProductThumb({
           {count}×
         </span>
       ) : null}
-    </button>
+    </div>
   );
 }

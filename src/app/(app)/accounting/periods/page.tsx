@@ -31,6 +31,8 @@ export default function PeriodsPage() {
     mutationFn: () => accountingApi.createPeriod({ startDate, endDate }),
     onSuccess: () => {
       toast.success("Period created");
+      setStartDate("");
+      setEndDate("");
       void qc.invalidateQueries({ queryKey: ["accounting", "periods"] });
     },
     onError: (e: Error) =>

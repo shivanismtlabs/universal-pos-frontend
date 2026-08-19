@@ -80,7 +80,7 @@ function TrendArrow({
 }
 
 export default function TopSellingProductsReportPage() {
-  const { money, businessType } = useBootstrap();
+  const { money, hasCapability } = useBootstrap();
   const [from, setFrom] = useState(defaultFrom);
   const [to, setTo] = useState(todayYmd);
   const [locationId, setLocationId] = useState("");
@@ -139,14 +139,15 @@ export default function TopSellingProductsReportPage() {
 
   const showMeal =
     data?.showMealPeriod ||
-    businessType === "restaurant" ||
-    businessType === "hybrid";
+    hasCapability("KOT") ||
+    hasCapability("KITCHEN") ||
+    hasCapability("TABLE");
 
   const title =
     data?.title ??
-    (businessType === "restaurant"
+    (hasCapability("KOT") || hasCapability("KITCHEN")
       ? "Top-Selling Menu Items"
-      : businessType === "service" || businessType === "salon"
+      : hasCapability("BOOKING")
         ? "Top-Booked Services"
         : "Top-Selling Products");
 

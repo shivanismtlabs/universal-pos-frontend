@@ -147,8 +147,9 @@ export default function SignupClient() {
 
   return (
     <AuthShell
-      title="Start your free trial"
-      subtitle="Create your account first. You’ll set up the company / store next — same flow as modern POS platforms."
+      wide
+      title="Create your workspace"
+      subtitle="Start a 15-day trial. You’ll set up the company next — no card required."
     >
       {/* Google sign-up — design hidden for now, do not delete.
       <AuthGoogleButton
@@ -159,59 +160,83 @@ export default function SignupClient() {
       <AuthDivider label="or sign up with email" />
       */}
 
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-3.5" noValidate>
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
         <div className="space-y-1.5">
-          <Label htmlFor="fullName">Full name</Label>
+          <Label
+            htmlFor="fullName"
+            className="text-[0.8125rem] font-semibold text-[#111827]"
+          >
+            Full name
+          </Label>
           <Input
             id="fullName"
             autoComplete="name"
             placeholder="Your name"
+            className="h-11 rounded-lg"
             {...register("fullName")}
           />
           <FieldError message={errors.fullName?.message} />
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="email"> email</Label>
+          <Label
+            htmlFor="email"
+            className="text-[0.8125rem] font-semibold text-[#111827]"
+          >
+            Work Email
+          </Label>
           <Input
             id="email"
             type="email"
             autoComplete="email"
-            placeholder="you@business.com"
+            placeholder="name@company.com"
+            className="h-11 rounded-lg"
             {...register("email")}
           />
           <FieldError message={errors.email?.message} />
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="phone">Phone</Label>
+          <Label
+            htmlFor="phone"
+            className="text-[0.8125rem] font-semibold text-[#111827]"
+          >
+            Phone
+          </Label>
           <Input
             id="phone"
             type="tel"
             autoComplete="tel"
             placeholder="+91 …"
+            className="h-11 rounded-lg"
             {...register("phone")}
           />
           <FieldError message={errors.phone?.message} />
         </div>
 
         <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <Label htmlFor="password">Password</Label>
+          <Label
+            htmlFor="password"
+            className="text-[0.8125rem] font-semibold text-[#111827]"
+          >
+            Password
+          </Label>
+          <div className="relative">
+            <Input
+              id="password"
+              type={showPassword ? "text" : "password"}
+              autoComplete="new-password"
+              className="h-11 rounded-lg pr-16"
+              {...register("password")}
+            />
             <button
               type="button"
-              className="text-[0.75rem] font-medium text-[#1a56db] hover:underline"
+              className="absolute inset-y-0 right-3 text-[0.7rem] font-semibold tracking-wide text-[#9ca3af] uppercase hover:text-[#4b5563]"
               onClick={() => setShowPassword((v) => !v)}
             >
               {showPassword ? "Hide" : "Show"}
             </button>
           </div>
-          <Input
-            id="password"
-            type={showPassword ? "text" : "password"}
-            autoComplete="new-password"
-            {...register("password")}
-          />
           {showPasswordHints ? (
             <>
               <div className="h-1 overflow-hidden rounded-full bg-[#eef2f8]">
@@ -246,11 +271,17 @@ export default function SignupClient() {
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="confirmPassword">Confirm password</Label>
+          <Label
+            htmlFor="confirmPassword"
+            className="text-[0.8125rem] font-semibold text-[#111827]"
+          >
+            Confirm password
+          </Label>
           <Input
             id="confirmPassword"
             type={showPassword ? "text" : "password"}
             autoComplete="new-password"
+            className="h-11 rounded-lg"
             {...register("confirmPassword")}
           />
           <FieldError message={errors.confirmPassword?.message} />
@@ -261,15 +292,19 @@ export default function SignupClient() {
           Policy. 15-day free trial · no card required.
         </p>
 
-        <Button type="submit" className="w-full" disabled={isSubmitting}>
-          {isSubmitting ? "Creating account…" : "Create account"}
+        <Button
+          type="submit"
+          className="h-11 w-full rounded-lg text-[0.9375rem] font-semibold"
+          disabled={isSubmitting}
+        >
+          {isSubmitting ? "Creating account…" : "Create workspace"}
         </Button>
 
-        <p className="text-center text-[0.8125rem] text-[#5a6b7d]">
+        <p className="pt-1 text-center text-[0.875rem] text-[#6b7280]">
           Already have an account?{" "}
           <Link
             href="/login"
-            className="font-semibold text-[#1a56db] underline-offset-2 hover:underline"
+            className="font-semibold text-[#1a56db] hover:underline"
           >
             Sign in
           </Link>

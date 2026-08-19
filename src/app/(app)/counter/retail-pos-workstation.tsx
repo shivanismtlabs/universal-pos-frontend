@@ -4,17 +4,16 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { loyaltyApi, paymentsApi, posApi, tenantsApi } from "@/lib/api";
+import { loyaltyApi, paymentsApi, posApi, resourcesApi, tenantsApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useBootstrap } from "@/lib/bootstrap";
 import { useBranchStore } from "@/lib/branch-store";
 import { useAuthStore } from "@/lib/auth-store";
 import { canApproveRefund } from "@/lib/roles";
-import { moneyNumber, newIdempotencyKey, cn } from "@/lib/utils";
+import { moneyNumber, stablePaymentAttemptKey, clearPaymentAttemptKey, cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select } from "@/components/ui/select";
 import { ReceiptModal, type ReceiptData } from "@/components/receipt-modal";
 import { StripeCheckoutModal } from "@/components/stripe-checkout-modal";
 import { ProductThumb } from "@/components/product-thumb";
@@ -23,6 +22,7 @@ import { CustomerPicker } from "@/components/customer-picker";
 import { StationPinLock } from "@/components/station-pin-lock";
 import { BarcodeScanInput } from "@/components/barcode-scan-input";
 import {
+  enqueueOfflineEvent,
   flushOfflineQueue,
   isOnline,
   pendingOfflineCount,
@@ -49,6 +49,24 @@ type CartLine = {
   image?: string | null;
   /** Product override % (e.g. 18). null/undefined → tenant rate */
   taxRatePercent?: number | null;
+  requiresVariant?: boolean;
+  variantId?: string;
+  variantOptions?: Array<{
+    id: string;
+    skuCode: string;
+    barcode?: string | null;
+    label: string;
+  }>;
+  requiresBatch?: boolean;
+  batchId?: string;
+  batchOptions?: Array<{
+    id: string;
+    batchCode: string;
+    qtyOnHand: number;
+    expiresAt?: string | null;
+  }>;
+  requiresSerial?: boolean;
+  serialNumber?: string;
 };
 
 type PayMethod =
@@ -73,7 +91,8 @@ export default function RetailPosWorkstation({
   compact?: boolean;
 }) {
   const qc = useQueryClient();
-  const { money, productName, currencyCode, data: boot } = useBootstrap();
+  const { money, productName, currencyCode, data: boot, hasCapability } =
+    useBootstrap();
   const roles = useAuthStore((s) => s.user?.roles ?? []);
   const actingUser = useAuthStore((s) => s.user);
   const lockStation = useAuthStore((s) => s.lockStation);
@@ -154,6 +173,7 @@ export default function RetailPosWorkstation({
   const [closingCash, setClosingCash] = useState("");
   const [showCloseRegister, setShowCloseRegister] = useState(false);
   const [payMethod, setPayMethod] = useState<PayMethod>("cash");
+  const [showMorePay, setShowMorePay] = useState(false);
   const [splitPay, setSplitPay] = useState(false);
   const [splitCashAmount, setSplitCashAmount] = useState("");
   const [cashTendered, setCashTendered] = useState("");
@@ -175,6 +195,10 @@ export default function RetailPosWorkstation({
     amountOff: number;
   } | null>(null);
   const [sendReceipt, setSendReceipt] = useState(false);
+  const [orderType, setOrderType] = useState("walk_in");
+  const [resourceId, setResourceId] = useState("");
+  const [guestCount, setGuestCount] = useState("1");
+  const [orderNote, setOrderNote] = useState("");
   const [touchMode, setTouchMode] = useState(false);
   const [busy, setBusy] = useState(false);
   const [offlinePending, setOfflinePending] = useState(0);
@@ -206,6 +230,10 @@ export default function RetailPosWorkstation({
     queryKey: ["stripe-config"],
     queryFn: () => paymentsApi.stripeConfig(),
   });
+  const payMethods = useQuery({
+    queryKey: ["payment-methods"],
+    queryFn: () => paymentsApi.methods(),
+  });
 
   const locations = useQuery({
     queryKey: ["locations"],
@@ -220,6 +248,23 @@ export default function RetailPosWorkstation({
     locations.data?.find((l) => l.code === "MAIN" && l.isActive !== false)?.id ??
     locations.data?.find((l) => l.isActive !== false)?.id ??
     locations.data?.[0]?.id;
+  const resourceType = hasCapability("TABLE") ? "table" : undefined;
+  const resources = useQuery({
+    queryKey: ["counter-resources", locationId, resourceType],
+    queryFn: () =>
+      resourcesApi.list({
+        limit: 100,
+        ...(locationId ? { locationId } : {}),
+        ...(resourceType ? { type: resourceType } : {}),
+      }),
+    enabled: Boolean(locationId) && (hasCapability("RESOURCE") || hasCapability("TABLE")),
+  });
+  const foodFulfillment =
+    hasCapability("TABLE") ||
+    hasCapability("KOT") ||
+    hasCapability("KITCHEN") ||
+    hasCapability("DELIVERY");
+  const resourceDesk = hasCapability("RESOURCE") || hasCapability("TABLE");
 
   useEffect(() => {
     if (!pinSwitchEnabled || !stationToken || pinLocked) return;
@@ -445,6 +490,21 @@ export default function RetailPosWorkstation({
     photoUrl?: string | null;
     images?: string[];
     taxRatePercent?: number | null;
+    requiresVariant?: boolean;
+    variantOptions?: Array<{
+      id: string;
+      skuCode: string;
+      barcode?: string | null;
+      label: string;
+    }>;
+    requiresBatch?: boolean;
+    batchOptions?: Array<{
+      id: string;
+      batchCode: string;
+      qtyOnHand: number;
+      expiresAt?: string | null;
+    }>;
+    requiresSerial?: boolean;
   }) {
     const price = moneyNumber(row.sellPrice);
     const image =
@@ -474,6 +534,11 @@ export default function RetailPosWorkstation({
                 sellUnit: unit,
                 image: l.image ?? image,
                 taxRatePercent: l.taxRatePercent ?? taxRatePercent,
+                requiresVariant: row.requiresVariant === true,
+                variantOptions: row.variantOptions ?? [],
+                requiresBatch: row.requiresBatch === true,
+                batchOptions: row.batchOptions ?? [],
+                requiresSerial: row.requiresSerial === true,
               }
             : l,
         );
@@ -496,6 +561,19 @@ export default function RetailPosWorkstation({
           category: row.category?.name ?? null,
           image,
           taxRatePercent,
+          requiresVariant: row.requiresVariant === true,
+          variantOptions: row.variantOptions ?? [],
+          requiresBatch: row.requiresBatch === true,
+          batchOptions: row.batchOptions ?? [],
+          requiresSerial: row.requiresSerial === true,
+          variantId:
+            row.requiresVariant && row.variantOptions?.length === 1
+              ? row.variantOptions[0].id
+              : undefined,
+          batchId:
+            row.requiresBatch && row.batchOptions?.length === 1
+              ? row.batchOptions[0].id
+              : undefined,
         },
       ];
     });
@@ -550,8 +628,10 @@ export default function RetailPosWorkstation({
       return;
     }
     if (!isOnline()) {
-      toast.error("Counter needs internet to charge — reconnect and try again");
-      return;
+      if (payMethod !== "cash" && payMethod !== "gift_card" && payMethod !== "store_credit") {
+        toast.error("Card/UPI needs internet — use cash or wait to reconnect");
+        return;
+      }
     }
     if (!registerSession) {
       toast.error("Open the register before charging");
@@ -587,6 +667,10 @@ export default function RetailPosWorkstation({
       toast.error("Enter gift card code");
       return;
     }
+    if (payMethod === "emi") {
+      toast.error("EMI provider is not configured");
+      return;
+    }
     if (payMethod === "bank_transfer") {
       if (
         !bankAccountName.trim() ||
@@ -618,10 +702,61 @@ export default function RetailPosWorkstation({
       toast.error("Select a customer to redeem loyalty points");
       return;
     }
+    const posRoot =
+      boot?.tenant?.settings && typeof boot.tenant.settings === "object"
+        ? (boot.tenant.settings as Record<string, unknown>).pos
+        : undefined;
+    const posCfg =
+      posRoot && typeof posRoot === "object"
+        ? (posRoot as Record<string, unknown>)
+        : {};
+    if (posCfg.customerRequired === true && !customerId) {
+      toast.error("Customer is required for checkout");
+      return;
+    }
+    for (const line of cart) {
+      if (line.requiresVariant && !line.variantId) {
+        toast.error(`Select variant for ${line.name}`);
+        return;
+      }
+      if (line.requiresBatch && !line.batchId) {
+        toast.error(`Select batch for ${line.name}`);
+        return;
+      }
+      if (line.requiresSerial && !line.serialNumber?.trim()) {
+        toast.error(`Enter serial for ${line.name}`);
+        return;
+      }
+    }
 
     chargeLock.current = true;
     setBusy(true);
     try {
+      const fingerprint = JSON.stringify({
+        locationId,
+        customerId,
+        items: cart.map((l) => ({
+          id: l.stockLevelId,
+          qty: l.qty,
+          price: l.unitPrice,
+        })),
+        discountNum,
+        payMethod,
+        chargeAmount,
+        splitPay,
+        splitCashAmount,
+        allowPartial,
+      });
+      const attemptKey = stablePaymentAttemptKey(fingerprint, "sale");
+      const splitCashKey = stablePaymentAttemptKey(
+        `${fingerprint}:cash`,
+        "sale-split-cash",
+      );
+      const stripeAttemptKey = stablePaymentAttemptKey(
+        `${fingerprint}:stripe`,
+        "sale-stripe",
+      );
+
       const cartPayload = {
         locationId,
         ...(customerId ? { customerId } : {}),
@@ -629,6 +764,11 @@ export default function RetailPosWorkstation({
           stockLevelId: l.stockLevelId,
           quantity: l.qty,
           unitPrice: l.unitPrice,
+          ...(l.variantId ? { variantId: l.variantId } : {}),
+          ...(l.batchId ? { batchId: l.batchId } : {}),
+          ...(l.serialNumber?.trim()
+            ? { serialNumber: l.serialNumber.trim() }
+            : {}),
         })),
         ...(discountNum > 0 ? { discountAmount: discountNum } : {}),
         ...(couponApplied
@@ -636,6 +776,14 @@ export default function RetailPosWorkstation({
           : couponCode.trim()
             ? { couponCode: couponCode.trim() }
             : {}),
+        ...(orderNote.trim() ? { note: orderNote.trim() } : {}),
+        meta: {
+          ...(foodFulfillment ? { orderType } : {}),
+          ...(resourceId ? { tableId: resourceId } : {}),
+          ...(foodFulfillment && Number(guestCount) > 0
+            ? { covers: Number(guestCount) }
+            : {}),
+        },
       };
 
       const checkoutExtras = {
@@ -695,7 +843,7 @@ export default function RetailPosWorkstation({
               amount: cashPart,
               method: "cash",
               type: "payment",
-              idempotencyKey: newIdempotencyKey("sale-split-cash"),
+              idempotencyKey: splitCashKey,
             });
           }
           try {
@@ -704,6 +852,7 @@ export default function RetailPosWorkstation({
               amount: rest,
               method: "upi",
               type: "payment",
+              idempotencyKey: stripeAttemptKey,
             });
             setStripeCheckout({
               orderId: prepared.orderId,
@@ -742,6 +891,7 @@ export default function RetailPosWorkstation({
             amount: stripeAmount,
             method: payMethod,
             type: "payment",
+            idempotencyKey: stripeAttemptKey,
           });
           setStripeCheckout({
             orderId: prepared.orderId,
@@ -763,85 +913,39 @@ export default function RetailPosWorkstation({
 
       const payAmt = chargeAmount;
       const settleMethod = payMethod;
-      const idempotencyKey = newIdempotencyKey("sale");
-      const basePayment: {
-        method: typeof settleMethod;
-        amount: number;
-        idempotencyKey: string;
-        giftCardCode?: string;
-        bankAccountName?: string;
-        bankAccountNumber?: string;
-        bankIfsc?: string;
-        bankName?: string;
-        bankReference?: string;
-        emiTenureMonths?: number;
-        emiProvider?: string;
-        emiReference?: string;
-      } = {
-        method: settleMethod,
-        amount: payAmt,
-        idempotencyKey,
-        ...(payMethod === "gift_card"
-          ? { giftCardCode: giftCardCode.trim() }
-          : {}),
-        ...(payMethod === "bank_transfer"
-          ? {
-              bankAccountName: bankAccountName.trim(),
-              bankAccountNumber: bankAccountNumber.trim(),
-              bankIfsc: bankIfsc.trim() || undefined,
-              bankName: bankName.trim() || undefined,
-              bankReference: bankReference.trim(),
-            }
-          : {}),
-        ...(payMethod === "emi"
-          ? {
-              emiTenureMonths: Number(emiTenureMonths),
-              emiProvider: emiProvider.trim(),
-              emiReference: emiReference.trim() || undefined,
-              // Also map onto bank* so older APIs (pre-EMI DTO) still accept the payload
-              bankName: emiProvider.trim(),
-              bankReference:
-                emiReference.trim() ||
-                `EMI${Number(emiTenureMonths)}m`,
-            }
-          : {}),
-      };
-
-      const checkoutBody = {
+      const result = await posApi.saleCheckout({
         ...cartPayload,
         ...checkoutExtras,
-        payments: [basePayment],
+        payments: [
+          {
+            method: settleMethod,
+            amount: payAmt,
+            idempotencyKey: attemptKey,
+            ...(payMethod === "gift_card"
+              ? { giftCardCode: giftCardCode.trim() }
+              : {}),
+            ...(payMethod === "bank_transfer"
+              ? {
+                  bankAccountName: bankAccountName.trim(),
+                  bankAccountNumber: bankAccountNumber.trim(),
+                  bankIfsc: bankIfsc.trim() || undefined,
+                  bankName: bankName.trim() || undefined,
+                  bankReference: bankReference.trim(),
+                }
+              : {}),
+            ...(payMethod === "emi"
+              ? {
+                  emiTenureMonths: Number(emiTenureMonths),
+                  emiProvider: emiProvider.trim(),
+                  emiReference: emiReference.trim() || undefined,
+                }
+              : {}),
+          },
+        ],
         ...(payMethod === "cash"
           ? { cashTendered: tenderedNum > 0 ? tenderedNum : payAmt }
           : {}),
-      };
-
-      let result;
-      try {
-        result = await posApi.saleCheckout(checkoutBody);
-      } catch (firstErr) {
-        const msg =
-          firstErr instanceof ApiError
-            ? firstErr.messages.join(", ")
-            : String(firstErr);
-        // Live/old API: forbidNonWhitelisted rejects emiTenureMonths/emiProvider/emiReference
-        if (
-          payMethod === "emi" &&
-          /emiTenureMonths|emiProvider|emiReference/i.test(msg)
-        ) {
-          const { emiTenureMonths: _t, emiProvider: _p, emiReference: _r, ...legacy } =
-            basePayment;
-          result = await posApi.saleCheckout({
-            ...checkoutBody,
-            payments: [legacy],
-          });
-          toast.message(
-            "EMI saved via compatibility mode — deploy latest API for full EMI fields",
-          );
-        } else {
-          throw firstErr;
-        }
-      }
+      });
 
       setCart([]);
       setDiscountAmount("");
@@ -852,6 +956,10 @@ export default function RetailPosWorkstation({
       setSplitCashAmount("");
       setAllowPartial(false);
       setPayAmount("");
+      setOrderNote("");
+      setResourceId("");
+      setGuestCount("1");
+      setOrderType("walk_in");
       setGiftCardCode("");
       setGiftCardBalance(null);
       setBankAccountName("");
@@ -869,6 +977,7 @@ export default function RetailPosWorkstation({
         change: result.change,
         cashTendered: result.cashTendered,
       });
+      clearPaymentAttemptKey();
       void qc.invalidateQueries({ queryKey: ["pos-sale-catalog"] });
       void qc.invalidateQueries({ queryKey: ["dashboard-catalog"] });
       void qc.invalidateQueries({ queryKey: ["retail-skus"] });
@@ -888,6 +997,52 @@ export default function RetailPosWorkstation({
       }
       scanRef.current?.focus();
     } catch (e) {
+      const canQueueOffline =
+        !isOnline() &&
+        payMethod === "cash" &&
+        !splitPay &&
+        !allowPartial &&
+        !!locationId &&
+        cart.length > 0;
+      if (canQueueOffline) {
+        const queued = enqueueOfflineEvent("pos.sale_checkout_cash", locationId, {
+          locationId,
+          ...(customerId ? { customerId } : {}),
+          items: cart.map((l) => ({
+            stockLevelId: l.stockLevelId,
+            quantity: l.qty,
+            unitPrice: l.unitPrice,
+            ...(l.variantId ? { variantId: l.variantId } : {}),
+            ...(l.batchId ? { batchId: l.batchId } : {}),
+            ...(l.serialNumber?.trim()
+              ? { serialNumber: l.serialNumber.trim() }
+              : {}),
+          })),
+          ...(discountNum > 0 ? { discountAmount: discountNum } : {}),
+          ...(orderNote.trim() ? { note: orderNote.trim() } : {}),
+          ...(loyaltyQuote && loyaltyQuote.points > 0
+            ? { loyaltyPointsToRedeem: loyaltyQuote.points }
+            : {}),
+          paymentAmount: chargeAmount,
+          cashTendered: tenderedNum > 0 ? tenderedNum : chargeAmount,
+          meta: {
+            ...(foodFulfillment ? { orderType } : {}),
+            ...(resourceId ? { tableId: resourceId } : {}),
+            ...(foodFulfillment && Number(guestCount) > 0
+              ? { covers: Number(guestCount) }
+              : {}),
+          },
+        });
+        setCart([]);
+        setDiscountAmount("");
+        setCouponCode("");
+        setCouponApplied(null);
+        setCashTendered("");
+        setLoyaltyPointsInput("");
+        setLoyaltyQuote(null);
+        toast.success(`Offline cash sale queued (${queued.clientEventId.slice(0, 8)})`);
+        return;
+      }
       toast.error(
         e instanceof ApiError ? e.messages.join(", ") : "Checkout failed",
       );
@@ -911,6 +1066,11 @@ export default function RetailPosWorkstation({
           stockLevelId: l.stockLevelId,
           quantity: l.qty,
           unitPrice: l.unitPrice,
+          ...(l.variantId ? { variantId: l.variantId } : {}),
+          ...(l.batchId ? { batchId: l.batchId } : {}),
+          ...(l.serialNumber?.trim()
+            ? { serialNumber: l.serialNumber.trim() }
+            : {}),
         })),
         ...(discountNum > 0 ? { discountAmount: discountNum } : {}),
         label: parkLabel.trim() || undefined,
@@ -990,6 +1150,7 @@ export default function RetailPosWorkstation({
         ? `Sale ${orderNumber} · partial ${money(amount)} via Stripe`
         : `Sale ${orderNumber} paid via Stripe`,
     );
+    clearPaymentAttemptKey();
     scanRef.current?.focus();
   }
 
@@ -999,7 +1160,9 @@ export default function RetailPosWorkstation({
     setStripeBusy(false);
     if (pending?.orderId) {
       await posApi.cancelPreparedSale(pending.orderId).catch(() => null);
-      toast.message("Stripe checkout cancelled");
+      toast.message(
+        "Card/UPI cancelled — any cash already taken stays on the ticket",
+      );
     }
   }
 
@@ -1013,7 +1176,7 @@ export default function RetailPosWorkstation({
     <div
       className={cn(
         "relative",
-        compact ? "" : "min-h-[calc(100vh-7rem)]",
+        compact ? "" : "min-h-[calc(100vh-5rem)]",
       )}
     >
       {/* Idle lock is handled in AppShell; this overlay is manual Switch user only */}
@@ -1272,7 +1435,7 @@ export default function RetailPosWorkstation({
               "flex-1 overflow-y-auto border-t border-[#eef2f8]",
               compact
                 ? "max-h-[24rem]"
-                : "max-h-[min(38rem,calc(100vh-15rem))]",
+                : "max-h-[calc(100vh-8.5rem)]",
             )}
           >
             <ul className="divide-y divide-[#eef2f8]">
@@ -1421,7 +1584,7 @@ export default function RetailPosWorkstation({
           </div>
         </section>
 
-        <aside className="flex min-h-0 flex-col overflow-hidden rounded-[16px] border border-[#d9e0ea] bg-white shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
+        <aside className="flex min-h-0 flex-col self-start overflow-hidden rounded-[16px] border border-[#d9e0ea] bg-white shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
           {compact ? (
             <div className="flex flex-wrap items-center gap-2 border-b border-[#e8edf4] bg-[#f8fafc] px-3 py-2">
               {registerSession ? (
@@ -1516,6 +1679,72 @@ export default function RetailPosWorkstation({
             />
           </div>
 
+          {foodFulfillment || resourceDesk ? (
+            <div className="grid gap-2 border-b border-[#e8edf4] px-4 py-3 sm:grid-cols-2">
+              {foodFulfillment ? (
+                <div className="field-shell">
+                  <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
+                    Order type
+                  </Label>
+                  <select
+                    className="mt-1 flex h-10 w-full rounded-md border border-[#d9e0ea] bg-white px-3 text-sm text-[#0b1f33]"
+                    value={orderType}
+                    onChange={(e) => setOrderType(e.target.value)}
+                  >
+                    <option value="walk_in">Walk-in</option>
+                    <option value="dine_in">Dine-in</option>
+                    <option value="takeaway">Takeaway</option>
+                    <option value="delivery">Delivery</option>
+                  </select>
+                </div>
+              ) : null}
+              {resourceDesk ? (
+                <div className="field-shell">
+                  <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
+                    {hasCapability("TABLE") ? "Table" : "Resource"}
+                  </Label>
+                  <select
+                    className="mt-1 flex h-10 w-full rounded-md border border-[#d9e0ea] bg-white px-3 text-sm text-[#0b1f33]"
+                    value={resourceId}
+                    onChange={(e) => setResourceId(e.target.value)}
+                  >
+                    <option value="">None</option>
+                    {(resources.data?.data ?? []).map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.name} · {r.status}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
+              {foodFulfillment && hasCapability("TABLE") ? (
+                <div className="field-shell">
+                  <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
+                    Covers / guests
+                  </Label>
+                  <Input
+                    className="h-10"
+                    inputMode="numeric"
+                    value={guestCount}
+                    onChange={(e) => setGuestCount(e.target.value)}
+                    placeholder="1"
+                  />
+                </div>
+              ) : null}
+              <div className="field-shell sm:col-span-2">
+                <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
+                  Order notes
+                </Label>
+                <Input
+                  className="h-10"
+                  value={orderNote}
+                  onChange={(e) => setOrderNote(e.target.value)}
+                  placeholder="Notes, allergies, prep note, booking reference…"
+                />
+              </div>
+            </div>
+          ) : null}
+
           <ul className="max-h-48 flex-1 space-y-1.5 overflow-y-auto px-3 py-3">
             {cart.map((l) => (
               <li
@@ -1607,6 +1836,70 @@ export default function RetailPosWorkstation({
                       {money(l.unitPrice * l.qty)}
                     </p>
                   </div>
+                  {(l.requiresVariant || l.requiresBatch || l.requiresSerial) && (
+                    <div className="mt-2 grid gap-1">
+                      {l.requiresVariant && (
+                        <select
+                          className="h-8 rounded-md border border-[#d6deea] bg-white px-2 text-xs text-[#0b1f33]"
+                          value={l.variantId ?? ""}
+                          onChange={(e) =>
+                            setCart((prev) =>
+                              prev.map((x) =>
+                                x.stockLevelId === l.stockLevelId
+                                  ? { ...x, variantId: e.target.value || undefined }
+                                  : x,
+                              ),
+                            )
+                          }
+                        >
+                          <option value="">Select variant</option>
+                          {(l.variantOptions ?? []).map((v) => (
+                            <option key={v.id} value={v.id}>
+                              {v.label || v.skuCode}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                      {l.requiresBatch && (
+                        <select
+                          className="h-8 rounded-md border border-[#d6deea] bg-white px-2 text-xs text-[#0b1f33]"
+                          value={l.batchId ?? ""}
+                          onChange={(e) =>
+                            setCart((prev) =>
+                              prev.map((x) =>
+                                x.stockLevelId === l.stockLevelId
+                                  ? { ...x, batchId: e.target.value || undefined }
+                                  : x,
+                              ),
+                            )
+                          }
+                        >
+                          <option value="">Select batch</option>
+                          {(l.batchOptions ?? []).map((b) => (
+                            <option key={b.id} value={b.id}>
+                              {b.batchCode} ({formatQtyWithUnit(b.qtyOnHand, l.sellUnit)})
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                      {l.requiresSerial && (
+                        <Input
+                          className="h-8 bg-white text-xs"
+                          placeholder="Serial / barcode"
+                          value={l.serialNumber ?? ""}
+                          onChange={(e) =>
+                            setCart((prev) =>
+                              prev.map((x) =>
+                                x.stockLevelId === l.stockLevelId
+                                  ? { ...x, serialNumber: e.target.value }
+                                  : x,
+                              ),
+                            )
+                          }
+                        />
+                      )}
+                    </div>
+                  )}
                 </div>
               </li>
             ))}
@@ -1634,156 +1927,113 @@ export default function RetailPosWorkstation({
           </ul>
 
           <div className="mt-auto space-y-3 border-t border-[#e8edf4] bg-[#f8fafc] p-4">
-            <div className="grid grid-cols-2 gap-2">
-              <div className="field-shell">
-                <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
-                  Discount {currencySymbol}
-                  {!canOverrideDiscount
-                    ? ` (max ${maxCashierDiscountPercent}%)`
-                    : ""}
-                </Label>
+            <div className="grid grid-cols-2 items-start gap-x-3 gap-y-1.5">
+              <Label className="text-[0.65rem] font-semibold leading-4 tracking-[0.12em] text-[#8b9bb0] uppercase">
+                Discount {currencySymbol}
+                {!canOverrideDiscount
+                  ? ` (max ${maxCashierDiscountPercent}%)`
+                  : ""}
+              </Label>
+              <Label className="text-[0.65rem] font-semibold leading-4 tracking-[0.12em] text-[#8b9bb0] uppercase">
+                Coupon
+              </Label>
+
+              <Input
+                className="h-9 rounded-md"
+                placeholder="0"
+                inputMode="decimal"
+                value={discountAmount}
+                onChange={(e) => {
+                  setDiscountAmount(e.target.value);
+                  setCouponApplied(null);
+                }}
+              />
+              <div className="flex h-9 min-w-0 items-stretch gap-1.5">
                 <Input
-                  className="h-10"
-                  placeholder="0"
-                  inputMode="decimal"
-                  value={discountAmount}
+                  className="h-9 min-w-0 flex-1 rounded-md uppercase"
+                  placeholder="CODE"
+                  value={couponCode}
                   onChange={(e) => {
-                    setDiscountAmount(e.target.value);
+                    setCouponCode(e.target.value);
                     setCouponApplied(null);
                   }}
                 />
-                <p
-                  className={cn(
-                    "text-[0.65rem]",
-                    discountCapped ? "text-[#c81e1e]" : "text-[#8b9bb0]",
-                  )}
+                <Button
+                  type="button"
+                  variant="soft"
+                  className="h-9 shrink-0 rounded-md px-3 text-[0.75rem] font-semibold"
+                  disabled={!couponCode.trim() || !cart.length}
+                  onClick={async () => {
+                    try {
+                      const v = await loyaltyApi.validateCoupon(
+                        couponCode.trim(),
+                        ticketBeforeDiscount,
+                      );
+                      setDiscountAmount(String(v.amountOff));
+                      setCouponApplied(v.code);
+                      toast.success(
+                        `Coupon ${v.code}: −${money(v.amountOff)}`,
+                      );
+                    } catch (e) {
+                      toast.error(
+                        e instanceof ApiError
+                          ? e.messages.join(", ")
+                          : "Invalid coupon",
+                      );
+                    }
+                  }}
                 >
-                  {discountCapped
-                    ? `Applied ${money(discountNum)} — cashier cap ${money(maxDiscountAmount)}`
-                    : canOverrideDiscount
-                      ? `Up to ticket total ${money(ticketBeforeDiscount)}`
-                      : `Cashier cap ${money(maxDiscountAmount)}`}
-                </p>
+                  Apply
+                </Button>
               </div>
-              <div className="field-shell">
-                <div className="mb-1 flex items-center justify-between gap-1">
-                  <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
-                    Coupon
-                  </Label>
-                  {couponApplied || moneyNumber(discountAmount || 0) > 0 ? (
-                    <button
-                      type="button"
-                      className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-[#d9e0ea] text-[#5a6b7d] hover:bg-white hover:text-[#0b1f33]"
-                      title="Clear discount & coupon"
-                      onClick={() => {
-                        setCouponCode("");
-                        setCouponApplied(null);
-                        setDiscountAmount("");
-                      }}
-                    >
-                      <svg
-                        width="10"
-                        height="10"
-                        viewBox="0 0 12 12"
-                        fill="none"
-                        aria-hidden
-                      >
-                        <path
-                          d="M3 3l6 6M9 3L3 9"
-                          stroke="currentColor"
-                          strokeWidth="1.8"
-                          strokeLinecap="round"
-                        />
-                      </svg>
-                    </button>
-                  ) : null}
-                </div>
-                <div className="flex gap-1">
-                  <Input
-                    className="h-10 uppercase"
-                    placeholder="CODE"
-                    value={couponCode}
-                    onChange={(e) => {
-                      setCouponCode(e.target.value);
-                      setCouponApplied(null);
-                    }}
-                  />
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    className="h-10 shrink-0"
-                    disabled={!couponCode.trim() || !cart.length}
-                    onClick={async () => {
-                      try {
-                        const v = await loyaltyApi.validateCoupon(
-                          couponCode.trim(),
-                          ticketBeforeDiscount,
-                        );
-                        setDiscountAmount(String(v.amountOff));
-                        setCouponApplied(v.code);
-                        toast.success(
-                          `Coupon ${v.code}: −${money(v.amountOff)}`,
-                        );
-                      } catch (e) {
-                        toast.error(
-                          e instanceof ApiError
-                            ? e.messages.join(", ")
-                            : "Invalid coupon",
-                        );
-                      }
-                    }}
-                  >
-                    Apply
-                  </Button>
-                  {couponApplied ? (
-                    <button
-                      type="button"
-                      className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[#d9e0ea] bg-white text-[#5a6b7d] hover:bg-[#f4f6fa] hover:text-[#0b1f33]"
-                      title="Clear coupon & discount"
-                      onClick={() => {
-                        setCouponCode("");
-                        setCouponApplied(null);
-                        setDiscountAmount("");
-                      }}
-                    >
-                      <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 12 12"
-                        fill="none"
-                        aria-hidden
-                      >
-                        <path
-                          d="M3 3l6 6M9 3L3 9"
-                          stroke="currentColor"
-                          strokeWidth="1.8"
-                          strokeLinecap="round"
-                        />
-                      </svg>
-                    </button>
-                  ) : null}
-                </div>
-                <p className="text-[0.65rem] text-[#8b9bb0]">
+
+              <p
+                className={cn(
+                  "min-h-4 text-[0.65rem] leading-4",
+                  discountCapped ? "text-[#c81e1e]" : "text-[#8b9bb0]",
+                )}
+              >
+                {discountCapped
+                  ? `Applied ${money(discountNum)} — cashier cap ${money(maxDiscountAmount)}`
+                  : canOverrideDiscount
+                    ? `Up to ticket total ${money(ticketBeforeDiscount)}`
+                    : `Cashier cap ${money(maxDiscountAmount)}`}
+              </p>
+              <p className="flex min-h-4 items-start justify-between gap-2 text-[0.65rem] leading-4 text-[#8b9bb0]">
+                <span>
                   {couponApplied
                     ? `Applied ${couponApplied}`
                     : "From Coupons setup"}
-                </p>
-              </div>
+                </span>
+                {couponApplied || moneyNumber(discountAmount || 0) > 0 ? (
+                  <button
+                    type="button"
+                    className="shrink-0 font-semibold text-[#1a56db] hover:underline"
+                    onClick={() => {
+                      setCouponCode("");
+                      setCouponApplied(null);
+                      setDiscountAmount("");
+                    }}
+                  >
+                    Clear
+                  </button>
+                ) : null}
+              </p>
             </div>
-            <div className="field-shell">
-              <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
+
+            <div className="space-y-1.5">
+              <Label className="text-[0.65rem] font-semibold leading-4 tracking-[0.12em] text-[#8b9bb0] uppercase">
                 Hold name
               </Label>
               <Input
-                className="h-10"
+                className="h-9 rounded-md"
                 placeholder="e.g. Table 4 · Walk-in draft"
                 value={parkLabel}
                 onChange={(e) => setParkLabel(e.target.value)}
                 maxLength={80}
               />
-              <p className="text-[0.65rem] text-[#8b9bb0]">
-                Save cart as draft without stock or payment — resume anytime
+              <p className="text-[0.65rem] leading-4 text-[#8b9bb0]">
+                Save as a draft — no stock or payment until you resume
               </p>
             </div>
 
@@ -1891,57 +2141,96 @@ export default function RetailPosWorkstation({
               </div>
             </div>
 
+            {(() => {
+              const catalogItems = payMethods.data?.items ?? [];
+              const byMethod = new Map(
+                catalogItems.map((m) => [m.method, m] as const),
+              );
+              const frontRow = [
+                "cash",
+                "qr",
+                "wallet",
+                "card",
+                "upi",
+              ] as const;
+              const shownPrimary = frontRow.map((method) => {
+                const m = byMethod.get(method);
+                const alwaysOn =
+                  method === "cash" ||
+                  method === "qr" ||
+                  method === "wallet";
+                return {
+                  method,
+                  displayName:
+                    method === "qr"
+                      ? "QR"
+                      : method === "wallet"
+                        ? "Wallet"
+                        : m?.displayName ?? method,
+                  available: alwaysOn || Boolean(m?.available),
+                  reason: m?.reason,
+                };
+              });
+              const more = catalogItems.filter(
+                (m) => !shownPrimary.some((p) => p.method === m.method),
+              );
+              const visible = showMorePay
+                ? [...shownPrimary, ...more]
+                : shownPrimary;
+              const methodLabel = (method: string, displayName: string) => {
+                if (method === "store_credit") return "Credit";
+                if (method === "gift_card") return "Gift";
+                if (method === "bank_transfer") return "Bank";
+                return displayName;
+              };
+              return (
+                <>
             <div
               className={cn(
                 "grid gap-1 rounded-[12px] bg-[#eef2f8] p-1",
-                touchMode ? "grid-cols-3" : "grid-cols-5",
+                touchMode ? "grid-cols-3" : "grid-cols-3",
               )}
             >
-              {(
-                [
-                  "cash",
-                  "upi",
-                  "card",
-                  "qr",
-                  "wallet",
-                  "bank_transfer",
-                  "emi",
-                  "store_credit",
-                  "gift_card",
-                ] as const
-              ).map((m) => (
+              {visible.map((m) => (
                 <button
-                  key={m}
+                  key={m.method}
                   type="button"
-                  data-active={payMethod === m ? "true" : "false"}
+                  disabled={!m.available}
+                  title={m.reason}
+                  data-active={payMethod === m.method ? "true" : "false"}
                   onClick={() => {
-                    setPayMethod(m);
-                    if (m !== "cash") setSplitPay(false);
+                    if (!m.available) {
+                      toast.message(m.reason || `${m.displayName} is not configured`);
+                      return;
+                    }
+                    setPayMethod(m.method as PayMethod);
+                    if (m.method !== "cash") setSplitPay(false);
                   }}
                   className={cn(
                     "rounded-[9px] font-bold tracking-[0.04em] uppercase transition",
                     touchMode ? "py-4 text-xs" : "py-2.5 text-[0.65rem]",
-                    payMethod === m
+                    !m.available && "cursor-not-allowed opacity-40",
+                    payMethod === m.method
                       ? "bg-[#1a56db] text-white shadow-[0_1px_3px_rgba(26,86,219,0.35)]"
                       : "text-[#5a6b7d] hover:bg-white/80 hover:text-[#0b1f33]",
                   )}
                 >
-                  {m === "store_credit"
-                    ? "Credit"
-                    : m === "gift_card"
-                      ? "Gift"
-                      : m === "bank_transfer"
-                        ? "Bank"
-                        : m === "wallet"
-                          ? "Wallet"
-                          : m === "qr"
-                            ? "QR"
-                            : m === "emi"
-                              ? "EMI"
-                              : m}
+                  {methodLabel(m.method, m.displayName)}
                 </button>
               ))}
             </div>
+            {more.length ? (
+              <button
+                type="button"
+                className="text-[0.65rem] font-semibold tracking-[0.08em] text-[#1a56db] uppercase"
+                onClick={() => setShowMorePay((v) => !v)}
+              >
+                {showMorePay ? "Fewer payment methods" : "More payment methods"}
+              </button>
+            ) : null}
+                </>
+              );
+            })()}
             {payMethod === "store_credit" ? (
               <p className="text-[0.7rem] text-[#5a6b7d]">
                 Debits customer store credit balance. Needs a linked customer.
@@ -2031,10 +2320,12 @@ export default function RetailPosWorkstation({
               </div>
             ) : null}
             {payMethod === "wallet" ? (
-              <p className="text-[0.7rem] text-[#5a6b7d]">
-                PhonePe / Paytm / similar — confirm collection on the device,
-                then charge.
-              </p>
+              <div className="space-y-1 rounded-[10px] border border-[#d9e0ea] bg-white p-3">
+                <p className="text-[0.7rem] text-[#5a6b7d]">
+                  Collect on PhonePe / Paytm / GPay (or any wallet), then tap
+                  Charge to record it.
+                </p>
+              </div>
             ) : null}
             {payMethod === "emi" ? (
               <div className="space-y-2 rounded-[10px] border border-[#d9e0ea] bg-white p-3">
@@ -2340,7 +2631,10 @@ export default function RetailPosWorkstation({
                 stripeBusy ||
                 !cart.length ||
                 !registerSession ||
-                !online ||
+                (!online &&
+                  payMethod !== "cash" &&
+                  payMethod !== "qr" &&
+                  payMethod !== "wallet") ||
                 ((payMethod === "card" || payMethod === "upi") &&
                   !stripeConfig.data?.enabled) ||
                 (payMethod === "emi" &&

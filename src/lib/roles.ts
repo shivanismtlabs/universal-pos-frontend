@@ -63,6 +63,13 @@ export const ROUTE_ROLES: Record<string, RoleCode[]> = {
   "/multi-store": ["admin", "manager", "inventory", "accountant"],
   "/multi-store/dashboard": ["admin", "manager", "inventory", "accountant"],
   "/settings": ["admin", "manager"],
+  "/settings/locations": [
+    "admin",
+    "manager",
+    "inventory",
+    "accountant",
+    "cashier",
+  ],
   "/settings/offline": ["admin", "manager", "cashier", "inventory"],
   "/settings/security": ["admin", "manager", "cashier"],
   "/settings/accounting": ["admin", "manager", "accountant"],
@@ -97,6 +104,7 @@ export const ROUTE_PERMISSIONS: Record<string, string[]> = {
   "/inventory": ["inventory.read", "inventory.write"],
   "/suppliers": ["suppliers.manage"],
   "/settings": ["settings.manage"],
+  "/settings/locations": ["settings.manage"],
   "/accounting": [
     "accounting.view",
     "accounting.create",
@@ -129,22 +137,43 @@ export function canAccessPath(
   userPerms?: string[] | undefined | null,
 ) {
   if (userRoles?.includes("admin")) return true;
-  const entry = Object.entries(ROUTE_ROLES).find(
-    ([prefix]) =>
-      pathname === prefix || pathname.startsWith(`${prefix}/`),
-  );
+  const entry = Object.entries(ROUTE_ROLES)
+    .filter(
+      ([prefix]) =>
+        pathname === prefix || pathname.startsWith(`${prefix}/`),
+    )
+    .sort((a, b) => b[0].length - a[0].length)[0];
   if (!entry) return true;
   const [prefix, roles] = entry;
   if (hasAnyRole(userRoles, roles)) return true;
   const perms = ROUTE_PERMISSIONS[prefix];
-  return hasAnyPermission(userPerms, perms ?? []);
+  if (perms?.length && hasAnyPermission(userPerms, perms)) return true;
+  // Custom roles aren't in ALL_ROLES — dashboard is a safe home if they hold any permission
+  if (
+    prefix === "/dashboard" &&
+    ((userPerms?.length ?? 0) > 0 || (userRoles?.length ?? 0) > 0)
+  ) {
+    return true;
+  }
+  return false;
 }
 
-export function defaultHomeForRoles(userRoles: string[] | undefined | null) {
+export function defaultHomeForRoles(
+  userRoles: string[] | undefined | null,
+  userPerms?: string[] | undefined | null,
+) {
   if (hasAnyRole(userRoles, ["admin", "manager", "cashier"])) return "/dashboard";
   if (hasAnyRole(userRoles, ["accountant"])) return "/accounting";
   if (hasAnyRole(userRoles, ["fitter"])) return "/appointments";
   if (hasAnyRole(userRoles, ["inventory"])) return "/inventory";
+  if (hasAnyPermission(userPerms, ["attendance.self", "attendance.manage"])) {
+    return "/attendance";
+  }
+  if (hasAnyPermission(userPerms, ["pos.checkout"])) return "/counter";
+  if (hasAnyPermission(userPerms, ["reports.read"])) return "/reports";
+  if (hasAnyPermission(userPerms, ["inventory.read", "inventory.write"])) {
+    return "/inventory";
+  }
   return "/dashboard";
 }
 

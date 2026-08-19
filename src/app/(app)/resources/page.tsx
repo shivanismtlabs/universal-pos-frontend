@@ -7,8 +7,16 @@ import { resourcesApi } from "@/lib/api";
 import { useBootstrap } from "@/lib/bootstrap";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 
 const TYPES = ["table", "room", "vehicle", "equipment", "desk", "hall", "court", "other"];
+const OPERATIONAL_STATUS = [
+  { id: "AVAILABLE", label: "Available", dbStatus: "available" },
+  { id: "OCCUPIED", label: "Occupied", dbStatus: "occupied" },
+  { id: "RESERVED", label: "Reserved", dbStatus: "occupied" },
+  { id: "CLEANING", label: "Cleaning", dbStatus: "maintenance" },
+  { id: "OUT_OF_SERVICE", label: "Out of service", dbStatus: "inactive" },
+] as const;
 
 export default function ResourcesPage() {
   const { hasCapability, hasModule } = useBootstrap();
@@ -16,6 +24,7 @@ export default function ResourcesPage() {
   const [name, setName] = useState("");
   const [type, setType] = useState("table");
   const [capacity, setCapacity] = useState("1");
+  const [operationalStatus, setOperationalStatus] = useState<(typeof OPERATIONAL_STATUS)[number]["id"]>("AVAILABLE");
 
   const allowed =
     hasCapability("RESOURCE") ||
@@ -34,10 +43,35 @@ export default function ResourcesPage() {
         name: name.trim(),
         type,
         capacity: Number(capacity) || 1,
+        status:
+          OPERATIONAL_STATUS.find((s) => s.id === operationalStatus)?.dbStatus ??
+          "available",
+        meta: { operationalStatus },
       }),
     onSuccess: () => {
       toast.success("Resource created");
       setName("");
+      setOperationalStatus("AVAILABLE");
+      void qc.invalidateQueries({ queryKey: ["resources"] });
+    },
+    onError: (e: Error) => toast.error(e.message || "Failed"),
+  });
+  const updateStatus = useMutation({
+    mutationFn: ({
+      id,
+      next,
+    }: {
+      id: string;
+      next: (typeof OPERATIONAL_STATUS)[number]["id"];
+    }) => {
+      const picked = OPERATIONAL_STATUS.find((s) => s.id === next);
+      return resourcesApi.update(id, {
+        status: picked?.dbStatus ?? "available",
+        meta: { operationalStatus: next },
+      });
+    },
+    onSuccess: () => {
+      toast.success("Resource updated");
       void qc.invalidateQueries({ queryKey: ["resources"] });
     },
     onError: (e: Error) => toast.error(e.message || "Failed"),
@@ -98,6 +132,24 @@ export default function ResourcesPage() {
             className="w-20"
           />
         </label>
+        <label className="space-y-1 text-sm">
+          <span className="text-slate-600">Operational state</span>
+          <select
+            className="h-9 rounded-md border border-slate-200 px-2 text-sm"
+            value={operationalStatus}
+            onChange={(e) =>
+              setOperationalStatus(
+                e.target.value as (typeof OPERATIONAL_STATUS)[number]["id"],
+              )
+            }
+          >
+            {OPERATIONAL_STATUS.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <Button type="submit" disabled={create.isPending}>
           Add resource
         </Button>
@@ -111,6 +163,7 @@ export default function ResourcesPage() {
               <th className="px-3 py-2 font-medium">Type</th>
               <th className="px-3 py-2 font-medium">Capacity</th>
               <th className="px-3 py-2 font-medium">Status</th>
+              <th className="px-3 py-2 font-medium">Change state</th>
             </tr>
           </thead>
           <tbody>
@@ -119,12 +172,41 @@ export default function ResourcesPage() {
                 <td className="px-3 py-2">{r.name}</td>
                 <td className="px-3 py-2">{r.type}</td>
                 <td className="px-3 py-2">{r.capacity}</td>
-                <td className="px-3 py-2">{r.status}</td>
+                <td className="px-3 py-2">
+                  {String((r.meta as { operationalStatus?: string } | null)?.operationalStatus ?? r.status)}
+                </td>
+                <td className="px-3 py-2">
+                  <div className="flex flex-wrap gap-1">
+                    {OPERATIONAL_STATUS.map((s) => {
+                      const current =
+                        String(
+                          (r.meta as { operationalStatus?: string } | null)
+                            ?.operationalStatus ?? r.status,
+                        ) === s.id;
+                      return (
+                        <button
+                          key={s.id}
+                          type="button"
+                          disabled={current || updateStatus.isPending}
+                          onClick={() => updateStatus.mutate({ id: r.id, next: s.id })}
+                          className={cn(
+                            "rounded border px-2 py-1 text-[0.7rem] font-medium",
+                            current
+                              ? "border-[#1a56db] bg-[#eff6ff] text-[#1a56db]"
+                              : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
+                          )}
+                        >
+                          {s.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </td>
               </tr>
             ))}
             {!list.isLoading && !(list.data?.data?.length) ? (
               <tr>
-                <td colSpan={4} className="px-3 py-6 text-center text-slate-500">
+                <td colSpan={5} className="px-3 py-6 text-center text-slate-500">
                   No resources yet
                 </td>
               </tr>

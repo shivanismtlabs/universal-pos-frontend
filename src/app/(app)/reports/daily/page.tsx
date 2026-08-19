@@ -40,7 +40,7 @@ function pctTone(n: number | null | undefined) {
 }
 
 export default function DailySalesReportPage() {
-  const { money, businessType } = useBootstrap();
+  const { money, hasCapability } = useBootstrap();
   const [date, setDate] = useState(todayYmd());
   const [locationId, setLocationId] = useState("");
   const [employeeId, setEmployeeId] = useState("");
@@ -90,14 +90,15 @@ export default function DailySalesReportPage() {
   );
 
   const showRestaurant =
-    businessType === "restaurant" ||
-    businessType === "hybrid" ||
+    hasCapability("KOT") ||
+    hasCapability("KITCHEN") ||
+    hasCapability("TABLE") ||
     Boolean(data?.variations.fulfillmentSplit.length) ||
     data?.variations.tableTurnover != null;
   const showRetailOmni = Boolean(data?.variations.channelSplit.length);
   const showService =
-    businessType === "service" ||
-    businessType === "salon" ||
+    hasCapability("BOOKING") ||
+    hasCapability("STAFF_ASSIGNMENT") ||
     (data?.variations.appointments.completed ?? 0) +
       (data?.variations.appointments.noShows ?? 0) >
       0;

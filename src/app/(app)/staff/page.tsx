@@ -20,7 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FieldError } from "@/components/ui/form";
-import { useAuthStore } from "@/lib/auth-store";
+import { EMPTY_ROLES, useAuthStore } from "@/lib/auth-store";
 import {
   inviteStaffSchema,
   passwordStrength,
@@ -46,7 +46,7 @@ function roleLabel(code: string) {
 
 export default function StaffPage() {
   const qc = useQueryClient();
-  const roles = useAuthStore((s) => s.user?.roles ?? []);
+  const roles = useAuthStore((s) => s.user?.roles ?? EMPTY_ROLES);
   const me = useAuthStore((s) => s.user);
   const canManage = roles.some((r) => ["admin", "manager"].includes(r));
   const isOwner = roles.includes("admin");

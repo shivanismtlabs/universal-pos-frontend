@@ -31,7 +31,7 @@ const ROLES = [
 ];
 
 export default function EmployeeSalesReportPage() {
-  const { money, businessType } = useBootstrap();
+  const { money, hasCapability } = useBootstrap();
   const [from, setFrom] = useState(defaultFrom);
   const [to, setTo] = useState(todayYmd);
   const [locationId, setLocationId] = useState("");
@@ -79,14 +79,13 @@ export default function EmployeeSalesReportPage() {
   );
 
   const showService =
-    businessType === "service" ||
-    businessType === "salon" ||
-    businessType === "spa" ||
-    businessType === "hybrid" ||
-    data?.businessType === "service" ||
-    data?.businessType === "salon";
+    hasCapability("BOOKING") ||
+    hasCapability("STAFF_ASSIGNMENT") ||
+    hasCapability("REPAIR_JOB");
   const showRestaurant =
-    businessType === "restaurant" || data?.businessType === "restaurant";
+    hasCapability("TABLE") ||
+    hasCapability("KOT") ||
+    hasCapability("KITCHEN");
 
   function applyFilters() {
     setApplied({

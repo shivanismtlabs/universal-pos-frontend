@@ -37,6 +37,7 @@ import { authApi, appsApi, tenantsApi, type PortalSessionResponse } from "@/lib/
 import { ApiError } from "@/lib/api/client";
 import { useAuthStore } from "@/lib/auth-store";
 import { applyPortalResponse } from "@/lib/auth-portal";
+import { defaultHomeForRoles } from "@/lib/roles";
 import { TotpChallengeForm, is2faChallenge } from "@/components/totp-challenge-form";
 import { cn } from "@/lib/utils";
 import {
@@ -82,6 +83,29 @@ const createOrgSchema = z
         "GSTIN must be 15 characters (letters/numbers)",
       ),
     storeName: z.string().trim().max(100).optional().or(z.literal("")),
+    email: z
+      .string()
+      .trim()
+      .max(120)
+      .refine((v) => !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), "Enter a valid email"),
+    website: z
+      .string()
+      .trim()
+      .max(200)
+      .optional()
+      .or(z.literal("")),
+    addressLine2: z.string().trim().max(200).optional().or(z.literal("")),
+    timezone: z.string().min(1).max(64),
+    locale: z.string().min(2).max(16),
+    organizationType: z.string().max(40).optional().or(z.literal("")),
+    pan: z
+      .string()
+      .trim()
+      .max(10)
+      .refine(
+        (v) => !v || /^[A-Z]{5}[0-9]{4}[A-Z]$/i.test(v),
+        "PAN must be 10 characters (AAAAA9999A)",
+      ),
   })
   .superRefine((v, ctx) => {
     const cities = citiesForState(v.state);
@@ -274,6 +298,13 @@ function OrganizationsPageInner() {
       inventoryStartDate: new Date().toISOString().slice(0, 10),
       taxId: "",
       storeName: "",
+      email: "",
+      website: "",
+      addressLine2: "",
+      timezone: "Asia/Kolkata",
+      locale: "en-IN",
+      organizationType: "",
+      pan: "",
     },
   });
 
@@ -336,7 +367,7 @@ function OrganizationsPageInner() {
     // Just opened / created a shop — go to app (keep identityToken for Switch org)
     if (accessToken && user) {
       clearedStaleShopRef.current = true;
-      router.replace("/dashboard");
+      router.replace(defaultHomeForRoles(user.roles, user.permissions));
       return;
     }
 
@@ -380,6 +411,7 @@ function OrganizationsPageInner() {
     const dest = applyPortalResponse(data);
     if (dest === "app") {
       clearedStaleShopRef.current = true;
+      qc.clear();
       try {
         const boot = await appsApi.bootstrap();
         qc.setQueryData(["tenant-bootstrap"], boot);
@@ -387,7 +419,8 @@ function OrganizationsPageInner() {
         /* AppShell retries */
       }
       toast.success("Welcome to your shop");
-      router.replace("/dashboard");
+      const u = useAuthStore.getState().user;
+      router.replace(defaultHomeForRoles(u?.roles, u?.permissions));
       return;
     }
     toast.message("Select an organization to continue");
@@ -422,8 +455,66 @@ function OrganizationsPageInner() {
               .map((label) => ({ label }))
           : undefined;
 
+      async function persistOrgProfile(next: CreateForm) {
+        const addressLine = [
+          next.addressLine1.trim(),
+          next.addressLine2?.trim(),
+          next.city.trim(),
+          next.state.trim(),
+          next.postalCode.trim(),
+        ]
+          .filter(Boolean)
+          .join(", ");
+
+        await tenantsApi.updateMe({
+          name: next.organizationName.trim(),
+          currencyCode: next.currencyCode || "INR",
+          locale: next.locale || "en-IN",
+          timezone: next.timezone || "Asia/Kolkata",
+          taxId: next.taxId?.trim() || undefined,
+          settings: {
+            organizationProfile: {
+              phone: next.phone?.trim() || null,
+              email: next.email?.trim() || null,
+              website: next.website?.trim() || null,
+              addressLine1: next.addressLine1.trim(),
+              addressLine2: next.addressLine2?.trim() || null,
+              city: next.city.trim(),
+              state: next.state.trim(),
+              postalCode: next.postalCode.trim(),
+              fiscalYearStart: next.fiscalYearStart,
+              inventoryStartDate: next.inventoryStartDate,
+              timezone: next.timezone || "Asia/Kolkata",
+              locale: next.locale || "en-IN",
+              organizationType: next.organizationType?.trim() || null,
+              pan: next.pan?.trim()?.toUpperCase() || null,
+              completedAt: new Date().toISOString(),
+            },
+            ...(next.businessLabel?.trim()
+              ? { businessLabel: next.businessLabel.trim() }
+              : {}),
+            ...(customItemFields?.length ? { customItemFields } : {}),
+          },
+        });
+
+        try {
+          const locs = await tenantsApi.listLocations();
+          const main = Array.isArray(locs) ? locs[0] : undefined;
+          if (main?.id) {
+            await tenantsApi.updateLocation(main.id, {
+              name: next.storeName?.trim() || main.name || "Main Store",
+              phone: next.phone?.trim() || undefined,
+              address: addressLine || undefined,
+            });
+          }
+        } catch {
+          /* location update optional on older APIs */
+        }
+      }
+
       // Path A: identity portal → create brand-new organization
       if (identityToken && !completeSetup) {
+        // Live API still rejects email/website/PAN etc. on POST /auth/organizations.
         const data = await authApi.createOrganization({
           organizationName: values.organizationName.trim(),
           businessType: values.businessType,
@@ -439,12 +530,18 @@ function OrganizationsPageInner() {
           postalCode: values.postalCode.trim() || undefined,
           countryCode: "IN",
           currencyCode: values.currencyCode || "INR",
-          locale: "en-IN",
+          locale: values.locale || "en-IN",
           fiscalYearStart: values.fiscalYearStart || undefined,
           inventoryStartDate: values.inventoryStartDate || undefined,
           taxId: values.taxId?.trim() || undefined,
           storeName: values.storeName?.trim() || undefined,
         });
+        applyPortalResponse(data);
+        try {
+          await persistOrgProfile(values);
+        } catch {
+          /* extras optional until API is upgraded */
+        }
         await enterApp(data);
         return;
       }
@@ -454,59 +551,13 @@ function OrganizationsPageInner() {
         throw new Error("Session expired — sign in again");
       }
 
-      const addressLine = [
-        values.addressLine1.trim(),
-        values.city.trim(),
-        values.state.trim(),
-        values.postalCode.trim(),
-      ]
-        .filter(Boolean)
-        .join(", ");
-
-      await tenantsApi.updateMe({
-        name: values.organizationName.trim(),
-        currencyCode: values.currencyCode || "INR",
-        locale: "en-IN",
-        taxId: values.taxId?.trim() || undefined,
-        settings: {
-          organizationProfile: {
-            phone: values.phone?.trim() || null,
-            addressLine1: values.addressLine1.trim(),
-            city: values.city.trim(),
-            state: values.state.trim(),
-            postalCode: values.postalCode.trim(),
-            fiscalYearStart: values.fiscalYearStart,
-            inventoryStartDate: values.inventoryStartDate,
-            completedAt: new Date().toISOString(),
-          },
-          ...(values.businessLabel?.trim()
-            ? { businessLabel: values.businessLabel.trim() }
-            : {}),
-          ...(customItemFields?.length
-            ? { customItemFields }
-            : {}),
-        },
-      });
+      await persistOrgProfile(values);
 
       await appsApi.setBusinessConfig({
         businessType: values.businessType,
         applyDefaultModes: true,
         businessLabel: values.businessLabel?.trim() || undefined,
       });
-
-      try {
-        const locs = await tenantsApi.listLocations();
-        const main = Array.isArray(locs) ? locs[0] : undefined;
-        if (main?.id) {
-          await tenantsApi.updateLocation(main.id, {
-            name: values.storeName?.trim() || main.name || "Main Store",
-            phone: values.phone?.trim() || undefined,
-            address: addressLine || undefined,
-          });
-        }
-      } catch {
-        /* location update optional on older APIs */
-      }
 
       try {
         const boot = await appsApi.bootstrap();
@@ -516,7 +567,8 @@ function OrganizationsPageInner() {
       }
 
       toast.success("Organization profile saved");
-      router.replace("/dashboard");
+      const u = useAuthStore.getState().user;
+      router.replace(defaultHomeForRoles(u?.roles, u?.permissions));
     } catch (e) {
       toast.error(
         e instanceof ApiError
@@ -815,6 +867,26 @@ function OrganizationsPageInner() {
                       message={form.formState.errors.phone?.message}
                     />
                   </div>
+                  <div>
+                    <Label>Email</Label>
+                    <Input
+                      className="mt-1"
+                      type="email"
+                      placeholder="billing@shop.com"
+                      {...form.register("email")}
+                    />
+                    <FieldError
+                      message={form.formState.errors.email?.message}
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <Label>Website</Label>
+                    <Input
+                      className="mt-1"
+                      placeholder="https://"
+                      {...form.register("website")}
+                    />
+                  </div>
                   <div className="sm:col-span-2">
                     <Label>Address *</Label>
                     <Input
@@ -824,6 +896,14 @@ function OrganizationsPageInner() {
                     />
                     <FieldError
                       message={form.formState.errors.addressLine1?.message}
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <Label>Address line 2</Label>
+                    <Input
+                      className="mt-1"
+                      placeholder="Area, landmark (optional)"
+                      {...form.register("addressLine2")}
                     />
                   </div>
                   <div>
@@ -887,6 +967,34 @@ function OrganizationsPageInner() {
                     />
                   </div>
                   <div>
+                    <Label>PAN</Label>
+                    <Input
+                      className="mt-1 uppercase"
+                      placeholder="AAAAA9999A"
+                      maxLength={10}
+                      {...form.register("pan")}
+                    />
+                    <FieldError
+                      message={form.formState.errors.pan?.message}
+                    />
+                  </div>
+                  <div>
+                    <Label>Organization type</Label>
+                    <Select
+                      className="mt-1"
+                      {...form.register("organizationType")}
+                    >
+                      <option value="">Select (optional)</option>
+                      <option value="proprietorship">Proprietorship</option>
+                      <option value="partnership">Partnership</option>
+                      <option value="llp">LLP</option>
+                      <option value="pvt_ltd">Private Limited</option>
+                      <option value="public">Public Limited</option>
+                      <option value="trust">Trust / Society</option>
+                      <option value="other">Other</option>
+                    </Select>
+                  </div>
+                  <div>
                     <Label>Currency</Label>
                     <Select
                       className="mt-1"
@@ -897,6 +1005,27 @@ function OrganizationsPageInner() {
                       <option value="EUR">EUR</option>
                       <option value="GBP">GBP</option>
                       <option value="AED">AED</option>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Time zone</Label>
+                    <Select className="mt-1" {...form.register("timezone")}>
+                      <option value="Asia/Kolkata">
+                        Asia/Kolkata (IST)
+                      </option>
+                      <option value="Asia/Dubai">Asia/Dubai (GST)</option>
+                      <option value="UTC">UTC</option>
+                      <option value="America/New_York">
+                        America/New York
+                      </option>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Language</Label>
+                    <Select className="mt-1" {...form.register("locale")}>
+                      <option value="en-IN">English (India)</option>
+                      <option value="hi-IN">Hindi</option>
+                      <option value="en-US">English (US)</option>
                     </Select>
                   </div>
                   <div>
@@ -967,6 +1096,13 @@ function OrganizationsPageInner() {
                 ? `Signed in as ${identity.fullName} · ${identity.email}`
                 : "Pick a shop or create a new one."}
             </p>
+            {orgs.length > 1 ? (
+              <p className="mt-2 text-sm">
+                <a href="/group" className="font-medium text-[#1a56db]">
+                  All Businesses — group sales, profit, inventory
+                </a>
+              </p>
+            ) : null}
           </div>
           <Button type="button" size="sm" variant="secondary" onClick={signOut}>
             <LogOut className="mr-1.5 h-3.5 w-3.5" />

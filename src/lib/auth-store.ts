@@ -3,6 +3,9 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
+/** Stable fallback — never `?? []` inside a Zustand selector (infinite loop). */
+export const EMPTY_ROLES: string[] = [];
+
 export type AuthSessionUser = {
   id: string;
   email: string;
@@ -49,6 +52,12 @@ type AuthState = {
   pinLocked: boolean;
   lastPinUserId: string | null;
   setIdentitySession: (payload: {
+    identityToken: string;
+    identityRefreshToken?: string | null;
+    identity: PortalIdentity;
+  }) => void;
+  /** Keep shop session; attach/refresh Zoho identity for org switcher */
+  attachIdentity: (payload: {
     identityToken: string;
     identityRefreshToken?: string | null;
     identity: PortalIdentity;
@@ -106,6 +115,16 @@ export const useAuthStore = create<AuthState>()(
           user: null,
           stationUser: null,
           pinLocked: false,
+        }),
+      attachIdentity: ({
+        identityToken,
+        identityRefreshToken,
+        identity,
+      }) =>
+        set({
+          identityToken,
+          identityRefreshToken: identityRefreshToken ?? null,
+          identity,
         }),
       setSession: ({
         accessToken,

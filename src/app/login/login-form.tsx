@@ -11,6 +11,7 @@ import {
 import { appsApi, authApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useAuthStore } from "@/lib/auth-store";
+import { defaultHomeForRoles } from "@/lib/roles";
 import { loginSchema, type LoginInput } from "@/lib/validations";
 // Google sign-in UI — keep imports/handlers, hide the buttons for now.
 // import {
@@ -78,8 +79,10 @@ export default function LoginForm() {
 
   useEffect(() => {
     if (!ready) return;
-    if (accessToken) router.replace("/dashboard");
-    else if (identityToken) router.replace("/organizations");
+    if (accessToken) {
+      const u = useAuthStore.getState().user;
+      router.replace(defaultHomeForRoles(u?.roles, u?.permissions));
+    } else if (identityToken) router.replace("/organizations");
   }, [ready, accessToken, identityToken, router]);
 
   const locked = lockUntil > now;
@@ -134,6 +137,7 @@ export default function LoginForm() {
     const dest = applyPortalResponse(data);
     writeLock(0, 0);
     setLockUntil(0);
+    qc.clear();
     if (dest === "orgs") {
       toast.success("Signed in — select your organization");
       router.replace("/organizations");
@@ -146,7 +150,8 @@ export default function LoginForm() {
       /* AppShell retries */
     }
     toast.success("Welcome back");
-    router.replace("/dashboard");
+    const u = useAuthStore.getState().user;
+    router.replace(defaultHomeForRoles(u?.roles, u?.permissions));
   }
 
   async function onSubmit(values: LoginInput) {
@@ -230,8 +235,8 @@ export default function LoginForm() {
 
   return (
     <AuthShell
-      title="Sign in"
-      subtitle="Access your Universal POS account. You’ll choose or create an organization next."
+      title="Welcome back"
+      subtitle="Sign in to access your dashboard and manage your operations."
     >
       {/* Google sign-in — design hidden for now, do not delete.
       <AuthGoogleButton
@@ -249,14 +254,20 @@ export default function LoginForm() {
           onCancel={() => setTotpToken(null)}
         />
       ) : (
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-5" noValidate>
         <div className="space-y-1.5">
-          <Label htmlFor="email">Email address</Label>
+          <Label
+            htmlFor="email"
+            className="text-[0.8125rem] font-semibold text-[#111827]"
+          >
+            Work Email
+          </Label>
           <Input
             id="email"
             type="email"
             autoComplete="username webauthn"
-            placeholder="you@business.com"
+            placeholder="name@company.com"
+            className="h-11 rounded-lg"
             {...register("email")}
           />
           <FieldError message={errors.email?.message} />
@@ -264,49 +275,55 @@ export default function LoginForm() {
 
         <div className="space-y-1.5">
           <div className="flex items-center justify-between gap-2">
-            <Label htmlFor="password">Password</Label>
-            <div className="flex items-center gap-3">
-              <Link
-                href="/forgot-password"
-                className="text-[0.75rem] font-medium text-[#1a56db] hover:underline"
-              >
-                Forgot password?
-              </Link>
-              <button
-                type="button"
-                className="text-[0.75rem] font-medium text-[#5a6b7d] hover:underline"
-                onClick={() => setShowPassword((v) => !v)}
-              >
-                {showPassword ? "Hide" : "Show"}
-              </button>
-            </div>
+            <Label
+              htmlFor="password"
+              className="text-[0.8125rem] font-semibold text-[#111827]"
+            >
+              Password
+            </Label>
+            <Link
+              href="/forgot-password"
+              className="text-[0.8rem] font-medium text-[#1a56db] hover:underline"
+            >
+              Forgot password?
+            </Link>
           </div>
-          <Input
-            id="password"
-            type={showPassword ? "text" : "password"}
-            autoComplete="current-password"
-            {...register("password")}
-          />
+          <div className="relative">
+            <Input
+              id="password"
+              type={showPassword ? "text" : "password"}
+              autoComplete="current-password"
+              className="h-11 rounded-lg pr-16"
+              {...register("password")}
+            />
+            <button
+              type="button"
+              className="absolute inset-y-0 right-3 text-[0.7rem] font-semibold tracking-wide text-[#9ca3af] uppercase hover:text-[#4b5563]"
+              onClick={() => setShowPassword((v) => !v)}
+            >
+              {showPassword ? "Hide" : "Show"}
+            </button>
+          </div>
           <FieldError message={errors.password?.message} />
         </div>
 
         <Button
           type="submit"
-          className="w-full"
+          className="h-11 w-full rounded-lg text-[0.9375rem] font-semibold"
           disabled={isSubmitting || locked}
         >
           {locked
             ? `Try again in ${lockSeconds}s`
             : isSubmitting
               ? "Signing in…"
-              : "Sign in"}
+              : "Sign in to workspace"}
         </Button>
 
         {bioSupported ? (
           <Button
             type="button"
             variant="secondary"
-            className="w-full"
+            className="h-11 w-full rounded-lg"
             disabled={locked || bioBusy || isSubmitting}
             onClick={() => void onBiometric()}
           >
@@ -315,19 +332,19 @@ export default function LoginForm() {
               : "Sign in with fingerprint / biometrics"}
           </Button>
         ) : (
-          <p className="text-center text-[0.72rem] leading-snug text-[#8b9bb0]">
+          <p className="text-center text-[0.72rem] leading-snug text-[#9ca3af]">
             {bioBlockReason ||
               "Biometric login available on HTTPS (or localhost) with Windows Hello / Touch ID"}
           </p>
         )}
 
-        <p className="text-center text-[0.8125rem] text-[#5a6b7d]">
-          New here?{" "}
+        <p className="pt-1 text-center text-[0.875rem] text-[#6b7280]">
+          Don&apos;t have an account?{" "}
           <Link
             href="/signup"
-            className="font-semibold text-[#1a56db] underline-offset-2 hover:underline"
+            className="font-semibold text-[#1a56db] hover:underline"
           >
-            Create an account
+            Request Access
           </Link>
         </p>
       </form>

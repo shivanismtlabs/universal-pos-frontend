@@ -7,7 +7,7 @@ import { expensesApi, tenantsApi } from "@/lib/api";
 import type { ExpenseRow } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useBootstrap } from "@/lib/bootstrap";
-import { useAuthStore } from "@/lib/auth-store";
+import { EMPTY_ROLES, useAuthStore } from "@/lib/auth-store";
 import { canFinance } from "@/lib/roles";
 import {
   todayYmd,
@@ -89,7 +89,7 @@ function expenseNet(row: ExpenseRow) {
 export default function ExpensesPage() {
   const { money } = useBootstrap();
   const qc = useQueryClient();
-  const roles = useAuthStore((s) => s.user?.roles ?? []);
+  const roles = useAuthStore((s) => s.user?.roles ?? EMPTY_ROLES);
   const allowFinance = canFinance(roles);
 
   const [deskTab, setDeskTab] = useState<DeskTab>("dashboard");

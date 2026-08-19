@@ -39,7 +39,7 @@ import {
   moneyNumber,
   newIdempotencyKey,
 } from "@/lib/utils";
-import { useAuthStore } from "@/lib/auth-store";
+import { EMPTY_ROLES, useAuthStore } from "@/lib/auth-store";
 import { canFinance, canRefund } from "@/lib/roles";
 import { Suspense, useState } from "react";
 import { ModeBadge } from "@/components/mode-badge";
@@ -59,7 +59,7 @@ function OrderDetailInner() {
   const search = useSearchParams();
   const id = search.get("id") ?? "";
   const qc = useQueryClient();
-  const roles = useAuthStore((s) => s.user?.roles ?? []);
+  const roles = useAuthStore((s) => s.user?.roles ?? EMPTY_ROLES);
   const allowRefund = canRefund(roles);
   const allowFinance = canFinance(roles);
   const [layDue, setLayDue] = useState("");

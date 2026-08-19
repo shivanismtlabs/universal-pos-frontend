@@ -10,7 +10,7 @@ export default function LoginRoute() {
   return (
     <Suspense
       fallback={
-        <div className="grid min-h-dvh place-items-center bg-[#1a56db] text-white/70">
+        <div className="grid min-h-dvh place-items-center bg-[#050b1c] text-white/70">
           Loading…
         </div>
       }

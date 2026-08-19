@@ -14,6 +14,27 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { PageHeader } from "@/components/page-header";
 
+const TAX_COUNTRIES = [
+  { id: "IN", label: "India (IN)" },
+  { id: "AE", label: "United Arab Emirates (AE)" },
+  { id: "US", label: "United States (US)" },
+  { id: "GB", label: "United Kingdom (GB)" },
+  { id: "AU", label: "Australia (AU)" },
+  { id: "SG", label: "Singapore (SG)" },
+] as const;
+
+function blankForm() {
+  return {
+    enabled: false,
+    basis: "accrual",
+    baseCurrency: "",
+    fiscalYearStartMonth: "4",
+    taxCountry: "",
+    inventoryAccountingEnabled: false,
+    cogsEnabled: false,
+  };
+}
+
 export default function AccountingSettingsPage() {
   const qc = useQueryClient();
   const roles = useAuthStore((s) => s.user?.roles);
@@ -23,48 +44,58 @@ export default function AccountingSettingsPage() {
     queryFn: () => accountingApi.settings(),
     enabled: can,
   });
-  const [enabled, setEnabled] = useState(false);
-  const [basis, setBasis] = useState("accrual");
-  const [baseCurrency, setBaseCurrency] = useState("INR");
-  const [fiscalYearStartMonth, setFiscalYearStartMonth] = useState("4");
-  const [taxCountry, setTaxCountry] = useState("IN");
-  const [inventoryAccountingEnabled, setInv] = useState(false);
-  const [cogsEnabled, setCogs] = useState(false);
+  const [form, setForm] = useState(blankForm);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
     if (!q.data || hydrated) return;
-    setEnabled(q.data.enabled);
-    setBasis(q.data.basis);
-    setBaseCurrency(q.data.baseCurrency);
-    setFiscalYearStartMonth(String(q.data.fiscalYearStartMonth));
-    setTaxCountry(q.data.taxCountry);
-    setInv(q.data.inventoryAccountingEnabled);
-    setCogs(q.data.cogsEnabled);
+    setForm({
+      enabled: q.data.enabled,
+      basis: q.data.basis,
+      baseCurrency: q.data.baseCurrency,
+      fiscalYearStartMonth: String(q.data.fiscalYearStartMonth),
+      taxCountry: q.data.taxCountry,
+      inventoryAccountingEnabled: q.data.inventoryAccountingEnabled,
+      cogsEnabled: q.data.cogsEnabled,
+    });
     setHydrated(true);
   }, [q.data, hydrated]);
 
   const save = useMutation({
-    mutationFn: () =>
-      accountingApi.updateSettings({
-        enabled,
-        basis,
-        baseCurrency,
-        fiscalYearStartMonth: Number(fiscalYearStartMonth),
-        taxCountry,
-        inventoryAccountingEnabled,
-        cogsEnabled,
-      }),
+    mutationFn: () => {
+      const currency = form.baseCurrency.trim().toUpperCase();
+      const tax = form.taxCountry.trim().toUpperCase();
+      if (currency.length !== 3) {
+        throw new Error("Base currency must be a 3-letter code (e.g. INR)");
+      }
+      if (tax.length !== 2) {
+        throw new Error("Tax country must be a 2-letter code (e.g. IN)");
+      }
+      return accountingApi.updateSettings({
+        enabled: form.enabled,
+        basis: form.basis,
+        baseCurrency: currency,
+        fiscalYearStartMonth: Number(form.fiscalYearStartMonth),
+        taxCountry: tax,
+        inventoryAccountingEnabled: form.inventoryAccountingEnabled,
+        cogsEnabled: form.cogsEnabled,
+      });
+    },
     onSuccess: () => {
       toast.success("Accounting settings saved");
+      setForm(blankForm());
       void qc.invalidateQueries({ queryKey: ["accounting"] });
     },
     onError: (e: Error) =>
-      toast.error(e instanceof ApiError ? e.message : "Save failed"),
+      toast.error(e instanceof ApiError ? e.message : e.message || "Save failed"),
   });
 
   if (!can) {
-    return <p className="text-sm text-[#6b7280]">Accounting settings require a finance role.</p>;
+    return (
+      <p className="text-sm text-[#6b7280]">
+        Accounting settings require a finance role.
+      </p>
+    );
   }
 
   return (
@@ -77,17 +108,24 @@ export default function AccountingSettingsPage() {
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
-            checked={enabled}
-            onChange={(e) => setEnabled(e.target.checked)}
+            checked={form.enabled}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, enabled: e.target.checked }))
+            }
           />
           Accounting enabled
         </label>
         <p className="text-[12px] text-[#6b7280]">
-          When enabled, POS sales, payments, returns, purchases, and expenses post journals in the same database transaction. External sync runs after commit.
+          When enabled, POS sales, payments, returns, purchases, and expenses
+          post journals in the same database transaction. External sync runs
+          after commit.
         </p>
         <div>
           <Label>Accounting basis</Label>
-          <Select value={basis} onChange={(e) => setBasis(e.target.value)}>
+          <Select
+            value={form.basis}
+            onChange={(e) => setForm((f) => ({ ...f, basis: e.target.value }))}
+          >
             <option value="accrual">Accrual</option>
             <option value="cash">Cash</option>
           </Select>
@@ -95,16 +133,24 @@ export default function AccountingSettingsPage() {
         <div>
           <Label>Base currency</Label>
           <Input
-            value={baseCurrency}
-            onChange={(e) => setBaseCurrency(e.target.value.toUpperCase())}
+            value={form.baseCurrency}
+            onChange={(e) =>
+              setForm((f) => ({
+                ...f,
+                baseCurrency: e.target.value.toUpperCase(),
+              }))
+            }
             maxLength={3}
+            placeholder="INR"
           />
         </div>
         <div>
           <Label>Fiscal year start month</Label>
           <Select
-            value={fiscalYearStartMonth}
-            onChange={(e) => setFiscalYearStartMonth(e.target.value)}
+            value={form.fiscalYearStartMonth}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, fiscalYearStartMonth: e.target.value }))
+            }
           >
             {Array.from({ length: 12 }, (_, i) => (
               <option key={i + 1} value={String(i + 1)}>
@@ -115,21 +161,44 @@ export default function AccountingSettingsPage() {
         </div>
         <div>
           <Label>Tax country</Label>
-          <Input value={taxCountry} onChange={(e) => setTaxCountry(e.target.value)} />
+          <Select
+            value={form.taxCountry}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, taxCountry: e.target.value }))
+            }
+          >
+            <option value="">Select country</option>
+            {!TAX_COUNTRIES.some((c) => c.id === form.taxCountry) &&
+            form.taxCountry ? (
+              <option value={form.taxCountry}>{form.taxCountry}</option>
+            ) : null}
+            {TAX_COUNTRIES.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.label}
+              </option>
+            ))}
+          </Select>
         </div>
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
-            checked={inventoryAccountingEnabled}
-            onChange={(e) => setInv(e.target.checked)}
+            checked={form.inventoryAccountingEnabled}
+            onChange={(e) =>
+              setForm((f) => ({
+                ...f,
+                inventoryAccountingEnabled: e.target.checked,
+              }))
+            }
           />
           Inventory accounting enabled
         </label>
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
-            checked={cogsEnabled}
-            onChange={(e) => setCogs(e.target.checked)}
+            checked={form.cogsEnabled}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, cogsEnabled: e.target.checked }))
+            }
           />
           COGS enabled
         </label>

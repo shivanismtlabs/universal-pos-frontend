@@ -98,7 +98,7 @@ function monthStartYmd() {
 }
 
 export default function InventoryReportsPage() {
-  const { money, businessType, hasMode } = useBootstrap();
+  const { money, hasCapability, hasMode } = useBootstrap();
   const qc = useQueryClient();
   const hasPhysicalGoods = hasMode("sale");
 
@@ -136,7 +136,9 @@ export default function InventoryReportsPage() {
   });
 
   const showRestaurantSplit =
-    businessType === "restaurant" || businessType === "hybrid";
+    hasCapability("KOT") ||
+    hasCapability("KITCHEN") ||
+    hasCapability("MODIFIERS");
 
   const params: InventoryReportParams = useMemo(
     () => ({

@@ -1,10 +1,18 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { X } from "lucide-react";
 import {
   catalogApi,
   type CatalogProductKind,
@@ -23,6 +31,7 @@ import {
   type ProductImagePickerHandle,
 } from "@/components/product-image-picker";
 import { ProductThumb } from "@/components/product-thumb";
+import { ImageLightbox } from "@/components/image-lightbox";
 import {
   createCatalogProductSchema,
   zodFieldErrors,
@@ -42,6 +51,58 @@ const UNITS = [
   "day",
   "service",
 ];
+
+const KINDS: { id: CatalogProductKind; label: string }[] = [
+  { id: "physical", label: "Physical" },
+  { id: "service", label: "Service" },
+  { id: "digital", label: "Digital" },
+  { id: "bundle", label: "Bundle / combo" },
+  { id: "rental", label: "Rental" },
+];
+
+const fieldControl =
+  "h-9 w-full rounded-md border border-[#d9e0ea] bg-white px-2.5 text-sm text-[#0b1f33] outline-none focus:border-[#1a56db]";
+
+function FieldRow({
+  label,
+  required,
+  children,
+  error,
+  stacked,
+}: {
+  label: string;
+  required?: boolean;
+  children: ReactNode;
+  error?: string;
+  stacked?: boolean;
+}) {
+  return (
+    <div
+      className={
+        stacked
+          ? "space-y-1.5"
+          : "grid grid-cols-[6.75rem_minmax(0,1fr)] items-center gap-x-4 gap-y-1"
+      }
+    >
+      <label
+        className={[
+          "text-[0.8125rem] font-medium",
+          required ? "text-[#c81e1e]" : "text-[#3d4f61]",
+          stacked ? "" : "text-left",
+        ].join(" ")}
+      >
+        {label}
+        {required ? " *" : ""}
+      </label>
+      <div className="min-w-0">
+        {children}
+        {error ? (
+          <p className="mt-1 text-[0.75rem] text-[#c81e1e]">{error}</p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
 
 export default function EditCatalogProductRoute() {
   return (
@@ -77,6 +138,7 @@ function EditCatalogProductPage() {
   /** Org custom / profile extras (from business config itemFields). */
   const [extraFields, setExtraFields] = useState<Record<string, string>>({});
   const [hydrated, setHydrated] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 
   const profileLabel = useMemo(() => {
     return businessConfig?.label || businessType || "Shop";
@@ -345,9 +407,6 @@ function EditCatalogProductPage() {
       toast.error(e instanceof ApiError ? e.message : e.message || "Save failed"),
   });
 
-  const section =
-    "space-y-3 rounded-md border border-[#e4e9f0] bg-white p-4";
-
   if (!id) {
     return (
       <p className="p-8 text-sm text-[#c81e1e]">
@@ -375,64 +434,100 @@ function EditCatalogProductPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4 pb-12">
-      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-[#eef1f4] pb-3">
+    <div className="pb-16">
+      <header className="mb-5 flex items-center justify-between border-b border-[#e8edf4] pb-3">
         <div>
-          <p className="text-[0.65rem] font-bold tracking-wide text-[#1a56db] uppercase">
-            Catalog
-          </p>
-          <h1 className="text-xl font-semibold text-[#0b1f33]">Edit Item</h1>
+          <h1 className="text-xl font-semibold tracking-tight text-[#0b1f33]">
+            Edit Item
+          </h1>
           <p className="mt-0.5 font-mono text-xs text-[#5a6b7d]">
             {product.data.skuCode}
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="secondary" asChild>
-            <Link href={`/catalog/view?id=${id}`}>Cancel</Link>
-          </Button>
-          <Button
-            disabled={!form.name.trim() || save.isPending}
-            onClick={() => save.mutate()}
-          >
-            {save.isPending ? "Saving…" : "Save"}
-          </Button>
-        </div>
+        <Link
+          href={`/catalog/view?id=${id}`}
+          className="grid h-8 w-8 place-items-center rounded-md text-[#5a6b7d] transition hover:bg-[#f4f6fa] hover:text-[#0b1f33]"
+          aria-label="Close"
+        >
+          <X className="h-5 w-5" strokeWidth={1.75} />
+        </Link>
       </header>
 
-      <section className={section}>
-        <h2 className="text-sm font-semibold text-[#0b1f33]">Basic information</h2>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="sm:col-span-2">
-            <Label>Product name *</Label>
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-8">
+        <div className="min-w-0 max-w-[36rem] flex-1 space-y-3.5">
+          <FieldRow label="Name" required error={fieldErrors.name}>
             <Input
+              className="h-9"
               value={form.name}
               onChange={(e) => {
                 clearFieldError("name");
                 setForm((f) => ({ ...f, name: e.target.value }));
               }}
             />
-            <FieldError message={fieldErrors.name} />
-          </div>
-          <div>
-            <Label>Product type *</Label>
+          </FieldRow>
+          <FieldRow label="Type" required>
+            <div className="flex flex-wrap gap-x-4 gap-y-2">
+              {KINDS.map((k) => (
+                <label
+                  key={k.id}
+                  className="flex items-center gap-1.5 text-[0.8125rem] text-[#0b1f33]"
+                >
+                  <input
+                    type="radio"
+                    className="accent-[#1a56db]"
+                    checked={form.kind === k.id}
+                    onChange={() => applyKindDefaults(k.id)}
+                  />
+                  {k.label}
+                </label>
+              ))}
+            </div>
+          </FieldRow>
+          <FieldRow label="Category">
             <select
-              className="h-9 w-full rounded-md border border-[#dce3ec] px-2 text-sm"
-              value={form.kind}
+              className={fieldControl}
+              value={form.categoryId}
               onChange={(e) =>
-                applyKindDefaults(e.target.value as CatalogProductKind)
+                setForm((f) => ({ ...f, categoryId: e.target.value }))
               }
             >
-              <option value="physical">Physical</option>
-              <option value="service">Service</option>
-              <option value="digital">Digital</option>
-              <option value="bundle">Bundle / combo</option>
-              <option value="rental">Rental</option>
+              <option value="">Select a category</option>
+              {(cats.data ?? []).map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.parent ? `${c.parent.name} › ` : ""}
+                  {c.name}
+                </option>
+              ))}
             </select>
-          </div>
-          <div>
-            <Label>Status</Label>
+          </FieldRow>
+          <FieldRow label="Brand">
             <select
-              className="h-9 w-full rounded-md border border-[#dce3ec] px-2 text-sm"
+              className={fieldControl}
+              value={form.brandId}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, brandId: e.target.value }))
+              }
+            >
+              <option value="">Select or add brand</option>
+              {(brands.data ?? []).map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+          </FieldRow>
+          <FieldRow label="Short name">
+            <Input
+              className="h-9"
+              value={form.shortName}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, shortName: e.target.value }))
+              }
+            />
+          </FieldRow>
+          <FieldRow label="Status">
+            <select
+              className={fieldControl}
               value={form.status}
               onChange={(e) =>
                 setForm((f) => ({
@@ -445,137 +540,123 @@ function EditCatalogProductPage() {
               <option value="draft">Draft</option>
               <option value="inactive">Inactive</option>
             </select>
-          </div>
-          <div>
-            <Label>Short name</Label>
-            <Input
-              value={form.shortName}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, shortName: e.target.value }))
-              }
-            />
-          </div>
+          </FieldRow>
+        </div>
+        <div className="w-full shrink-0 space-y-3 lg:w-[22.5rem]">
           {(product.data.images?.length || form.photoUrl) ? (
-            <div className="sm:col-span-2">
-              <Label>Current images</Label>
-              <div className="mt-1 flex flex-wrap gap-2">
+            <div>
+              <p className="mb-1.5 text-[0.75rem] font-medium text-[#3d4f61]">
+                Current images
+              </p>
+              <div className="flex flex-wrap gap-2">
                 {(product.data.images?.length
                   ? product.data.images
                   : [form.photoUrl]
                 )
                   .filter(Boolean)
                   .slice(0, 8)
-                  .map((src) => (
+                  .map((src, i, arr) => (
                     <ProductThumb
                       key={src}
                       src={src}
                       label={form.name}
                       className="rounded border border-[#e4e9f0]"
+                      count={i === 0 ? arr.length : undefined}
+                      onClick={() => setLightboxIndex(i)}
                     />
                   ))}
               </div>
-              <p className="mt-1 text-[0.75rem] text-[#8a9bb0]">
-                Upload below to add more images.
-              </p>
             </div>
           ) : null}
-          <div className="sm:col-span-2">
-            <ProductImagePicker
-              ref={imagePickerRef}
-              label="Add images"
-              hint="Optional · new photos are added to the gallery"
-            />
-          </div>
-          <div className="sm:col-span-2">
-            <Label>Short description</Label>
-            <Input
-              value={form.shortDescription}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, shortDescription: e.target.value }))
-              }
-            />
-          </div>
-          <div className="sm:col-span-2">
-            <Label>Full description</Label>
-            <textarea
-              className="min-h-[72px] w-full rounded-md border border-[#dce3ec] px-2 py-1.5 text-sm"
-              value={form.description}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, description: e.target.value }))
-              }
-            />
-          </div>
+          <ProductImagePicker ref={imagePickerRef} variant="item" />
         </div>
-      </section>
+      </div>
 
-      <section className={section}>
-        <h2 className="text-sm font-semibold">Classification</h2>
-        <div className="grid gap-3 sm:grid-cols-2">
+      <div className="mt-6 max-w-[36rem] space-y-3.5">
+        <FieldRow label="Short description" stacked>
+          <Input
+            className="h-9"
+            value={form.shortDescription}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, shortDescription: e.target.value }))
+            }
+          />
+        </FieldRow>
+        <FieldRow label="Full description" stacked>
+          <textarea
+            className="min-h-[72px] w-full rounded-md border border-[#d9e0ea] px-2.5 py-1.5 text-sm"
+            value={form.description}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, description: e.target.value }))
+            }
+          />
+        </FieldRow>
+      </div>
+
+      <section className="mt-7 max-w-[36rem] border-t border-[#e8edf4] pt-5">
+        <h2 className="mb-4 text-[0.95rem] font-semibold text-[#0b1f33]">
+          Item Details
+        </h2>
+        <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <Label>Category</Label>
+            <label className="text-[0.8125rem] font-medium text-[#c81e1e]">
+              Unit *
+            </label>
             <select
-              className="h-9 w-full rounded-md border border-[#dce3ec] px-2 text-sm"
-              value={form.categoryId}
+              className={`${fieldControl} mt-1.5`}
+              value={form.unitOfMeasure}
               onChange={(e) =>
-                setForm((f) => ({ ...f, categoryId: e.target.value }))
+                setForm((f) => ({ ...f, unitOfMeasure: e.target.value }))
               }
             >
-              <option value="">— None —</option>
-              {(cats.data ?? []).map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.parent ? `${c.parent.name} › ` : ""}
-                  {c.name}
+              {UNITS.map((u) => (
+                <option key={u} value={u}>
+                  {u}
                 </option>
               ))}
             </select>
           </div>
           <div>
-            <Label>Brand (optional)</Label>
-            <select
-              className="h-9 w-full rounded-md border border-[#dce3ec] px-2 text-sm"
-              value={form.brandId}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, brandId: e.target.value }))
-              }
-            >
-              <option value="">— None —</option>
-              {(brands.data ?? []).map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-      </section>
-
-      <section className={section}>
-        <h2 className="text-sm font-semibold">Identification</h2>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <Label>SKU</Label>
-            <div className="flex gap-1">
+            <label className="text-[0.8125rem] font-medium text-[#3d4f61]">
+              SKU
+            </label>
+            {fieldErrors.skuCode ? (
+              <p className="mt-1 text-[0.75rem] text-[#c81e1e]">
+                {fieldErrors.skuCode}
+              </p>
+            ) : null}
+            <div className="mt-1.5 flex">
               <Input
+                className="h-9 rounded-r-none"
                 value={form.skuCode}
                 onChange={(e) => {
                   clearFieldError("skuCode");
                   setForm((f) => ({ ...f, skuCode: e.target.value }));
                 }}
-                placeholder="Auto if empty"
+                placeholder="Type or generate"
               />
               <Button
                 type="button"
                 variant="secondary"
+                className="h-9 shrink-0 rounded-l-none border-l-0"
                 onClick={() => genSku.mutate()}
               >
                 Generate
               </Button>
             </div>
-            <FieldError message={fieldErrors.skuCode} />
           </div>
-          <div>
+        </div>
+      </section>
+
+      <section className="mt-8 border-t border-[#e8edf4] pt-5">
+        <h2 className="mb-4 text-[0.95rem] font-semibold text-[#0b1f33]">
+          Identification
+        </h2>
+        <div className="grid max-w-3xl gap-4 sm:grid-cols-2">
+          <div className="sm:col-span-2">
             <Label>Internal code</Label>
             <Input
+              className="mt-1 max-w-sm"
               value={form.internalCode}
               onChange={(e) =>
                 setForm((f) => ({ ...f, internalCode: e.target.value }))
@@ -584,7 +665,7 @@ function EditCatalogProductPage() {
           </div>
           <div className="sm:col-span-2">
             <Label>Barcode</Label>
-            <div className="flex gap-1">
+            <div className="mt-1 flex gap-1">
               <div className="min-w-0 flex-1">
                 <BarcodeScanInput
                   value={form.barcode}
@@ -634,12 +715,15 @@ function EditCatalogProductPage() {
         </div>
       </section>
 
-      <section className={section}>
-        <h2 className="text-sm font-semibold">Pricing & unit</h2>
-        <div className="grid gap-3 sm:grid-cols-2">
+      <section className="mt-8 border-t border-[#e8edf4] pt-5">
+        <h2 className="mb-4 text-[0.95rem] font-semibold text-[#0b1f33]">
+          Pricing &amp; tax
+        </h2>
+        <div className="grid max-w-3xl gap-4 sm:grid-cols-2">
           <div>
-            <Label>Selling price</Label>
+            <Label>Selling price (Rate)</Label>
             <Input
+              className="mt-1"
               type="number"
               min={0}
               step="0.01"
@@ -654,6 +738,7 @@ function EditCatalogProductPage() {
           <div>
             <Label>Cost price</Label>
             <Input
+              className="mt-1"
               type="number"
               min={0}
               step="0.01"
@@ -668,6 +753,7 @@ function EditCatalogProductPage() {
           <div>
             <Label>MRP / list price</Label>
             <Input
+              className="mt-1"
               type="number"
               min={0}
               step="0.01"
@@ -682,6 +768,7 @@ function EditCatalogProductPage() {
           <div>
             <Label>Tax rate %</Label>
             <Input
+              className="mt-1"
               type="number"
               min={0}
               max={40}
@@ -700,8 +787,9 @@ function EditCatalogProductPage() {
             </p>
           </div>
           <div>
-            <Label>Tax code / HSN ref (optional)</Label>
+            <Label>Tax code / HSN / SAC</Label>
             <Input
+              className="mt-1"
               value={form.taxCode}
               onChange={(e) =>
                 setForm((f) => ({ ...f, taxCode: e.target.value }))
@@ -709,28 +797,14 @@ function EditCatalogProductPage() {
               placeholder="e.g. GST18 or HSN"
             />
           </div>
-          <div>
-            <Label>Unit of measure</Label>
-            <select
-              className="h-9 w-full rounded-md border border-[#dce3ec] px-2 text-sm"
-              value={form.unitOfMeasure}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, unitOfMeasure: e.target.value }))
-              }
-            >
-              {UNITS.map((u) => (
-                <option key={u} value={u}>
-                  {u}
-                </option>
-              ))}
-            </select>
-          </div>
         </div>
       </section>
 
-      <section className={section}>
-        <h2 className="text-sm font-semibold">Behavior</h2>
-        <div className="grid gap-2 sm:grid-cols-2">
+      <section className="mt-8 border-t border-[#e8edf4] pt-5">
+        <h2 className="mb-4 text-[0.95rem] font-semibold text-[#0b1f33]">
+          Inventory tracking
+        </h2>
+        <div className="grid max-w-3xl gap-2 sm:grid-cols-2">
           {(
             [
               ["trackInventory", "Track inventory"],
@@ -744,6 +818,7 @@ function EditCatalogProductPage() {
             <label key={key} className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
+                className="accent-[#1a56db]"
                 checked={form[key]}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, [key]: e.target.checked }))
@@ -756,8 +831,8 @@ function EditCatalogProductPage() {
       </section>
 
       {itemMetaFields.length ? (
-        <section className={section}>
-          <h2 className="text-sm font-semibold text-[#0b1f33]">
+        <section className="mt-8 border-t border-[#e8edf4] pt-5">
+          <h2 className="mb-2 text-[0.95rem] font-semibold text-[#0b1f33]">
             Shop extras
           </h2>
           <p className="text-[0.75rem] text-[#5a6b7d]">
@@ -844,6 +919,32 @@ function EditCatalogProductPage() {
           </div>
         </section>
       ) : null}
+
+      <div className="mt-8 flex gap-2">
+        <Button
+          disabled={!form.name.trim() || save.isPending}
+          onClick={() => save.mutate()}
+        >
+          {save.isPending ? "Saving…" : "Save"}
+        </Button>
+        <Button variant="secondary" asChild>
+          <Link href={`/catalog/view?id=${id}`}>Cancel</Link>
+        </Button>
+      </div>
+
+      <ImageLightbox
+        open={lightboxIndex != null}
+        images={
+          (product.data?.images?.length
+            ? product.data.images
+            : form.photoUrl
+              ? [form.photoUrl]
+              : []) as string[]
+        }
+        startIndex={lightboxIndex ?? 0}
+        label={form.name}
+        onClose={() => setLightboxIndex(null)}
+      />
     </div>
   );
 }

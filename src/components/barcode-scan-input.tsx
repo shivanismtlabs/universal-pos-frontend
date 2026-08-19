@@ -67,6 +67,8 @@ type Props = {
   showSubmitButton?: boolean;
   /** USB scanner hint under the field (default true). */
   showHint?: boolean;
+  /** Tight POS toolbar (h-9, no oversized Add). */
+  compact?: boolean;
   inputRef?: Ref<HTMLInputElement>;
 };
 
@@ -86,6 +88,7 @@ export function BarcodeScanInput({
   autoSubmitWedge = true,
   showSubmitButton = true,
   showHint = true,
+  compact = false,
   inputRef,
 }: Props) {
   const id = useId();
@@ -151,18 +154,20 @@ export function BarcodeScanInput({
     };
   }, []);
 
+  const fieldH = compact ? "h-9" : showSubmitButton ? "h-12" : "h-10";
+
   return (
-    <div className={cn("space-y-1.5", className)}>
-      {label ? (
+    <div className={cn(compact ? "space-y-0" : "space-y-1.5", className)}>
+      {label && !compact ? (
         <Label htmlFor={id} className="text-[#5a6b7d]">
           {label}
         </Label>
       ) : null}
-      <form onSubmit={handleSubmit} className="flex gap-2">
+      <form onSubmit={handleSubmit} className="flex gap-1.5">
         <div className="relative min-w-0 flex-1">
           <span
             aria-hidden
-            className="pointer-events-none absolute top-1/2 left-3.5 -translate-y-1/2 text-[#8b9bb0]"
+            className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-[#8b9bb0]"
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
               <path
@@ -184,9 +189,11 @@ export function BarcodeScanInput({
             inputMode="text"
             enterKeyHint="done"
             placeholder={placeholder}
+            aria-label={label || placeholder}
             className={cn(
-              "h-12 pl-10 font-mono text-[0.95rem]",
-              !showSubmitButton && "h-10",
+              "font-mono",
+              fieldH,
+              compact ? "pl-9 text-[0.8125rem]" : "pl-10 text-[0.95rem]",
               inputClassName,
             )}
             onChange={(e) => handleChange(e.target.value)}
@@ -196,7 +203,11 @@ export function BarcodeScanInput({
         {showSubmitButton ? (
           <Button
             type="submit"
-            className="h-12 min-w-[5.25rem] px-4"
+            className={cn(
+              "shrink-0",
+              fieldH,
+              compact ? "min-w-[3.5rem] px-3" : "min-w-[5.25rem] px-4",
+            )}
             disabled={disabled || !value.trim()}
           >
             Add
@@ -206,7 +217,7 @@ export function BarcodeScanInput({
           <Button
             type="button"
             variant="secondary"
-            className={cn("px-3", showSubmitButton ? "h-12" : "h-10")}
+            className={cn("shrink-0 px-3", fieldH)}
             disabled={disabled}
             title="Camera barcode scan"
             onClick={() => setCameraOpen(true)}

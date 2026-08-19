@@ -28,6 +28,8 @@ type StepId =
   | "tax"
   | "build"
   | "stockup"
+  | "resources"
+  | "plans"
   | "prefs"
   | "register"
   | "customers";
@@ -59,9 +61,14 @@ function firstName(full?: string | null) {
  * commerce-mode aware — sale unlocks inventory steps; never industry-hardcoded.
  */
 export function HomeGettingStarted() {
-  const { hasMode, productName, data: boot } = useBootstrap();
+  const { hasMode, hasCapability, productName, data: boot } = useBootstrap();
   const user = useAuthStore((s) => s.user);
   const hasSale = hasMode("sale");
+  const hasRental = hasMode("rental") || hasCapability("AVAILABILITY");
+  const hasPlans =
+    hasMode("subscription") ||
+    hasCapability("SUBSCRIPTION") ||
+    hasCapability("MEMBERSHIP");
   const [importOpen, setImportOpen] = useState(false);
 
   const floor = useQuery({
@@ -118,7 +125,7 @@ export function HomeGettingStarted() {
         detail:
           "Set tax IDs, rates, and receipt fields so invoices match your region (GST/VAT or none).",
         tip: "Tax applies at checkout for any commerce mode you enable.",
-        primary: { label: "Tax & shop settings", href: "/settings" },
+        primary: { label: "Tax & shop settings", href: "/settings/tax" },
         done: taxConfigured,
       },
     ];
@@ -147,6 +154,34 @@ export function HomeGettingStarted() {
           done: products > 0 && inStock > 0,
         },
       );
+    }
+
+    if (hasRental) {
+      list.push({
+        id: "resources",
+        n: list.length + 1,
+        title: "Set up bookable resources",
+        detail:
+          "Add rooms, tables, vehicles, or other assets you assign at the counter. Same resource list for every rental-style business.",
+        tip: "Operational status (available / occupied / out of service) is generic — not restaurant-only.",
+        primary: { label: "Resources", href: "/resources" },
+        secondary: { label: "Counter", href: "/counter" },
+        done: prefsConfigured,
+      });
+    }
+
+    if (hasPlans) {
+      list.push({
+        id: "plans",
+        n: list.length + 1,
+        title: "Create a plan or membership",
+        detail:
+          "Sell recurring access (classes, retainers, clubs) from catalog items in subscription mode.",
+        tip: "Check-in uses the same membership record for gym, salon, or coworking.",
+        primary: { label: "Counter · plans", href: "/counter" },
+        secondary: { label: "Check-in", href: "/check-in" },
+        done: prefsConfigured,
+      });
     }
 
     list.push(
@@ -183,7 +218,7 @@ export function HomeGettingStarted() {
     );
 
     return list.map((s, i) => ({ ...s, n: i + 1 }));
-  }, [hasSale, products, inStock, taxConfigured, prefsConfigured]);
+  }, [hasSale, hasRental, hasPlans, products, inStock, taxConfigured, prefsConfigured]);
 
   const unlockedIds = useMemo(() => {
     const ids = new Set<StepId>();

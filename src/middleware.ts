@@ -11,6 +11,11 @@ const JOURNAL_UUID = new RegExp(`^/accounting/journals/(${UUID})$`, "i");
 
 export function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname;
+  if (path === "/kot" || path === "/kot/") {
+    const url = request.nextUrl.clone();
+    url.pathname = "/kitchen";
+    return NextResponse.redirect(url);
+  }
   const catalog = path.match(CATALOG_UUID);
   if (catalog) {
     const url = request.nextUrl.clone();
@@ -36,5 +41,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/catalog/:path*", "/orders/:path*", "/accounting/journals/:path*"],
+  matcher: ["/kot", "/kot/", "/catalog/:path*", "/orders/:path*", "/accounting/journals/:path*"],
 };

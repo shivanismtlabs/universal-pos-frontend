@@ -37,6 +37,11 @@ export type ReceiptData = {
     inventoryUnit?: { barcodeSku: string; size?: string | null } | null;
     retailSku?: { sku: string } | null;
     product?: { name?: string; skuCode?: string } | null;
+    tracking?: {
+      variantId?: string;
+      batchId?: string;
+      serialNumber?: string;
+    };
   }>;
   totals: {
     subtotal: string | number;
@@ -49,9 +54,26 @@ export type ReceiptData = {
     method: string;
     type: string;
     amount: string | number;
+    status?: string;
+    gatewayRef?: string | null;
+    provider?: string | null;
   }>;
+  register?: { sessionId?: string | null } | null;
+  remainingDue?: string | number | null;
+  amountPaid?: string | number | null;
   change?: string | number | null;
   cashTendered?: string | number | null;
+  fulfillment?: {
+    orderType?: string;
+    resourceId?: string;
+    covers?: number;
+    note?: string;
+  } | null;
+  rentalWindow?: {
+    pickupDate?: string | null;
+    returnDueDate?: string | null;
+    lifecycle?: string | null;
+  } | null;
 };
 
 function moneyLabel(method: string) {
@@ -303,6 +325,39 @@ export function ReceiptModal({
                 ) : null}
               </section>
 
+              {(data.fulfillment?.orderType ||
+                data.fulfillment?.covers ||
+                data.fulfillment?.note ||
+                data.rentalWindow?.returnDueDate) && (
+                <section className="mt-4 rounded-[10px] border border-[#eef2f7] bg-[#f8fafc] px-3 py-2.5 text-[0.82rem] text-[#5a6b7d]">
+                  {data.fulfillment?.orderType ? (
+                    <p>
+                      Type:{" "}
+                      <span className="font-medium capitalize text-[#0b1f33]">
+                        {data.fulfillment.orderType.replace(/_/g, " ")}
+                      </span>
+                    </p>
+                  ) : null}
+                  {data.fulfillment?.covers ? (
+                    <p>Guests / covers: {data.fulfillment.covers}</p>
+                  ) : null}
+                  {data.rentalWindow?.pickupDate ? (
+                    <p>
+                      Pickup: {String(data.rentalWindow.pickupDate).slice(0, 10)}
+                    </p>
+                  ) : null}
+                  {data.rentalWindow?.returnDueDate ? (
+                    <p>
+                      Return due:{" "}
+                      {String(data.rentalWindow.returnDueDate).slice(0, 10)}
+                    </p>
+                  ) : null}
+                  {data.fulfillment?.note ? (
+                    <p className="mt-1">{data.fulfillment.note}</p>
+                  ) : null}
+                </section>
+              )}
+
               {/* Items */}
               <section className="mt-5">
                 <div className="flex justify-between border-b border-[#e5e9ef] pb-2 text-[0.62rem] font-semibold tracking-[0.14em] text-[#8b9bb0] uppercase">
@@ -339,6 +394,16 @@ export function ReceiptModal({
                           {item.inventoryUnit?.size ? (
                             <span className="block text-[0.78rem] text-[#5a6b7d]">
                               {item.inventoryUnit.size}
+                            </span>
+                          ) : null}
+                          {item.tracking?.serialNumber ? (
+                            <span className="block font-mono text-[0.72rem] text-[#8b9bb0]">
+                              S/N {item.tracking.serialNumber}
+                            </span>
+                          ) : null}
+                          {item.tracking?.batchId ? (
+                            <span className="block font-mono text-[0.72rem] text-[#8b9bb0]">
+                              Lot {item.tracking.batchId.slice(0, 8)}
                             </span>
                           ) : null}
                         </span>
@@ -419,6 +484,14 @@ export function ReceiptModal({
                       <li key={i} className="flex justify-between gap-3">
                         <span className="text-[#5a6b7d]">
                           {moneyLabel(p.method)}
+                          {p.status && p.status !== "succeeded"
+                            ? ` (${p.status})`
+                            : ""}
+                          {p.gatewayRef ? (
+                            <span className="mt-0.5 block font-mono text-[0.65rem] text-[#8b9bb0]">
+                              {p.gatewayRef}
+                            </span>
+                          ) : null}
                         </span>
                         <span className="tabular-nums font-medium text-[#0b1f33]">
                           {money(p.amount)}
@@ -426,6 +499,21 @@ export function ReceiptModal({
                       </li>
                     ))}
                   </ul>
+                  {moneyNumber(data.totals.balanceDue) > 0 ? (
+                    <p className="mt-2 text-[0.8rem] font-semibold text-[#b45309]">
+                      Remaining due {money(data.remainingDue ?? data.totals.balanceDue)}
+                    </p>
+                  ) : (
+                    <p className="mt-2 text-[0.8rem] font-semibold text-[#0b1f33]">
+                      Total paid{" "}
+                      {money(
+                        data.amountPaid ??
+                          (data.payments ?? [])
+                            .filter((p) => !p.status || p.status === "succeeded")
+                            .reduce((s, p) => s + moneyNumber(p.amount), 0),
+                      )}
+                    </p>
+                  )}
                 </section>
               ) : null}
 

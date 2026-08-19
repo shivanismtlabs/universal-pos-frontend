@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ProductThumb } from "@/components/product-thumb";
+import { ImageLightbox } from "@/components/image-lightbox";
 import { ProductBarcodePreview } from "@/components/product-barcode-preview";
 import { EntityRowActions } from "@/components/entity-row-actions";
 
@@ -40,6 +41,10 @@ function CatalogProductDetailPage() {
   >("overview");
   const [barcodeDraft, setBarcodeDraft] = useState("");
   const [barcodeErr, setBarcodeErr] = useState<string | null>(null);
+  const [lightbox, setLightbox] = useState<{
+    images: string[];
+    index: number;
+  } | null>(null);
 
   const product = useQuery({
     queryKey: ["catalog-product", id],
@@ -266,17 +271,41 @@ function CatalogProductDetailPage() {
     })) ??
     [];
 
+  const gallery = (
+    p.images?.length ? p.images : p.photoUrl ? [p.photoUrl] : []
+  ).filter(Boolean) as string[];
+
   return (
     <div className="space-y-4 pb-12">
       <header className="flex flex-wrap items-start justify-between gap-3 border-b border-[#eef1f4] pb-3">
         <div className="flex gap-3">
-          <ProductThumb
-            src={p.photoUrl || p.images?.[0]}
-            label={p.name}
-            size="xl"
-            className="rounded border border-[#eef1f4]"
-            count={p.images?.length}
-          />
+          <div className="flex flex-col gap-1.5">
+            <ProductThumb
+              src={gallery[0]}
+              label={p.name}
+              size="xl"
+              className="rounded border border-[#eef1f4]"
+              count={gallery.length}
+              onClick={
+                gallery.length
+                  ? () => setLightbox({ images: gallery, index: 0 })
+                  : undefined
+              }
+            />
+            {gallery.length > 1 ? (
+              <div className="flex max-w-[11rem] gap-1 overflow-x-auto">
+                {gallery.map((src, i) => (
+                  <ProductThumb
+                    key={`${src}-${i}`}
+                    src={src}
+                    label={p.name}
+                    size="sm"
+                    onClick={() => setLightbox({ images: gallery, index: i })}
+                  />
+                ))}
+              </div>
+            ) : null}
+          </div>
           <div>
             <p className="text-[0.65rem] font-bold tracking-wide text-[#1a56db] uppercase">
               {p.kind} · {p.status}
@@ -755,6 +784,14 @@ function CatalogProductDetailPage() {
           </table>
         </div>
       ) : null}
+
+      <ImageLightbox
+        open={Boolean(lightbox)}
+        images={lightbox?.images ?? gallery}
+        startIndex={lightbox?.index ?? 0}
+        label={p.name}
+        onClose={() => setLightbox(null)}
+      />
     </div>
   );
 }

@@ -122,7 +122,7 @@ function InventoryPageInner() {
           <p className="mt-0.5 text-[0.8rem] text-[#5a6b7d]">
             Multi-location stock · transfers · purchases · audits
           </p>
-        </div>
+            </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="ghost" asChild>
             <Link href="/transfers">Stock transfer</Link>
@@ -133,7 +133,7 @@ function InventoryPageInner() {
           <Button variant="ghost" asChild>
             <Link href="/adjustments">Adjustments history</Link>
           </Button>
-        </div>
+          </div>
       </header>
 
       <div className="flex flex-wrap items-end gap-2">
@@ -154,31 +154,31 @@ function InventoryPageInner() {
               </option>
             ))}
           </select>
-        </div>
+                </div>
         {locations.data && locations.data.length > 1 ? (
           <p className="pb-2 text-[0.75rem] text-[#8b9bb0]">
             Stock is per location — switch the dropdown if this store looks empty.
           </p>
         ) : null}
-      </div>
+                </div>
 
       <div className="flex flex-wrap gap-1 border-b border-[#eef1f4]">
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            type="button"
+              {tabs.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
             onClick={() => selectTab(t.id)}
-            className={cn(
+                  className={cn(
               "px-3 py-2 text-sm font-medium border-b-2 -mb-px",
-              tab === t.id
+                    tab === t.id
                 ? "border-[#1a56db] text-[#1a56db]"
                 : "border-transparent text-[#5a6b7d]",
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+                  )}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
 
       {tab === "levels" && activeLoc ? (
         <LevelsTab locationId={activeLoc} canWrite={canWrite} />
@@ -200,7 +200,7 @@ function InventoryPageInner() {
       ) : null}
       {tab === "ledger" ? <LedgerTab locationId={activeLoc} /> : null}
       {tab === "warehouses" ? <WarehousesTab canWrite={canWrite} /> : null}
-    </div>
+          </div>
   );
 }
 
@@ -265,7 +265,7 @@ function LevelsTab({
           />
           Low stock only
         </label>
-      </div>
+                </div>
       <div className="overflow-x-auto rounded-md border border-[#e4e9f0] bg-white">
         <table className="w-full min-w-[720px] text-sm">
           <thead className="bg-[#f7f9fb] text-left text-[0.7rem] uppercase text-[#5a6b7d]">
@@ -339,49 +339,49 @@ function LevelsTab({
             ) : null}
           </tbody>
         </table>
-      </div>
+                </div>
 
       {reorderId ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
           <div className="w-full max-w-sm space-y-3 rounded-lg bg-white p-4 shadow-lg">
             <h3 className="font-semibold">Branch price & reorder</h3>
-            <div>
+                <div>
               <Label>Sell price (this branch)</Label>
-              <Input
+                  <Input
                 type="number"
                 min={0}
                 step="0.01"
                 value={sp}
                 onChange={(e) => setSp(e.target.value)}
-              />
-            </div>
-            <div>
+                  />
+                </div>
+                  <div>
               <Label>Reorder point</Label>
-              <Input
-                type="number"
+                    <Input
+                      type="number"
                 min={0}
                 value={rp}
                 onChange={(e) => setRp(e.target.value)}
-              />
-            </div>
-            <div>
+                    />
+                </div>
+                <div>
               <Label>Reorder qty</Label>
-              <Input
-                type="number"
+                  <Input
+                    type="number"
                 min={0}
                 value={rq}
                 onChange={(e) => setRq(e.target.value)}
-              />
-            </div>
+                  />
+                </div>
             <div className="flex justify-end gap-2">
               <Button variant="secondary" onClick={() => setReorderId(null)}>
                 Cancel
-              </Button>
+                </Button>
               <Button onClick={() => saveReorder.mutate()}>Save</Button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+                </div>
+                </div>
+                </div>
+            ) : null}
     </div>
   );
 }
@@ -424,7 +424,7 @@ function AlertsTab({
           {rows.length} alert{rows.length === 1 ? "" : "s"} · at or below
           reorder
         </span>
-      </div>
+                </div>
 
       <section className="overflow-hidden rounded-xl border border-[#e4e9f0] bg-white shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
         <div className="max-h-[min(60dvh,32rem)] overflow-auto">
@@ -479,12 +479,12 @@ function AlertsTab({
                     {locationId ? " at this location" : ""}.
                   </td>
                 </tr>
-              ) : null}
+            ) : null}
             </tbody>
           </table>
-        </div>
+          </div>
       </section>
-    </div>
+      </div>
   );
 }
 
@@ -556,7 +556,7 @@ function MoveTab({
       {!locationId ? (
         <FieldError message="Select a location" />
       ) : null}
-      <div>
+          <div>
         <Label>Item</Label>
         <select
           className="h-9 w-full rounded-md border border-[#dce3ec] px-2 text-sm"
@@ -574,35 +574,35 @@ function MoveTab({
           ))}
         </select>
         <FieldError message={fieldErrors.stockLevelId} />
-      </div>
-      <div>
+          </div>
+            <div>
         <Label>Quantity</Label>
-        <Input
+              <Input
           type="number"
           min={0.001}
           step="any"
           value={qty}
-          onChange={(e) => {
+                onChange={(e) => {
             setQty(e.target.value);
             setFieldErrors((f) => ({ ...f, qty: "" }));
-          }}
-        />
+                }}
+              />
         <FieldError message={fieldErrors.qty} />
-      </div>
-      <div>
+            </div>
+            <div>
         <Label>Reason</Label>
-        <Input
+              <Input
           value={reason}
-          onChange={(e) => {
+                onChange={(e) => {
             setReason(e.target.value);
             setFieldErrors((f) => ({ ...f, reason: "" }));
-          }}
+                }}
           placeholder={
             mode === "in" ? "GRN, found stock, return…" : "Write-off, usage…"
           }
-        />
+              />
         <FieldError message={fieldErrors.reason} />
-      </div>
+            </div>
       <Button
         disabled={run.isPending}
         onClick={() => run.mutate()}
@@ -714,10 +714,10 @@ function DamageTab({
           </h3>
           <div className="sm:col-span-2">
             <Label>Item</Label>
-            <select
+              <select
               className="mt-1 h-9 w-full rounded-md border border-[#dce3ec] px-2 text-sm"
               value={stockLevelId}
-              onChange={(e) => {
+                onChange={(e) => {
                 setStockLevelId(e.target.value);
                 setFieldErrors((f) => ({ ...f, stockLevelId: "" }));
               }}
@@ -726,26 +726,26 @@ function DamageTab({
               {(levels.data?.items ?? []).map((i) => (
                 <option key={i.stockLevelId} value={i.stockLevelId}>
                   {i.name} — sellable {i.qtyOnHand} {i.sellUnit}
-                </option>
-              ))}
-            </select>
+                  </option>
+                ))}
+              </select>
             <FieldError message={fieldErrors.stockLevelId} />
-          </div>
-          <div>
+            </div>
+            <div>
             <Label>Qty</Label>
-            <Input
+              <Input
               className="mt-1"
               type="number"
               min={0.001}
               step="any"
               value={qty}
-              onChange={(e) => {
+                onChange={(e) => {
                 setQty(e.target.value);
                 setFieldErrors((f) => ({ ...f, qty: "" }));
-              }}
-            />
+                }}
+              />
             <FieldError message={fieldErrors.qty} />
-          </div>
+            </div>
           <div>
             <Label>Reason</Label>
             <Input
@@ -760,13 +760,13 @@ function DamageTab({
             <FieldError message={fieldErrors.reason} />
           </div>
           <div className="sm:col-span-2">
-            <Button
+          <Button
               disabled={mark.isPending}
               onClick={() => mark.mutate()}
             >
               Quarantine
-            </Button>
-          </div>
+          </Button>
+        </div>
         </div>
       ) : null}
 
@@ -780,7 +780,7 @@ function DamageTab({
         <span className="text-[0.75rem] text-[#8b9bb0]">
           {damaged.length} item{damaged.length === 1 ? "" : "s"}
         </span>
-      </div>
+                    </div>
 
       <section className="overflow-hidden rounded-xl border border-[#e4e9f0] bg-white shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
         <div className="max-h-[min(60dvh,32rem)] overflow-auto">
@@ -838,8 +838,8 @@ function DamageTab({
                               }))
                             }
                           />
-                          <Button
-                            size="sm"
+                    <Button
+                      size="sm"
                             variant="secondary"
                             disabled={amount <= 0 || restore.isPending}
                             onClick={() =>
@@ -850,8 +850,8 @@ function DamageTab({
                             }
                           >
                             Restore
-                          </Button>
-                        </div>
+                    </Button>
+          </div>
                       ) : (
                         <span className="block text-right text-[#8b9bb0]">
                           —
@@ -870,7 +870,7 @@ function DamageTab({
                     No damaged quantity at this location.
                   </td>
                 </tr>
-              ) : null}
+        ) : null}
             </tbody>
           </table>
         </div>
