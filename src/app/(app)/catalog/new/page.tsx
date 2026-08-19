@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { catalogApi, type CatalogProductKind } from "@/lib/api";
+import { catalogApi, tenantsApi, type CatalogProductKind } from "@/lib/api";
 import { PageHeader } from "@/components/page-header";
 import { ApiError } from "@/lib/api/client";
 import { useBootstrap } from "@/lib/bootstrap";
@@ -26,19 +26,7 @@ import {
   zodMessages,
 } from "@/lib/validations";
 
-const UNITS = [
-  "pcs",
-  "pack",
-  "kg",
-  "g",
-  "L",
-  "ml",
-  "m",
-  "box",
-  "hour",
-  "day",
-  "service",
-];
+import { activeUnitOptions } from "@/lib/measure-units";
 
 const KINDS: { id: CatalogProductKind; label: string }[] = [
   { id: "physical", label: "Physical" },
@@ -70,6 +58,14 @@ export default function NewCatalogProductPage() {
     queryKey: ["catalog-brands"],
     queryFn: () => catalogApi.listBrands(),
   });
+  const unitsQ = useQuery({
+    queryKey: ["measure-units"],
+    queryFn: () => tenantsApi.listUnits(),
+  });
+  const unitOptions = useMemo(
+    () => activeUnitOptions(unitsQ.data),
+    [unitsQ.data],
+  );
 
   /** Org custom / profile extras (from business config itemFields). */
   const [extraFields, setExtraFields] = useState<Record<string, string>>({});
@@ -300,8 +296,7 @@ export default function NewCatalogProductPage() {
       />
 
       <section className="space-y-5 rounded-2xl border border-[#e5e7eb] bg-white p-5">
-        <div className="grid gap-5 lg:grid-cols-[1fr_220px]">
-          <div className="space-y-3">
+        <div className="space-y-3">
             <div>
               <Label>Name *</Label>
               <Input
@@ -393,15 +388,13 @@ export default function NewCatalogProductPage() {
                 <option value="inactive">Inactive</option>
               </select>
             </div>
-          </div>
-          <div>
-            <ProductImagePicker
-              ref={imagePickerRef}
-              variant="item"
-              label="Upload item photos"
-            />
-          </div>
         </div>
+
+        <ProductImagePicker
+          ref={imagePickerRef}
+          variant="item"
+          label="Upload item photos"
+        />
 
         <div>
           <Label>Short description</Label>
@@ -434,12 +427,21 @@ export default function NewCatalogProductPage() {
                 setForm((f) => ({ ...f, unitOfMeasure: e.target.value }))
               }
             >
-              {UNITS.map((u) => (
-                <option key={u} value={u}>
-                  {u}
+              {unitOptions.some((u) => u.code === form.unitOfMeasure) ? null : (
+                <option value={form.unitOfMeasure}>{form.unitOfMeasure}</option>
+              )}
+              {unitOptions.map((u) => (
+                <option key={u.code} value={u.code}>
+                  {u.name} ({u.code})
                 </option>
               ))}
             </select>
+            <p className="mt-1 text-xs text-[#6b7280]">
+              Change the list in{" "}
+              <Link href="/settings/units" className="text-[#1a56db]">
+                Settings → Units
+              </Link>
+            </p>
           </div>
           <div>
             <Label>SKU</Label>

@@ -18,6 +18,8 @@ import {
 } from "@/components/stock-adjust-dialog";
 import { formatQtyWithUnit, normalizeSellUnit } from "@/lib/sell-units";
 import { cn } from "@/lib/utils";
+import { TablePager } from "@/components/table-pager";
+import { usePagedList } from "@/lib/use-paged-list";
 
 /**
  * Zoho-style Inventory → Adjustments — scrollable history + new qty adjustment.
@@ -84,6 +86,7 @@ export default function InventoryAdjustmentsPage() {
         r.actorName.toLowerCase().includes(needle),
     );
   }, [history.data, q]);
+  const pagedAdj = usePagedList(items, 20);
 
   if (!hasMode("sale")) {
     return (
@@ -174,7 +177,7 @@ export default function InventoryAdjustmentsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#eef1f4]">
-                {items.map((r) => {
+                {pagedAdj.slice.map((r) => {
                   const unit = normalizeSellUnit(r.sellUnit);
                   const up = r.delta > 0;
                   const down = r.delta < 0;
@@ -216,6 +219,7 @@ export default function InventoryAdjustmentsPage() {
               </tbody>
             </table>
           </div>
+          <TablePager {...pagedAdj.pagerProps} />
         </section>
       )}
 

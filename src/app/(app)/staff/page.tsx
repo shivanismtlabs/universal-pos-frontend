@@ -29,6 +29,8 @@ import {
 import { PageHeader } from "@/components/page-header";
 import { SetPinDialog } from "@/components/set-pin-dialog";
 import { cn } from "@/lib/utils";
+import { TablePager } from "@/components/table-pager";
+import { usePagedList } from "@/lib/use-paged-list";
 
 const ROLE_LABELS: Record<string, string> = {
   admin: "Admin",
@@ -174,6 +176,7 @@ export default function StaffPage() {
   });
 
   const team = list.data ?? [];
+  const pagedTeam = usePagedList(team, 15);
   const roleCounts = team.reduce<Record<string, number>>((acc, u) => {
     for (const r of u.roles ?? []) {
       acc[r] = (acc[r] ?? 0) + 1;
@@ -302,7 +305,7 @@ export default function StaffPage() {
             ) : null}
           </div>
           <ul className="divide-y divide-[#f3f4f6]">
-            {team.map((u) => (
+            {pagedTeam.slice.map((u) => (
               <li
                 key={u.id}
                 className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"
@@ -363,6 +366,7 @@ export default function StaffPage() {
               </li>
             ))}
           </ul>
+          <TablePager {...pagedTeam.pagerProps} />
           {list.isLoading ? (
             <p className="px-4 py-8 text-sm text-[#6b7280]">Loading…</p>
           ) : null}

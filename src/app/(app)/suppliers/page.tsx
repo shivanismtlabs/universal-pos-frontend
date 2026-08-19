@@ -3,9 +3,9 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
 import { X } from "lucide-react";
 import { toast } from "sonner";
+import Link from "next/link";
 import { loyaltyApi, posApi, suppliersApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useBootstrap } from "@/lib/bootstrap";
@@ -13,33 +13,25 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import { FieldError } from "@/components/ui/form";
 import { formatDate, moneyNumber, newIdempotencyKey } from "@/lib/utils";
-import {
-  createSupplierSchema,
-  type CreateSupplierInput,
-  zodMessages,
-} from "@/lib/validations";
+import { TablePager } from "@/components/table-pager";
+import { SupplierMasterPanel } from "./supplier-master-panel";
 
 export default function SuppliersPage() {
   const qc = useQueryClient();
   const { hasSale, money, data: boot } = useBootstrap();
   const isRentalOnly = false;
-  const [lineSkuId, setLineSkuId] = useState("");
-  const [lineQty, setLineQty] = useState("10");
-  const [lineUnitCost, setLineUnitCost] = useState("");
+  const [poLines, setPoLines] = useState<
+    Array<{ skuId: string; qty: string; cost: string }>
+  >([{ skuId: "", qty: "10", cost: "" }]);
   const [lineTaxPercent, setLineTaxPercent] = useState("");
   const [discountAmount, setDiscountAmount] = useState("");
   const [couponCode, setCouponCode] = useState("");
   const [couponApplied, setCouponApplied] = useState<string | null>(null);
   const [receiveQty, setReceiveQty] = useState<Record<string, string>>({});
   const [returnQty, setReturnQty] = useState<Record<string, string>>({});
-  const [editId, setEditId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState({
-    name: "",
-    contact: "",
-    phone: "",
-  });
+  const [poPage, setPoPage] = useState(1);
+  const PO_PAGE = 8;
 
   const defaultTaxPercent = useMemo(() => {
     const settings = boot?.tenant?.settings as
@@ -79,26 +71,26 @@ export default function SuppliersPage() {
     [catalog.data],
   );
 
-  const selectedSku = useMemo(
-    () => skuOptions.find((s) => s.id === lineSkuId) ?? null,
-    [skuOptions, lineSkuId],
-  );
-
   const poTotals = useMemo(() => {
-    const qty = Math.max(1, Number(lineQty) || 1);
-    const unit = Math.max(0, moneyNumber(lineUnitCost || 0));
+    let subtotal = 0;
+    for (const line of poLines) {
+      if (!line.skuId) continue;
+      const qty = Math.max(1, Number(line.qty) || 1);
+      const unit = Math.max(0, moneyNumber(line.cost || 0));
+      subtotal += Math.round(unit * qty * 100) / 100;
+    }
+    subtotal = Math.round(subtotal * 100) / 100;
     const taxPct = Math.min(
       40,
       Math.max(0, moneyNumber(lineTaxPercent || 0)),
     );
-    const subtotal = Math.round(unit * qty * 100) / 100;
     const discountEntered = Math.max(0, moneyNumber(discountAmount || 0));
     const discount = Math.min(discountEntered, subtotal);
     const taxable = Math.max(0, subtotal - discount);
     const tax = Math.round(taxable * (taxPct / 100) * 100) / 100;
     const grand = Math.round((taxable + tax) * 100) / 100;
-    return { qty, unit, taxPct, subtotal, discount, tax, grand };
-  }, [lineQty, lineUnitCost, lineTaxPercent, discountAmount]);
+    return { taxPct, subtotal, discount, tax, grand };
+  }, [poLines, lineTaxPercent, discountAmount]);
 
   function clearCouponAndDiscount() {
     setCouponCode("");
@@ -106,32 +98,35 @@ export default function SuppliersPage() {
     setDiscountAmount("");
   }
 
-  function applySelectedProduct(id: string) {
-    setLineSkuId(id);
+  function applyLineProduct(index: number, id: string) {
+    setPoLines((rows) => {
+      const next = [...rows];
+      const cur = { ...next[index]! };
+      cur.skuId = id;
+      if (!id) {
+        cur.cost = "";
+        next[index] = cur;
+        return next;
+      }
+      const row = skuOptions.find((s) => s.id === id);
+      if (row) {
+        const cost =
+          row.costPrice != null && Number.isFinite(Number(row.costPrice))
+            ? Number(row.costPrice)
+            : moneyNumber(row.sellPrice);
+        cur.cost = String(cost);
+        const rate =
+          row.taxRatePercent != null && Number.isFinite(row.taxRatePercent)
+            ? row.taxRatePercent
+            : defaultTaxPercent;
+        setLineTaxPercent(String(rate));
+      }
+      next[index] = cur;
+      return next;
+    });
     clearCouponAndDiscount();
-    if (!id) {
-      setLineUnitCost("");
-      setLineTaxPercent("");
-      return;
-    }
-    const row = skuOptions.find((s) => s.id === id);
-    if (!row) return;
-    const cost =
-      row.costPrice != null && Number.isFinite(Number(row.costPrice))
-        ? Number(row.costPrice)
-        : moneyNumber(row.sellPrice);
-    setLineUnitCost(String(cost));
-    const rate =
-      row.taxRatePercent != null && Number.isFinite(row.taxRatePercent)
-        ? row.taxRatePercent
-        : defaultTaxPercent;
-    setLineTaxPercent(String(rate));
   }
 
-  const supplierForm = useForm<CreateSupplierInput>({
-    resolver: zodResolver(createSupplierSchema),
-    defaultValues: { name: "", contact: "", phone: "" },
-  });
   const poForm = useForm({
     defaultValues: {
       supplierId: "",
@@ -139,23 +134,13 @@ export default function SuppliersPage() {
       expectedDelivery: "",
     },
   });
-  const supplierErrors = supplierForm.formState.errors;
-
-  const createSupplier = useMutation({
-    mutationFn: (v: CreateSupplierInput) =>
-      suppliersApi.create({
-        name: v.name,
-        contact: v.contact || undefined,
-        phone: v.phone || undefined,
-      }),
-    onSuccess: () => {
-      toast.success("Supplier added");
-      supplierForm.reset();
-      void qc.invalidateQueries({ queryKey: ["suppliers"] });
-    },
-    onError: (e) =>
-      toast.error(e instanceof ApiError ? e.messages.join(", ") : "Failed"),
-  });
+  const poSuppliers = useMemo(
+    () =>
+      (suppliers.data ?? []).filter(
+        (s) => (s.status ?? "active") === "active",
+      ),
+    [suppliers.data],
+  );
 
   const createPo = useMutation({
     mutationFn: (v: {
@@ -163,21 +148,22 @@ export default function SuppliersPage() {
       poType: string;
       expectedDelivery: string;
     }) => {
-      if (lineSkuId) {
-        const qty = Number(lineQty);
-        const unitCost = Number(lineUnitCost);
+      const filled = poLines.filter((l) => l.skuId);
+      for (const line of filled) {
+        const qty = Number(line.qty);
+        const unitCost = Number(line.cost);
         if (!(qty > 0) || !Number.isFinite(qty)) {
-          toast.error("Qty must be greater than 0");
-          throw new Error("Qty must be greater than 0");
+          toast.error("Each line qty must be greater than 0");
+          throw new Error("invalid qty");
         }
         if (!Number.isFinite(unitCost) || unitCost < 0) {
           toast.error("Unit cost cannot be negative");
-          throw new Error("Unit cost cannot be negative");
+          throw new Error("invalid cost");
         }
       }
-      const { qty, unit, taxPct, subtotal, discount, tax, grand } = poTotals;
+      const { taxPct, subtotal, discount, tax, grand } = poTotals;
       const noteParts: string[] = [];
-      if (lineSkuId) {
+      if (filled.length) {
         noteParts.push(
           `Subtotal ${subtotal.toFixed(2)} · Discount ${discount.toFixed(2)} · Tax ${taxPct}% = ${tax.toFixed(2)} · Total ${grand.toFixed(2)}`,
         );
@@ -188,15 +174,13 @@ export default function SuppliersPage() {
         poType: v.poType,
         expectedDelivery: v.expectedDelivery || undefined,
         notes: noteParts.length ? noteParts.join(" · ") : undefined,
-        ...(lineSkuId
+        ...(filled.length
           ? {
-              lines: [
-                {
-                  stockLevelId: lineSkuId,
-                  qtyOrdered: qty,
-                  ...(unit > 0 ? { unitCost: unit } : {}),
-                },
-              ],
+              lines: filled.map((l) => ({
+                stockLevelId: l.skuId,
+                qtyOrdered: Math.max(1, Number(l.qty) || 1),
+                ...(Number(l.cost) > 0 ? { unitCost: Number(l.cost) } : {}),
+              })),
             }
           : {}),
       });
@@ -208,9 +192,7 @@ export default function SuppliersPage() {
         poType: "purchase",
         expectedDelivery: "",
       });
-      setLineSkuId("");
-      setLineQty("10");
-      setLineUnitCost("");
+      setPoLines([{ skuId: "", qty: "10", cost: "" }]);
       setLineTaxPercent("");
       clearCouponAndDiscount();
       void qc.invalidateQueries({ queryKey: ["purchase-orders"] });
@@ -290,141 +272,25 @@ export default function SuppliersPage() {
       ),
   });
 
-  const updateSupplier = useMutation({
-    mutationFn: () => {
-      const parsed = createSupplierSchema.safeParse(editForm);
-      if (!parsed.success) {
-        toast.error(zodMessages(parsed.error).join(", "));
-        throw new Error(zodMessages(parsed.error)[0] ?? "Invalid supplier");
-      }
-      return suppliersApi.update(editId!, {
-        name: parsed.data.name,
-        contact: parsed.data.contact || undefined,
-        phone: parsed.data.phone || undefined,
-      });
-    },
-    onSuccess: () => {
-      toast.success("Supplier updated");
-      setEditId(null);
-      void qc.invalidateQueries({ queryKey: ["suppliers"] });
-    },
-    onError: (e) => {
-      if (e instanceof ApiError) toast.error(e.messages.join(", "));
-    },
-  });
-
   return (
     <div className="mx-auto max-w-5xl space-y-5">
       <header>
         <p className="eyebrow">Shop setup</p>
         <h1 className="display mt-1 text-3xl text-[#0b1f33]">
-          Suppliers &amp; POs
+          Suppliers &amp; procurement
         </h1>
         <p className="mt-1 text-sm text-[#5a6b7d]">
-          Create a purchase order, then receive quantity onto the shelf — works
-          for any product catalog.
+          Universal supplier master plus purchase orders. Same engine for any
+          catalog — not a grocery- or restaurant-only pack.{" "}
+          <Link href="/purchases" className="font-medium text-[#1a56db]">
+            AP / GRN / invoices
+          </Link>
         </p>
       </header>
 
-      <div className="grid gap-5 lg:grid-cols-2">
-        <section className="rounded-2xl border border-[#d9e0ea] bg-white p-4">
-          <h2 className="text-sm font-semibold">Suppliers</h2>
-          <ul className="mt-2 max-h-48 divide-y divide-[#eef2f8] overflow-y-auto text-sm">
-            {(suppliers.data ?? []).map((s) => (
-              <li
-                key={s.id}
-                className="flex items-start justify-between gap-2 py-2"
-              >
-                <div className="min-w-0">
-                  <p className="font-medium">{s.name}</p>
-                  <p className="text-xs text-[#5a6b7d]">
-                    {[s.contact, s.phone].filter(Boolean).join(" · ") || "—"}
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => {
-                    setEditId(s.id);
-                    setEditForm({
-                      name: s.name,
-                      contact: s.contact ?? "",
-                      phone: s.phone ?? "",
-                    });
-                  }}
-                >
-                  Edit
-                </Button>
-              </li>
-            ))}
-          </ul>
-          {editId ? (
-            <div className="mt-3 space-y-2 rounded-xl border border-[#e8edf4] bg-[#f8fafc] p-3">
-              <p className="text-xs font-semibold text-[#0b1f33]">Edit supplier</p>
-              <Input
-                placeholder="Name"
-                value={editForm.name}
-                onChange={(e) =>
-                  setEditForm((f) => ({ ...f, name: e.target.value }))
-                }
-              />
-              <Input
-                placeholder="Contact"
-                value={editForm.contact}
-                onChange={(e) =>
-                  setEditForm((f) => ({ ...f, contact: e.target.value }))
-                }
-              />
-              <Input
-                placeholder="Phone"
-                value={editForm.phone}
-                onChange={(e) =>
-                  setEditForm((f) => ({ ...f, phone: e.target.value }))
-                }
-              />
-              <div className="flex gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={updateSupplier.isPending}
-                  onClick={() => updateSupplier.mutate()}
-                >
-                  Save
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => setEditId(null)}
-                >
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          ) : null}
-          <form
-            className="mt-3 space-y-2 border-t border-[#d9e0ea] pt-3"
-            onSubmit={supplierForm.handleSubmit((v) =>
-              createSupplier.mutate(v),
-            )}
-            noValidate
-          >
-            <div>
-              <Input placeholder="Name" {...supplierForm.register("name")} />
-              <FieldError message={supplierErrors.name?.message} />
-            </div>
-            <Input placeholder="Contact" {...supplierForm.register("contact")} />
-            <div>
-              <Input placeholder="Phone" {...supplierForm.register("phone")} />
-              <FieldError message={supplierErrors.phone?.message} />
-            </div>
-            <Button type="submit" size="sm" disabled={createSupplier.isPending}>
-              Add supplier
-            </Button>
-          </form>
-        </section>
+      <SupplierMasterPanel />
 
+      <div className="grid gap-5 lg:grid-cols-2">
         <section className="rounded-2xl border border-[#d9e0ea] bg-white p-4">
           <h2 className="text-sm font-semibold">New purchase order</h2>
           <form
@@ -437,8 +303,9 @@ export default function SuppliersPage() {
                 {...poForm.register("supplierId", { required: true })}
               >
                 <option value="">Select</option>
-                {(suppliers.data ?? []).map((s) => (
+                {poSuppliers.map((s) => (
                   <option key={s.id} value={s.id}>
+                    {s.code ? `${s.code} · ` : ""}
                     {s.name}
                   </option>
                 ))}
@@ -456,45 +323,88 @@ export default function SuppliersPage() {
             </div>
             {hasSale ? (
               <>
-                <div className="field-shell">
-                  <Label>Product to order (SKU)</Label>
-                  <Select
-                    value={lineSkuId}
-                    onChange={(e) => applySelectedProduct(e.target.value)}
+                {poLines.map((line, idx) => (
+                  <div
+                    key={idx}
+                    className="space-y-2 rounded-xl border border-[#eef2f8] p-2"
                   >
-                    <option value="">Optional — pick later on receive</option>
-                    {skuOptions.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name} · {s.sku} (on hand {s.qtyOnHand})
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-                {lineSkuId ? (
-                  <>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="field-shell">
-                        <Label>Qty ordered</Label>
-                        <Input
-                          type="number"
-                          min={1}
-                          value={lineQty}
-                          onChange={(e) => setLineQty(e.target.value)}
-                        />
-                      </div>
-                      <div className="field-shell">
-                        <Label>Unit cost</Label>
-                        <Input
-                          type="number"
-                          min={0}
-                          step="0.01"
-                          inputMode="decimal"
-                          value={lineUnitCost}
-                          onChange={(e) => setLineUnitCost(e.target.value)}
-                          placeholder="0.00"
-                        />
-                      </div>
+                    <div className="field-shell">
+                      <Label>Line {idx + 1} · Item</Label>
+                      <Select
+                        value={line.skuId}
+                        onChange={(e) => applyLineProduct(idx, e.target.value)}
+                      >
+                        <option value="">Optional — pick later on receive</option>
+                        {skuOptions.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name} · {s.sku} (on hand {s.qtyOnHand})
+                          </option>
+                        ))}
+                      </Select>
                     </div>
+                    {line.skuId ? (
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="field-shell">
+                          <Label>Qty</Label>
+                          <Input
+                            type="number"
+                            min={1}
+                            value={line.qty}
+                            onChange={(e) =>
+                              setPoLines((rows) =>
+                                rows.map((r, i) =>
+                                  i === idx ? { ...r, qty: e.target.value } : r,
+                                ),
+                              )
+                            }
+                          />
+                        </div>
+                        <div className="field-shell">
+                          <Label>Unit cost</Label>
+                          <Input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={line.cost}
+                            onChange={(e) =>
+                              setPoLines((rows) =>
+                                rows.map((r, i) =>
+                                  i === idx ? { ...r, cost: e.target.value } : r,
+                                ),
+                              )
+                            }
+                          />
+                        </div>
+                      </div>
+                    ) : null}
+                    {poLines.length > 1 ? (
+                      <button
+                        type="button"
+                        className="text-xs text-[#b91c1c]"
+                        onClick={() =>
+                          setPoLines((rows) => rows.filter((_, i) => i !== idx))
+                        }
+                      >
+                        Remove line
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={() =>
+                    setPoLines((rows) => [
+                      ...rows,
+                      { skuId: "", qty: "1", cost: "" },
+                    ])
+                  }
+                >
+                  Add line
+                </Button>
+                {poLines.some((l) => l.skuId) ? (
+                  <>
                     <div className="grid grid-cols-2 gap-2">
                       <div className="field-shell">
                         <Label>Tax %</Label>
@@ -503,14 +413,11 @@ export default function SuppliersPage() {
                           min={0}
                           max={40}
                           step="0.01"
-                          inputMode="decimal"
                           value={lineTaxPercent}
                           onChange={(e) => setLineTaxPercent(e.target.value)}
                         />
                         <p className="mt-1 text-[0.65rem] text-[#8b9bb0]">
-                          {selectedSku?.taxRatePercent != null
-                            ? `From item tax (${selectedSku.taxRatePercent}%)`
-                            : `Shop default (${defaultTaxPercent}%)`}
+                          Shop default {defaultTaxPercent}%
                         </p>
                       </div>
                       <div className="field-shell">
@@ -531,7 +438,6 @@ export default function SuppliersPage() {
                           type="number"
                           min={0}
                           step="0.01"
-                          inputMode="decimal"
                           value={discountAmount}
                           onChange={(e) => {
                             setDiscountAmount(e.target.value);
@@ -581,51 +487,26 @@ export default function SuppliersPage() {
                         >
                           Apply
                         </Button>
-                        {couponApplied ? (
-                          <button
-                            type="button"
-                            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[#d9e0ea] text-[#5a6b7d] hover:bg-[#f4f6fa] hover:text-[#0b1f33]"
-                            title="Clear coupon & discount"
-                            onClick={clearCouponAndDiscount}
-                          >
-                            <X className="h-4 w-4" strokeWidth={2.5} />
-                          </button>
-                        ) : null}
                       </div>
-                      <p className="mt-1 text-[0.65rem] text-[#8b9bb0]">
-                        {couponApplied
-                          ? `Applied ${couponApplied}`
-                          : "Optional — from Coupons setup"}
-                      </p>
                     </div>
                     <div className="rounded-xl border border-[#e8edf4] bg-[#f8fafc] px-3 py-2 text-xs text-[#0b1f33]">
                       <div className="flex justify-between gap-2">
                         <span className="text-[#5a6b7d]">Subtotal</span>
-                        <span className="tabular-nums">
-                          {money(poTotals.subtotal)}
-                        </span>
+                        <span className="tabular-nums">{money(poTotals.subtotal)}</span>
                       </div>
                       {poTotals.discount > 0 ? (
                         <div className="mt-1 flex justify-between gap-2">
                           <span className="text-[#5a6b7d]">Discount</span>
-                          <span className="tabular-nums">
-                            −{money(poTotals.discount)}
-                          </span>
+                          <span className="tabular-nums">−{money(poTotals.discount)}</span>
                         </div>
                       ) : null}
                       <div className="mt-1 flex justify-between gap-2">
-                        <span className="text-[#5a6b7d]">
-                          Tax ({poTotals.taxPct}%)
-                        </span>
-                        <span className="tabular-nums">
-                          {money(poTotals.tax)}
-                        </span>
+                        <span className="text-[#5a6b7d]">Tax ({poTotals.taxPct}%)</span>
+                        <span className="tabular-nums">{money(poTotals.tax)}</span>
                       </div>
                       <div className="mt-1 flex justify-between gap-2 border-t border-[#e8edf4] pt-1 font-semibold">
                         <span>Order total</span>
-                        <span className="tabular-nums">
-                          {money(poTotals.grand)}
-                        </span>
+                        <span className="tabular-nums">{money(poTotals.grand)}</span>
                       </div>
                     </div>
                   </>
@@ -651,7 +532,9 @@ export default function SuppliersPage() {
           </p>
         </div>
         <ul className="divide-y divide-[#eef2f8]">
-          {(pos.data ?? []).map((po) => {
+          {(pos.data ?? [])
+            .slice((poPage - 1) * PO_PAGE, poPage * PO_PAGE)
+            .map((po) => {
             const openLines =
               po.lines?.filter((l) => l.qtyReceived < l.qtyOrdered) ??
               po.lines ??
@@ -857,6 +740,13 @@ export default function SuppliersPage() {
             <li className="px-4 py-8 text-sm text-[#5a6b7d]">No POs yet</li>
           ) : null}
         </ul>
+        <TablePager
+          page={poPage}
+          totalPages={Math.max(1, Math.ceil((pos.data?.length ?? 0) / PO_PAGE))}
+          total={pos.data?.length ?? 0}
+          pageSize={PO_PAGE}
+          onPage={setPoPage}
+        />
       </section>
     </div>
   );

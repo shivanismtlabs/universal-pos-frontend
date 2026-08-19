@@ -13,6 +13,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   catalogApi,
+  tenantsApi,
   type CatalogProductKind,
   type CatalogProductStatus,
 } from "@/lib/api";
@@ -37,19 +38,7 @@ import {
   zodMessages,
 } from "@/lib/validations";
 
-const UNITS = [
-  "pcs",
-  "pack",
-  "kg",
-  "g",
-  "L",
-  "ml",
-  "m",
-  "box",
-  "hour",
-  "day",
-  "service",
-];
+import { activeUnitOptions } from "@/lib/measure-units";
 
 const KINDS: { id: CatalogProductKind; label: string }[] = [
   { id: "physical", label: "Physical" },
@@ -89,6 +78,14 @@ function EditCatalogProductPage() {
     queryKey: ["catalog-brands"],
     queryFn: () => catalogApi.listBrands(),
   });
+  const unitsQ = useQuery({
+    queryKey: ["measure-units"],
+    queryFn: () => tenantsApi.listUnits(),
+  });
+  const unitOptions = useMemo(
+    () => activeUnitOptions(unitsQ.data),
+    [unitsQ.data],
+  );
   const product = useQuery({
     queryKey: ["catalog-product", id],
     queryFn: () => catalogApi.getProduct(id),
@@ -410,8 +407,7 @@ function EditCatalogProductPage() {
       />
 
       <section className="space-y-5 rounded-2xl border border-[#e5e7eb] bg-white p-5">
-        <div className="grid gap-5 lg:grid-cols-[1fr_220px]">
-          <div className="space-y-3">
+        <div className="space-y-3">
             <div>
               <Label>Name *</Label>
               <Input
@@ -503,38 +499,36 @@ function EditCatalogProductPage() {
                 <option value="inactive">Inactive</option>
               </select>
             </div>
-          </div>
-          <div className="space-y-3">
-            {(product.data.images?.length || form.photoUrl) ? (
-              <div>
-                <Label>Current images</Label>
-                <div className="mt-1 flex flex-wrap gap-2">
-                  {(product.data.images?.length
-                    ? product.data.images
-                    : [form.photoUrl]
-                  )
-                    .filter(Boolean)
-                    .slice(0, 8)
-                    .map((src, i, arr) => (
-                      <ProductThumb
-                        key={src}
-                        src={src}
-                        label={form.name}
-                        className="rounded-lg border border-[#e5e7eb]"
-                        count={i === 0 ? arr.length : undefined}
-                        onClick={() => setLightboxIndex(i)}
-                      />
-                    ))}
-                </div>
-              </div>
-            ) : null}
-            <ProductImagePicker
-              ref={imagePickerRef}
-              variant="item"
-              label="Upload item photos"
-            />
-          </div>
         </div>
+
+        {(product.data.images?.length || form.photoUrl) ? (
+          <div>
+            <Label>Current images</Label>
+            <div className="mt-1 flex flex-wrap gap-2">
+              {(product.data.images?.length
+                ? product.data.images
+                : [form.photoUrl]
+              )
+                .filter(Boolean)
+                .slice(0, 8)
+                .map((src, i, arr) => (
+                  <ProductThumb
+                    key={src}
+                    src={src}
+                    label={form.name}
+                    className="rounded-lg border border-[#e5e7eb]"
+                    count={i === 0 ? arr.length : undefined}
+                    onClick={() => setLightboxIndex(i)}
+                  />
+                ))}
+            </div>
+          </div>
+        ) : null}
+        <ProductImagePicker
+          ref={imagePickerRef}
+          variant="item"
+          label="Upload item photos"
+        />
 
         <div>
           <Label>Short description</Label>
@@ -567,12 +561,21 @@ function EditCatalogProductPage() {
                 setForm((f) => ({ ...f, unitOfMeasure: e.target.value }))
               }
             >
-              {UNITS.map((u) => (
-                <option key={u} value={u}>
-                  {u}
+              {unitOptions.some((u) => u.code === form.unitOfMeasure) ? null : (
+                <option value={form.unitOfMeasure}>{form.unitOfMeasure}</option>
+              )}
+              {unitOptions.map((u) => (
+                <option key={u.code} value={u.code}>
+                  {u.name} ({u.code})
                 </option>
               ))}
             </select>
+            <p className="mt-1 text-xs text-[#6b7280]">
+              Change the list in{" "}
+              <Link href="/settings/units" className="text-[#1a56db]">
+                Settings → Units
+              </Link>
+            </p>
           </div>
           <div>
             <Label>SKU</Label>

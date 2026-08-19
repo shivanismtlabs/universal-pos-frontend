@@ -260,7 +260,7 @@ export default function LoginForm() {
             htmlFor="email"
             className="text-[0.8125rem] font-semibold text-[#111827]"
           >
-            Work Email
+            Email
           </Label>
           <Input
             id="email"

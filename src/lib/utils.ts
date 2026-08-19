@@ -127,11 +127,10 @@ export function mediaUrl(path?: string | null) {
   ) {
     return trimmed;
   }
-  // Same-origin proxy (next.config rewrites /v1/uploads → API)
-  if (typeof window !== "undefined" && trimmed.startsWith("/v1/uploads/")) {
-    return trimmed;
-  }
   const origin = getApiOrigin();
+  if (trimmed.startsWith("/v1/uploads/")) {
+    return `${origin}${trimmed}`;
+  }
   return `${origin}${trimmed.startsWith("/") ? trimmed : `/${trimmed}`}`;
 }
 

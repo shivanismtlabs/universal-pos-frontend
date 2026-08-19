@@ -28,6 +28,7 @@ import { useAuthStore } from "@/lib/auth-store";
 import { PageHeader } from "@/components/page-header";
 import { EntityRowActions } from "@/components/entity-row-actions";
 import { CustomerCrmPanel } from "@/components/customer-crm-panel";
+import { TablePager } from "@/components/table-pager";
 
 function numOrUndef(v: unknown) {
   if (v === "" || v === undefined || v === null) return undefined;
@@ -426,30 +427,14 @@ export default function CustomersPage() {
               </p>
             ) : null}
 
-            {totalPages > 1 ? (
-              <div className="flex items-center justify-between gap-2 border-t border-[#eef2f8] px-4 py-3">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  disabled={page <= 1 || list.isFetching}
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                >
-                  Previous
-                </Button>
-                <span className="text-[0.75rem] text-[#5a6b7d]">
-                  Page {page} of {totalPages}
-                </span>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  disabled={page >= totalPages || list.isFetching}
-                  onClick={() => setPage((p) => p + 1)}
-                >
-                  Next
-                </Button>
-              </div>
+            {total ? (
+              <TablePager
+                page={page}
+                totalPages={totalPages}
+                total={total}
+                pageSize={pageSize}
+                onPage={setPage}
+              />
             ) : null}
           </section>
         </FadeIn>

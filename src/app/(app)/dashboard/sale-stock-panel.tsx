@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { catalogApi, posApi } from "@/lib/api";
+import { catalogApi, posApi, tenantsApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { canWriteCatalog } from "@/lib/roles";
 import { useAuthStore } from "@/lib/auth-store";
@@ -39,6 +39,7 @@ import {
   type SellUnit,
 } from "@/lib/sell-units";
 import { cn } from "@/lib/utils";
+import { activeUnitOptions } from "@/lib/measure-units";
 
 const EMPTY = {
   title: "",
@@ -281,6 +282,14 @@ export function SaleStockPanel({
     queryKey: ["pos-sale-categories"],
     queryFn: () => posApi.listSaleCategories(),
   });
+  const unitsQ = useQuery({
+    queryKey: ["measure-units"],
+    queryFn: () => tenantsApi.listUnits(),
+  });
+  const unitOptions = useMemo(
+    () => activeUnitOptions(unitsQ.data),
+    [unitsQ.data],
+  );
 
   const categories = categoriesQ.data ?? floor.data?.categories ?? [];
 
@@ -756,12 +765,11 @@ export function SaleStockPanel({
                         }))
                       }
                     >
-                      <option value="pcs">pcs</option>
-                      <option value="pack">box / pack</option>
-                      <option value="kg">kg</option>
-                      <option value="g">g</option>
-                      <option value="L">L</option>
-                      <option value="ml">ml</option>
+                      {unitOptions.map((u) => (
+                        <option key={u.code} value={u.code}>
+                          {u.name} ({u.code})
+                        </option>
+                      ))}
                     </Select>
                   </div>
 
@@ -1810,12 +1818,11 @@ export function SaleStockPanel({
                                   )
                                 }
                               >
-                                <option value="pcs">Piece (pcs)</option>
-                                <option value="pack">Pack / box</option>
-                                <option value="kg">Kilogram (kg)</option>
-                                <option value="g">Gram (g)</option>
-                                <option value="L">Litre (L)</option>
-                                <option value="ml">Millilitre (ml)</option>
+                                {unitOptions.map((u) => (
+                                  <option key={u.code} value={u.code}>
+                                    {u.name} ({u.code})
+                                  </option>
+                                ))}
                               </Select>
                             </div>
                             <div className="field-shell">

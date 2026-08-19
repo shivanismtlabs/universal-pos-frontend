@@ -1,30 +1,76 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
 import { toast } from "sonner";
+import { Plus, Search } from "lucide-react";
 import { resourcesApi } from "@/lib/api";
 import { useBootstrap } from "@/lib/bootstrap";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/page-header";
+import { TablePager } from "@/components/table-pager";
 import { cn } from "@/lib/utils";
 
-const TYPES = ["table", "room", "vehicle", "equipment", "desk", "hall", "court", "other"];
-const OPERATIONAL_STATUS = [
-  { id: "AVAILABLE", label: "Available", dbStatus: "available" },
-  { id: "OCCUPIED", label: "Occupied", dbStatus: "occupied" },
-  { id: "RESERVED", label: "Reserved", dbStatus: "occupied" },
-  { id: "CLEANING", label: "Cleaning", dbStatus: "maintenance" },
-  { id: "OUT_OF_SERVICE", label: "Out of service", dbStatus: "inactive" },
+const PAGE_SIZE = 20;
+
+const TYPES = [
+  { id: "", label: "All types" },
+  { id: "table", label: "Table" },
+  { id: "room", label: "Room" },
+  { id: "vehicle", label: "Vehicle" },
+  { id: "equipment", label: "Equipment" },
+  { id: "desk", label: "Desk" },
+  { id: "hall", label: "Hall" },
+  { id: "court", label: "Court" },
+  { id: "other", label: "Other" },
 ] as const;
+
+const OPERATIONAL_STATUS = [
+  { id: "AVAILABLE", label: "Available", dbStatus: "available", tone: "ok" },
+  { id: "OCCUPIED", label: "Occupied", dbStatus: "occupied", tone: "busy" },
+  { id: "RESERVED", label: "Reserved", dbStatus: "occupied", tone: "busy" },
+  { id: "CLEANING", label: "Cleaning", dbStatus: "maintenance", tone: "warn" },
+  { id: "OUT_OF_SERVICE", label: "Out of service", dbStatus: "inactive", tone: "off" },
+] as const;
+
+const TONE: Record<string, string> = {
+  ok: "bg-[#d1fae5] text-[#065f46]",
+  busy: "bg-[#dbeafe] text-[#1e40af]",
+  warn: "bg-[#fef3c7] text-[#92400e]",
+  off: "bg-[#f3f4f6] text-[#6b7280]",
+};
+
+function typeLabel(id: string) {
+  return TYPES.find((t) => t.id === id)?.label ?? id;
+}
+
+function statusMeta(row: {
+  status: string;
+  meta?: Record<string, unknown> | null;
+}) {
+  const op = String(row.meta?.operationalStatus ?? "");
+  const found = OPERATIONAL_STATUS.find((s) => s.id === op);
+  if (found) return found;
+  return (
+    OPERATIONAL_STATUS.find((s) => s.dbStatus === row.status) ??
+    OPERATIONAL_STATUS[0]
+  );
+}
 
 export default function ResourcesPage() {
   const { hasCapability, hasModule } = useBootstrap();
   const qc = useQueryClient();
+  const [page, setPage] = useState(1);
+  const [q, setQ] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
+  const [showAdd, setShowAdd] = useState(false);
   const [name, setName] = useState("");
   const [type, setType] = useState("table");
   const [capacity, setCapacity] = useState("1");
-  const [operationalStatus, setOperationalStatus] = useState<(typeof OPERATIONAL_STATUS)[number]["id"]>("AVAILABLE");
+  const [operationalStatus, setOperationalStatus] =
+    useState<(typeof OPERATIONAL_STATUS)[number]["id"]>("AVAILABLE");
 
   const allowed =
     hasCapability("RESOURCE") ||
@@ -32,10 +78,24 @@ export default function ResourcesPage() {
     hasModule("resources");
 
   const list = useQuery({
-    queryKey: ["resources"],
-    queryFn: () => resourcesApi.list({ limit: 100 }),
+    queryKey: ["resources", page, q, typeFilter],
+    queryFn: () =>
+      resourcesApi.list({
+        page,
+        limit: PAGE_SIZE,
+        q: q.trim() || undefined,
+        type: typeFilter || undefined,
+      }),
     enabled: allowed,
   });
+
+  const rows = useMemo(() => list.data?.data ?? [], [list.data]);
+  const meta = list.data?.meta;
+  const total = meta?.total ?? rows.length;
+  const totalPages = Math.max(
+    1,
+    meta?.totalPages ?? Math.ceil(total / PAGE_SIZE) || 1,
+  );
 
   const create = useMutation({
     mutationFn: () =>
@@ -49,13 +109,16 @@ export default function ResourcesPage() {
         meta: { operationalStatus },
       }),
     onSuccess: () => {
-      toast.success("Resource created");
+      toast.success("Resource added");
       setName("");
       setOperationalStatus("AVAILABLE");
+      setShowAdd(false);
+      setPage(1);
       void qc.invalidateQueries({ queryKey: ["resources"] });
     },
-    onError: (e: Error) => toast.error(e.message || "Failed"),
+    onError: (e: Error) => toast.error(e.message || "Could not add resource"),
   });
+
   const updateStatus = useMutation({
     mutationFn: ({
       id,
@@ -71,149 +134,215 @@ export default function ResourcesPage() {
       });
     },
     onSuccess: () => {
-      toast.success("Resource updated");
+      toast.success("Status updated");
       void qc.invalidateQueries({ queryKey: ["resources"] });
     },
-    onError: (e: Error) => toast.error(e.message || "Failed"),
+    onError: (e: Error) => toast.error(e.message || "Could not update"),
   });
 
   if (!allowed) {
     return (
-      <div className="p-6">
-        <h1 className="text-xl font-semibold">Resources</h1>
-        <p className="mt-2 text-sm text-slate-600">
-          Enable the RESOURCE capability in business setup to manage tables,
-          rooms, vehicles, and halls.
-        </p>
+      <div className="mx-auto max-w-5xl space-y-4">
+        <PageHeader
+          title="Resources"
+          subtitle="Tables, rooms, vehicles, desks, and halls — one list for any shop."
+        />
+        <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5 text-sm text-[#4b5563]">
+          Enable the Resource feature in Settings → Commerce modes & features to
+          manage bookable units here.
+        </section>
       </div>
     );
   }
 
-  return (
-    <div className="space-y-6 p-6">
-      <div>
-        <h1 className="text-xl font-semibold text-[#0b1f33]">Resources</h1>
-        <p className="mt-1 text-sm text-slate-600">
-          Generic bookable resources — not industry-specific tables or rooms.
-        </p>
-      </div>
+  const fieldSelect =
+    "h-9 w-full rounded-lg border border-[#e5e7eb] bg-white px-3 text-sm";
 
-      <form
-        className="flex flex-wrap items-end gap-3 rounded-lg border border-slate-200 bg-white p-4"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!name.trim()) return;
-          create.mutate();
-        }}
-      >
-        <label className="space-y-1 text-sm">
-          <span className="text-slate-600">Name</span>
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Table 5" />
-        </label>
-        <label className="space-y-1 text-sm">
-          <span className="text-slate-600">Type</span>
+  return (
+    <div className="mx-auto max-w-5xl space-y-4">
+      <PageHeader
+        title="Resources"
+        subtitle="Bookable units for appointments and jobs"
+        action={
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => setShowAdd((v) => !v)}
+          >
+            <Plus className="size-3.5" />
+            {showAdd ? "Close" : "New resource"}
+          </Button>
+        }
+      />
+
+      {showAdd ? (
+        <section className="rounded-2xl border border-[#e5e7eb] bg-white p-4">
+          <form
+            className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!name.trim()) return;
+              create.mutate();
+            }}
+          >
+            <div className="lg:col-span-2">
+              <Label>Name</Label>
+              <Input
+                className="mt-1 h-9"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Chair 3, Bay A…"
+                autoFocus
+              />
+            </div>
+            <div>
+              <Label>Type</Label>
+              <select
+                className={cn("mt-1", fieldSelect)}
+                value={type}
+                onChange={(e) => setType(e.target.value)}
+              >
+                {TYPES.filter((t) => t.id).map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label>Capacity</Label>
+              <Input
+                className="mt-1 h-9"
+                value={capacity}
+                onChange={(e) => setCapacity(e.target.value)}
+                inputMode="numeric"
+              />
+            </div>
+            <div className="flex items-end">
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={create.isPending || !name.trim()}
+              >
+                Add
+              </Button>
+            </div>
+          </form>
+        </section>
+      ) : null}
+
+      <section className="overflow-hidden rounded-2xl border border-[#e5e7eb] bg-white">
+        <div className="flex flex-wrap items-center gap-2 border-b border-[#e5e7eb] px-3 py-2">
+          <div className="relative min-w-[12rem] flex-1">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[#9ca3af]" />
+            <Input
+              className="h-9 pl-8"
+              value={q}
+              onChange={(e) => {
+                setQ(e.target.value);
+                setPage(1);
+              }}
+              placeholder="Search name or type"
+            />
+          </div>
           <select
-            className="h-9 rounded-md border border-slate-200 px-2 text-sm"
-            value={type}
-            onChange={(e) => setType(e.target.value)}
+            className={cn("w-[10rem]", fieldSelect)}
+            value={typeFilter}
+            onChange={(e) => {
+              setTypeFilter(e.target.value);
+              setPage(1);
+            }}
           >
             {TYPES.map((t) => (
-              <option key={t} value={t}>
-                {t}
+              <option key={t.id || "all"} value={t.id}>
+                {t.label}
               </option>
             ))}
           </select>
-        </label>
-        <label className="space-y-1 text-sm">
-          <span className="text-slate-600">Capacity</span>
-          <Input
-            value={capacity}
-            onChange={(e) => setCapacity(e.target.value)}
-            className="w-20"
-          />
-        </label>
-        <label className="space-y-1 text-sm">
-          <span className="text-slate-600">Operational state</span>
-          <select
-            className="h-9 rounded-md border border-slate-200 px-2 text-sm"
-            value={operationalStatus}
-            onChange={(e) =>
-              setOperationalStatus(
-                e.target.value as (typeof OPERATIONAL_STATUS)[number]["id"],
-              )
-            }
-          >
-            {OPERATIONAL_STATUS.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <Button type="submit" disabled={create.isPending}>
-          Add resource
-        </Button>
-      </form>
+        </div>
 
-      <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-slate-50 text-slate-600">
-            <tr>
-              <th className="px-3 py-2 font-medium">Name</th>
-              <th className="px-3 py-2 font-medium">Type</th>
-              <th className="px-3 py-2 font-medium">Capacity</th>
-              <th className="px-3 py-2 font-medium">Status</th>
-              <th className="px-3 py-2 font-medium">Change state</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(list.data?.data ?? []).map((r) => (
-              <tr key={r.id} className="border-t border-slate-100">
-                <td className="px-3 py-2">{r.name}</td>
-                <td className="px-3 py-2">{r.type}</td>
-                <td className="px-3 py-2">{r.capacity}</td>
-                <td className="px-3 py-2">
-                  {String((r.meta as { operationalStatus?: string } | null)?.operationalStatus ?? r.status)}
-                </td>
-                <td className="px-3 py-2">
-                  <div className="flex flex-wrap gap-1">
-                    {OPERATIONAL_STATUS.map((s) => {
-                      const current =
-                        String(
-                          (r.meta as { operationalStatus?: string } | null)
-                            ?.operationalStatus ?? r.status,
-                        ) === s.id;
-                      return (
-                        <button
-                          key={s.id}
-                          type="button"
-                          disabled={current || updateStatus.isPending}
-                          onClick={() => updateStatus.mutate({ id: r.id, next: s.id })}
+        {list.isLoading ? (
+          <p className="px-4 py-8 text-center text-sm text-[#6b7280]">
+            Loading…
+          </p>
+        ) : rows.length === 0 ? (
+          <p className="px-4 py-8 text-center text-sm text-[#6b7280]">
+            No resources on this page. Add one or clear filters.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="border-b border-[#e5e7eb] bg-[#f9fafb] text-xs uppercase tracking-wide text-[#6b7280]">
+                <tr>
+                  <th className="px-3 py-2 font-medium">Name</th>
+                  <th className="px-3 py-2 font-medium">Type</th>
+                  <th className="px-3 py-2 font-medium">Capacity</th>
+                  <th className="px-3 py-2 font-medium">Status</th>
+                  <th className="px-3 py-2 font-medium">Change</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => {
+                  const st = statusMeta(r);
+                  return (
+                    <tr
+                      key={r.id}
+                      className="border-b border-[#f3f4f6] last:border-0"
+                    >
+                      <td className="px-3 py-2 font-medium text-[#111827]">
+                        {r.name}
+                      </td>
+                      <td className="px-3 py-2 text-[#4b5563]">
+                        {typeLabel(r.type)}
+                      </td>
+                      <td className="px-3 py-2 tabular-nums text-[#4b5563]">
+                        {r.capacity}
+                      </td>
+                      <td className="px-3 py-2">
+                        <span
                           className={cn(
-                            "rounded border px-2 py-1 text-[0.7rem] font-medium",
-                            current
-                              ? "border-[#1a56db] bg-[#eff6ff] text-[#1a56db]"
-                              : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
+                            "rounded-full px-2 py-0.5 text-xs font-medium",
+                            TONE[st.tone],
                           )}
                         >
-                          {s.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {!list.isLoading && !(list.data?.data?.length) ? (
-              <tr>
-                <td colSpan={5} className="px-3 py-6 text-center text-slate-500">
-                  No resources yet
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
+                          {st.label}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2">
+                        <select
+                          className="h-8 max-w-[11rem] rounded-lg border border-[#e5e7eb] bg-white px-2 text-xs"
+                          value={st.id}
+                          disabled={updateStatus.isPending}
+                          onChange={(e) =>
+                            updateStatus.mutate({
+                              id: r.id,
+                              next: e.target
+                                .value as (typeof OPERATIONAL_STATUS)[number]["id"],
+                            })
+                          }
+                        >
+                          {OPERATIONAL_STATUS.map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <TablePager
+          page={page}
+          totalPages={totalPages}
+          total={total}
+          pageSize={PAGE_SIZE}
+          onPage={setPage}
+        />
+      </section>
     </div>
   );
 }

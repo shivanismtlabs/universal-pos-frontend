@@ -15,6 +15,8 @@ import {
   PageSkeleton,
 } from "@/components/page-header";
 import { ReceiptModal, type ReceiptData } from "@/components/receipt-modal";
+import { TablePager } from "@/components/table-pager";
+import { usePagedList } from "@/lib/use-paged-list";
 
 /**
  * All orders — read-only history. Create tickets only at the counter.
@@ -53,6 +55,7 @@ export default function OrdersPage() {
   const rows = (orders.data?.items ?? []).filter(
     (o) => kind === "all" || o.kind === kind,
   );
+  const paged = usePagedList(rows, 20);
 
   if (orders.isLoading) {
     return <PageSkeleton rows={6} />;
@@ -156,7 +159,7 @@ export default function OrdersPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#f0f3f7]">
-              {rows.map((o) => (
+              {paged.slice.map((o) => (
                 <tr key={o.id} className="hover:bg-[#f7f9fc]">
                   <td className="px-4 py-3 font-medium">
                     <Link
@@ -203,6 +206,7 @@ export default function OrdersPage() {
               ))}
             </tbody>
           </table>
+          <TablePager {...paged.pagerProps} />
         </section>
       )}
 

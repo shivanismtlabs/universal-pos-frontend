@@ -183,7 +183,12 @@ export function getOfflineDb(tenantId: string) {
 export async function verifyOfflineDbIntegrity(tenantId: string) {
   const db = getOfflineDb(tenantId);
   try {
-    await db.open();
+    await Promise.race([
+      db.open(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("indexedDB.open timeout")), 2500),
+      ),
+    ]);
     // Touch each table
     await Promise.all([
       db.products.count(),
@@ -195,9 +200,22 @@ export async function verifyOfflineDbIntegrity(tenantId: string) {
     await db.meta.put({ key: "schemaVersion", value: String(OFFLINE_DB_VERSION) });
     return { ok: true as const };
   } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const quota =
+      /QuotaExceeded|NO_SPACE|FILE_ERROR_NO_SPACE|disk full|timeout|DatabaseClosed|indexedDB|UnknownError/i.test(
+        msg,
+      );
+    if (quota) {
+      return {
+        ok: false as const,
+        error: "Local offline storage is unavailable. The shop still works online.",
+      };
+    }
     return {
       ok: false as const,
-      error: e instanceof Error ? e.message : "integrity_failed",
+      error: quota
+        ? "Local storage is full. Free disk space, then refresh."
+        : msg || "integrity_failed",
     };
   }
 }

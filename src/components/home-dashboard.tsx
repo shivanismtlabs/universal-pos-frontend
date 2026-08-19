@@ -6,15 +6,19 @@ import { useQuery } from "@tanstack/react-query";
 import {
   ArrowRightLeft,
   Package,
-  ShoppingBag,
   Truck,
   Plus,
   LayoutGrid,
 } from "lucide-react";
-import { catalogApi, posApi, reportsApi } from "@/lib/api";
+import {
+  catalogApi,
+  posApi,
+  reportsApi,
+} from "@/lib/api";
 import { useBootstrap } from "@/lib/bootstrap";
 import { Button } from "@/components/ui/button";
 import { ProductThumb } from "@/components/product-thumb";
+import { TablePager } from "@/components/table-pager";
 import { cn } from "@/lib/utils";
 
 function moneyNum(v: string | number | undefined | null) {
@@ -38,23 +42,36 @@ export function HomeDashboard() {
   const { money, hasMode } = useBootstrap();
   const hasSale = hasMode("sale");
   const [lens, setLens] = useState<DashLens>("sales");
+  const [ticketPage, setTicketPage] = useState(1);
+  const ticketPageSize = 5;
+
+  const range = useMemo(() => {
+    const to = new Date();
+    const from = new Date(Date.now() - 6 * 86400000);
+    const iso = (d: Date) => d.toISOString().slice(0, 10);
+    return { from: iso(from), to: iso(to) };
+  }, []);
 
   const sales = useQuery({
-    queryKey: ["reports-sales-summary"],
-    queryFn: () => reportsApi.salesSummary(),
+    queryKey: ["reports-sales-summary", range.from, range.to],
+    queryFn: () => reportsApi.salesSummary(range.from, range.to),
+  });
+  const monthly = useQuery({
+    queryKey: ["reports-monthly-home-spark"],
+    queryFn: () => reportsApi.monthlySales({}),
   });
   const payments = useQuery({
-    queryKey: ["reports-payments-summary"],
-    queryFn: () => reportsApi.paymentsSummary(),
+    queryKey: ["reports-payments-summary", range.from, range.to],
+    queryFn: () => reportsApi.paymentsSummary(range.from, range.to),
+  });
+  const recent = useQuery({
+    queryKey: ["pos-sale-recent-home"],
+    queryFn: () => posApi.listRecentSales(25),
+    enabled: hasSale,
   });
   const floor = useQuery({
     queryKey: ["pos-sale-floor"],
     queryFn: () => posApi.saleFloor(),
-    enabled: hasSale,
-  });
-  const recent = useQuery({
-    queryKey: ["pos-sale-recent-home-dash"],
-    queryFn: () => posApi.listRecentSales(12),
     enabled: hasSale,
   });
   const products = useQuery({
@@ -70,17 +87,47 @@ export function HomeDashboard() {
   const stockRows = floor.data?.counts?.stockRows ?? 0;
 
   const spark = useMemo(() => {
-    const vals = (recent.data?.items ?? [])
-      .slice(0, 7)
-      .reverse()
-      .map((o) => moneyNum(o.subtotal));
-    if (vals.length < 2) return null;
-    const max = Math.max(...vals, 1);
-    return vals.map((v) => Math.max(4, Math.round((v / max) * 100)));
-  }, [recent.data]);
+    const days = (monthly.data?.daily ?? []).filter(
+      (d) => Number(d.sales) > 0 || Number(d.orders) > 0,
+    );
+    const slice = days.slice(-7);
+    if (!slice.length) return [];
+    const max = Math.max(...slice.map((d) => Number(d.sales) || 0), 1);
+    return slice.map((d) => {
+      const salesN = Number(d.sales) || 0;
+      return {
+        label: d.date ? d.date.slice(8) : "",
+        sales: salesN,
+        orders: d.orders ?? 0,
+        pct: Math.max(12, Math.round((salesN / max) * 100)),
+      };
+    });
+  }, [monthly.data]);
 
   const payMethods = payments.data?.byMethod ?? [];
   const productPreview = (products.data?.items ?? []).slice(0, 8);
+  const kindRows = (sales.data?.byKind ?? []).filter(
+    (k) => moneyNum(k.subtotal) > 0 || k.count > 0,
+  );
+  const tickets = useMemo(() => {
+    const raw = recent.data as unknown;
+    if (Array.isArray(raw)) return raw as NonNullable<typeof recent.data>["items"];
+    if (raw && typeof raw === "object" && Array.isArray((raw as { items?: unknown }).items)) {
+      return (raw as { items: NonNullable<typeof recent.data>["items"] }).items;
+    }
+    return [];
+  }, [recent.data]);
+  const ticketPages = Math.max(1, Math.ceil(tickets.length / ticketPageSize));
+  const ticketSlice = tickets.slice(
+    (ticketPage - 1) * ticketPageSize,
+    ticketPage * ticketPageSize,
+  );
+
+  const hasSalesActivity =
+    orderCount > 0 ||
+    tickets.length > 0 ||
+    kindRows.length > 0 ||
+    spark.some((b) => b.sales > 0);
 
   const lenses: Array<{ id: DashLens; label: string; show: boolean }> = [
     { id: "sales", label: "Sales", show: true },
@@ -129,7 +176,7 @@ export function HomeDashboard() {
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Kpi
           label="Sales (period)"
-          value={formatMoney(revenue)}
+          value={money(revenue)}
           hint={`${orderCount} order${orderCount === 1 ? "" : "s"}`}
         />
         <Kpi
@@ -153,7 +200,7 @@ export function HomeDashboard() {
         />
       </div>
 
-      {lens === "sales" ? (
+      {lens === "sales" && hasSalesActivity ? (
         <section className="rounded-xl border border-[#e4e9f0] bg-white p-4 shadow-[0_1px_2px_rgba(11,31,51,0.04)] sm:p-5">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
@@ -172,60 +219,113 @@ export function HomeDashboard() {
             </Link>
           </div>
 
-          <div className="mt-4 grid gap-4 lg:grid-cols-[1.4fr_1fr]">
-            <div className="relative h-40 overflow-hidden rounded-lg border border-[#eef1f4] bg-[#fafbfc]">
-              {spark ? (
-                <div className="flex h-full items-end gap-1.5 px-3 pb-3 pt-6">
-                  {spark.map((h, i) => (
+          <div
+            className={cn(
+              "mt-4 grid gap-4",
+              spark.length ? "lg:grid-cols-[1.15fr_1fr]" : "",
+            )}
+          >
+            {spark.length ? (
+              <div className="rounded-lg border border-[#eef1f4] bg-[#fafbfc] px-3 pb-2 pt-3">
+                <div className="flex h-36 items-end gap-1.5">
+                  {spark.map((bar, i) => (
                     <div
-                      key={i}
-                      className="flex flex-1 flex-col items-center justify-end"
+                      key={`${bar.label}-${i}`}
+                      className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1"
                     >
+                      <span className="text-[0.6rem] tabular-nums text-[#6b7280]">
+                        {bar.sales > 0 ? Math.round(bar.sales) : ""}
+                      </span>
                       <div
-                        className="w-full max-w-[1.75rem] rounded-t-sm bg-[#1a56db]/85"
-                        style={{ height: `${h}%` }}
+                        className="w-full max-w-[1.75rem] rounded-t-sm bg-[#1a56db]"
+                        style={{ height: `${bar.pct}%` }}
+                        title={`${bar.label}: ${money(bar.sales)}`}
                       />
+                      <span className="text-[0.65rem] tabular-nums text-[#8b9bb0]">
+                        {bar.label}
+                      </span>
                     </div>
                   ))}
                 </div>
+                <p className="mt-1 text-center text-[0.7rem] text-[#8b9bb0]">
+                  Last 7 days · {orderCount} ticket{orderCount === 1 ? "" : "s"}
+                </p>
+              </div>
+            ) : null}
+
+            <div className="overflow-hidden rounded-lg border border-[#eef1f4] bg-[#fafbfc]">
+              {kindRows.length ? (
+                <ul className="space-y-2 p-3">
+                  {kindRows.map((row) => (
+                    <ChannelRow
+                      key={row.kind}
+                      color={
+                        row.kind === "sale"
+                          ? "#1a56db"
+                          : row.kind === "service"
+                            ? "#16a34a"
+                            : "#7c3aed"
+                      }
+                      label={
+                        row.kind === "sale"
+                          ? "Point of Sale"
+                          : row.kind.charAt(0).toUpperCase() + row.kind.slice(1)
+                      }
+                      amount={money(moneyNum(row.subtotal))}
+                      orders={row.count}
+                    />
+                  ))}
+                </ul>
+              ) : tickets.length ? (
+                <>
+                  <table className="w-full text-left text-sm">
+                    <thead className="border-b border-[#e5e7eb] text-xs uppercase text-[#6b7280]">
+                      <tr>
+                        <th className="px-3 py-1.5 font-medium">Ticket</th>
+                        <th className="px-3 py-1.5 font-medium">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ticketSlice.map((t) => (
+                        <tr
+                          key={t.id}
+                          className="border-b border-[#f3f4f6] last:border-0"
+                        >
+                          <td className="px-3 py-1.5">
+                            <p className="font-medium text-[#111827]">
+                              {t.orderNumber}
+                            </p>
+                            <p className="text-[0.7rem] text-[#8b9bb0]">
+                              {t.customerName || "Walk-in"} · {t.itemCount} item
+                              {t.itemCount === 1 ? "" : "s"}
+                            </p>
+                          </td>
+                          <td className="px-3 py-1.5 text-right tabular-nums font-semibold text-[#0b1f33]">
+                            {money(moneyNum(t.subtotal))}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <TablePager
+                    page={ticketPage}
+                    totalPages={ticketPages}
+                    total={tickets.length}
+                    pageSize={ticketPageSize}
+                    onPage={setTicketPage}
+                  />
+                </>
               ) : (
-                <div className="grid h-full place-items-center px-4 text-center">
-                  <div>
-                    <ShoppingBag className="mx-auto h-7 w-7 text-[#cfd8e6]" />
-                    <p className="mt-2 text-[0.8rem] text-[#5a6b7d]">
-                      No sales in this period yet.
-                    </p>
-                    <Link
-                      href="/counter"
-                      className="mt-1 inline-block text-[0.78rem] font-semibold text-[#1a56db] hover:underline"
-                    >
-                      Open counter →
-                    </Link>
-                  </div>
-                </div>
+                <ul className="space-y-2 p-3">
+                  <ChannelRow
+                    color="#1a56db"
+                    label="Point of Sale"
+                    amount={money(revenue)}
+                    orders={orderCount}
+                  />
+                </ul>
               )}
             </div>
-
-            <ul className="space-y-3 rounded-lg border border-[#eef1f4] bg-[#fafbfc] p-3">
-              <ChannelRow
-                color="#1a56db"
-                label="Point of Sale"
-                amount={formatMoney(revenue)}
-                orders={orderCount}
-              />
-              <ChannelRow
-                color="#16a34a"
-                label="Other channels"
-                amount={formatMoney(0)}
-                orders={0}
-              />
-              <ChannelRow
-                color="#7c3aed"
-                label="Store credit"
-                amount={formatMoney(0)}
-                orders={0}
-              />
-            </ul>
           </div>
         </section>
       ) : null}
@@ -274,7 +374,7 @@ export function HomeDashboard() {
         </section>
       ) : null}
 
-      {hasSale ? (
+      {hasSale && productPreview.length ? (
         <section className="rounded-xl border border-[#e4e9f0] bg-white p-4 sm:p-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
@@ -318,21 +418,7 @@ export function HomeDashboard() {
                 </li>
               ))}
             </ul>
-          ) : (
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-[#d9e0ea] bg-[#fafbfc] px-4 py-6">
-              <div>
-                <p className="text-sm font-semibold text-[#0b1f33]">
-                  No products yet
-                </p>
-                <p className="mt-0.5 text-[0.8rem] text-[#5a6b7d]">
-                  Add items with photos so they show on the counter and home.
-                </p>
-              </div>
-              <Button asChild>
-                <Link href="/catalog/new">Add products</Link>
-              </Button>
-            </div>
-          )}
+          ) : null}
         </section>
       ) : null}
     </div>

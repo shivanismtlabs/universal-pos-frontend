@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { startTransition, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useBootstrap } from "@/lib/bootstrap";
 import { EmptyState, PageSkeleton } from "@/components/page-header";
@@ -118,7 +118,7 @@ export default function DashboardPage() {
       setHomeTab("getting-started");
       return;
     }
-    setHomeTab(id);
+    startTransition(() => setHomeTab(id));
   }
 
   return (
@@ -219,7 +219,7 @@ export default function DashboardPage() {
                 <button
                   key={t.id}
                   type="button"
-                  onClick={() => setFloor(t.id)}
+                  onClick={() => startTransition(() => setFloor(t.id))}
                   className={cn(
                     "rounded-full px-3.5 py-1.5 text-[0.8rem] font-semibold transition",
                     floor === t.id

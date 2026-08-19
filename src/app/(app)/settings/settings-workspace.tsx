@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, Suspense } from "react";
+import { useEffect, useRef, useState, Suspense } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -21,6 +21,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FieldError } from "@/components/ui/form";
 import { PageHeader } from "@/components/page-header";
+import { mediaUrl } from "@/lib/utils";
+import { prepareProductImageDataUrl } from "@/lib/image-prepare";
 import { canUseBiometrics, biometricBlockReason, registerDeviceBiometric } from "@/lib/webauthn";
 import {
   expenseCategoryNameSchema,
@@ -208,6 +210,8 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
   const [counterErrors, setCounterErrors] = useState<Record<string, string>>(
     {},
   );
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const [logoDrag, setLogoDrag] = useState(false);
 
   const refundReasons = useQuery({
     queryKey: ["refund-reasons-settings"],
@@ -446,6 +450,33 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
     onError: (e) => {
       if (e instanceof ApiError || !(e instanceof Error)) toast.error(errMsg(e));
     },
+  });
+
+  const uploadLogo = useMutation({
+    mutationFn: async (file: File) => {
+      const imageBase64 = await prepareProductImageDataUrl(file);
+      return tenantsApi.uploadLogo(imageBase64);
+    },
+    onSuccess: (res) => {
+      const url =
+        res && typeof res === "object" && "logoUrl" in res
+          ? String((res as { logoUrl?: string }).logoUrl || "")
+          : "";
+      if (url) setProfile((p) => ({ ...p, logoUrl: url }));
+      toast.success("Logo uploaded");
+      invalidate();
+    },
+    onError: (e) => toast.error(errMsg(e)),
+  });
+
+  const clearLogo = useMutation({
+    mutationFn: () => tenantsApi.removeLogo(),
+    onSuccess: () => {
+      setProfile((p) => ({ ...p, logoUrl: "" }));
+      toast.success("Logo removed");
+      invalidate();
+    },
+    onError: (e) => toast.error(errMsg(e)),
   });
 
   const saveTax = useMutation({
@@ -835,29 +866,70 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
             </div>
             <div>
               <Label>Upload your logo</Label>
-              <div className="mt-1 flex min-h-[120px] flex-col items-center justify-center rounded-lg border border-dashed border-[#c5d0e0] bg-[#f8fafc] px-3 py-4 text-center">
+              <input
+                ref={logoInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                className="sr-only"
+                disabled={!canEdit || uploadLogo.isPending}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (file) uploadLogo.mutate(file);
+                }}
+              />
+              <button
+                type="button"
+                disabled={!canEdit || uploadLogo.isPending}
+                onClick={() => logoInputRef.current?.click()}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  if (canEdit) setLogoDrag(true);
+                }}
+                onDragLeave={() => setLogoDrag(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setLogoDrag(false);
+                  const file = e.dataTransfer.files?.[0];
+                  if (file && canEdit) uploadLogo.mutate(file);
+                }}
+                className={`mt-1 flex min-h-[140px] w-full flex-col items-center justify-center rounded-lg border border-dashed px-3 py-4 text-center transition-colors ${
+                  logoDrag
+                    ? "border-[#1a56db] bg-[#eff6ff]"
+                    : "border-[#c5d0e0] bg-[#f8fafc] hover:border-[#1a56db]"
+                }`}
+              >
                 {profile.logoUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    src={profile.logoUrl}
+                    src={mediaUrl(profile.logoUrl) || profile.logoUrl}
                     alt="Shop logo"
-                    className="mb-2 max-h-[60px] max-w-[230px] object-contain"
+                    className="mb-2 max-h-[72px] max-w-[230px] object-contain"
                   />
                 ) : (
-                  <p className="text-sm text-[#6b7280]">No logo yet</p>
+                  <p className="text-sm font-medium text-[#374151]">
+                    {uploadLogo.isPending
+                      ? "Uploading…"
+                      : "Click or drop a photo"}
+                  </p>
                 )}
-              </div>
-              <Input
-                className="mt-2"
-                value={profile.logoUrl}
-                onChange={(e) =>
-                  setProfile((p) => ({ ...p, logoUrl: e.target.value }))
-                }
-                placeholder="https://…/logo.png"
-              />
+                <p className="text-xs text-[#6b7280]">
+                  JPEG, PNG, WebP or GIF · up to 1 MB preferred
+                </p>
+              </button>
+              {profile.logoUrl && canEdit ? (
+                <button
+                  type="button"
+                  className="mt-2 text-xs font-medium text-[#b91c1c]"
+                  disabled={clearLogo.isPending}
+                  onClick={() => clearLogo.mutate()}
+                >
+                  Remove logo
+                </button>
+              ) : null}
               <p className="mt-1.5 text-[0.7rem] leading-snug text-[#6b7280]">
-                This logo will appear on transactions and email notifications.
-                Preferred size: 230px × 60px @ 72 DPI. Maximum size of 1MB.
+                This logo will appear on receipts and shop branding. Preferred
+                size: 230px × 60px @ 72 DPI.
               </p>
             </div>
           </div>

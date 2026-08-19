@@ -1,6 +1,9 @@
-import { apiRequest } from "./client";
+import { apiRequest, ApiError } from "./client";
 import { useAuthStore } from "../auth-store";
-import type { TenantBootstrap } from "../bootstrap-types";
+import {
+  parseUnitsFromSettings,
+  type MeasureUnitRow,
+} from "../measure-units";
 
 function token() {
   return useAuthStore.getState().accessToken;
@@ -12,6 +15,154 @@ function stationToken() {
 
 function identityToken() {
   return useAuthStore.getState().identityToken;
+}
+
+function isMissingRoute(e: unknown) {
+  return e instanceof ApiError && (e.status === 404 || e.status === 405);
+}
+
+async function persistMeasureUnits(items: MeasureUnitRow[]) {
+  await apiRequest("/tenants/me", {
+    method: "PATCH",
+    body: { settings: { units: items } },
+    token: token(),
+  });
+  return { items: parseUnitsFromSettings({ units: items }) };
+}
+
+async function unitsFromTenantMe() {
+  const me = await apiRequest<{ settings?: unknown }>("/tenants/me", {
+    token: token(),
+  });
+  return { items: parseUnitsFromSettings(me?.settings) };
+}
+
+async function listMeasureUnits() {
+  try {
+    return await apiRequest<{ items: MeasureUnitRow[] }>(
+      "/tenants/me/units",
+      { token: token() },
+    );
+  } catch (e) {
+    if (!isMissingRoute(e)) throw e;
+  }
+  try {
+    return await apiRequest<{ items: MeasureUnitRow[] }>("/units", {
+      token: token(),
+    });
+  } catch (e) {
+    if (!isMissingRoute(e)) throw e;
+  }
+  return unitsFromTenantMe();
+}
+
+async function createMeasureUnit(body: {
+  code: string;
+  name: string;
+  decimalQty?: boolean;
+}) {
+  try {
+    return await apiRequest("/tenants/me/units", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  } catch (e) {
+    if (!isMissingRoute(e)) throw e;
+  }
+  try {
+    return await apiRequest("/units", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  } catch (e) {
+    if (!isMissingRoute(e)) throw e;
+  }
+  const { items } = await unitsFromTenantMe();
+  const code = body.code.trim();
+  if (items.some((u) => u.code.toLowerCase() === code.toLowerCase())) {
+    throw new Error(`Unit "${code}" already exists`);
+  }
+  items.push({
+    code,
+    name: body.name.trim(),
+    decimalQty: body.decimalQty === true,
+    active: true,
+    system: false,
+  });
+  return persistMeasureUnits(items);
+}
+
+async function updateMeasureUnit(
+  code: string,
+  body: { name?: string; decimalQty?: boolean; active?: boolean },
+) {
+  const enc = encodeURIComponent(code);
+  try {
+    return await apiRequest(`/tenants/me/units/${enc}`, {
+      method: "PATCH",
+      body,
+      token: token(),
+    });
+  } catch (e) {
+    if (!isMissingRoute(e)) throw e;
+  }
+  try {
+    return await apiRequest(`/units/${enc}`, {
+      method: "PATCH",
+      body,
+      token: token(),
+    });
+  } catch (e) {
+    if (!isMissingRoute(e)) throw e;
+  }
+  const { items } = await unitsFromTenantMe();
+  const idx = items.findIndex(
+    (u) => u.code.toLowerCase() === code.toLowerCase(),
+  );
+  if (idx < 0) throw new Error("Unit not found");
+  const cur = items[idx]!;
+  if (body.active === false && cur.code === "pcs") {
+    throw new Error("Piece (pcs) must stay active");
+  }
+  items[idx] = {
+    ...cur,
+    name: body.name?.trim() || cur.name,
+    decimalQty:
+      body.decimalQty === undefined ? cur.decimalQty : body.decimalQty,
+    active: body.active === undefined ? cur.active : body.active,
+  };
+  return persistMeasureUnits(items);
+}
+
+async function deleteMeasureUnit(code: string) {
+  const enc = encodeURIComponent(code);
+  try {
+    return await apiRequest(`/tenants/me/units/${enc}`, {
+      method: "DELETE",
+      token: token(),
+    });
+  } catch (e) {
+    if (!isMissingRoute(e)) throw e;
+  }
+  try {
+    return await apiRequest(`/units/${enc}`, {
+      method: "DELETE",
+      token: token(),
+    });
+  } catch (e) {
+    if (!isMissingRoute(e)) throw e;
+  }
+  const { items } = await unitsFromTenantMe();
+  const cur = items.find((u) => u.code.toLowerCase() === code.toLowerCase());
+  if (!cur) throw new Error("Unit not found");
+  if (cur.system) {
+    throw new Error("Built-in units cannot be deleted — deactivate them instead");
+  }
+  return persistMeasureUnits(
+    items.filter((u) => u.code.toLowerCase() !== code.toLowerCase()),
+  );
 }
 
 type AuthUserPayload = {
@@ -1320,7 +1471,7 @@ export const resourcesApi = {
         locationId?: string | null;
         meta?: Record<string, unknown> | null;
       }>;
-      meta: { page: number; limit: number; total: number };
+      meta: { page: number; limit: number; total: number; totalPages?: number };
     }>(`/resources${q ? `?${q}` : ""}`, { token: token() });
   },
   create(body: {
@@ -2977,6 +3128,34 @@ export const tenantsApi = {
       body,
       token: token(),
     });
+  },
+  uploadLogo(imageBase64: string) {
+    return apiRequest<{ logoUrl: string }>("/tenants/me/logo", {
+      method: "POST",
+      body: { imageBase64 },
+      token: token(),
+    });
+  },
+  removeLogo() {
+    return apiRequest<{ logoUrl: null }>("/tenants/me/logo/remove", {
+      method: "POST",
+      token: token(),
+    });
+  },
+  listUnits() {
+    return listMeasureUnits();
+  },
+  createUnit(body: { code: string; name: string; decimalQty?: boolean }) {
+    return createMeasureUnit(body);
+  },
+  updateUnit(
+    code: string,
+    body: { name?: string; decimalQty?: boolean; active?: boolean },
+  ) {
+    return updateMeasureUnit(code, body);
+  },
+  deleteUnit(code: string) {
+    return deleteMeasureUnit(code);
   },
 };
 
@@ -6313,21 +6492,168 @@ export const documentsApi = {
   },
 };
 
+export type SupplierWriteBody = {
+  name?: string;
+  code?: string;
+  legalName?: string;
+  supplierType?: string;
+  category?: string;
+  status?: string;
+  contact?: string;
+  designation?: string;
+  phone?: string;
+  phoneAlt?: string;
+  email?: string;
+  website?: string;
+  notes?: string;
+  taxId?: string;
+  taxCategory?: string;
+  taxExempt?: boolean;
+  registrationNo?: string;
+  paymentTerm?: string;
+  dueDays?: number;
+  creditLimit?: number;
+  currencyCode?: string;
+  preferredPayMethod?: string;
+  bankName?: string;
+  bankAccountName?: string;
+  bankAccountNo?: string;
+  bankIdentifier?: string;
+  payHandle?: string;
+};
+
+export type SupplierRow = {
+  id: string;
+  code?: string;
+  name: string;
+  legalName?: string | null;
+  supplierType?: string | null;
+  category?: string | null;
+  status?: string;
+  contact?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  paymentTerm?: string | null;
+  dueDays?: number | null;
+  creditLimit?: string | number | null;
+};
+
+export type SupplierDetail = SupplierRow & {
+  designation?: string | null;
+  phoneAlt?: string | null;
+  website?: string | null;
+  notes?: string | null;
+  taxId?: string | null;
+  taxCategory?: string | null;
+  taxExempt?: boolean;
+  registrationNo?: string | null;
+  currencyCode?: string | null;
+  preferredPayMethod?: string | null;
+  bank?: Record<string, string | null | boolean>;
+  contacts?: Array<{
+    id: string;
+    name: string;
+    email?: string | null;
+    phone?: string | null;
+    role?: string | null;
+    isPrimary: boolean;
+  }>;
+  addresses?: Array<{
+    id: string;
+    kind: string;
+    line1: string;
+    city?: string | null;
+    state?: string | null;
+    country?: string | null;
+  }>;
+  documents?: Array<{
+    id: string;
+    docType: string;
+    fileUrl: string;
+    fileName?: string | null;
+    expiresAt?: string | null;
+    createdAt: string;
+  }>;
+  notesFeed?: Array<{ id: string; body: string; createdAt?: string }>;
+};
+
 export const suppliersApi = {
-  list() {
-    return apiRequest<
-      Array<{ id: string; name: string; contact?: string | null; phone?: string | null }>
-    >("/suppliers", { token: token() });
+  list(status?: string) {
+    const q = status ? `?status=${encodeURIComponent(status)}` : "";
+    return apiRequest<SupplierRow[]>(`/suppliers${q}`, { token: token() });
   },
-  create(body: { name: string; contact?: string; phone?: string }) {
-    return apiRequest("/suppliers", { method: "POST", body, token: token() });
+  get(id: string) {
+    return apiRequest<SupplierDetail>(`/suppliers/${id}`, { token: token() });
   },
-  update(
-    id: string,
-    body: { name?: string; contact?: string; phone?: string },
-  ) {
-    return apiRequest(`/suppliers/${id}`, {
+  create(body: SupplierWriteBody) {
+    return apiRequest<SupplierRow>("/suppliers", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  update(id: string, body: SupplierWriteBody) {
+    return apiRequest<SupplierRow>(`/suppliers/${id}`, {
       method: "PATCH",
+      body,
+      token: token(),
+    });
+  },
+  addContact(
+    id: string,
+    body: {
+      name: string;
+      email?: string;
+      phone?: string;
+      role?: string;
+      notes?: string;
+      isPrimary?: boolean;
+    },
+  ) {
+    return apiRequest(`/suppliers/${id}/contacts`, {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  addAddress(
+    id: string,
+    body: {
+      kind?: string;
+      line1: string;
+      line2?: string;
+      city?: string;
+      state?: string;
+      postalCode?: string;
+      country?: string;
+      isDefault?: boolean;
+    },
+  ) {
+    return apiRequest(`/suppliers/${id}/addresses`, {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  addNote(id: string, body: string) {
+    return apiRequest(`/suppliers/${id}/notes`, {
+      method: "POST",
+      body: { body },
+      token: token(),
+    });
+  },
+  addDocument(
+    id: string,
+    body: {
+      docType: string;
+      imageBase64: string;
+      fileName?: string;
+      expiresAt?: string;
+      notes?: string;
+    },
+  ) {
+    return apiRequest(`/suppliers/${id}/documents`, {
+      method: "POST",
       body,
       token: token(),
     });

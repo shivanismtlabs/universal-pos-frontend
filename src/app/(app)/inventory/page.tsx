@@ -25,6 +25,8 @@ import { cn } from "@/lib/utils";
 import { EntityRowActions } from "@/components/entity-row-actions";
 import { PageHeader, PageSkeleton } from "@/components/page-header";
 import { FieldError } from "@/components/ui/form";
+import { TablePager } from "@/components/table-pager";
+import { usePagedList } from "@/lib/use-paged-list";
 import {
   stockMoveSchema,
   zodFieldErrors,
@@ -225,6 +227,9 @@ function LevelsTab({
       }),
   });
 
+  const levelRows = levels.data?.items ?? [];
+  const pagedLevels = usePagedList(levelRows, 25);
+
   const [reorderId, setReorderId] = useState<string | null>(null);
   const [rp, setRp] = useState("");
   const [rq, setRq] = useState("");
@@ -285,7 +290,7 @@ function LevelsTab({
             </tr>
           </thead>
           <tbody>
-            {(levels.data?.items ?? []).map((r) => (
+            {pagedLevels.slice.map((r) => (
               <tr key={r.stockLevelId} className="border-t border-[#f0f3f7]">
                 <td className="px-3 py-2 font-medium">{r.name}</td>
                 <td className="px-3 py-2 font-mono text-xs">{r.sku}</td>
@@ -343,7 +348,8 @@ function LevelsTab({
             ) : null}
           </tbody>
         </table>
-                </div>
+      </div>
+      <TablePager {...pagedLevels.pagerProps} />
 
       {reorderId ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4">
@@ -1084,6 +1090,7 @@ function LedgerTab({ locationId }: { locationId: string }) {
         limit: 100,
       }),
   });
+  const paged = usePagedList(ledger.data?.items ?? [], 25);
 
   return (
     <div className="space-y-5">
@@ -1125,7 +1132,7 @@ function LedgerTab({ locationId }: { locationId: string }) {
             </tr>
           </thead>
           <tbody>
-            {(ledger.data?.items ?? []).map((r) => (
+            {paged.slice.map((r) => (
               <tr key={r.id} className="border-t">
                 <td className="px-3 py-2 text-xs text-[#5a6b7d]">
                   {new Date(r.createdAt).toLocaleString()}
@@ -1146,6 +1153,7 @@ function LedgerTab({ locationId }: { locationId: string }) {
           </tbody>
         </table>
       </div>
+      <TablePager {...paged.pagerProps} />
     </div>
   );
 }

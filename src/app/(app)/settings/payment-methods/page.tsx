@@ -18,6 +18,32 @@ type PaymentMethod = {
   configHint?: string;
 };
 
+type ApiMethodRow = {
+  method?: string;
+  label?: string;
+  displayName?: string;
+  isInternal?: boolean;
+  status?: string;
+  description?: string;
+  configHint?: string;
+  reason?: string;
+  configured?: boolean;
+  available?: boolean;
+  requiresProvider?: boolean;
+};
+
+function unwrapMethodRows(payload: unknown): ApiMethodRow[] {
+  if (!payload) return [];
+  if (Array.isArray(payload)) return payload as ApiMethodRow[];
+  if (typeof payload === "object") {
+    const rec = payload as { items?: unknown; data?: unknown; methods?: unknown };
+    if (Array.isArray(rec.items)) return rec.items as ApiMethodRow[];
+    if (Array.isArray(rec.methods)) return rec.methods as ApiMethodRow[];
+    if (Array.isArray(rec.data)) return rec.data as ApiMethodRow[];
+  }
+  return [];
+}
+
 export default function PaymentMethodsSettingsPage() {
   const methodsQ = useQuery({
     queryKey: ["payment-methods-settings"],
@@ -25,21 +51,19 @@ export default function PaymentMethodsSettingsPage() {
   });
 
   const methods: PaymentMethod[] = useMemo(() => {
-    const raw = methodsQ.data as
-      | Array<{
-          method: string;
-          label?: string;
-          isInternal?: boolean;
-          status?: string;
-          description?: string;
-          configHint?: string;
-        }>
-      | undefined;
-
-    if (!raw) return [];
-
-    return raw.map((m) => {
-      const status = (m.status ?? "ready") as MethodStatus;
+    return unwrapMethodRows(methodsQ.data).map((m) => {
+      const configured = m.configured !== false;
+      const available = m.available !== false;
+      const status: MethodStatus =
+        m.status === "ready" ||
+        m.status === "not_configured" ||
+        m.status === "provider_required"
+          ? m.status
+          : !configured || !available
+            ? m.requiresProvider
+              ? "provider_required"
+              : "not_configured"
+            : "ready";
       const statusLabel =
         status === "ready"
           ? "Ready"
@@ -47,13 +71,13 @@ export default function PaymentMethodsSettingsPage() {
             ? "Not configured"
             : "Provider required";
       return {
-        id: m.method,
-        label: m.label ?? m.method,
+        id: m.method || m.label || m.displayName || "method",
+        label: m.label ?? m.displayName ?? m.method ?? "Method",
         isInternal: m.isInternal ?? false,
         status,
         statusLabel,
         description: m.description ?? "",
-        configHint: m.configHint,
+        configHint: m.configHint ?? m.reason,
       };
     });
   }, [methodsQ.data]);
@@ -73,6 +97,8 @@ export default function PaymentMethodsSettingsPage() {
 
       {methodsQ.isLoading ? (
         <p className="text-sm text-[#6b7280]">Loading…</p>
+      ) : methodsQ.isError ? (
+        <p className="text-sm text-[#b91c1c]">Could not load payment methods.</p>
       ) : (
         <section className="rounded-2xl border border-[#e5e7eb] bg-white">
           {methods.length === 0 ? (

@@ -1,10 +1,12 @@
-/** Mirrors backend/src/common/sell-units.ts — grocery / retail qty rules. */
+/** Mirrors backend sell-units + tenant Settings → Units. */
 
 export const SELL_UNITS = ["pcs", "pack", "kg", "g", "L", "ml"] as const;
-export type SellUnit = (typeof SELL_UNITS)[number];
+export type SellUnit = string;
+
+const DECIMAL_UNITS = new Set(["kg", "L", "lb", "m", "hour", "gal"]);
 
 export const SELL_UNIT_OPTIONS: Array<{
-  value: SellUnit;
+  value: string;
   label: string;
   priceHint: string;
   qtyHint: string;
@@ -47,23 +49,20 @@ export const SELL_UNIT_OPTIONS: Array<{
   },
 ];
 
-const WHOLE_UNITS = new Set<SellUnit>(["pcs", "pack", "g", "ml"]);
-const DECIMAL_UNITS = new Set<SellUnit>(["kg", "L"]);
-
-export function isSellUnit(v: unknown): v is SellUnit {
-  return typeof v === "string" && (SELL_UNITS as readonly string[]).includes(v);
+export function isSellUnit(v: unknown): v is string {
+  return typeof v === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,15}$/.test(v.trim());
 }
 
 export function normalizeSellUnit(v: unknown): SellUnit {
-  return isSellUnit(v) ? v : "pcs";
+  return isSellUnit(v) ? String(v).trim() : "pcs";
 }
 
-export function requiresWholeQty(unit: SellUnit): boolean {
-  return WHOLE_UNITS.has(unit);
+export function requiresWholeQty(unit: string): boolean {
+  return !allowsDecimalQty(unit);
 }
 
-export function allowsDecimalQty(unit: SellUnit): boolean {
-  return DECIMAL_UNITS.has(unit);
+export function allowsDecimalQty(unit: string): boolean {
+  return DECIMAL_UNITS.has(normalizeSellUnit(unit));
 }
 
 export function qtyStep(unit: SellUnit): number {

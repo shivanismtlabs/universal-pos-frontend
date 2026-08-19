@@ -23,6 +23,7 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { FieldError } from "@/components/ui/form";
 import { PageHeader, EmptyState, PageSkeleton } from "@/components/page-header";
+import { TablePager } from "@/components/table-pager";
 import {
   createExpenseSchema,
   expenseCategoryNameSchema,
@@ -93,6 +94,8 @@ export default function ExpensesPage() {
   const allowFinance = canFinance(roles);
 
   const [deskTab, setDeskTab] = useState<DeskTab>("dashboard");
+  const [expListPage, setExpListPage] = useState(1);
+  const EXP_PAGE = 15;
 
   const [from, setFrom] = useState(monthStartYmd);
   const [to, setTo] = useState(todayYmd);
@@ -551,8 +554,12 @@ export default function ExpensesPage() {
     if (!items.length) {
       return <EmptyState title={emptyTitle} detail={emptyDetail} />;
     }
+    const totalPages = Math.max(1, Math.ceil(items.length / EXP_PAGE));
+    const pageSafe = Math.min(expListPage, totalPages);
+    const slice = items.slice((pageSafe - 1) * EXP_PAGE, pageSafe * EXP_PAGE);
     return (
-      <div className="mt-3 overflow-x-auto rounded-xl border border-[#d9e0ea]">
+      <div className="mt-3 overflow-hidden rounded-xl border border-[#d9e0ea]">
+        <div className="overflow-x-auto">
         <table className="min-w-full text-left text-sm">
           <thead className="bg-[#f5f7fb] text-[0.7rem] font-semibold tracking-wide text-[#5a6b7d] uppercase">
             <tr>
@@ -570,7 +577,7 @@ export default function ExpensesPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-[#eef2f7] bg-white">
-            {items.map((e) => (
+            {slice.map((e) => (
               <tr key={e.id} className="hover:bg-[#fafbfd]">
                 <td className="px-3 py-2 font-medium text-[#0b1f33]">
                   {e.expenseNumber ?? "—"}
@@ -619,6 +626,14 @@ export default function ExpensesPage() {
             ))}
           </tbody>
         </table>
+        </div>
+        <TablePager
+          page={pageSafe}
+          totalPages={totalPages}
+          total={items.length}
+          pageSize={EXP_PAGE}
+          onPage={setExpListPage}
+        />
       </div>
     );
   };
@@ -635,7 +650,10 @@ export default function ExpensesPage() {
           <button
             key={id}
             type="button"
-            onClick={() => setDeskTab(id)}
+            onClick={() => {
+              setDeskTab(id);
+              setExpListPage(1);
+            }}
             className={cn(
               "rounded-[8px] px-3.5 py-1.5 text-xs font-semibold transition-colors",
               deskTab === id

@@ -202,3 +202,8 @@ export function canWriteCatalog(userRoles: string[] | undefined | null) {
 export function canFinance(userRoles: string[] | undefined | null) {
   return hasAnyRole(userRoles, ["admin", "manager", "accountant"]);
 }
+
+/** Bank / AP fields on suppliers — same gate as finance reports. */
+export function canViewFinance(userRoles: string[] | undefined | null) {
+  return canFinance(userRoles);
+}

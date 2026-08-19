@@ -31,6 +31,8 @@ import { FieldError } from "@/components/ui/form";
 import { useAuthStore } from "@/lib/auth-store";
 import { formatDate } from "@/lib/utils";
 import { RequireCommerceMode } from "@/components/require-commerce-mode";
+import { TablePager } from "@/components/table-pager";
+import { usePagedList } from "@/lib/use-paged-list";
 
 function AppointmentsDesk() {
   const qc = useQueryClient();
@@ -47,6 +49,7 @@ function AppointmentsDesk() {
     queryKey: ["appointments"],
     queryFn: () => appointmentsApi.list({ limit: 50 }),
   });
+  const pagedAppts = usePagedList(list.data?.items ?? [], 15);
   const customers = useQuery({
     queryKey: ["customers", "pick"],
     queryFn: () => customersApi.list({ limit: 100 }),
@@ -188,7 +191,7 @@ function AppointmentsDesk() {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#e5e7eb]">
-              {(list.data?.items ?? []).map((a) => (
+              {(pagedAppts.slice).map((a) => (
                 <tr key={a.id}>
                   <td className="py-3">
                     {formatDate(a.startsAt)}{" "}
@@ -246,6 +249,7 @@ function AppointmentsDesk() {
               ))}
             </tbody>
           </table>
+          <TablePager {...pagedAppts.pagerProps} />
           {!list.data?.items?.length && !list.isLoading ? (
             <p className="py-6 text-[#6b7280]">No appointments</p>
           ) : null}

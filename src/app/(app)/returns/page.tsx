@@ -17,6 +17,8 @@ import { Label } from "@/components/ui/label";
 import { FieldError } from "@/components/ui/form";
 import { formatDate, newIdempotencyKey, cn } from "@/lib/utils";
 import { useBootstrap } from "@/lib/bootstrap";
+import { TablePager } from "@/components/table-pager";
+import { usePagedList } from "@/lib/use-paged-list";
 import { SaleReturnDialog } from "@/components/sale-return-dialog";
 import { canApproveRefund } from "@/lib/roles";
 import { useAuthStore } from "@/lib/auth-store";
@@ -139,6 +141,7 @@ function RentalReturnsDesk() {
 
   const outOrders = candidates.data?.items ?? [];
   const returns = list.data?.items ?? [];
+  const pagedReturns = usePagedList(returns, 12);
 
   return (
     <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
@@ -156,7 +159,7 @@ function RentalReturnsDesk() {
           </div>
         ) : (
           <ul className="scroll-soft max-h-[32rem] divide-y divide-[#f3f4f6] overflow-y-auto">
-            {returns.map((r) => {
+            {pagedReturns.slice.map((r) => {
               const unit = r.stockUnit ?? r.inventoryUnit;
               return (
                 <li key={r.id} className="px-5 py-4">
@@ -238,6 +241,7 @@ function RentalReturnsDesk() {
               );
             })}
           </ul>
+          <TablePager {...pagedReturns.pagerProps} />
         )}
       </section>
 

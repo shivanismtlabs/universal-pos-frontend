@@ -258,8 +258,9 @@ export const ProductImagePicker = forwardRef<
   if (variant === "item") {
     const extras = slots.slice(2);
     return (
-      <div className="grid grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)] gap-2 rounded-md border border-[#e8edf4] bg-[#fafbfc] p-2 sm:grid-cols-[8.5rem_minmax(0,1fr)]">
-        <div className="flex min-h-0 flex-col gap-2">
+      <div className="space-y-2">
+        <Label>{label}</Label>
+        <div className="grid grid-cols-2 gap-2">
           <Zone
             title="Upload Front Image"
             subtitle="Cover"
@@ -284,7 +285,7 @@ export const ProductImagePicker = forwardRef<
           onPick={() => openPicker("append", true)}
         />
         {extras.length ? (
-          <div className="col-span-2 flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2">
             {extras.map((slot, i) => (
               <div key={slot.id} className="relative h-14 w-14">
                 {/* eslint-disable-next-line @next/next/no-img-element */}

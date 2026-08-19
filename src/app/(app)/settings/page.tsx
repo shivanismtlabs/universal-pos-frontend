@@ -7,6 +7,7 @@ import { SettingsWorkspace } from "./settings-workspace";
 /** Old Settings tab strip used `?tab=` — send those URLs to real pages. */
 const TAB_REDIRECT: Record<string, string> = {
   tax: "/settings/tax",
+  units: "/settings/units",
   receipt: "/settings/receipt",
   counter: "/settings/counter",
   returns: "/settings/returns",

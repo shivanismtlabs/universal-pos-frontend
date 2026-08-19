@@ -66,6 +66,7 @@ export function BootstrapProvider({ children }: { children: ReactNode }) {
     gcTime: 30 * 60_000,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
+    placeholderData: (prev) => prev,
   });
 
   const data = query.data;

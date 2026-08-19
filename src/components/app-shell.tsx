@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, Suspense } from "react";
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "motion/react";
 import {
@@ -501,6 +501,12 @@ const NAV_GROUPS: NavGroup[] = [
         folder: "Business",
       },
       {
+        href: "/settings/units",
+        label: "Units",
+        icon: Scale,
+        folder: "Business",
+      },
+      {
         href: "/settings/notifications",
         label: "Notifications",
         icon: Bell,
@@ -729,10 +735,9 @@ function SidebarBody({
   modeLabel: string;
 }) {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const search = searchParams?.toString() ? `?${searchParams.toString()}` : "";
   const router = useRouter();
   const [navQuery, setNavQuery] = useState("");
+  const [search, setSearch] = useState("");
   const { data: boot } = useBootstrap();
   const showGroup = Boolean(boot?.group && !boot.group.hideLayer);
 
@@ -766,8 +771,25 @@ function SidebarBody({
     setRailId(pathGroupId);
   }, [pathGroupId]);
 
+  useEffect(() => {
+    setSearch(typeof window !== "undefined" ? window.location.search : "");
+  }, [pathname]);
+
   const activeGroup =
     groups.find((g) => g.id === railId) ?? groups[0] ?? null;
+
+  useEffect(() => {
+    const hrefs = new Set<string>();
+    if (activeGroup?.href) hrefs.add(activeGroup.href);
+    for (const c of activeGroup?.children ?? []) hrefs.add(c.href);
+    hrefs.forEach((href) => {
+      try {
+        router.prefetch(href);
+      } catch {
+        /* ignore */
+      }
+    });
+  }, [activeGroup, router]);
 
   const q = navQuery.trim().toLowerCase();
   const panelLinks = useMemo(() => {
@@ -1242,31 +1264,55 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       });
   }, [accessToken, pinLocked]);
 
-  /** Offline local-first: crypto unlock, connectivity ping, hydrate outbox, light pull */
+  /** Offline local-first: run after first paint so nav stays snappy */}
   useEffect(() => {
     if (!accessToken || pinLocked || !user?.tenantId || !user.id) return;
-    void unlockOfflineCrypto({
-      tenantId: user.tenantId,
-      deviceId: getDeviceId(),
-      userId: user.id,
+    const idle =
+      typeof window !== "undefined" && "requestIdleCallback" in window
+        ? window.requestIdleCallback.bind(window)
+        : (cb: () => void) => window.setTimeout(cb, 1200);
+    const cancel =
+      typeof window !== "undefined" && "cancelIdleCallback" in window
+        ? window.cancelIdleCallback.bind(window)
+        : (id: number) => window.clearTimeout(id);
+    const handle = idle(() => {
+      void unlockOfflineCrypto({
+        tenantId: user.tenantId!,
+        deviceId: getDeviceId(),
+        userId: user.id,
+      }).catch(() => undefined);
+      hydrateOfflinePendingCount();
     });
-    hydrateOfflinePendingCount();
-    const stop = startConnectivityMonitor(30_000);
+    const stop = startConnectivityMonitor(45_000);
     return () => {
+      cancel(handle as number);
       stop();
     };
   }, [accessToken, pinLocked, user?.tenantId, user?.id]);
 
   useEffect(() => {
     if (!accessToken || pinLocked || !user?.tenantId) return;
-    const locationId = useBranchStore.getState().currentLocationId;
-    if (!locationId || !isServerReachable()) return;
-    void flushOfflineQueue().then(() => hydrateOfflinePendingCount());
-    void pullOfflineSnapshot({
-      tenantId: user.tenantId,
-      locationId,
-      full: false,
-    }).catch(() => undefined);
+    const idle =
+      typeof window !== "undefined" && "requestIdleCallback" in window
+        ? window.requestIdleCallback.bind(window)
+        : (cb: () => void) => window.setTimeout(cb, 2500);
+    const cancel =
+      typeof window !== "undefined" && "cancelIdleCallback" in window
+        ? window.cancelIdleCallback.bind(window)
+        : (id: number) => window.clearTimeout(id);
+    const handle = idle(() => {
+      const locationId = useBranchStore.getState().currentLocationId;
+      if (!locationId || !isServerReachable()) return;
+      void flushOfflineQueue()
+        .then(() => hydrateOfflinePendingCount())
+        .catch(() => undefined);
+      void pullOfflineSnapshot({
+        tenantId: user.tenantId,
+        locationId,
+        full: false,
+      }).catch(() => undefined);
+    });
+    return () => cancel(handle as number);
   }, [accessToken, pinLocked, user?.tenantId]);
 
   useEffect(() => {
