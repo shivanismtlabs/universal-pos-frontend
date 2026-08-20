@@ -12,6 +12,11 @@ function parseOptions(
   raw: unknown,
 ): Array<{ value: string; label: string }> | undefined {
   if (!raw) return undefined;
+  // Settings API may store { options: ["a","b"] } or a flat array
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    const nested = (raw as { options?: unknown }).options;
+    if (nested !== undefined) return parseOptions(nested);
+  }
   if (Array.isArray(raw)) {
     const out: Array<{ value: string; label: string }> = [];
     for (const item of raw) {

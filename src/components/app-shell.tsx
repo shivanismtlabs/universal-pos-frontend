@@ -32,6 +32,7 @@ import {
   Wallet,
   TicketPercent,
   ChevronDown,
+  ChevronUp,
   ChevronRight,
   Home,
   Building2,
@@ -770,6 +771,8 @@ function SidebarBody({
 
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
+  /** Collapsed by default so catalog nav gets more height */
+  const [accountOpen, setAccountOpen] = useState(false);
 
   useEffect(() => {
     setSearch(typeof window !== "undefined" ? window.location.search : "");
@@ -843,7 +846,7 @@ function SidebarBody({
 
   const linkClass = (active: boolean) =>
     cn(
-      "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[0.8125rem] font-medium transition",
+      "flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-[0.8125rem] font-medium transition",
       active
         ? "bg-[#eef2ff] font-semibold text-[#1a56db]"
         : "text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0b1f33]",
@@ -851,7 +854,7 @@ function SidebarBody({
 
   const subLinkClass = (active: boolean) =>
     cn(
-      "flex items-center gap-2 rounded-lg py-1.5 pr-2 pl-7 text-[0.8125rem] font-medium transition",
+      "flex items-center gap-2 rounded-lg py-2 pr-2.5 pl-7 text-[0.8125rem] font-medium transition",
       active
         ? "bg-[#eef2ff] font-semibold text-[#1a56db]"
         : "text-[#475569] hover:bg-[#f8fafc] hover:text-[#0b1f33]",
@@ -902,7 +905,7 @@ function SidebarBody({
         />
       </div>
 
-      <nav className="min-h-0 flex-1 overflow-y-auto px-2 py-2 [scrollbar-width:thin]">
+      <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2.5 py-3 [scrollbar-width:thin]">
         {groups.map((g) => {
           const Icon = g.icon;
           if (g.href) {
@@ -912,7 +915,7 @@ function SidebarBody({
                 key={g.id}
                 href={g.href}
                 onClick={onNavigate}
-                className={cn(linkClass(active), "mb-0.5")}
+                className={cn(linkClass(active), "mb-1")}
               >
                 <Icon className="h-4 w-4 shrink-0" strokeWidth={2} />
                 <span className="min-w-0 flex-1 truncate">{g.label}</span>
@@ -936,12 +939,12 @@ function SidebarBody({
           const unfoldered = kids.filter((c) => !c.folder);
 
           return (
-            <div key={g.id} className="mb-0.5">
+            <div key={g.id} className="mb-1">
               <button
                 type="button"
                 onClick={() => toggleGroup(g.id)}
                 className={cn(
-                  "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[0.8125rem] transition",
+                  "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-left text-[0.8125rem] transition",
                   groupActive && !expanded
                     ? "bg-[#f1f5f9] font-semibold text-[#0b1f33]"
                     : "text-[#334155] hover:bg-[#f1f5f9]",
@@ -959,9 +962,9 @@ function SidebarBody({
               </button>
 
               {expanded ? (
-                <div className="mt-0.5 space-y-0.5 pb-1">
+                <div className="mt-1 space-y-0.5 pb-1.5">
                   {g.section ? (
-                    <p className="px-3 pt-1 pb-0.5 text-[0.65rem] font-semibold tracking-wide text-[#94a3b8] uppercase">
+                    <p className="px-3 pt-1.5 pb-1 text-[0.65rem] font-semibold tracking-wide text-[#94a3b8] uppercase">
                       {g.section}
                     </p>
                   ) : null}
@@ -977,11 +980,11 @@ function SidebarBody({
                             isLeafActive(pathname, search, c.href),
                           );
                         return (
-                          <div key={folder} className="mb-0.5">
+                          <div key={folder} className="mb-1">
                             <button
                               type="button"
                               onClick={() => toggleFolder(folder)}
-                              className="flex w-full items-center gap-2 rounded-lg py-1.5 pr-2 pl-7 text-[0.8125rem] font-medium text-[#475569] hover:bg-[#f8fafc]"
+                              className="flex w-full items-center gap-2 rounded-lg py-2 pr-2.5 pl-7 text-[0.8125rem] font-medium text-[#475569] hover:bg-[#f8fafc]"
                             >
                               <Folder className="h-3.5 w-3.5 shrink-0 opacity-70" />
                               <span className="min-w-0 flex-1 truncate text-left">
@@ -1050,7 +1053,7 @@ function SidebarBody({
           );
         })}
 
-        <div className="my-2 border-t border-[#e8ecf1]" />
+        <div className="my-3 border-t border-[#e8ecf1]" />
 
         <Link
           href="/notifications"
@@ -1070,49 +1073,83 @@ function SidebarBody({
         </Link>
       </nav>
 
-      <div className="shrink-0 space-y-2 border-t border-[#e8ecf1] bg-white px-3 py-3">
-        <div className="rounded-lg border border-[#e2e8f0] bg-[#f8fafc] px-3 py-2.5">
-          <p className="text-[0.72rem] leading-snug text-[#475569]">
-            Premium trial — upgrade when you are ready.
-          </p>
-          <div className="mt-2 flex gap-3 text-[0.72rem] font-semibold text-[#1a56db]">
-            <Link href="/plan" onClick={onNavigate} className="hover:underline">
-              Upgrade
-            </Link>
-            <Link href="/plan" onClick={onNavigate} className="hover:underline">
-              Switch trial
-            </Link>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 px-0.5">
-          <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#e2e8f0] text-[0.7rem] font-semibold text-[#475569]">
+      <div className="shrink-0 border-t border-[#e8ecf1] bg-white">
+        <button
+          type="button"
+          onClick={() => setAccountOpen((v) => !v)}
+          className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#f8fafc]"
+          aria-expanded={accountOpen}
+          title={accountOpen ? "Hide account" : "Show account"}
+        >
+          <div className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[#e2e8f0] text-[0.65rem] font-semibold text-[#475569]">
             {(userName?.trim()?.[0] || "U").toUpperCase()}
           </div>
           <div className="min-w-0 flex-1">
             <p className="truncate text-[0.75rem] font-semibold text-[#0b1f33]">
               {userName ?? "Staff"}
             </p>
-            <p className="truncate text-[0.65rem] text-[#94a3b8]">{userEmail}</p>
+            {!accountOpen ? (
+              <p className="truncate text-[0.65rem] text-[#94a3b8]">Account</p>
+            ) : null}
           </div>
-        </div>
-        {onSwitchOrg ? (
-          <button
-            type="button"
-            className="w-full rounded-lg px-2 py-1.5 text-left text-[0.75rem] font-medium text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#0b1f33]"
-            onClick={onSwitchOrg}
-          >
-            Switch shop
-          </button>
-        ) : null}
-        <button
-          type="button"
-          className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[0.75rem] font-medium text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#0b1f33]"
-          onClick={onLogout}
-        >
-          <LogOut className="h-3.5 w-3.5" />
-          Sign out
+          {accountOpen ? (
+            <ChevronDown className="h-4 w-4 shrink-0 text-[#94a3b8]" />
+          ) : (
+            <ChevronUp className="h-4 w-4 shrink-0 text-[#94a3b8]" />
+          )}
         </button>
+
+        {accountOpen ? (
+          <div className="space-y-2 border-t border-[#eef1f4] px-3 pt-2 pb-3">
+            <div className="rounded-lg border border-[#e2e8f0] bg-[#f8fafc] px-2.5 py-2">
+              <p className="text-[0.7rem] leading-snug text-[#475569]">
+                Premium trial — upgrade when you are ready.
+              </p>
+              <div className="mt-1.5 flex gap-3 text-[0.7rem] font-semibold text-[#1a56db]">
+                <Link
+                  href="/plan"
+                  onClick={onNavigate}
+                  className="hover:underline"
+                >
+                  Upgrade
+                </Link>
+                <Link
+                  href="/plan"
+                  onClick={onNavigate}
+                  className="hover:underline"
+                >
+                  Switch trial
+                </Link>
+              </div>
+            </div>
+
+            {userEmail ? (
+              <p className="truncate px-0.5 text-[0.68rem] text-[#94a3b8]">
+                {userEmail}
+              </p>
+            ) : null}
+
+            <div className="grid gap-0.5">
+              {onSwitchOrg ? (
+                <button
+                  type="button"
+                  className="w-full rounded-lg px-2 py-2 text-left text-[0.75rem] font-medium text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#0b1f33]"
+                  onClick={onSwitchOrg}
+                >
+                  Switch shop
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-[0.75rem] font-medium text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#0b1f33]"
+                onClick={onLogout}
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                Sign out
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -1411,7 +1448,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         }}
       />
       {/* Light expandable sidebar */}
-      <aside className="app-shell-aside hidden h-dvh w-[16.5rem] shrink-0 flex-col border-r border-[#e2e8f0] md:flex print:hidden">
+      <aside className="app-shell-aside hidden h-dvh w-[17.5rem] shrink-0 flex-col border-r border-[#e2e8f0] md:flex print:hidden">
         <Suspense fallback={<div className="h-full bg-[#fafbfc]" />}>
           <SidebarBody {...sidebarProps} />
         </Suspense>

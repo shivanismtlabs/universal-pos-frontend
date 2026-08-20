@@ -9,13 +9,41 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/page-header";
 
-const ENTITIES: Array<{ value: CustomFieldEntityKey; label: string }> = [
-  { value: "customer", label: "Customer" },
-  { value: "product", label: "Product" },
-  { value: "order", label: "Order" },
-  { value: "service_job", label: "Service Job" },
-  { value: "rental", label: "Rental" },
-  { value: "subscription", label: "Subscription" },
+const ENTITIES: Array<{
+  value: CustomFieldEntityKey;
+  label: string;
+  where: string;
+}> = [
+  {
+    value: "product",
+    label: "Product (Items)",
+    where: "Shows on Catalog → New Item / Edit Item",
+  },
+  {
+    value: "customer",
+    label: "Customer",
+    where: "Shows on customer profile forms (when enabled)",
+  },
+  {
+    value: "order",
+    label: "Order (POS ticket)",
+    where: "Shows on Counter (POS) ticket before payment",
+  },
+  {
+    value: "service_job",
+    label: "Service Job",
+    where: "Shows on service / job screens",
+  },
+  {
+    value: "rental",
+    label: "Rental",
+    where: "Shows on rental order flows",
+  },
+  {
+    value: "subscription",
+    label: "Subscription",
+    where: "Shows on membership / plan flows",
+  },
 ];
 
 const DATA_TYPES = [
@@ -41,12 +69,16 @@ type CustomFieldDefinition = {
 
 export default function CustomFieldsSettingsPage() {
   const qc = useQueryClient();
-  const [entity, setEntity] = useState<CustomFieldEntityKey>("customer");
+  const [entity, setEntity] = useState<CustomFieldEntityKey>("product");
   const [fieldKey, setFieldKey] = useState("");
   const [label, setLabel] = useState("");
   const [dataType, setDataType] = useState<string>("text");
   const [required, setRequired] = useState(false);
   const [optionsCsv, setOptionsCsv] = useState("");
+
+  const entityHelp =
+    ENTITIES.find((e) => e.value === entity)?.where ??
+    "Pick where this field should appear";
 
   const defsQ = useQuery({
     queryKey: ["custom-field-definitions", entity],
@@ -61,12 +93,10 @@ export default function CustomFieldsSettingsPage() {
       if (!title) throw new Error("Label is required");
       const options =
         dataType === "select" || dataType === "multi_select"
-          ? {
-              options: optionsCsv
-                .split(",")
-                .map((x) => x.trim())
-                .filter(Boolean),
-            }
+          ? optionsCsv
+              .split(",")
+              .map((x) => x.trim())
+              .filter(Boolean)
           : undefined;
       return customFieldsApi.createDefinition({
         entity,
@@ -74,17 +104,24 @@ export default function CustomFieldsSettingsPage() {
         label: title,
         dataType,
         required,
-        options,
+        ...(options?.length ? { options } : {}),
       });
     },
     onSuccess: async () => {
-      toast.success("Custom field added");
+      toast.success(
+        entity === "product"
+          ? "Field added — open Catalog → New Item to fill it"
+          : entity === "order"
+            ? "Field added — open Counter (POS) ticket to fill it"
+            : "Custom field added",
+      );
       setFieldKey("");
       setLabel("");
       setOptionsCsv("");
-      await qc.invalidateQueries({
-        queryKey: ["custom-field-definitions", entity],
-      });
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["custom-field-definitions"] }),
+        qc.invalidateQueries({ queryKey: ["custom-fields"] }),
+      ]);
     },
     onError: (e) => {
       toast.error(e instanceof Error ? e.message : "Could not add field");
@@ -110,13 +147,20 @@ export default function CustomFieldsSettingsPage() {
       />
 
       <section className="space-y-4 rounded-2xl border border-[#e5e7eb] bg-white p-5">
+        <div className="rounded-xl border border-[#dbe4ff] bg-[#f5f8ff] px-3 py-2.5 text-sm text-[#1e3a5f]">
+          <p className="font-semibold">Where will this show?</p>
+          <p className="mt-0.5 text-[0.85rem] text-[#475569]">{entityHelp}</p>
+        </div>
+
         <div className="grid gap-3 md:grid-cols-2">
           <div>
             <Label>Entity</Label>
             <select
               className="mt-1 h-10 w-full rounded-lg border border-[#e5e7eb] bg-white px-3 text-sm"
               value={entity}
-              onChange={(e) => setEntity(e.target.value as CustomFieldEntityKey)}
+              onChange={(e) =>
+                setEntity(e.target.value as CustomFieldEntityKey)
+              }
             >
               {ENTITIES.map((it) => (
                 <option key={it.value} value={it.value}>
@@ -190,7 +234,9 @@ export default function CustomFieldsSettingsPage() {
       </section>
 
       <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5">
-        <h2 className="text-sm font-semibold text-[#0b1f33]">Defined fields</h2>
+        <h2 className="text-sm font-semibold text-[#0b1f33]">
+          Defined fields — {ENTITIES.find((e) => e.value === entity)?.label}
+        </h2>
         <ul className="mt-3 space-y-2">
           {rows.map((row) => (
             <li
@@ -201,16 +247,20 @@ export default function CustomFieldsSettingsPage() {
               <span className="ml-2 font-mono text-[0.75rem] text-[#5a6b7d]">
                 {row.fieldKey}
               </span>
-              <span className="ml-2 text-[0.75rem] uppercase text-[#5a6b7d]">
+              <span className="ml-2 text-[0.75rem] text-[#5a6b7d] uppercase">
                 {row.dataType}
               </span>
               {row.required ? (
-                <span className="ml-2 text-[0.75rem] text-[#b45309]">required</span>
+                <span className="ml-2 text-[0.75rem] text-[#b45309]">
+                  required
+                </span>
               ) : null}
             </li>
           ))}
-          {!defsQ.isLoading && rows.length === 0 ? (
-            <li className="text-sm text-[#6b7280]">No fields defined yet.</li>
+          {!rows.length ? (
+            <li className="py-6 text-center text-sm text-[#5a6b7d]">
+              No custom fields for this entity yet
+            </li>
           ) : null}
         </ul>
       </section>

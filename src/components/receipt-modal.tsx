@@ -139,9 +139,10 @@ function gstSlabs(
   for (const item of items) {
     const tax = moneyNumber(item.taxAmount);
     if (tax <= 0) continue;
+    const line = moneyNumber(item.lineTotal);
     let rate = moneyNumber(item.taxRatePercent ?? 0);
-    if (!rate) {
-      const line = moneyNumber(item.lineTotal);
+    // HSN codes were once misread as rates (capped at 40) — prefer real math
+    if (!rate || rate > 28) {
       if (line > 0) rate = (tax / line) * 100;
     }
     const key = Math.round(rate * 10) / 10;
@@ -417,8 +418,19 @@ export function ReceiptModal({
                     ? moneyNumber(item.lineTotal)
                     : moneyNumber(item.unitPrice) * qty;
                 const rate = moneyNumber(item.unitPrice);
-                const gst = moneyNumber(item.taxRatePercent ?? 0);
-                const hsn = (item.hsnOrSac || item.taxCode || "").trim();
+                const taxAmt = moneyNumber(item.taxAmount);
+                let gst = moneyNumber(item.taxRatePercent ?? 0);
+                // Prefer amount-derived % when stored rate missing or looks like HSN bleed
+                if (taxAmt > 0 && amt > 0) {
+                  const derived = Math.round((taxAmt / amt) * 1000) / 10;
+                  if (!gst || gst > 28) gst = derived;
+                }
+                const rawHsn = (item.hsnOrSac || item.taxCode || "").trim();
+                // Don't print rate tags (GST5) as HSN; keep real HSN/SAC
+                const hsn =
+                  rawHsn && !/^(?:GST|VAT|TAX)\s*\d/i.test(rawHsn)
+                    ? rawHsn
+                    : "";
                 return (
                   <div key={i} className="mb-1.5">
                     <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-1">

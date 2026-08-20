@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { customersApi, loyaltyApi, paymentsApi, posApi, resourcesApi, tenantsApi } from "@/lib/api";
+import { customersApi, customFieldsApi, loyaltyApi, paymentsApi, posApi, resourcesApi, tenantsApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useBootstrap } from "@/lib/bootstrap";
 import { useBranchStore } from "@/lib/branch-store";
@@ -21,6 +21,7 @@ import { ImageLightbox } from "@/components/image-lightbox";
 import { CustomerPicker } from "@/components/customer-picker";
 import { StationPinLock } from "@/components/station-pin-lock";
 import { BarcodeScanInput } from "@/components/barcode-scan-input";
+import { customFieldDefsToMeta } from "@/lib/product-form-fields";
 import {
   enqueueOfflineEvent,
   flushOfflineQueue,
@@ -184,7 +185,9 @@ export default function RetailPosWorkstation({
   const [couponCode, setCouponCode] = useState("");
   const [couponApplied, setCouponApplied] = useState<string | null>(null);
   const [parkLabel, setParkLabel] = useState("");
-  const [showParked, setShowParked] = useState(false);
+  const [orderExtraFields, setOrderExtraFields] = useState<
+    Record<string, string>
+  >({});
   const [openingFloat, setOpeningFloat] = useState("0");
   const [closingCash, setClosingCash] = useState("");
   const [showCloseRegister, setShowCloseRegister] = useState(false);
@@ -353,18 +356,20 @@ export default function RetailPosWorkstation({
   const catalogTotal = catalog.data?.total ?? items.length;
   const catalogTotalPages = catalog.data?.totalPages ?? 1;
 
-  const parked = useQuery({
-    queryKey: ["pos-sale-parked", locationId],
-    queryFn: () => posApi.listParkedSales(locationId),
-    enabled: Boolean(locationId) && showParked,
-  });
-
   const register = useQuery({
     queryKey: ["pos-sale-register", locationId],
     queryFn: () => posApi.currentRegister(locationId),
     enabled: Boolean(locationId),
     refetchInterval: 60_000,
   });
+  const orderCustomFieldsQ = useQuery({
+    queryKey: ["custom-fields", "order"],
+    queryFn: () => customFieldsApi.listDefinitions("order"),
+  });
+  const orderFormFields = useMemo(
+    () => customFieldDefsToMeta(orderCustomFieldsQ.data ?? []),
+    [orderCustomFieldsQ.data],
+  );
   const registerSession = register.data?.session ?? null;
 
   const openRegister = useMutation({
@@ -417,10 +422,16 @@ export default function RetailPosWorkstation({
     let tax = 0;
     for (const l of cart) {
       const lineGross = l.unitPrice * l.qty;
+      // Ignore HSN bleed / absurd product rates; fall back to shop GST %
+      const productPct =
+        l.taxRatePercent != null &&
+        Number.isFinite(l.taxRatePercent) &&
+        l.taxRatePercent > 0 &&
+        l.taxRatePercent <= 28
+          ? l.taxRatePercent
+          : null;
       const rate =
-        l.taxRatePercent != null && Number.isFinite(l.taxRatePercent)
-          ? Math.min(40, Math.max(0, l.taxRatePercent)) / 100
-          : taxSettings.rate;
+        productPct != null ? productPct / 100 : taxSettings.rate;
       if (rate <= 0) continue;
       if (taxSettings.inclusive) {
         const net = lineGross / (1 + rate);
@@ -531,7 +542,10 @@ export default function RetailPosWorkstation({
     const onHand = Number(row.qtyOnHand);
     const tracks = row.trackQty !== false;
     const taxRatePercent =
-      row.taxRatePercent != null && Number.isFinite(row.taxRatePercent)
+      row.taxRatePercent != null &&
+      Number.isFinite(row.taxRatePercent) &&
+      row.taxRatePercent > 0 &&
+      row.taxRatePercent <= 28
         ? row.taxRatePercent
         : null;
     setCart((prev) => {
@@ -661,6 +675,19 @@ export default function RetailPosWorkstation({
     if (!cart.length) {
       toast.error("Cart is empty");
       return;
+    }
+    for (const f of orderFormFields) {
+      if (!f.required) continue;
+      const v = (orderExtraFields[f.key] ?? "").trim();
+      if (f.type === "boolean") {
+        if (v !== "true" && v !== "false") {
+          toast.error(`Fill required field: ${f.label}`);
+          return;
+        }
+      } else if (!v) {
+        toast.error(`Fill required field: ${f.label}`);
+        return;
+      }
     }
     if (payMethod === "cash" && tenderedNum > 0 && tenderedNum < chargeAmount) {
       toast.error("Cash tendered is less than payment amount");
@@ -805,6 +832,15 @@ export default function RetailPosWorkstation({
           ...(resourceId ? { tableId: resourceId } : {}),
           ...(foodFulfillment && Number(guestCount) > 0
             ? { covers: Number(guestCount) }
+            : {}),
+          ...(Object.keys(orderExtraFields).length
+            ? {
+                customFields: Object.fromEntries(
+                  Object.entries(orderExtraFields).filter(
+                    ([, v]) => String(v ?? "").trim() !== "",
+                  ),
+                ),
+              }
             : {}),
         },
       };
@@ -976,6 +1012,7 @@ export default function RetailPosWorkstation({
       setCouponApplied(null);
       setCashTendered("");
       setSplitPay(false);
+      setOrderExtraFields({});
       setSplitCashAmount("");
       setAllowPartial(false);
       setPayAmount("");
@@ -1058,6 +1095,15 @@ export default function RetailPosWorkstation({
             ...(foodFulfillment && Number(guestCount) > 0
               ? { covers: Number(guestCount) }
               : {}),
+            ...(Object.keys(orderExtraFields).length
+              ? {
+                  customFields: Object.fromEntries(
+                    Object.entries(orderExtraFields).filter(
+                      ([, v]) => String(v ?? "").trim() !== "",
+                    ),
+                  ),
+                }
+              : {}),
           },
         });
         setCart([]);
@@ -1066,6 +1112,7 @@ export default function RetailPosWorkstation({
         setCouponApplied(null);
         setCashTendered("");
         setLoyaltyPointsInput("");
+        setOrderExtraFields({});
         setLoyaltyQuote(null);
         toast.success(`Offline cash sale queued (${queued.clientEventId.slice(0, 8)})`);
         return;
@@ -1106,45 +1153,12 @@ export default function RetailPosWorkstation({
       setDiscountAmount("");
       setParkLabel("");
       toast.success(`Draft saved ${parkedSale.orderNumber}`);
-      void qc.invalidateQueries({ queryKey: ["pos-sale-parked"] });
-      setShowParked(true);
     } catch (e) {
       toast.error(
         e instanceof ApiError ? e.messages.join(", ") : "Park failed",
       );
     } finally {
       setBusy(false);
-    }
-  }
-
-  async function resumeParked(id: string) {
-    try {
-      const resumed = await posApi.resumeParkedSale(id);
-      setCart(
-        resumed.cart.map((l) => ({
-          stockLevelId: l.stockLevelId,
-          sku: l.sku,
-          name: l.name,
-          unitPrice: l.unitPrice,
-          listPrice: l.unitPrice,
-          qty: l.qty,
-          maxQty: l.maxQty,
-          sellUnit: normalizeSellUnit(l.sellUnit),
-          image: (l as { image?: string | null }).image ?? null,
-        })),
-      );
-      setCustomerId(resumed.customerId ?? "");
-      setDiscountAmount(
-        resumed.discountAmount > 0 ? String(resumed.discountAmount) : "",
-      );
-      await posApi.discardParkedSale(id);
-      toast.success(`Resumed ${resumed.orderNumber}`);
-      void qc.invalidateQueries({ queryKey: ["pos-sale-parked"] });
-      setShowParked(false);
-    } catch (e) {
-      toast.error(
-        e instanceof ApiError ? e.messages.join(", ") : "Resume failed",
-      );
     }
   }
 
@@ -1164,6 +1178,7 @@ export default function RetailPosWorkstation({
     setAllowPartial(false);
     setPayAmount("");
     setStripeCheckout(null);
+    setOrderExtraFields({});
     setStripeBusy(false);
     setReceipt({
       data: receiptData as ReceiptData,
@@ -1460,13 +1475,20 @@ export default function RetailPosWorkstation({
 
           <div
             className={cn(
-              "flex-1 overflow-y-auto border-t border-[#eef2f8]",
+              "flex-1 overflow-y-auto border-t border-[#eef2f8] bg-[#f4f6f9]",
               compact
                 ? "max-h-[24rem]"
                 : "max-h-[calc(100vh-8.5rem)]",
             )}
           >
-            <ul className="divide-y divide-[#eef2f8]">
+            <ul
+              className={cn(
+                "grid gap-2 p-2.5 sm:p-3",
+                compact
+                  ? "grid-cols-2 sm:grid-cols-3"
+                  : "grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5",
+              )}
+            >
               {items.map((row) => {
                 const gallery =
                   row.images?.length
@@ -1487,72 +1509,76 @@ export default function RetailPosWorkstation({
                   qtyLeftLabel: formatQtyWithUnit(available, row.sellUnit),
                 });
                 return (
-                  <li key={row.id}>
+                  <li key={row.id} className="min-w-0">
                     <button
                       type="button"
                       onClick={() => upsertLine(row)}
-                      className="flex w-full items-center gap-3 px-3 py-3 text-left transition hover:bg-[#f8fafc] sm:gap-3.5 sm:px-4"
+                      className={cn(
+                        "flex h-full w-full flex-col overflow-hidden rounded-xl border bg-white text-left shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition",
+                        inCart
+                          ? "border-[#1a56db] ring-1 ring-[#1a56db]/25"
+                          : "border-[#e2e8f0] hover:border-[#cbd5e1] hover:shadow-[0_2px_8px_rgba(15,23,42,0.06)]",
+                      )}
                     >
-                      <ProductThumb
-                        src={src}
-                        label={row.name}
-                        size="xl"
-                        count={gallery.length}
-                        onClick={
-                          gallery.length
-                            ? () =>
-                                setLightbox({
-                                  images: gallery,
-                                  index: 0,
-                                  label: row.name,
-                                })
-                            : undefined
-                        }
-                      />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-[0.9375rem] font-semibold text-[#0b1f33]">
+                      <div className="relative aspect-[4/3] w-full overflow-hidden bg-[#eef2f7]">
+                        <div className="absolute inset-0">
+                          <ProductThumb
+                            src={src}
+                            label={row.name}
+                            size="fill"
+                            className="h-full w-full rounded-none border-0 shadow-none"
+                            count={gallery.length}
+                            onClick={
+                              gallery.length
+                                ? () =>
+                                    setLightbox({
+                                      images: gallery,
+                                      index: 0,
+                                      label: row.name,
+                                    })
+                                : undefined
+                            }
+                          />
+                        </div>
+                        <span
+                          className={cn(
+                            "absolute top-1.5 left-1.5 z-[1] max-w-[calc(100%-0.75rem)] truncate rounded-md px-1.5 py-0.5 text-[0.62rem] font-bold",
+                            stock.tone === "out"
+                              ? "bg-[#fef2f2] text-[#c81e1e]"
+                              : stock.tone === "low"
+                                ? "bg-[#fff7ed] text-[#9a3412]"
+                                : "bg-white/95 text-[#1a56db]",
+                          )}
+                        >
+                          {stock.label}
+                        </span>
+                      </div>
+                      <div className="flex min-h-0 flex-1 flex-col gap-1 p-2.5">
+                        <p className="line-clamp-2 text-[0.8rem] leading-snug font-semibold text-[#0b1f33]">
                           {row.name}
                         </p>
-                        <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[0.7rem] text-[#8b9bb0]">
-                          <span>{row.sku}</span>
-                          {kindLabel ? (
-                            <span className="rounded-md bg-[#eef2f7] px-1.5 py-0.5 font-sans text-[0.65rem] font-semibold text-[#334155]">
-                              {kindLabel}
-                            </span>
-                          ) : null}
-                          {row.category?.name ? (
-                            <span className="font-sans text-[#5a6b7d]">
-                              · {row.category.name}
-                            </span>
-                          ) : null}
-                          <span
-                            className={cn(
-                              "rounded-md px-1.5 py-0.5 font-sans text-[0.65rem] font-semibold",
-                              stock.tone === "out"
-                                ? "bg-[#fef2f2] text-[#c81e1e]"
-                                : stock.tone === "low"
-                                  ? "bg-[#fff7ed] text-[#9a3412]"
-                                  : "bg-[#e8eefb] text-[#1a56db]",
-                            )}
-                          >
-                            {stock.label}
+                        <p className="truncate font-mono text-[0.62rem] text-[#94a3b8]">
+                          {row.sku}
+                          {row.category?.name
+                            ? ` · ${row.category.name}`
+                            : ""}
+                          {kindLabel ? ` · ${kindLabel}` : ""}
+                        </p>
+                        <div className="mt-auto flex items-center justify-between gap-2 pt-1">
+                          <p className="text-[0.9rem] font-extrabold tabular-nums text-[#0b1f33]">
+                            {money(row.sellPrice)}
+                          </p>
+                          <span className="inline-flex h-7 min-w-[2.75rem] items-center justify-center rounded-lg bg-[#1a56db] px-2 text-[0.68rem] font-bold tracking-wide text-white">
+                            {inCart ? `+${inCart.qty}` : "ADD"}
                           </span>
-                        </p>
-                      </div>
-                      <div className="flex shrink-0 flex-col items-end gap-1.5 sm:flex-row sm:items-center sm:gap-3">
-                        <p className="text-[0.9375rem] font-bold tabular-nums text-[#0b1f33]">
-                          {money(row.sellPrice)}
-                        </p>
-                        <span className="inline-flex h-9 min-w-[3.75rem] items-center justify-center rounded-[10px] bg-[#1a56db] px-3 text-xs font-semibold text-white shadow-[0_4px_12px_rgba(26,86,219,0.22)]">
-                          {inCart ? `+${inCart.qty}` : "ADD"}
-                        </span>
+                        </div>
                       </div>
                     </button>
                   </li>
                 );
               })}
               {!items.length ? (
-                <li className="px-4 py-14 text-center">
+                <li className="col-span-full px-4 py-14 text-center">
                   {catalog.isLoading ? (
                     <p className="text-sm text-[#5a6b7d]">Loading catalog…</p>
                   ) : (
@@ -1811,9 +1837,14 @@ export default function RetailPosWorkstation({
                   ) : null}
                   <p className="truncate font-mono text-[0.65rem] text-[#8b9bb0]">
                     {l.sku}
-                    {l.taxRatePercent != null
+                    {l.taxRatePercent != null &&
+                    Number.isFinite(l.taxRatePercent) &&
+                    l.taxRatePercent > 0 &&
+                    l.taxRatePercent <= 28
                       ? ` · tax ${l.taxRatePercent}%`
-                      : ""}
+                      : taxSettings.rate > 0
+                        ? ` · tax ${Math.round(taxSettings.rate * 1000) / 10}%`
+                        : ""}
                   </p>
                   <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                     <label className="sr-only" htmlFor={`rate-${l.stockLevelId}`}>
@@ -2165,56 +2196,80 @@ export default function RetailPosWorkstation({
               </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
+            {orderFormFields.length ? (
+              <div className="space-y-2 rounded-lg border border-[#e8edf4] bg-[#f8fafc] p-2.5">
+                <p className="text-[0.65rem] font-semibold tracking-[0.1em] text-[#8b9bb0] uppercase">
+                  Order fields
+                </p>
+                {orderFormFields.map((field) => (
+                  <div key={field.key}>
+                    <Label className="text-[0.7rem]">
+                      {field.label}
+                      {field.required ? " *" : ""}
+                    </Label>
+                    {field.type === "boolean" ? (
+                      <label className="mt-1 flex items-center gap-2 text-sm text-[#0b1f33]">
+                        <input
+                          type="checkbox"
+                          checked={orderExtraFields[field.key] === "true"}
+                          onChange={(e) =>
+                            setOrderExtraFields((prev) => ({
+                              ...prev,
+                              [field.key]: e.target.checked ? "true" : "false",
+                            }))
+                          }
+                        />
+                        Yes
+                      </label>
+                    ) : field.type === "select" && field.options?.length ? (
+                      <select
+                        className="mt-1 h-9 w-full rounded-md border border-[#e2e8f0] bg-white px-2 text-sm"
+                        value={orderExtraFields[field.key] ?? ""}
+                        onChange={(e) =>
+                          setOrderExtraFields((prev) => ({
+                            ...prev,
+                            [field.key]: e.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">Select</option>
+                        {field.options.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <Input
+                        className="mt-1 h-9"
+                        type={field.type === "number" ? "number" : "text"}
+                        value={orderExtraFields[field.key] ?? ""}
+                        onChange={(e) =>
+                          setOrderExtraFields((prev) => ({
+                            ...prev,
+                            [field.key]: e.target.value,
+                          }))
+                        }
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            <div className="flex items-center gap-2">
               <Button
                 type="button"
                 variant="secondary"
                 size="sm"
-                className={cn("h-10", touchMode && "h-14 text-base")}
+                className="h-7 px-2.5 text-[0.7rem] font-semibold"
                 disabled={busy || !cart.length}
                 onClick={() => void parkCart()}
                 title="Save this cart as a draft/hold without taking stock or payment"
               >
                 Save draft
               </Button>
-              <Button
-                type="button"
-                variant="soft"
-                size="sm"
-                className={cn("h-10", touchMode && "h-14 text-base")}
-                onClick={() => setShowParked((v) => !v)}
-              >
-                {showParked ? "Hide drafts" : "View drafts"}
-              </Button>
             </div>
-
-            {showParked ? (
-              <ul className="max-h-28 space-y-1 overflow-y-auto rounded-[12px] border border-[#d9e0ea] bg-white p-2 text-xs">
-                {(parked.data?.items ?? []).map((p) => (
-                  <li
-                    key={p.id}
-                    className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 hover:bg-[#f8fafc]"
-                  >
-                    <span className="truncate text-[#5a6b7d]">
-                      {p.orderNumber}
-                      {p.label ? ` · ${p.label}` : ""} · {p.customerName}
-                    </span>
-                    <button
-                      type="button"
-                      className="shrink-0 font-semibold text-[#1a56db] hover:underline"
-                      onClick={() => void resumeParked(p.id)}
-                    >
-                      Resume
-                    </button>
-                  </li>
-                ))}
-                {!parked.data?.items?.length ? (
-                  <li className="py-3 text-center text-[#8b9bb0]">
-                    No draft bills
-                  </li>
-                ) : null}
-              </ul>
-            ) : null}
 
             <div className="rounded-[12px] border border-[#e2e8f0] bg-white px-3.5 py-3">
               <div className="flex items-baseline justify-between text-sm text-[#5a6b7d]">
