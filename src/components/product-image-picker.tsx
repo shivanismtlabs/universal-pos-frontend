@@ -11,8 +11,6 @@ import { toast } from "sonner";
 import { Sparkles } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { aiApi } from "@/lib/api";
-import { ApiError } from "@/lib/api/client";
 import {
   prepareProductImage,
   prepareProductImageFromDataUrl,
@@ -27,60 +25,6 @@ export type ProductImagePickerHandle = {
 
 type Slot = PreparedImage & { id: string };
 
-/** Load Pollinations image in the browser (fetch, then img+canvas if CORS is picky). */
-async function loadPollinationsImageAsDataUrl(url: string): Promise<string> {
-  try {
-    const imgRes = await fetch(url, {
-      method: "GET",
-      mode: "cors",
-      cache: "no-store",
-    });
-    if (!imgRes.ok) throw new Error(`HTTP ${imgRes.status}`);
-    const blob = await imgRes.blob();
-    if (blob.size < 500) throw new Error("empty image");
-    return await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(new Error("read failed"));
-      reader.readAsDataURL(blob);
-    });
-  } catch {
-    // Canvas path
-    return await new Promise<string>((resolve, reject) => {
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-      const timer = window.setTimeout(
-        () => reject(new Error("AI image timed out")),
-        60_000,
-      );
-      img.onload = () => {
-        window.clearTimeout(timer);
-        try {
-          const canvas = document.createElement("canvas");
-          const max = 1024;
-          const scale = Math.min(1, max / Math.max(img.width, img.height));
-          canvas.width = Math.max(1, Math.round(img.width * scale));
-          canvas.height = Math.max(1, Math.round(img.height * scale));
-          const ctx = canvas.getContext("2d");
-          if (!ctx) {
-            reject(new Error("canvas unavailable"));
-            return;
-          }
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          resolve(canvas.toDataURL("image/jpeg", 0.85));
-        } catch (e) {
-          reject(e instanceof Error ? e : new Error("canvas failed"));
-        }
-      };
-      img.onerror = () => {
-        window.clearTimeout(timer);
-        reject(new Error("image load failed"));
-      };
-      img.src = url;
-    });
-  }
-}
-
 /**
  * Local-only image picker — previews use short blob: URLs.
  * Upload payloads stay in a ref and never enter parent form state
@@ -94,9 +38,9 @@ export const ProductImagePicker = forwardRef<
     max?: number;
     /** Zoho New Item: Front / Rear / Other zones — same files as default. */
     variant?: "default" | "item";
-    /** When set, shows “Generate with AI” from product name (Pollinations). */
+    /** Product name for Openverse real-photo search. */
     productName?: string;
-    /** Optional extra prompt detail (e.g. short description). */
+    /** Optional extra search detail (e.g. short description). */
     productHint?: string;
   }
 >(function ProductImagePicker(
@@ -239,99 +183,29 @@ export const ProductImagePicker = forwardRef<
     }
     setAiBusy(true);
     try {
-      const res = await aiApi.searchRealProductImage({
-        name,
-        hint: productHint?.trim() || undefined,
+      // Next.js route — no Nest / Pollinations AI required
+      const res = await fetch("/api/catalog/find-photo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          hint: productHint?.trim() || undefined,
+        }),
       });
+      const data = (await res.json()) as {
+        message?: string;
+        imageBase64?: string;
+      };
+      if (!res.ok || !data.imageBase64) {
+        throw new Error(data.message || "No real photo found");
+      }
       await applyImageDataUrl(
-        res.imageBase64,
+        data.imageBase64,
         "Real photo found — save the item to keep it",
       );
     } catch (e) {
       toast.error(
-        e instanceof ApiError
-          ? e.messages.join(", ")
-          : e instanceof Error
-            ? e.message
-            : "No real photo found",
-      );
-    } finally {
-      setAiBusy(false);
-    }
-  }
-
-  async function generateWithAi() {
-    const name = productName?.trim() ?? "";
-    if (name.length < 2) {
-      toast.error("Enter the product name first, then generate an image");
-      return;
-    }
-    if (slotsRef.current.length >= max) {
-      toast.error(`Maximum ${max} images`);
-      return;
-    }
-    setAiBusy(true);
-    try {
-      let dataUrl: string | null = null;
-      try {
-        const res = await aiApi.generateProductImage({
-          name,
-          hint: productHint?.trim() || undefined,
-        });
-        dataUrl = res.imageBase64;
-      } catch (serverErr) {
-        toast.message("Server AI busy — trying from your browser…");
-        let url: string;
-        try {
-          const fb = await aiApi.productImageFallbackUrl({
-            name,
-            hint: productHint?.trim() || undefined,
-          });
-          url = fb.url;
-        } catch {
-          const prompt = [
-            `Photorealistic food and product photograph of ${name.slice(0, 100)}`,
-            "authentic Indian restaurant style plating if it is a dish",
-            productHint?.trim()?.slice(0, 120) || null,
-            "real edible food on a clean white or marble surface",
-            "natural colors appetizing professional food photography",
-            "no text no watermark no illustration no cartoon no surreal art",
-          ]
-            .filter(Boolean)
-            .join(", ");
-          const qs = new URLSearchParams({
-            width: "1024",
-            height: "1024",
-            model: "flux",
-            nologo: "true",
-            enhance: "true",
-            seed: String(Math.floor(Math.random() * 1_000_000_000)),
-          });
-          url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?${qs}`;
-        }
-        try {
-          dataUrl = await loadPollinationsImageAsDataUrl(url);
-        } catch {
-          throw serverErr instanceof ApiError
-            ? serverErr
-            : new Error(
-                "Could not generate image. Try Find real photo or upload.",
-              );
-        }
-      }
-
-      if (!dataUrl) throw new Error("No image returned");
-      await applyImageDataUrl(
-        dataUrl,
-        "AI image ready — save the item to keep it",
-      );
-    } catch (e) {
-      toast.error(
-        e instanceof ApiError
-          ? e.messages.join(", ")
-          : e instanceof Error
-            ? e.message
-            : "Could not generate image",
+        e instanceof Error ? e.message : "No real photo found",
       );
     } finally {
       setAiBusy(false);
@@ -350,7 +224,7 @@ export const ProductImagePicker = forwardRef<
     return (
       <div className="space-y-2 rounded-lg border border-[#d9e0ea] bg-[#f8fafc] p-3">
         <p className="text-[0.72rem] font-medium text-[#0b1f33]">
-          Free images from product name
+          Free real photos from product name
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <Button
@@ -363,20 +237,10 @@ export const ProductImagePicker = forwardRef<
             <Sparkles className="h-3.5 w-3.5" />
             {aiBusy ? "Searching…" : "Find real photo"}
           </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={busy || aiBusy}
-            onClick={() => void generateWithAi()}
-            className="gap-1.5 border-[#c5d0e0] text-[#1a56db] hover:bg-[#eef3fb]"
-          >
-            {aiBusy ? "Working…" : "AI generate"}
-          </Button>
         </div>
         <p className="text-[0.65rem] leading-snug text-[#8b9bb0]">
-          Prefer <strong>Find real photo</strong> (Openverse) — camera photos.
-          AI is free but often looks fake for food.
+          Uses Openverse (real Creative Commons photos) — not AI art. Or upload
+          your own photo below.
         </p>
       </div>
     );

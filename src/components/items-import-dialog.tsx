@@ -23,6 +23,7 @@ export type ImportableRow = {
   reorderPoint?: number;
   hsnOrSac?: string;
   trackInventory?: boolean;
+  image?: string;
 };
 
 const TEMPLATE_HEADERS = [
@@ -37,6 +38,7 @@ const TEMPLATE_HEADERS = [
   "manufacturer",
   "hsn",
   "track_inventory",
+  "image_url",
 ];
 
 /** Minimal CSV line parser (quoted fields). */
@@ -118,6 +120,14 @@ function mapHeader(h: string): string | null {
     track: "trackInventory",
     reorder_point: "reorderPoint",
     reorder: "reorderPoint",
+    image_url: "image",
+    image: "image",
+    photo_url: "image",
+    photo: "image",
+    picture: "image",
+    picture_url: "image",
+    img: "image",
+    img_url: "image",
   };
   return aliases[n] ?? null;
 }
@@ -178,6 +188,7 @@ export function rowsFromTable(table: string[][]): ImportableRow[] {
           : undefined,
       hsnOrSac: obj.hsnOrSac?.trim() || undefined,
       trackInventory,
+      image: obj.image?.trim() || undefined,
     });
   }
   if (!out.length) throw new Error("No data rows found");
@@ -219,6 +230,7 @@ export function downloadItemsTemplate() {
       "Generic",
       "8544",
       "true",
+      "https://images.unsplash.com/photo-1583394838336-acd977736f90",
     ],
     [
       "Organic Almond Milk 1L",
@@ -232,6 +244,7 @@ export function downloadItemsTemplate() {
       "Farm Co",
       "",
       "true",
+      "https://images.unsplash.com/photo-1550583724-b2692b85b150",
     ],
   ]);
 }
@@ -388,6 +401,7 @@ export function ItemsImportDialog({
                   <li key={r.sku} className="truncate">
                     {r.title} · <span className="font-mono">{r.sku}</span> · ₹
                     {r.price}
+                    {r.image ? " · photo" : ""}
                   </li>
                 ))}
                 {preview.length > 8 ? (
@@ -400,7 +414,7 @@ export function ItemsImportDialog({
               Required columns: <strong>name</strong>, <strong>sku</strong>,{" "}
               <strong>selling_price</strong>. Optional: category, unit,
               opening_stock, cost_price, barcode, manufacturer, hsn,
-              track_inventory.
+              track_inventory, image_url.
             </p>
           )}
         </div>

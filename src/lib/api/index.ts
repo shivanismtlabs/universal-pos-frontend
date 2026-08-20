@@ -2079,6 +2079,8 @@ export const posApi = {
       reorderPoint?: number;
       hsnOrSac?: string;
       trackInventory?: boolean;
+      image?: string;
+      photoUrl?: string;
     }>;
     locationId?: string;
     createCategories?: boolean;
