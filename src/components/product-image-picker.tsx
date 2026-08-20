@@ -241,18 +241,42 @@ export const ProductImagePicker = forwardRef<
         });
         dataUrl = res.imageBase64;
       } catch (serverErr) {
-        // Server (often cloud VPC) cannot reach Pollinations — try from browser
+        // Server TLS/network fail — load Pollinations from the browser
         toast.message("Server AI busy — trying from your browser…");
-        const fb = await aiApi.productImageFallbackUrl({
-          name,
-          hint: productHint?.trim() || undefined,
-        });
+        let url: string;
         try {
-          dataUrl = await loadPollinationsImageAsDataUrl(fb.url);
+          const fb = await aiApi.productImageFallbackUrl({
+            name,
+            hint: productHint?.trim() || undefined,
+          });
+          url = fb.url;
+        } catch {
+          // Build URL locally if fallback endpoint missing / old API
+          const prompt = [
+            "Product photo for online store",
+            name.slice(0, 80),
+            productHint?.trim()?.slice(0, 100) || null,
+            "white background, centered, sharp, no text",
+          ]
+            .filter(Boolean)
+            .join(", ");
+          const qs = new URLSearchParams({
+            width: "768",
+            height: "768",
+            model: "flux",
+            nologo: "true",
+            seed: String(Math.floor(Math.random() * 1_000_000_000)),
+          });
+          url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?${qs}`;
+        }
+        try {
+          dataUrl = await loadPollinationsImageAsDataUrl(url);
         } catch {
           throw serverErr instanceof ApiError
             ? serverErr
-            : new Error("Could not generate image. Try again or upload a photo.");
+            : new Error(
+                "Could not generate image. Try again or upload a photo.",
+              );
         }
       }
 
