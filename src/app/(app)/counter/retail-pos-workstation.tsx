@@ -43,6 +43,8 @@ type CartLine = {
   sku: string;
   name: string;
   unitPrice: number;
+  /** Catalog / shelf price when the line was added — used for urgent/special rate UI */
+  listPrice: number;
   qty: number;
   maxQty: number;
   sellUnit: SellUnit;
@@ -548,6 +550,7 @@ export default function RetailPosWorkstation({
                 maxQty: tracks ? onHand : Math.max(l.maxQty, next + 100),
                 sellUnit: unit,
                 image: l.image ?? image,
+                listPrice: l.listPrice ?? price,
                 taxRatePercent: l.taxRatePercent ?? taxRatePercent,
                 requiresVariant: row.requiresVariant === true,
                 variantOptions: row.variantOptions ?? [],
@@ -571,6 +574,7 @@ export default function RetailPosWorkstation({
           sku: row.sku,
           name: row.name,
           unitPrice: price,
+          listPrice: price,
           qty: normalizeQty(startQty, unit),
           maxQty: tracks ? onHand : 999999,
           sellUnit: unit,
@@ -1122,6 +1126,7 @@ export default function RetailPosWorkstation({
           sku: l.sku,
           name: l.name,
           unitPrice: l.unitPrice,
+          listPrice: l.unitPrice,
           qty: l.qty,
           maxQty: l.maxQty,
           sellUnit: normalizeSellUnit(l.sellUnit),
@@ -1805,11 +1810,86 @@ export default function RetailPosWorkstation({
                     </p>
                   ) : null}
                   <p className="truncate font-mono text-[0.65rem] text-[#8b9bb0]">
-                    {money(l.unitPrice)} {priceUnitLabel(l.sellUnit)}
+                    {l.sku}
                     {l.taxRatePercent != null
                       ? ` · tax ${l.taxRatePercent}%`
                       : ""}
                   </p>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                    <label className="sr-only" htmlFor={`rate-${l.stockLevelId}`}>
+                      Unit price
+                    </label>
+                    <Input
+                      id={`rate-${l.stockLevelId}`}
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      className="h-7 w-[5.5rem] bg-white px-1.5 text-xs font-semibold tabular-nums"
+                      value={Number.isFinite(l.unitPrice) ? l.unitPrice : ""}
+                      title="Change rate for this sale (urgent / special)"
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        if (raw === "") return;
+                        const next = moneyNumber(raw);
+                        if (!Number.isFinite(next) || next < 0) return;
+                        setCart((prev) =>
+                          prev.map((x) =>
+                            x.stockLevelId === l.stockLevelId
+                              ? { ...x, unitPrice: Math.round(next * 100) / 100 }
+                              : x,
+                          ),
+                        );
+                      }}
+                    />
+                    <span className="text-[0.65rem] font-medium text-[#94a3b8]">
+                      {priceUnitLabel(l.sellUnit)}
+                    </span>
+                    {Math.abs(l.unitPrice - (l.listPrice ?? l.unitPrice)) >
+                    0.001 ? (
+                      <>
+                        <span className="rounded bg-[#fff7ed] px-1.5 py-0.5 text-[0.62rem] font-bold tracking-wide text-[#c2410c] uppercase">
+                          Urgent / special
+                        </span>
+                        <button
+                          type="button"
+                          className="text-[0.65rem] font-semibold text-[#1a56db] hover:underline"
+                          onClick={() =>
+                            setCart((prev) =>
+                              prev.map((x) =>
+                                x.stockLevelId === l.stockLevelId
+                                  ? {
+                                      ...x,
+                                      unitPrice: x.listPrice ?? x.unitPrice,
+                                    }
+                                  : x,
+                              ),
+                            )
+                          }
+                        >
+                          Reset {money(l.listPrice ?? l.unitPrice)}
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        className="rounded border border-[#e2e8f0] bg-white px-1.5 py-0.5 text-[0.62rem] font-semibold text-[#475569] hover:border-[#1a56db] hover:text-[#1a56db]"
+                        title="Bump rate +20% for urgent sale"
+                        onClick={() =>
+                          setCart((prev) =>
+                            prev.map((x) => {
+                              if (x.stockLevelId !== l.stockLevelId) return x;
+                              const base = x.listPrice ?? x.unitPrice;
+                              const bumped =
+                                Math.round(base * 1.2 * 100) / 100;
+                              return { ...x, unitPrice: bumped };
+                            }),
+                          )
+                        }
+                      >
+                        Urgent +20%
+                      </button>
+                    )}
+                  </div>
                   <div className="mt-1 flex items-center gap-2">
                     <div className="flex shrink-0 items-center rounded-lg bg-white p-0.5 ring-1 ring-[#e4e9f0]">
                       <button

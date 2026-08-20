@@ -246,10 +246,8 @@ export function OverviewDashboard({ embed = false }: { embed?: boolean }) {
         <section className="space-y-3 rounded-[14px] border border-[#d9e0ea] bg-white p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <p className="text-[0.65rem] font-bold tracking-[0.12em] text-[#1a56db] uppercase">
-                Multi-store
-              </p>
-              <h2 className="text-sm font-semibold text-[#0b1f33]">
+              <p className="eyebrow">Multi-store</p>
+              <h2 className="section-title mt-1">
                 {branchDash.data?.branch.name
                   ? `Branch · ${branchDash.data.branch.name}`
                   : "All branches"}

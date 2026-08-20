@@ -45,13 +45,9 @@ export default function MultiStoreDashboardPage() {
     <div className="space-y-5">
       <header className="flex flex-wrap items-end justify-between gap-3 border-b border-[#eef1f4] pb-3">
         <div>
-          <p className="text-[0.65rem] font-bold tracking-[0.12em] text-[#1a56db] uppercase">
-            Multi-store
-          </p>
-          <h1 className="mt-0.5 text-[1.4rem] font-semibold text-[#0b1f33]">
-            Multi-store dashboard
-          </h1>
-          <p className="mt-0.5 text-[0.8rem] text-[#5a6b7d]">
+          <p className="eyebrow">Multi-store</p>
+          <h1 className="page-title mt-1">Multi-store dashboard</h1>
+          <p className="page-subtitle mt-1.5">
             All branches today · switch operating branch from the top bar
           </p>
         </div>

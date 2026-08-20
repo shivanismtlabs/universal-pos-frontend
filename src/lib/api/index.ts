@@ -1388,12 +1388,20 @@ export const ordersApi = {
         description?: string | null;
         quantity?: number | string;
         unitPrice: string | number;
+        lineTotal?: string | number;
         discount?: string | number;
         taxAmount: string | number;
         size?: string | null;
         inventoryUnitId?: string | null;
         stockUnitId?: string | null;
         stockLevelId?: string | null;
+        productId?: string | null;
+        product?: {
+          id: string;
+          name: string;
+          skuCode?: string | null;
+          taxCode?: string | null;
+        } | null;
         inventoryUnit?: {
           id: string;
           barcodeSku: string;
@@ -1405,6 +1413,16 @@ export const ordersApi = {
           barcodeSku: string;
           variantLabel?: string | null;
         } | null;
+        stockLevel?: {
+          id: string;
+          sku?: string | null;
+          product?: {
+            id?: string;
+            name?: string | null;
+            skuCode?: string | null;
+            taxCode?: string | null;
+          } | null;
+        } | null;
         retailSku?: { id: string; sku: string } | null;
         wearer?: { id: string; fullName: string } | null;
       }>;
@@ -1414,7 +1432,11 @@ export const ordersApi = {
         method: string;
         status: string;
         type: string;
+        createdAt?: string;
       }>;
+      createdAt?: string;
+      location?: { id: string; name: string; address?: string | null } | null;
+      store?: { id: string; name: string; address?: string | null } | null;
     }>(`/orders/${id}`, { token: token() });
   },
 
@@ -3015,6 +3037,7 @@ export const tenantsApi = {
       currencyCode?: string;
       locale?: string;
       branding?: Record<string, unknown> | null;
+      settings?: Record<string, unknown> | null;
     }>("/tenants/me", { token: token() });
   },
   listStores() {
@@ -6128,12 +6151,14 @@ export const billingApi = {
         id: string;
         invoiceNumber: string;
         gstin?: string | null;
+        taxIdSnapshot?: string | null;
         placeOfSupply?: string | null;
         cgst: string | number;
         sgst: string | number;
         igst: string | number;
         grandTotal: string | number;
         createdAt: string;
+        taxBreakdown?: Record<string, unknown> | null;
       }>
     >(`/orders/${orderId}/invoices`, { token: token() });
   },

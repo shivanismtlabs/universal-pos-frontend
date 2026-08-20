@@ -733,16 +733,17 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
-      <PageHeader
-        title={meta.title}
-        subtitle={
-          tab === "branding" && boot?.tenant?.id
-            ? `ID: ${boot.tenant.id}${productName ? ` · ${productName}` : ""}`
-            : productName
-              ? `${meta.subtitle} · ${productName}`
-              : meta.subtitle
-        }
-      />
+        <PageHeader
+          title={meta.title}
+          eyebrow="Business settings"
+          subtitle={
+            tab === "branding" && boot?.tenant?.id
+              ? `ID: ${boot.tenant.id}${productName ? ` · ${productName}` : ""}`
+              : productName
+                ? `${meta.subtitle} · ${productName}`
+                : meta.subtitle
+          }
+        />
 
       {tab === "branding" ? (
         <section className="space-y-5 rounded-2xl border border-[#e5e7eb] bg-white p-5">

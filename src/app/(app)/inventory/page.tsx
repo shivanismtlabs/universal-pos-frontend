@@ -121,6 +121,7 @@ function InventoryPageInner() {
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <PageHeader
+        eyebrow="Stock"
         title="Inventory"
         subtitle="How much stock you have in this shop. Import an Excel file to add items and opening qty."
         action={

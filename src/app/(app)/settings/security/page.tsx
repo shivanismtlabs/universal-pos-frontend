@@ -81,14 +81,12 @@ export default function SecuritySettingsPage() {
   return (
     <div className="mx-auto max-w-3xl space-y-5 p-4 md:p-6">
       <header className="border-b border-[#eef1f4] pb-4">
-        <p className="text-[0.65rem] font-bold tracking-[0.12em] text-[#1a56db] uppercase">
-          Settings · Security
-        </p>
-        <h1 className="mt-0.5 flex items-center gap-2 text-[1.4rem] font-semibold text-[#0b1f33]">
-          <Shield className="size-6 text-[#1a56db]" />
+        <p className="eyebrow">Settings · Security</p>
+        <h1 className="page-title mt-1 flex items-center gap-2">
+          <Shield className="size-6 shrink-0 text-[#1a56db]" strokeWidth={2.25} />
           Security
         </h1>
-        <p className="mt-1 text-sm text-[#5a6b7d]">
+        <p className="page-subtitle mt-1.5">
           Audit trail, IP restrictions, session timeout, 2FA, encrypted backups.
         </p>
       </header>

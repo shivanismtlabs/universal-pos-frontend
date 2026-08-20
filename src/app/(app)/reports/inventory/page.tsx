@@ -455,6 +455,7 @@ export default function InventoryReportsPage() {
       <div className="document-print-root mx-auto max-w-3xl space-y-4">
         <PageHeader
           title="Inventory Reports"
+          eyebrow="Reports"
           subtitle="Stock levels, movement, and valuation for physical goods."
         />
         <div className="rounded-2xl border border-[#d9e0ea] bg-white px-6 py-10 text-center">
@@ -477,6 +478,7 @@ export default function InventoryReportsPage() {
   return (
     <div className="document-print-root mx-auto max-w-6xl space-y-5">
       <PageHeader
+        eyebrow="Reports"
         title="Inventory Reports"
         subtitle="Stock levels, movement, valuation, adjustments, reorder, and expiry — any business with physical goods."
         action={

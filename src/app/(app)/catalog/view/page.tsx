@@ -307,11 +307,11 @@ function CatalogProductDetailPage() {
             ) : null}
           </div>
           <div>
-            <p className="text-[0.65rem] font-bold tracking-wide text-[#1a56db] uppercase">
+            <p className="eyebrow">
               {p.kind} · {p.status}
             </p>
-            <h1 className="text-xl font-semibold text-[#0b1f33]">{p.name}</h1>
-            <p className="font-mono text-sm text-[#5a6b7d]">
+            <h1 className="page-title mt-1">{p.name}</h1>
+            <p className="mt-1 font-mono text-sm font-medium text-[#475569]">
               SKU {p.skuCode}
               {p.barcode ? ` · Barcode ${p.barcode}` : ""}
             </p>

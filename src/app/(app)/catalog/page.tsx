@@ -99,13 +99,9 @@ function CatalogPageInner() {
     <div className="space-y-3">
       <header className="flex flex-wrap items-end justify-between gap-3 border-b border-[#eef1f4] pb-3">
         <div className="min-w-0">
-          <p className="text-[0.65rem] font-bold tracking-[0.12em] text-[#1a56db] uppercase">
-            Inventory
-          </p>
-          <h1 className="mt-0.5 text-[1.4rem] font-semibold tracking-tight text-[#0b1f33]">
-            Product catalog
-        </h1>
-          <p className="mt-0.5 text-[0.8rem] text-[#5a6b7d]">
+          <p className="eyebrow">Inventory</p>
+          <h1 className="page-title mt-1">Product catalog</h1>
+          <p className="page-subtitle mt-1.5">
             What you sell · rent · service — stock quantities live under Stock
             levels
           </p>

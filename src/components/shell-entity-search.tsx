@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { appsApi } from "@/lib/api";
 import { useBootstrap } from "@/lib/bootstrap";
 
-/** Product + customer hits for the shell search box */
+/** Product + customer hits for the shell search box (light sidebar). */
 export function ShellEntitySearch({
   query,
   onNavigate,
@@ -30,19 +30,21 @@ export function ShellEntitySearch({
     !search.isLoading && products.length === 0 && customers.length === 0;
 
   return (
-    <div className="mt-2 max-h-64 space-y-2 overflow-y-auto rounded-lg border border-white/10 bg-[#0a0e14] p-2 [scrollbar-width:thin]">
+    <div className="mt-2 max-h-64 space-y-2 overflow-y-auto rounded-lg border border-[#e2e8f0] bg-white p-2 shadow-[0_8px_24px_-12px_rgba(15,23,42,0.25)] [scrollbar-width:thin]">
       {search.isLoading ? (
-        <p className="px-1 py-2 text-[0.7rem] text-[#7a8796]">Searching…</p>
+        <p className="px-1 py-2 text-[0.7rem] font-medium text-[#64748b]">
+          Searching…
+        </p>
       ) : null}
       {empty ? (
-        <p className="px-1 py-2 text-[0.7rem] text-[#7a8796]">
+        <p className="px-1 py-2 text-[0.7rem] font-medium text-[#64748b]">
           No products or customers match “{q}”
         </p>
       ) : null}
 
       {products.length ? (
         <div>
-          <p className="px-1 pb-1 text-[0.58rem] font-semibold tracking-[0.12em] text-[#6b8ab8] uppercase">
+          <p className="px-1 pb-1 text-[0.58rem] font-bold tracking-[0.12em] text-[#94a3b8] uppercase">
             Products
           </p>
           <ul className="space-y-0.5">
@@ -51,12 +53,12 @@ export function ShellEntitySearch({
                 <Link
                   href={p.href}
                   onClick={onNavigate}
-                  className="block rounded-md px-2 py-1.5 hover:bg-white/[0.06]"
+                  className="block rounded-md px-2 py-1.5 hover:bg-[#f1f5f9]"
                 >
-                  <p className="truncate text-[0.78rem] font-medium text-white">
+                  <p className="truncate text-[0.78rem] font-semibold text-[#0b1f33]">
                     {p.name}
                   </p>
-                  <p className="truncate text-[0.65rem] text-[#7a8796]">
+                  <p className="truncate text-[0.65rem] font-medium text-[#64748b]">
                     {p.sku}
                     {p.category ? ` · ${p.category}` : ""} · {money(p.price)}
                   </p>
@@ -69,7 +71,7 @@ export function ShellEntitySearch({
 
       {customers.length ? (
         <div>
-          <p className="px-1 pb-1 text-[0.58rem] font-semibold tracking-[0.12em] text-[#6b8ab8] uppercase">
+          <p className="px-1 pb-1 text-[0.58rem] font-bold tracking-[0.12em] text-[#94a3b8] uppercase">
             Customers
           </p>
           <ul className="space-y-0.5">
@@ -78,12 +80,12 @@ export function ShellEntitySearch({
                 <Link
                   href={c.href}
                   onClick={onNavigate}
-                  className="block rounded-md px-2 py-1.5 hover:bg-white/[0.06]"
+                  className="block rounded-md px-2 py-1.5 hover:bg-[#f1f5f9]"
                 >
-                  <p className="truncate text-[0.78rem] font-medium text-white">
+                  <p className="truncate text-[0.78rem] font-semibold text-[#0b1f33]">
                     {c.fullName}
                   </p>
-                  <p className="truncate text-[0.65rem] text-[#7a8796]">
+                  <p className="truncate text-[0.65rem] font-medium text-[#64748b]">
                     {c.phone}
                     {c.email ? ` · ${c.email}` : ""}
                   </p>

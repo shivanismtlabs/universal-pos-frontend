@@ -235,7 +235,8 @@ export default function PurchasesPage() {
   return (
     <div className="mx-auto max-w-6xl space-y-5">
       <PageHeader
-        title="Purchases"
+        eyebrow="Purchases"
+        title="GRN & payables"
         subtitle="Goods receipts, supplier invoices, payments, and AP ledger. Vendor master lives under Suppliers."
       />
 

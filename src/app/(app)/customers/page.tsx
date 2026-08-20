@@ -302,6 +302,7 @@ export default function CustomersPage() {
     <div className="mx-auto max-w-6xl space-y-8">
       <FadeIn>
         <PageHeader
+          eyebrow="People"
           title="Customers"
           subtitle="Customer directory for your shop. Search, add contacts, and review history."
           action={

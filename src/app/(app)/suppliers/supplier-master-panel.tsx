@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -323,8 +324,8 @@ export function SupplierMasterPanel() {
             One master list for any shop — goods, services, or both.
           </p>
         </div>
-        <Button type="button" size="sm" onClick={startNew}>
-          + New supplier
+        <Button type="button" size="sm" asChild>
+          <Link href="/suppliers/new">+ New supplier</Link>
         </Button>
       </div>
       <div className="flex flex-wrap gap-2 px-4 py-2">

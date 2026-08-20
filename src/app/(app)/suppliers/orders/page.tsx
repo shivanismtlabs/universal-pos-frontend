@@ -274,8 +274,8 @@ export default function SupplierPurchaseOrdersPage() {
   return (
     <div className="mx-auto max-w-5xl space-y-5">
       <header>
-        <p className="eyebrow">Suppliers</p>
-        <h1 className="display mt-1 text-3xl text-[#0b1f33]">
+        <p className="eyebrow">Purchases</p>
+        <h1 className="display mt-1 text-[1.75rem] sm:text-3xl text-[#0b1f33]">
           Purchase orders
         </h1>
         <p className="mt-1 text-sm text-[#475569]">

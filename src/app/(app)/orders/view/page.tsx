@@ -46,6 +46,67 @@ import { ModeBadge } from "@/components/mode-badge";
 import { PageBreadcrumb, PageSkeleton } from "@/components/page-header";
 import { ReceiptModal, type ReceiptData } from "@/components/receipt-modal";
 import { SaleReturnDialog } from "@/components/sale-return-dialog";
+import { printTaxInvoice } from "@/lib/tax-invoice-print";
+import { useBootstrap } from "@/lib/bootstrap";
+
+function lineItemName(item: {
+  description?: string | null;
+  product?: { name?: string | null; skuCode?: string | null } | null;
+  inventoryUnit?: { barcodeSku?: string } | null;
+  stockUnit?: { barcodeSku?: string; variantLabel?: string | null } | null;
+  stockLevel?: {
+    sku?: string | null;
+    product?: { name?: string | null } | null;
+  } | null;
+  retailSku?: { sku?: string } | null;
+  itemKind?: string;
+  itemType?: string;
+}) {
+  return (
+    item.product?.name?.trim() ||
+    item.stockLevel?.product?.name?.trim() ||
+    item.description?.trim() ||
+    item.stockUnit?.variantLabel?.trim() ||
+    item.inventoryUnit?.barcodeSku ||
+    item.stockUnit?.barcodeSku ||
+    item.retailSku?.sku ||
+    item.stockLevel?.sku ||
+    "Line item"
+  );
+}
+
+function lineItemSku(item: {
+  product?: { skuCode?: string | null } | null;
+  inventoryUnit?: { barcodeSku?: string } | null;
+  stockUnit?: { barcodeSku?: string } | null;
+  stockLevel?: {
+    sku?: string | null;
+    product?: { skuCode?: string | null } | null;
+  } | null;
+  retailSku?: { sku?: string } | null;
+}) {
+  return (
+    item.product?.skuCode ||
+    item.stockLevel?.product?.skuCode ||
+    item.stockLevel?.sku ||
+    item.inventoryUnit?.barcodeSku ||
+    item.stockUnit?.barcodeSku ||
+    item.retailSku?.sku ||
+    null
+  );
+}
+
+function commerceModeForItem(item: {
+  itemKind?: string;
+  itemType?: string;
+}): string {
+  const k = (item.itemKind || item.itemType || "").toLowerCase();
+  if (k === "retail" || k === "sale" || k === "product") return "sale";
+  if (k === "rental_unit" || k === "rental") return "rental";
+  if (k === "service") return "service";
+  if (k === "subscription") return "subscription";
+  return "sale";
+}
 
 export default function OrderDetailPage() {
   return (
@@ -59,6 +120,7 @@ function OrderDetailInner() {
   const search = useSearchParams();
   const id = search.get("id") ?? "";
   const qc = useQueryClient();
+  const { productName } = useBootstrap();
   const roles = useAuthStore((s) => s.user?.roles ?? EMPTY_ROLES);
   const allowRefund = canRefund(roles);
   const allowFinance = canFinance(roles);
@@ -382,28 +444,37 @@ function OrderDetailInner() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
+    <div className="mx-auto max-w-5xl space-y-5">
       <PageBreadcrumb
         items={[
           { label: "All orders", href: "/orders" },
           { label: data.orderNumber },
         ]}
       />
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
+      <header className="flex flex-wrap items-start justify-between gap-4 border-b border-[#eef1f4] pb-4">
+        <div className="min-w-0">
+          <p className="eyebrow">Sales · Order</p>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
             <h1 className="page-title">{data.orderNumber}</h1>
             <ModeBadge mode={data.kind} />
+            <span className="rounded-md bg-[#f1f5f9] px-2 py-0.5 text-[0.7rem] font-bold tracking-wide text-[#475569] uppercase">
+              {isRental
+                ? lifecycleLabel(lifecycle)
+                : data.status.replaceAll("_", " ")}
+            </span>
           </div>
-          <p className="page-subtitle mt-1">
-            {data.customer?.fullName ?? "Walk-in"}
-            {data.customer?.phone ? ` · ${data.customer.phone}` : ""} ·{" "}
-            {isRental
-              ? lifecycleLabel(lifecycle)
-              : data.status.replaceAll("_", " ")}
+          <p className="page-subtitle mt-1.5">
+            {data.customer?.fullName ?? "Walk-in Guest"}
+            {data.customer?.phone ? ` · ${data.customer.phone}` : ""}
+            {data.location?.name || data.store?.name
+              ? ` · ${data.location?.name ?? data.store?.name}`
+              : ""}
+            {data.createdAt
+              ? ` · ${new Date(data.createdAt).toLocaleString()}`
+              : ""}
           </p>
         </div>
-        <div className="flex flex-wrap items-start gap-3">
+        <div className="flex flex-wrap items-start gap-2">
           {allowRefund &&
           data.kind === "sale" &&
           data.status === "closed" ? (
@@ -427,9 +498,7 @@ function OrderDetailInner() {
             type="button"
             variant="secondary"
             size="sm"
-            disabled={
-              sendInvoice.isPending || !data.customer?.id
-            }
+            disabled={sendInvoice.isPending || !data.customer?.id}
             title={
               data.customer?.id
                 ? "Email / SMS invoice to customer"
@@ -439,11 +508,11 @@ function OrderDetailInner() {
           >
             {sendInvoice.isPending ? "Sending…" : "Email / SMS invoice"}
           </Button>
-          <div className="text-right">
-            <p className="text-caption font-medium tracking-wide text-[var(--muted)] uppercase">
-              Balance
+          <div className="ml-1 rounded-xl border border-[#e2e8f0] bg-white px-3 py-2 text-right shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+            <p className="text-[0.65rem] font-bold tracking-[0.1em] text-[#94a3b8] uppercase">
+              Balance due
             </p>
-            <p className="text-2xl font-semibold tabular-nums">
+            <p className="text-xl font-extrabold tabular-nums text-[#0b1f33]">
               {formatInr(data.balanceDue)}
             </p>
           </div>
@@ -473,7 +542,7 @@ function OrderDetailInner() {
       {isRental &&
       ["reserved", "ready", "checked_out"].includes(lifecycle) ? (
         <section className="rounded-2xl border border-[#e5e7eb] bg-white p-4">
-          <h2 className="text-sm font-semibold">Extend rental</h2>
+          <h2 className="section-title text-[0.95rem]">Extend rental</h2>
           <p className="mt-1 text-xs text-[#6b7280]">
             Current due:{" "}
             {formatDate(
@@ -510,7 +579,7 @@ function OrderDetailInner() {
         </section>
       ) : null}
 
-      <div className="grid gap-4 sm:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-4">
         {[
           ["Subtotal", formatInr(data.subtotal)],
           ["Tax", formatInr(data.taxTotal)],
@@ -519,74 +588,114 @@ function OrderDetailInner() {
         ].map(([k, v]) => (
           <div
             key={k}
-            className="rounded-xl border border-[#e5e7eb] bg-white px-3 py-2.5"
+            className="rounded-xl border border-[#e2e8f0] bg-white px-3.5 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
           >
-            <p className="text-[0.65rem] font-semibold tracking-wide text-[#9ca3af] uppercase">
+            <p className="text-[0.65rem] font-bold tracking-[0.12em] text-[#94a3b8] uppercase">
               {k}
             </p>
-            <p className="mt-0.5 text-sm font-semibold">{v}</p>
+            <p className="mt-1 text-[0.95rem] font-bold tabular-nums text-[#0b1f33]">
+              {v}
+            </p>
           </div>
         ))}
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-[1.2fr_0.9fr]">
-        <section className="rounded-2xl border border-[#e5e7eb] bg-white p-4">
-          <h2 className="text-sm font-semibold">Line items</h2>
-          <table className="mt-2 w-full text-left text-sm">
-            <tbody className="divide-y divide-[#f3f4f6]">
-              {data.items.map((item) => (
-                <tr key={item.id}>
-                  <td className="py-2.5">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <ModeBadge
-                        mode={
-                          item.itemType === "retail" ||
-                          item.itemType === "sale"
-                            ? "sale"
-                            : item.itemType === "rental_unit" ||
-                                item.itemType === "rental"
-                              ? "rental"
-                              : item.itemType
-                        }
-                      />
-                      <span className="font-medium">
-                        {item.inventoryUnit?.barcodeSku ??
-                          item.retailSku?.sku ??
-                          item.itemType}
-                      </span>
-                    </div>
-                    {item.size ? (
-                      <span className="text-[#6b7280]"> · {item.size}</span>
-                    ) : null}
-                  </td>
-                  <td className="py-2.5">{formatInr(item.unitPrice)}</td>
-                  <td className="py-2.5 text-right">
-                    {canEditItems ? (
-                      <Button
-                        type="button"
-                        variant="danger"
-                        size="sm"
-                        onClick={() => removeItem.mutate(item.id)}
-                      >
-                        Remove
-                      </Button>
-                    ) : null}
-                  </td>
+      <div className="grid gap-5 lg:grid-cols-[1.25fr_0.85fr]">
+        <section className="overflow-hidden rounded-2xl border border-[#e2e8f0] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+          <div className="flex items-center justify-between border-b border-[#eef1f4] px-4 py-3">
+            <div>
+              <h2 className="section-title text-[0.95rem]">Line items</h2>
+              <p className="mt-0.5 text-[0.75rem] font-medium text-[#64748b]">
+                {data.items.length} line
+                {data.items.length === 1 ? "" : "s"} on this order
+              </p>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[520px] text-left text-sm">
+              <thead className="bg-[#f8fafc] text-[0.65rem] font-bold tracking-[0.08em] text-[#64748b] uppercase">
+                <tr>
+                  <th className="px-4 py-2.5 font-bold">Item</th>
+                  <th className="px-3 py-2.5 text-right font-bold">Qty</th>
+                  <th className="px-3 py-2.5 text-right font-bold">Rate</th>
+                  <th className="px-3 py-2.5 text-right font-bold">Tax</th>
+                  <th className="px-4 py-2.5 text-right font-bold">Amount</th>
+                  {canEditItems ? (
+                    <th className="px-3 py-2.5 text-right font-bold"> </th>
+                  ) : null}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-[#f1f5f9]">
+                {data.items.map((item) => {
+                  const qty = moneyNumber(item.quantity ?? 1);
+                  const rate = moneyNumber(item.unitPrice);
+                  const tax = moneyNumber(item.taxAmount);
+                  const amount =
+                    item.lineTotal != null
+                      ? moneyNumber(item.lineTotal)
+                      : rate * qty + tax;
+                  const name = lineItemName(item);
+                  const sku = lineItemSku(item);
+                  return (
+                    <tr key={item.id} className="hover:bg-[#fafbfc]">
+                      <td className="px-4 py-3">
+                        <div className="flex items-start gap-2">
+                          <ModeBadge mode={commerceModeForItem(item)} />
+                          <div className="min-w-0">
+                            <p className="font-semibold text-[#0b1f33]">
+                              {name}
+                            </p>
+                            <p className="mt-0.5 font-mono text-[0.7rem] text-[#64748b]">
+                              {sku ? `SKU ${sku}` : null}
+                              {item.size ? ` · Size ${item.size}` : null}
+                              {!sku && !item.size ? "—" : null}
+                            </p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-3 py-3 text-right tabular-nums font-medium">
+                        {qty % 1 === 0 ? qty : qty.toFixed(3)}
+                      </td>
+                      <td className="px-3 py-3 text-right tabular-nums">
+                        {formatInr(rate)}
+                      </td>
+                      <td className="px-3 py-3 text-right tabular-nums text-[#64748b]">
+                        {formatInr(tax)}
+                      </td>
+                      <td className="px-4 py-3 text-right font-bold tabular-nums text-[#0b1f33]">
+                        {formatInr(amount)}
+                      </td>
+                      {canEditItems ? (
+                        <td className="px-3 py-3 text-right">
+                          <Button
+                            type="button"
+                            variant="danger"
+                            size="sm"
+                            onClick={() => removeItem.mutate(item.id)}
+                          >
+                            Remove
+                          </Button>
+                        </td>
+                      ) : null}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
           {!data.items.length ? (
-            <p className="py-4 text-sm text-[#6b7280]">No items yet</p>
+            <p className="px-4 py-8 text-center text-sm text-[#64748b]">
+              No items on this order yet
+            </p>
           ) : null}
 
           {canEditItems ? (
             <form
-              className="mt-4 space-y-3 border-t border-[#e5e7eb] pt-4"
+              className="space-y-3 border-t border-[#eef1f4] p-4"
               onSubmit={form.handleSubmit((v) => addItem.mutate(v))}
               noValidate
             >
-              <h3 className="text-sm font-semibold">Add item</h3>
+              <h3 className="text-sm font-bold text-[#0b1f33]">Add item</h3>
               <select className="select-field" {...form.register("itemType")}>
                 <option value="rental_unit">Rental unit</option>
                 <option value="retail">Retail</option>
@@ -632,9 +741,14 @@ function OrderDetailInner() {
         <div className="space-y-4">
           {allowFinance ? (
             <>
-          <section className="rounded-2xl border border-[#e5e7eb] bg-white p-4">
+          <section className="rounded-2xl border border-[#e2e8f0] bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
             <div className="flex items-center justify-between gap-2">
-              <h2 className="text-sm font-semibold">GST invoices</h2>
+              <div>
+                <h2 className="section-title text-[0.95rem]">GST invoices</h2>
+                <p className="mt-0.5 text-[0.72rem] font-medium text-[#64748b]">
+                  Tax invoice for this order
+                </p>
+              </div>
               <Button
                 type="button"
                 size="sm"
@@ -644,11 +758,13 @@ function OrderDetailInner() {
                 Generate
               </Button>
             </div>
-            <ul className="mt-2 divide-y divide-[#f3f4f6] text-sm">
+            <ul className="mt-3 divide-y divide-[#f1f5f9] text-sm">
               {(invoices.data ?? []).map((inv) => (
-                <li key={inv.id} className="py-2">
-                  <p className="font-mono font-semibold">{inv.invoiceNumber}</p>
-                  <p className="text-xs text-[#6b7280]">
+                <li key={inv.id} className="py-3">
+                  <p className="font-mono text-[0.85rem] font-bold text-[#0b1f33]">
+                    {inv.invoiceNumber}
+                  </p>
+                  <p className="mt-0.5 text-[0.75rem] font-medium text-[#64748b]">
                     CGST {formatInr(inv.cgst)} · SGST {formatInr(inv.sgst)}
                     {moneyNumber(inv.igst) > 0
                       ? ` · IGST ${formatInr(inv.igst)}`
@@ -657,36 +773,116 @@ function OrderDetailInner() {
                   </p>
                   <button
                     type="button"
-                    className="mt-1 text-xs font-medium text-[#0b1f33] hover:underline"
+                    className="mt-2 text-[0.78rem] font-bold text-[#1a56db] hover:underline"
                     onClick={() => {
-                      const w = window.open("", "_blank");
-                      if (!w) return;
-                      w.document.write(`<!doctype html><html><head><title>${inv.invoiceNumber}</title>
-<style>body{font-family:Segoe UI,sans-serif;padding:24px;color:#111}h1{font-size:18px}table{width:100%;border-collapse:collapse;margin-top:16px}td,th{border-bottom:1px solid #e5e7eb;padding:8px;text-align:left;font-size:13px}</style>
-</head><body>
-<h1>Tax Invoice · ${inv.invoiceNumber}</h1>
-<p>${data.customer?.fullName ?? ""} · ${data.orderNumber}</p>
-<p>GSTIN: ${inv.gstin ?? tenant.data?.gstin ?? "—"}</p>
-<table><tr><th>CGST</th><td>${formatInr(inv.cgst)}</td></tr>
-<tr><th>SGST</th><td>${formatInr(inv.sgst)}</td></tr>
-<tr><th>IGST</th><td>${formatInr(inv.igst)}</td></tr>
-<tr><th>Grand total</th><td><strong>${formatInr(inv.grandTotal)}</strong></td></tr></table>
-<script>window.print()</script></body></html>`);
-                      w.document.close();
+                      const branding = (tenant.data?.branding ??
+                        {}) as Record<string, unknown>;
+                      const settings = (tenant.data as { settings?: Record<string, unknown> } | undefined)?.settings;
+                      const org =
+                        settings?.organizationProfile &&
+                        typeof settings.organizationProfile === "object"
+                          ? (settings.organizationProfile as Record<
+                              string,
+                              unknown
+                            >)
+                          : {};
+                      const shopName =
+                        (typeof branding.productName === "string" &&
+                          branding.productName) ||
+                        productName ||
+                        tenant.data?.name ||
+                        "Universal POS";
+                      const lines = data.items.map((item) => {
+                        const qty = moneyNumber(item.quantity ?? 1);
+                        const rate = moneyNumber(item.unitPrice);
+                        const tax = moneyNumber(item.taxAmount);
+                        const amount =
+                          item.lineTotal != null
+                            ? moneyNumber(item.lineTotal)
+                            : rate * qty + tax;
+                        return {
+                          name: lineItemName(item),
+                          sku: lineItemSku(item),
+                          hsn:
+                            item.product?.taxCode ||
+                            item.stockLevel?.product?.taxCode ||
+                            null,
+                          qty,
+                          rate,
+                          tax,
+                          amount,
+                        };
+                      });
+                      const ok = printTaxInvoice({
+                        invoiceNumber: inv.invoiceNumber,
+                        createdAt: inv.createdAt,
+                        orderNumber: data.orderNumber,
+                        gstin:
+                          inv.taxIdSnapshot ||
+                          inv.gstin ||
+                          tenant.data?.gstin ||
+                          tenant.data?.taxId ||
+                          null,
+                        placeOfSupply:
+                          inv.placeOfSupply ||
+                          (typeof inv.taxBreakdown?.placeOfSupply === "string"
+                            ? inv.taxBreakdown.placeOfSupply
+                            : null),
+                        cgst: moneyNumber(inv.cgst),
+                        sgst: moneyNumber(inv.sgst),
+                        igst: moneyNumber(inv.igst),
+                        grandTotal: moneyNumber(inv.grandTotal),
+                        subtotal: moneyNumber(data.subtotal),
+                        taxTotal: moneyNumber(data.taxTotal),
+                        shop: {
+                          name: shopName,
+                          tagline:
+                            typeof branding.tagline === "string"
+                              ? branding.tagline
+                              : null,
+                          address:
+                            data.location?.address ||
+                            data.store?.address ||
+                            [
+                              typeof org.addressLine1 === "string"
+                                ? org.addressLine1
+                                : "",
+                              typeof org.city === "string" ? org.city : "",
+                              typeof org.state === "string" ? org.state : "",
+                            ]
+                              .filter(Boolean)
+                              .join(", ") ||
+                            null,
+                          phone:
+                            typeof org.phone === "string" ? org.phone : null,
+                          email:
+                            typeof org.email === "string" ? org.email : null,
+                          logoUrl:
+                            typeof branding.logoUrl === "string"
+                              ? branding.logoUrl
+                              : null,
+                        },
+                        customer: {
+                          name: data.customer?.fullName ?? "Walk-in Guest",
+                          phone: data.customer?.phone ?? null,
+                        },
+                        lines,
+                      });
+                      if (!ok) toast.error("Could not open print preview");
                     }}
                   >
-                    Print
+                    Print tax invoice
                   </button>
                 </li>
               ))}
               {!invoices.data?.length ? (
-                <li className="py-3 text-[#6b7280]">No invoices yet</li>
+                <li className="py-3 text-[#64748b]">No invoices yet — click Generate</li>
               ) : null}
             </ul>
           </section>
 
-          <section className="rounded-2xl border border-[#e5e7eb] bg-white p-4">
-            <h2 className="text-sm font-semibold">Fees &amp; layaway</h2>
+          <section className="rounded-2xl border border-[#e2e8f0] bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+            <h2 className="section-title text-[0.95rem]">Fees &amp; layaway</h2>
             <div className="mt-2 flex flex-wrap gap-1.5">
               <Button
                 type="button"
@@ -792,9 +988,9 @@ function OrderDetailInner() {
             </>
           ) : null}
 
-          <section className="rounded-2xl border border-[#e5e7eb] bg-white p-4">
+          <section className="rounded-2xl border border-[#e2e8f0] bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
             <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold">Rental agreement</h2>
+              <h2 className="section-title text-[0.95rem]">Rental agreement</h2>
               <Button
                 type="button"
                 size="sm"
@@ -834,25 +1030,40 @@ function OrderDetailInner() {
         </div>
       </div>
 
-      <section className="overflow-hidden rounded-2xl border border-[#e5e7eb] bg-white p-4">
-        <h2 className="text-sm font-semibold">Payments</h2>
-        <table className="mt-2 w-full text-left text-sm">
-          <thead className="text-[0.65rem] tracking-wide text-[#9ca3af] uppercase">
+      <section className="overflow-hidden rounded-2xl border border-[#e2e8f0] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+        <div className="border-b border-[#eef1f4] px-4 py-3">
+          <h2 className="section-title text-[0.95rem]">Payments</h2>
+          <p className="mt-0.5 text-[0.75rem] font-medium text-[#64748b]">
+            {(data.payments ?? []).length} payment
+            {(data.payments ?? []).length === 1 ? "" : "s"} recorded
+          </p>
+        </div>
+        <div className="overflow-x-auto px-4 pb-3">
+        <table className="mt-1 w-full min-w-[480px] text-left text-sm">
+          <thead className="text-[0.65rem] font-bold tracking-[0.08em] text-[#64748b] uppercase">
             <tr>
-              <th className="pb-2">Amount</th>
-              <th className="pb-2">Method</th>
-              <th className="pb-2">Type</th>
-              <th className="pb-2">Status</th>
-              <th className="pb-2" />
+              <th className="py-2.5 pr-3">Amount</th>
+              <th className="py-2.5 pr-3">Method</th>
+              <th className="py-2.5 pr-3">Type</th>
+              <th className="py-2.5 pr-3">Status</th>
+              <th className="py-2.5" />
             </tr>
           </thead>
-          <tbody className="divide-y divide-[#f3f4f6]">
+          <tbody className="divide-y divide-[#f1f5f9]">
             {(data.payments ?? []).map((p) => (
-              <tr key={p.id}>
-                <td className="py-2.5">{formatInr(p.amount)}</td>
-                <td className="py-2.5">{p.method}</td>
-                <td className="py-2.5">{p.type}</td>
-                <td className="py-2.5">{p.status}</td>
+              <tr key={p.id} className="hover:bg-[#fafbfc]">
+                <td className="py-2.5 pr-3 font-bold tabular-nums text-[#0b1f33]">
+                  {formatInr(p.amount)}
+                </td>
+                <td className="py-2.5 pr-3 capitalize">{p.method.replaceAll("_", " ")}</td>
+                <td className="py-2.5 pr-3 capitalize text-[#64748b]">
+                  {p.type.replaceAll("_", " ")}
+                </td>
+                <td className="py-2.5 pr-3">
+                  <span className="rounded-md bg-[#f1f5f9] px-1.5 py-0.5 text-[0.7rem] font-bold tracking-wide text-[#475569] uppercase">
+                    {p.status.replaceAll("_", " ")}
+                  </span>
+                </td>
                 <td className="py-2.5 text-right">
                   {allowRefund &&
                   data.kind !== "sale" &&
@@ -894,6 +1105,7 @@ function OrderDetailInner() {
         {!data.payments?.length ? (
           <p className="py-4 text-sm text-[#6b7280]">No payments</p>
         ) : null}
+        </div>
       </section>
 
       {receiptOpen ? (

@@ -226,9 +226,9 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    id: "suppliers",
-    label: "Suppliers",
-    icon: Building2,
+    id: "purchases",
+    label: "Purchases",
+    icon: Truck,
     section: "Commerce",
     commerce: "sale",
     children: [
@@ -240,21 +240,19 @@ const NAV_GROUPS: NavGroup[] = [
         module: "inventory",
       },
       {
+        href: "/suppliers/new",
+        label: "New supplier",
+        icon: Building2,
+        commerce: "sale",
+        module: "inventory",
+      },
+      {
         href: "/suppliers/orders",
         label: "Purchase orders",
         icon: ClipboardList,
         commerce: "sale",
         module: "inventory",
       },
-    ],
-  },
-  {
-    id: "purchases",
-    label: "Purchases",
-    icon: Truck,
-    section: "Commerce",
-    commerce: "sale",
-    children: [
       {
         href: "/purchases",
         label: "GRN & payables",
@@ -682,9 +680,13 @@ function isLeafActive(pathname: string, search: string, href: string) {
     return pathname === "/settings";
   }
 
-  // `/suppliers` directory only — not /suppliers/orders
+  // `/suppliers` directory only — not /suppliers/orders or /suppliers/new
   if (base === "/suppliers") {
     return pathname === "/suppliers";
+  }
+
+  if (base === "/suppliers/new") {
+    return pathname === "/suppliers/new";
   }
 
   return pathname === base || pathname.startsWith(`${base}/`);

@@ -89,13 +89,9 @@ export default function OfflineSettingsPage() {
   return (
     <div className="mx-auto max-w-3xl space-y-5 p-4 md:p-6">
       <header className="border-b border-[#eef1f4] pb-4">
-        <p className="text-[0.65rem] font-bold tracking-[0.12em] text-[#1a56db] uppercase">
-          Settings · Offline
-        </p>
-        <h1 className="mt-0.5 text-[1.4rem] font-semibold text-[#0b1f33]">
-          Local data &amp; sync
-        </h1>
-        <p className="mt-1 text-sm text-[#5a6b7d]">
+        <p className="eyebrow">Settings · Offline</p>
+        <h1 className="page-title mt-1">Local data &amp; sync</h1>
+        <p className="page-subtitle mt-1.5">
           Local-first catalog and outbox for this device. Seed while online so
           checkout keeps working with zero connectivity.
         </p>
