@@ -10,6 +10,23 @@ function token() {
   return useAuthStore.getState().accessToken;
 }
 
+/** Pollinations-backed product image generation */
+export const aiApi = {
+  generateProductImage(body: { name: string; hint?: string }) {
+    return apiRequest<{
+      provider: string;
+      prompt: string;
+      mime: string;
+      bytes: number;
+      imageBase64: string;
+    }>("/ai/product-image", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+};
+
 function stationToken() {
   return useAuthStore.getState().stationToken;
 }

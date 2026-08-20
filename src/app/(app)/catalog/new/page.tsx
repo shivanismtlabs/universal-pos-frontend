@@ -399,6 +399,8 @@ export default function NewCatalogProductPage() {
           ref={imagePickerRef}
           variant="item"
           label="Upload item photos"
+          productName={form.name}
+          productHint={form.shortDescription || form.description}
         />
 
         <div>

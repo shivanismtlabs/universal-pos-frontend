@@ -69,6 +69,23 @@ export async function prepareProductImageDataUrl(file: File): Promise<string> {
   return prepared.uploadDataUrl;
 }
 
+/** Turn an API data URL (e.g. AI generate) into picker-ready preview + upload payload. */
+export async function prepareProductImageFromDataUrl(
+  dataUrl: string,
+): Promise<PreparedImage> {
+  const raw = dataUrl.trim();
+  if (!raw.startsWith("data:image/")) {
+    throw new Error("Invalid image data from AI");
+  }
+  const res = await fetch(raw);
+  const blob = await res.blob();
+  if (!blob.size) throw new Error("Empty AI image");
+  const file = new File([blob], "ai-product.jpg", {
+    type: blob.type || "image/jpeg",
+  });
+  return prepareProductImage(file);
+}
+
 function fitSize(width: number, height: number, maxEdge: number) {
   const scale = Math.min(1, maxEdge / Math.max(width, height));
   return {

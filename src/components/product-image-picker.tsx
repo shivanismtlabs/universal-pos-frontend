@@ -8,9 +8,14 @@ import {
   useState,
 } from "react";
 import { toast } from "sonner";
+import { Sparkles } from "lucide-react";
 import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import { aiApi } from "@/lib/api";
+import { ApiError } from "@/lib/api/client";
 import {
   prepareProductImage,
+  prepareProductImageFromDataUrl,
   type PreparedImage,
 } from "@/lib/image-prepare";
 
@@ -35,6 +40,10 @@ export const ProductImagePicker = forwardRef<
     max?: number;
     /** Zoho New Item: Front / Rear / Other zones — same files as default. */
     variant?: "default" | "item";
+    /** When set, shows “Generate with AI” from product name (Pollinations). */
+    productName?: string;
+    /** Optional extra prompt detail (e.g. short description). */
+    productHint?: string;
   }
 >(function ProductImagePicker(
   {
@@ -42,11 +51,14 @@ export const ProductImagePicker = forwardRef<
     hint = "Optional · up to eight photos · first image becomes the cover",
     max = 8,
     variant = "default",
+    productName,
+    productHint,
   },
   ref,
 ) {
   const [slots, setSlots] = useState<Slot[]>([]);
   const [busy, setBusy] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
   const slotsRef = useRef<Slot[]>([]);
   slotsRef.current = slots;
   const inputRef = useRef<HTMLInputElement>(null);
@@ -90,63 +102,100 @@ export const ProductImagePicker = forwardRef<
     });
   }
 
+  function pushPrepared(
+    prepared: PreparedImage,
+    mode: "append" | 0 | 1 = "append",
+  ) {
+    const one: Slot = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      ...prepared,
+    };
+    setSlots((prev) => {
+      if (mode === 0) {
+        if (prev[0]) {
+          try {
+            URL.revokeObjectURL(prev[0].previewUrl);
+          } catch {
+            /* ignore */
+          }
+        }
+        if (!prev.length) return [one];
+        const next = [...prev];
+        next[0] = one;
+        return next;
+      }
+      if (mode === 1) {
+        if (prev.length === 0) return [one];
+        if (prev[1]) {
+          try {
+            URL.revokeObjectURL(prev[1].previewUrl);
+          } catch {
+            /* ignore */
+          }
+        }
+        if (prev.length === 1) return [...prev, one].slice(0, max);
+        const next = [...prev];
+        next[1] = one;
+        return next;
+      }
+      return [...prev, one].slice(0, max);
+    });
+  }
+
   async function onFiles(fileList: FileList | null) {
     const files = Array.from(fileList ?? []);
     if (!files.length) return;
     setBusy(true);
     try {
-      const added: Slot[] = [];
       const room = max - slotsRef.current.length;
+      const target = targetRef.current;
+      let first = true;
       for (const file of files.slice(0, Math.max(0, room))) {
         try {
           const prepared = await prepareProductImage(file);
-          added.push({
-            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            ...prepared,
-          });
+          pushPrepared(prepared, first ? target : "append");
+          first = false;
         } catch (e) {
           toast.error(
             e instanceof Error ? e.message : `Could not read ${file.name}`,
           );
         }
       }
-      if (added.length) {
-        const target = targetRef.current;
-        setSlots((prev) => {
-          if (target === 0 || target === 1) {
-            const one = added[0];
-            if (!one) return prev;
-            const next = [...prev];
-            if (target === 0) {
-              if (next[0]) {
-                try {
-                  URL.revokeObjectURL(next[0].previewUrl);
-                } catch {
-                  /* ignore */
-                }
-              }
-              if (!next.length) return [one];
-              next[0] = one;
-              return next;
-            }
-            if (next.length === 0) return [one];
-            if (next[1]) {
-              try {
-                URL.revokeObjectURL(next[1].previewUrl);
-              } catch {
-                /* ignore */
-              }
-            }
-            if (next.length === 1) return [...next, one].slice(0, max);
-            next[1] = one;
-            return next;
-          }
-          return [...prev, ...added].slice(0, max);
-        });
-      }
     } finally {
       setBusy(false);
       if (inputRef.current) inputRef.current.value = "";
+    }
+  }
+
+  async function generateWithAi() {
+    const name = productName?.trim() ?? "";
+    if (name.length < 2) {
+      toast.error("Enter the product name first, then generate an image");
+      return;
+    }
+    if (slotsRef.current.length >= max) {
+      toast.error(`Maximum ${max} images`);
+      return;
+    }
+    setAiBusy(true);
+    try {
+      const res = await aiApi.generateProductImage({
+        name,
+        hint: productHint?.trim() || undefined,
+      });
+      const prepared = await prepareProductImageFromDataUrl(res.imageBase64);
+      pushPrepared(prepared, slotsRef.current.length === 0 ? 0 : "append");
+      toast.success("AI image ready — save the item to keep it");
+    } catch (e) {
+      toast.error(
+        e instanceof ApiError
+          ? e.messages.join(", ")
+          : e instanceof Error
+            ? e.message
+            : "Could not generate image",
+      );
+    } finally {
+      setAiBusy(false);
     }
   }
 
@@ -156,6 +205,27 @@ export const ProductImagePicker = forwardRef<
       inputRef.current.multiple = multiple;
       inputRef.current.click();
     }
+  }
+
+  function AiGenerateBar() {
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={busy || aiBusy}
+          onClick={() => void generateWithAi()}
+          className="gap-1.5 border-[#c5d0e0] text-[#1a56db] hover:bg-[#eef3fb]"
+        >
+          <Sparkles className="h-3.5 w-3.5" />
+          {aiBusy ? "Generating…" : "Generate image from name"}
+        </Button>
+        <p className="text-[0.7rem] text-[#8b9bb0]">
+          Free AI (Pollinations) · uses the product name above
+        </p>
+      </div>
+    );
   }
 
   function Zone({
@@ -178,7 +248,7 @@ export const ProductImagePicker = forwardRef<
     return (
       <button
         type="button"
-        disabled={busy}
+        disabled={busy || aiBusy}
         onClick={onPick}
         onDragOver={
           droppable
@@ -260,6 +330,7 @@ export const ProductImagePicker = forwardRef<
     return (
       <div className="space-y-2">
         <Label>{label}</Label>
+        <AiGenerateBar />
         <div className="grid grid-cols-2 gap-2">
           <Zone
             title="Upload Front Image"
@@ -322,6 +393,9 @@ export const ProductImagePicker = forwardRef<
     <div className="field-shell">
       <Label>{label}</Label>
       <p className="mb-2 text-[0.7rem] text-[#8b9bb0]">{hint}</p>
+      <div className="mb-2">
+        <AiGenerateBar />
+      </div>
       <div className="flex flex-wrap gap-2">
         {slots.map((slot, idx) => (
           <div key={slot.id} className="relative h-14 w-14 shrink-0">
@@ -344,11 +418,11 @@ export const ProductImagePicker = forwardRef<
         {slots.length < max ? (
           <button
             type="button"
-            disabled={busy}
+            disabled={busy || aiBusy}
             onClick={() => inputRef.current?.click()}
             className="grid h-14 w-14 place-items-center rounded-lg border border-dashed border-[#cfd8e6] text-xs font-semibold text-[#1a56db] hover:bg-[#e8eefb] disabled:opacity-50"
           >
-            {busy ? "…" : "+"}
+            {busy || aiBusy ? "…" : "+"}
           </button>
         ) : null}
         <input
@@ -361,8 +435,10 @@ export const ProductImagePicker = forwardRef<
           onChange={(e) => void onFiles(e.target.files)}
         />
       </div>
-      {busy ? (
-        <p className="mt-1 text-[0.7rem] text-[#5a6b7d]">Preparing photo…</p>
+      {busy || aiBusy ? (
+        <p className="mt-1 text-[0.7rem] text-[#5a6b7d]">
+          {aiBusy ? "Generating AI image…" : "Preparing photo…"}
+        </p>
       ) : (
         <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
           {slots.length
