@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -21,6 +21,8 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/page-header";
+import { TablePager } from "@/components/table-pager";
+import { usePagedList } from "@/lib/use-paged-list";
 
 type Tab =
   | "current"
@@ -212,6 +214,24 @@ export default function InventoryReportsPage() {
             : tab === "reorder"
               ? reorder
               : expiry;
+
+  const currentPaged = usePagedList(current.data?.items, 25);
+  const movementPaged = usePagedList(movement.data?.items, 25);
+  const valuationPaged = usePagedList(valuation.data?.items, 25);
+  const adjustmentsPaged = usePagedList(adjustments.data?.items, 25);
+  const reorderPaged = usePagedList(reorder.data?.items, 25);
+  const expiryPaged = usePagedList(expiry.data?.items, 25);
+
+  useEffect(() => {
+    currentPaged.setPage(1);
+    movementPaged.setPage(1);
+    valuationPaged.setPage(1);
+    adjustmentsPaged.setPage(1);
+    reorderPaged.setPage(1);
+    expiryPaged.setPage(1);
+    // Reset when filters or tab change — ignore setPage identity
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, params]);
 
   const createPo = useMutation({
     mutationFn: async () => {
@@ -688,7 +708,7 @@ export default function InventoryReportsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#eef2f8]">
-                  {current.data.items.map((r) => (
+                  {currentPaged.slice.map((r) => (
                     <tr key={`${r.stockLevelId}-${r.locationId}`}>
                       <td className="px-2 py-2">
                         <p className="font-medium text-[#0b1f33]">{r.item}</p>
@@ -723,7 +743,9 @@ export default function InventoryReportsPage() {
                 <p className="py-8 text-center text-sm text-[#8b9bb0]">
                   No stock rows for these filters
                 </p>
-              ) : null}
+              ) : (
+                <TablePager {...currentPaged.pagerProps} />
+              )}
             </div>
           </div>
         ) : null}
@@ -766,7 +788,7 @@ export default function InventoryReportsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#eef2f8]">
-                  {movement.data.items.map((r) => (
+                  {movementPaged.slice.map((r) => (
                     <tr key={r.id}>
                       <td className="px-2 py-2 text-xs text-[#5a6b7d]">
                         {new Date(r.at).toLocaleString()}
@@ -805,7 +827,9 @@ export default function InventoryReportsPage() {
                 <p className="py-8 text-center text-sm text-[#8b9bb0]">
                   No ledger events in this range
                 </p>
-              ) : null}
+              ) : (
+                <TablePager {...movementPaged.pagerProps} />
+              )}
             </div>
           </div>
         ) : null}
@@ -866,7 +890,7 @@ export default function InventoryReportsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#eef2f8]">
-                  {valuation.data.items.map((r, i) => (
+                  {valuationPaged.slice.map((r, i) => (
                     <tr key={`${r.sku}-${r.locationName}-${i}`}>
                       <td className="px-2 py-2">
                         <p className="font-medium">{r.item}</p>
@@ -891,6 +915,9 @@ export default function InventoryReportsPage() {
                   ))}
                 </tbody>
               </table>
+              {valuation.data.items.length ? (
+                <TablePager {...valuationPaged.pagerProps} />
+              ) : null}
             </div>
           </div>
         ) : null}
@@ -936,7 +963,7 @@ export default function InventoryReportsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#eef2f8]">
-                  {adjustments.data.items.map((r) => (
+                  {adjustmentsPaged.slice.map((r) => (
                     <tr key={r.id}>
                       <td className="px-2 py-2 text-xs text-[#5a6b7d]">
                         {new Date(r.at).toLocaleString()}
@@ -967,7 +994,9 @@ export default function InventoryReportsPage() {
                 <p className="py-8 text-center text-sm text-[#8b9bb0]">
                   No adjustments in this range
                 </p>
-              ) : null}
+              ) : (
+                <TablePager {...adjustmentsPaged.pagerProps} />
+              )}
             </div>
           </div>
         ) : null}
@@ -1042,7 +1071,7 @@ export default function InventoryReportsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#eef2f8]">
-                  {reorder.data.items.map((r) => (
+                  {reorderPaged.slice.map((r) => (
                     <tr key={r.stockLevelId}>
                       <td className="px-2 py-2 print:hidden">
                         <input
@@ -1086,7 +1115,9 @@ export default function InventoryReportsPage() {
                 <p className="py-8 text-center text-sm text-[#8b9bb0]">
                   Nothing below reorder threshold
                 </p>
-              ) : null}
+              ) : (
+                <TablePager {...reorderPaged.pagerProps} />
+              )}
             </div>
           </div>
         ) : null}
@@ -1127,7 +1158,7 @@ export default function InventoryReportsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#eef2f8]">
-                  {expiry.data.items.map((r) => (
+                  {expiryPaged.slice.map((r) => (
                     <tr key={r.batchId}>
                       <td className="px-2 py-2">
                         <p className="font-medium">{r.item}</p>
@@ -1156,7 +1187,9 @@ export default function InventoryReportsPage() {
                   No batches expiring in this window (enable batch tracking on
                   items)
                 </p>
-              ) : null}
+              ) : (
+                <TablePager {...expiryPaged.pagerProps} />
+              )}
             </div>
           </div>
         ) : null}

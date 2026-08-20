@@ -10,6 +10,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import {
+  Barcode,
+  ClipboardCopy,
   Copy,
   Plus,
   Search,
@@ -40,6 +42,13 @@ import {
 } from "@/lib/validations";
 import { ItemsImportDialog } from "@/components/items-import-dialog";
 import { EntityRowActions } from "@/components/entity-row-actions";
+import { TablePager } from "@/components/table-pager";
+import { pagerFromMeta } from "@/lib/use-paged-list";
+import {
+  barcodeValueForProduct,
+  copyBarcodeToClipboard,
+  printBarcodeLabel,
+} from "@/lib/print-barcode";
 
 /** Row action buttons for catalog tables (explicit alias avoids Turbopack HMR misses). */
 const CatalogRowActions = EntityRowActions;
@@ -164,6 +173,7 @@ function ProductsPanel() {
   const tenantId = useAuthStore((s) => s.user?.tenantId);
   const locationId = useBranchStore((s) => s.currentLocationId);
   const [q, setQ] = useState("");
+  const [debouncedQ, setDebouncedQ] = useState("");
   const [kind, setKind] = useState<CatalogProductKind | "">("");
   const [statusFilter, setStatusFilter] = useState<
     "" | "active" | "inactive" | "low"
@@ -193,15 +203,16 @@ function ProductsPanel() {
       "catalog-products",
       tenantId,
       locationId,
-      q,
+      debouncedQ,
       kind,
       statusFilter,
       categoryId,
       brandId,
+      page,
     ],
     queryFn: () =>
       catalogApi.listProducts({
-        q: q || undefined,
+        q: debouncedQ || undefined,
         kind: kind || undefined,
         status:
           statusFilter === "active" || statusFilter === "inactive"
@@ -210,13 +221,25 @@ function ProductsPanel() {
         categoryId: categoryId || undefined,
         brandId: brandId || undefined,
         locationId: locationId || undefined,
+        lowStock: statusFilter === "low" || undefined,
+        page,
+        limit: pageSize,
       }),
     refetchOnMount: "always",
+    placeholderData: (prev) => prev,
   });
 
   useEffect(() => {
+    const t = window.setTimeout(() => {
+      setDebouncedQ(q.trim());
+      setPage(1);
+    }, 280);
+    return () => window.clearTimeout(t);
+  }, [q]);
+
+  useEffect(() => {
     setPage(1);
-  }, [q, kind, statusFilter, categoryId, brandId]);
+  }, [kind, statusFilter, categoryId, brandId]);
 
   const dup = useMutation({
     mutationFn: (id: string) => catalogApi.duplicate(id),
@@ -253,9 +276,8 @@ function ProductsPanel() {
       toast.error(e instanceof ApiError ? e.message : "Delete failed"),
   });
 
-  const allItems = Array.isArray(list.data)
-    ? list.data
-    : (list.data?.items ?? []);
+  const items = list.data?.items ?? [];
+  const meta = list.data?.meta;
   const categoryChips = useMemo(() => {
     const fromApi = (cats.data ?? []).filter((c) => c.isActive !== false);
     if (fromApi.length) {
@@ -265,24 +287,11 @@ function ProductsPanel() {
       }));
     }
     const map = new Map<string, string>();
-    for (const p of allItems) {
+    for (const p of items) {
       if (p.category?.id) map.set(p.category.id, p.category.name);
     }
     return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
-  }, [cats.data, allItems]);
-
-  const filteredItems =
-    statusFilter === "low"
-      ? allItems.filter(
-          (p) =>
-            p.trackInventory !== false &&
-            p.stockOnHand != null &&
-            p.stockOnHand <= 5 &&
-            p.stockOnHand > 0,
-        )
-      : allItems;
-  const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
-  const items = filteredItems.slice((page - 1) * pageSize, page * pageSize);
+  }, [cats.data, items]);
 
   return (
     <div className="space-y-3">
@@ -545,10 +554,55 @@ function ProductsPanel() {
                         size="sm"
                         variant="ghost"
                         className="h-8 w-8 px-0 text-[#5a6b7d]"
-                        title="Duplicate"
+                        title="Print barcode"
+                        disabled={
+                          archive.isPending ||
+                          remove.isPending ||
+                          dup.isPending ||
+                          !barcodeValueForProduct(p)
+                        }
+                        onClick={() =>
+                          printBarcodeLabel({
+                            value: barcodeValueForProduct(p),
+                            productName: p.name,
+                            sku: p.skuCode,
+                            format: p.barcodeType,
+                          })
+                        }
+                      >
+                        <Barcode className="size-3.5" />
+                        <span className="sr-only">Print barcode</span>
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 w-8 px-0 text-[#5a6b7d]"
+                        title="Copy barcode / SKU"
+                        disabled={
+                          archive.isPending ||
+                          remove.isPending ||
+                          dup.isPending ||
+                          !barcodeValueForProduct(p)
+                        }
+                        onClick={() =>
+                          void copyBarcodeToClipboard(
+                            barcodeValueForProduct(p),
+                            p.barcode ? "Barcode" : "SKU",
+                          )
+                        }
+                      >
+                        <ClipboardCopy className="size-3.5" />
+                        <span className="sr-only">Copy barcode</span>
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 w-8 px-0 text-[#5a6b7d]"
+                        title="Duplicate item"
                         onClick={() => dup.mutate(p.id)}
                       >
                         <Copy className="size-3.5" />
+                        <span className="sr-only">Duplicate</span>
                       </Button>
                     </div>
                   </td>
@@ -558,32 +612,9 @@ function ProductsPanel() {
           </tbody>
         </table>
       </div>
-      {allItems.length > pageSize ? (
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-[0.75rem] text-[#5a6b7d]">
-            Showing {(page - 1) * pageSize + 1}–
-            {Math.min(page * pageSize, allItems.length)} of {allItems.length}
-          </p>
-          <div className="flex gap-1">
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              Prev
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            >
-              Next
-            </Button>
-                  </div>
-                </div>
-      ) : null}
+      <TablePager
+        {...pagerFromMeta(meta, page, pageSize, setPage, items.length)}
+      />
       <ImageLightbox
         open={Boolean(lightbox)}
         images={lightbox?.images ?? []}

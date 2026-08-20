@@ -6,7 +6,7 @@
  * Purchases/suppliers/transfer live as linked modules.
  */
 import Link from "next/link";
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -27,7 +27,7 @@ import { EntityRowActions } from "@/components/entity-row-actions";
 import { PageHeader, PageSkeleton } from "@/components/page-header";
 import { FieldError } from "@/components/ui/form";
 import { TablePager } from "@/components/table-pager";
-import { usePagedList } from "@/lib/use-paged-list";
+import { pagerFromMeta } from "@/lib/use-paged-list";
 import {
   stockMoveSchema,
   zodFieldErrors,
@@ -227,19 +227,28 @@ function LevelsTab({
   const qc = useQueryClient();
   const [q, setQ] = useState("");
   const [lowOnly, setLowOnly] = useState(false);
+  const [page, setPage] = useState(1);
+  const pageSize = 25;
   const levels = useQuery({
-    queryKey: ["inv-levels", locationId, q, lowOnly],
+    queryKey: ["inv-levels", locationId, q, lowOnly, page],
     queryFn: () =>
       inventoryApi.listLevels({
         locationId,
         q: q || undefined,
         lowStock: lowOnly || undefined,
         includeZero: true,
+        page,
+        limit: pageSize,
       }),
+    placeholderData: (prev) => prev,
   });
 
   const levelRows = levels.data?.items ?? [];
-  const pagedLevels = usePagedList(levelRows, 25);
+  const meta = levels.data?.meta;
+
+  useEffect(() => {
+    setPage(1);
+  }, [q, lowOnly, locationId]);
 
   const [reorderId, setReorderId] = useState<string | null>(null);
   const [rp, setRp] = useState("");
@@ -301,7 +310,7 @@ function LevelsTab({
             </tr>
           </thead>
           <tbody>
-            {pagedLevels.slice.map((r) => (
+            {levelRows.map((r) => (
               <tr key={r.stockLevelId} className="border-t border-[#f0f3f7]">
                 <td className="px-3 py-2 font-medium">{r.name}</td>
                 <td className="px-3 py-2 font-mono text-xs">{r.sku}</td>
@@ -360,7 +369,9 @@ function LevelsTab({
           </tbody>
         </table>
       </div>
-      <TablePager {...pagedLevels.pagerProps} />
+      <TablePager
+        {...pagerFromMeta(meta, page, pageSize, setPage, levelRows.length)}
+      />
 
       {reorderId ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -1108,16 +1119,25 @@ function AuditTab({
 
 function LedgerTab({ locationId }: { locationId: string }) {
   const [type, setType] = useState("");
+  const [page, setPage] = useState(1);
+  const pageSize = 25;
   const ledger = useQuery({
-    queryKey: ["inv-ledger", locationId, type],
+    queryKey: ["inv-ledger", locationId, type, page],
     queryFn: () =>
       inventoryApi.listLedger({
         locationId: locationId || undefined,
         type: type || undefined,
-        limit: 100,
+        page,
+        limit: pageSize,
       }),
+    placeholderData: (prev) => prev,
   });
-  const paged = usePagedList(ledger.data?.items ?? [], 25);
+  const rows = ledger.data?.items ?? [];
+  const meta = ledger.data?.meta;
+
+  useEffect(() => {
+    setPage(1);
+  }, [type, locationId]);
 
   return (
     <div className="space-y-5">
@@ -1159,7 +1179,7 @@ function LedgerTab({ locationId }: { locationId: string }) {
             </tr>
           </thead>
           <tbody>
-            {paged.slice.map((r) => (
+            {rows.map((r) => (
               <tr key={r.id} className="border-t">
                 <td className="px-3 py-2 text-xs text-[#5a6b7d]">
                   {new Date(r.createdAt).toLocaleString()}
@@ -1180,7 +1200,9 @@ function LedgerTab({ locationId }: { locationId: string }) {
           </tbody>
         </table>
       </div>
-      <TablePager {...paged.pagerProps} />
+      <TablePager
+        {...pagerFromMeta(meta, page, pageSize, setPage, rows.length)}
+      />
     </div>
   );
 }

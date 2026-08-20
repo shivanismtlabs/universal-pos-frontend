@@ -1010,7 +1010,11 @@ export const inventoryApi = {
     }>("/stock-transfers", { method: "POST", body, token: token() });
   },
 
-  listStockTransfers(limit = 100) {
+  listStockTransfers(params?: { page?: number; limit?: number }) {
+    const qs = new URLSearchParams();
+    if (params?.page) qs.set("page", String(params.page));
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const q = qs.toString();
     return apiRequest<{
       items: Array<{
         id: string;
@@ -1030,7 +1034,8 @@ export const inventoryApi = {
         }>;
         actorName: string;
       }>;
-    }>(`/stock-transfers?limit=${limit}`, { token: token() });
+      meta?: { page: number; limit: number; total: number; totalPages: number };
+    }>(`/stock-transfers${q ? `?${q}` : ""}`, { token: token() });
   },
 
   listLevels(params?: {
@@ -1038,12 +1043,16 @@ export const inventoryApi = {
     q?: string;
     lowStock?: boolean;
     includeZero?: boolean;
+    page?: number;
+    limit?: number;
   }) {
     const qs = new URLSearchParams();
     if (params?.locationId) qs.set("locationId", params.locationId);
     if (params?.q) qs.set("q", params.q);
     if (params?.lowStock) qs.set("lowStock", "true");
     if (params?.includeZero) qs.set("includeZero", "true");
+    if (params?.page) qs.set("page", String(params.page));
+    if (params?.limit) qs.set("limit", String(params.limit));
     const q = qs.toString();
     return apiRequest<{
       items: Array<{
@@ -1064,6 +1073,7 @@ export const inventoryApi = {
         location?: { id: string; name: string; type?: string };
         photoUrl?: string | null;
       }>;
+      meta?: { page: number; limit: number; total: number; totalPages: number };
     }>(`/inventory/levels${q ? `?${q}` : ""}`, { token: token() });
   },
 
@@ -1196,12 +1206,14 @@ export const inventoryApi = {
     productId?: string;
     type?: string;
     limit?: number;
+    page?: number;
   }) {
     const qs = new URLSearchParams();
     if (params?.locationId) qs.set("locationId", params.locationId);
     if (params?.productId) qs.set("productId", params.productId);
     if (params?.type) qs.set("type", params.type);
     if (params?.limit) qs.set("limit", String(params.limit));
+    if (params?.page) qs.set("page", String(params.page));
     const q = qs.toString();
     return apiRequest<{
       items: Array<{
@@ -1216,6 +1228,7 @@ export const inventoryApi = {
         location?: { name: string };
         actor?: { fullName: string } | null;
       }>;
+      meta?: { page: number; limit: number; total: number; totalPages: number };
     }>(`/inventory/ledger${q ? `?${q}` : ""}`, { token: token() });
   },
 
@@ -5478,6 +5491,8 @@ export const expensesApi = {
     categoryId?: string;
     status?: string;
     pettyCash?: boolean;
+    page?: number;
+    limit?: number;
   }) {
     const qs = new URLSearchParams();
     if (params?.from) qs.set("from", params.from);
@@ -5486,11 +5501,14 @@ export const expensesApi = {
     if (params?.categoryId) qs.set("categoryId", params.categoryId);
     if (params?.status) qs.set("status", params.status);
     if (params?.pettyCash) qs.set("pettyCash", "true");
+    if (params?.page) qs.set("page", String(params.page));
+    if (params?.limit) qs.set("limit", String(params.limit));
     const q = qs.toString();
     return apiRequest<{
       items: ExpenseRow[];
       total: number;
       count: number;
+      meta?: { page: number; limit: number; total: number; totalPages: number };
     }>(`/expenses${q ? `?${q}` : ""}`, { token: token() });
   },
   get(id: string) {
@@ -5818,12 +5836,14 @@ export const notifyApi = {
     type?: string;
     locationId?: string;
     limit?: number;
+    page?: number;
   }) {
     const q = new URLSearchParams();
     if (params?.status) q.set("status", params.status);
     if (params?.type) q.set("type", params.type);
     if (params?.locationId) q.set("locationId", params.locationId);
     if (params?.limit) q.set("limit", String(params.limit));
+    if (params?.page) q.set("page", String(params.page));
     const qs = q.toString();
     return apiRequest<{
       unreadCount: number;
@@ -5842,6 +5862,7 @@ export const notifyApi = {
         readAt?: string | null;
         resolvedAt?: string | null;
       }>;
+      meta?: { page: number; limit: number; total: number; totalPages: number };
     }>(`/notify/inbox${qs ? `?${qs}` : ""}`, { token: token() });
   },
 
@@ -6762,9 +6783,13 @@ export const suppliersApi = {
       token: token(),
     });
   },
-  listGrns() {
-    return apiRequest<
-      Array<{
+  listGrns(params?: { page?: number; limit?: number }) {
+    const qs = new URLSearchParams();
+    if (params?.page) qs.set("page", String(params.page));
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const q = qs.toString();
+    return apiRequest<{
+      items: Array<{
         id: string;
         grnNumber: string;
         supplierId: string;
@@ -6788,8 +6813,9 @@ export const suppliersApi = {
             product?: { name: string } | null;
           };
         }>;
-      }>
-    >("/goods-receipts", { token: token() });
+      }>;
+      meta?: { page: number; limit: number; total: number; totalPages: number };
+    }>(`/goods-receipts${q ? `?${q}` : ""}`, { token: token() });
   },
   invoiceFromGrn(id: string) {
     return apiRequest<{
@@ -6803,10 +6829,14 @@ export const suppliersApi = {
       token: token(),
     });
   },
-  listInvoices(status?: string) {
-    const qs = status ? `?status=${encodeURIComponent(status)}` : "";
-    return apiRequest<
-      Array<{
+  listInvoices(params?: { status?: string; page?: number; limit?: number }) {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set("status", params.status);
+    if (params?.page) qs.set("page", String(params.page));
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const q = qs.toString();
+    return apiRequest<{
+      items: Array<{
         id: string;
         supplierId: string;
         purchaseOrderId?: string | null;
@@ -6824,8 +6854,9 @@ export const suppliersApi = {
         supplier?: { id: string; name: string };
         purchaseOrder?: { id: string; poNumber: string | null };
         goodsReceipt?: { id: string; grnNumber: string };
-      }>
-    >(`/supplier-invoices${qs}`, { token: token() });
+      }>;
+      meta?: { page: number; limit: number; total: number; totalPages: number };
+    }>(`/supplier-invoices${q ? `?${q}` : ""}`, { token: token() });
   },
   listOutstanding() {
     return apiRequest<
@@ -6912,12 +6943,18 @@ export const suppliersApi = {
       token: token(),
     });
   },
-  listPayments(supplierId?: string) {
-    const qs = supplierId
-      ? `?supplierId=${encodeURIComponent(supplierId)}`
-      : "";
-    return apiRequest<
-      Array<{
+  listPayments(params?: {
+    supplierId?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const qs = new URLSearchParams();
+    if (params?.supplierId) qs.set("supplierId", params.supplierId);
+    if (params?.page) qs.set("page", String(params.page));
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const q = qs.toString();
+    return apiRequest<{
+      items: Array<{
         id: string;
         supplierId: string;
         supplierInvoiceId?: string | null;
@@ -6932,8 +6969,9 @@ export const suppliersApi = {
           invoiceNumber: string;
           status: string;
         };
-      }>
-    >(`/supplier-payments${qs}`, { token: token() });
+      }>;
+      meta?: { page: number; limit: number; total: number; totalPages: number };
+    }>(`/supplier-payments${q ? `?${q}` : ""}`, { token: token() });
   },
   createPayment(body: {
     supplierId: string;
@@ -7247,6 +7285,9 @@ export const catalogApi = {
     status?: CatalogProductStatus;
     availableInPos?: boolean;
     locationId?: string;
+    page?: number;
+    limit?: number;
+    lowStock?: boolean;
   }) {
     const qs = new URLSearchParams();
     if (params?.q) qs.set("q", params.q);
@@ -7257,11 +7298,14 @@ export const catalogApi = {
     if (params?.availableInPos != null)
       qs.set("availableInPos", String(params.availableInPos));
     if (params?.locationId) qs.set("locationId", params.locationId);
+    if (params?.page) qs.set("page", String(params.page));
+    if (params?.limit) qs.set("limit", String(params.limit));
+    if (params?.lowStock) qs.set("lowStock", "true");
     const q = qs.toString();
-    return apiRequest<{ items: CatalogProductListItem[] }>(
-      `/catalog/products${q ? `?${q}` : ""}`,
-      { token: token() },
-    );
+    return apiRequest<{
+      items: CatalogProductListItem[];
+      meta: { page: number; limit: number; total: number; totalPages: number };
+    }>(`/catalog/products${q ? `?${q}` : ""}`, { token: token() });
   },
   getProduct(id: string) {
     return apiRequest<

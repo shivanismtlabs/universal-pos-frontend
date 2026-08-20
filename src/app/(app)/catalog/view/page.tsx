@@ -436,7 +436,7 @@ function CatalogProductDetailPage() {
             </div>
           </div>
           <div className="rounded-md border border-[#e4e9f0] bg-white p-3 text-center">
-            <p className="mb-2 text-[0.7rem] font-semibold text-[#5a6b7d] uppercase">
+            <p className="mb-2 text-[0.72rem] font-bold tracking-wide text-[#475569] uppercase">
               QR code
             </p>
             {p.qr?.chartUrl ? (
@@ -799,10 +799,10 @@ function CatalogProductDetailPage() {
 function Row({ label, value }: { label: string; value?: string | null }) {
   return (
     <div className="grid grid-cols-[140px_1fr] gap-2 border-b border-[#f3f5f8] py-1.5">
-      <span className="text-[0.7rem] font-semibold uppercase text-[#5a6b7d]">
+      <span className="text-[0.72rem] font-bold tracking-wide text-[#475569] uppercase">
         {label}
       </span>
-      <span className="text-[#0b1f33]">{value || "—"}</span>
+      <span className="font-medium text-[#0b1f33]">{value || "—"}</span>
     </div>
   );
 }

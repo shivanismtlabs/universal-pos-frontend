@@ -232,12 +232,13 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
         ? (settings.expenses as Record<string, unknown>)
         : undefined;
 
-    const bt =
+    const rawBt =
       (typeof settings.businessType === "string" && settings.businessType) ||
       boot.business?.type ||
       businessType ||
-      "general";
-    setSelectedBusinessType(bt);
+      "retail";
+    // UI uses "other"; registry also has legacy "general" — same template
+    setSelectedBusinessType(rawBt === "general" ? "other" : rawBt);
 
     setBranding({
       productName: t.branding?.productName ?? t.name ?? "",
@@ -392,10 +393,24 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
       const phone = phoneLocal
         ? `${profile.phoneCountryCode} ${phoneLocal}`.trim()
         : "";
+      const typeId =
+        selectedBusinessType === "general" ? "other" : selectedBusinessType;
+      const prevTypeRaw =
+        (boot?.tenant?.settings as Record<string, unknown> | undefined)
+          ?.businessType ??
+        boot?.business?.type ??
+        "";
+      const prevType =
+        prevTypeRaw === "general" ? "other" : String(prevTypeRaw || "");
+      const typeChanged = Boolean(typeId) && typeId !== prevType;
+      // Only re-apply commerce/capability defaults when the shop type actually changes
+      // (same path as create-shop setup). Profile edits alone must not reset modes.
       await appsApi.setBusinessConfig({
-        businessType: selectedBusinessType,
-        applyDefaultModes: false,
+        businessType: typeId,
+        applyDefaultModes: typeChanged,
+        applyDefaultCapabilities: typeChanged,
       });
+      const logoTrimmed = profile.logoUrl.trim();
       return tenantsApi.updateMe({
         name,
         currencyCode: parsed.data.currencyCode || "INR",
@@ -404,7 +419,8 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
         branding: {
           productName: name,
           tagline: parsed.data.tagline?.trim() ?? "",
-          logoUrl: profile.logoUrl.trim() || "",
+          // Omit empty logoUrl so Save cannot wipe a just-uploaded logo
+          ...(logoTrimmed ? { logoUrl: logoTrimmed } : {}),
         },
         settings: {
           organizationProfile: {
@@ -775,8 +791,10 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
                   ))}
                 </select>
                 <p className="mt-1 text-[0.72rem] text-[#6b7280]">
-                  Universal profile — drives item extras and billing style, not a
-                  separate app per industry.
+                  Same setup template as when the shop was created. Changing type
+                  reapplies that template’s modes &amp; capabilities.{" "}
+                  <span className="font-medium text-[#475569]">Other / general</span>{" "}
+                  uses the universal profile (no industry-only fields).
                 </p>
               </div>
               <div>

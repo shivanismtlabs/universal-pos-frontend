@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { ordersApi, posApi } from "@/lib/api";
@@ -16,7 +16,7 @@ import {
 } from "@/components/page-header";
 import { ReceiptModal, type ReceiptData } from "@/components/receipt-modal";
 import { TablePager } from "@/components/table-pager";
-import { usePagedList } from "@/lib/use-paged-list";
+import { pagerFromMeta } from "@/lib/use-paged-list";
 
 /**
  * All orders — read-only history. Create tickets only at the counter.
@@ -27,15 +27,20 @@ export default function OrdersPage() {
   const [kind, setKind] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [appliedQ, setAppliedQ] = useState("");
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
   const [receiptOrderId, setReceiptOrderId] = useState<string | null>(null);
 
   const orders = useQuery({
-    queryKey: ["orders", appliedQ],
+    queryKey: ["orders", appliedQ, kind, page],
     queryFn: () =>
       ordersApi.list({
-        limit: 80,
+        page,
+        limit: pageSize,
         ...(appliedQ ? { q: appliedQ } : {}),
+        ...(kind !== "all" ? { kind } : {}),
       }),
+    placeholderData: (prev) => prev,
   });
 
   const receiptQ = useQuery({
@@ -43,6 +48,10 @@ export default function OrdersPage() {
     queryFn: () => posApi.receipt(receiptOrderId!),
     enabled: Boolean(receiptOrderId),
   });
+
+  useEffect(() => {
+    setPage(1);
+  }, [appliedQ, kind]);
 
   const kinds = useMemo(() => {
     const fromData = new Set(
@@ -52,12 +61,10 @@ export default function OrdersPage() {
     return ["all", ...[...fromData].sort()];
   }, [orders.data?.items, commerceModes]);
 
-  const rows = (orders.data?.items ?? []).filter(
-    (o) => kind === "all" || o.kind === kind,
-  );
-  const paged = usePagedList(rows, 20);
+  const rows = orders.data?.items ?? [];
+  const meta = orders.data?.meta;
 
-  if (orders.isLoading) {
+  if (orders.isLoading && !orders.data) {
     return <PageSkeleton rows={6} />;
   }
 
@@ -159,7 +166,7 @@ export default function OrdersPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#f0f3f7]">
-              {paged.slice.map((o) => (
+              {rows.map((o) => (
                 <tr key={o.id} className="hover:bg-[#f7f9fc]">
                   <td className="px-4 py-3 font-medium">
                     <Link
@@ -206,7 +213,9 @@ export default function OrdersPage() {
               ))}
             </tbody>
           </table>
-          <TablePager {...paged.pagerProps} />
+          <TablePager
+            {...pagerFromMeta(meta, page, pageSize, setPage, rows.length)}
+          />
         </section>
       )}
 

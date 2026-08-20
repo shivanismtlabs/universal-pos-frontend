@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { expensesApi, tenantsApi } from "@/lib/api";
@@ -24,6 +24,7 @@ import { Select } from "@/components/ui/select";
 import { FieldError } from "@/components/ui/form";
 import { PageHeader, EmptyState, PageSkeleton } from "@/components/page-header";
 import { TablePager } from "@/components/table-pager";
+import { pagerFromMeta } from "@/lib/use-paged-list";
 import {
   createExpenseSchema,
   expenseCategoryNameSchema,
@@ -134,6 +135,10 @@ export default function ExpensesPage() {
   const [adjustNotes, setAdjustNotes] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
+  useEffect(() => {
+    setExpListPage(1);
+  }, [from, to, statusFilter, filterCategoryId, filterLocationId, pettyOnly]);
+
   const categories = useQuery({
     queryKey: ["expense-categories", "active"],
     queryFn: () => expensesApi.listCategories(true),
@@ -162,6 +167,7 @@ export default function ExpensesPage() {
       filterCategoryId,
       filterLocationId,
       pettyOnly,
+      expListPage,
     ],
     queryFn: () =>
       expensesApi.list({
@@ -171,8 +177,11 @@ export default function ExpensesPage() {
         categoryId: filterCategoryId || undefined,
         locationId: filterLocationId || undefined,
         pettyCash: pettyOnly || undefined,
+        page: expListPage,
+        limit: EXP_PAGE,
       }),
     enabled: deskTab === "expenses",
+    placeholderData: (prev) => prev,
   });
 
   const pending = useQuery({
@@ -622,13 +631,15 @@ export default function ExpensesPage() {
     );
   };
 
-  const expenseTable = (items: ExpenseRow[], emptyTitle: string, emptyDetail: string) => {
+  const expenseTable = (
+    items: ExpenseRow[],
+    emptyTitle: string,
+    emptyDetail: string,
+    meta?: { page?: number; totalPages?: number; total?: number; limit?: number },
+  ) => {
     if (!items.length) {
       return <EmptyState title={emptyTitle} detail={emptyDetail} />;
     }
-    const totalPages = Math.max(1, Math.ceil(items.length / EXP_PAGE));
-    const pageSafe = Math.min(expListPage, totalPages);
-    const slice = items.slice((pageSafe - 1) * EXP_PAGE, pageSafe * EXP_PAGE);
     return (
       <div className="mt-3 overflow-hidden rounded-xl border border-[#d9e0ea]">
         <div className="overflow-x-auto">
@@ -649,7 +660,7 @@ export default function ExpensesPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-[#eef2f7] bg-white">
-            {slice.map((e) => (
+            {items.map((e) => (
               <tr key={e.id} className="hover:bg-[#fafbfd]">
                 <td className="px-3 py-2 font-medium text-[#0b1f33]">
                   {e.expenseNumber ?? "—"}
@@ -700,11 +711,7 @@ export default function ExpensesPage() {
         </table>
         </div>
         <TablePager
-          page={pageSafe}
-          totalPages={totalPages}
-          total={items.length}
-          pageSize={EXP_PAGE}
-          onPage={setExpListPage}
+          {...pagerFromMeta(meta, expListPage, EXP_PAGE, setExpListPage, items.length)}
         />
       </div>
     );
@@ -1145,6 +1152,7 @@ export default function ExpensesPage() {
                 list.data?.items ?? [],
                 "No expenses in range",
                 "Adjust filters or add an expense on the left.",
+                list.data?.meta,
               )
             )}
           </section>

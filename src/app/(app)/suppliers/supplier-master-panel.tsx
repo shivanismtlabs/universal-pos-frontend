@@ -316,7 +316,9 @@ export function SupplierMasterPanel() {
     <section className="rounded-2xl border border-[#e5e7eb] bg-white">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#e5e7eb] px-4 py-3">
         <div>
-          <h2 className="text-sm font-semibold text-[#111827]">Suppliers</h2>
+          <h2 className="text-sm font-semibold text-[#111827]">
+            All suppliers
+          </h2>
           <p className="text-xs text-[#6b7280]">
             One master list for any shop — goods, services, or both.
           </p>

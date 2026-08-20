@@ -13,6 +13,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { EmptyState, PageSkeleton } from "@/components/page-header";
+import { TablePager } from "@/components/table-pager";
+import { pagerFromMeta } from "@/lib/use-paged-list";
 import { FieldError } from "@/components/ui/form";
 import {
   stockTransferSchema,
@@ -37,31 +39,36 @@ export default function StockTransferPage() {
   const roles = useAuthStore((s) => s.user?.roles);
   const canWrite = canWriteCatalog(roles);
   const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
+  const pageSize = 25;
   const [composerOpen, setComposerOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const history = useQuery({
-    queryKey: ["stock-transfers"],
-    queryFn: () => inventoryApi.listStockTransfers(100),
+    queryKey: ["stock-transfers", page],
+    queryFn: () => inventoryApi.listStockTransfers({ page, limit: pageSize }),
+    placeholderData: (prev) => prev,
   });
 
   const items = useMemo(() => {
     const list = history.data?.items ?? [];
     const needle = q.trim().toLowerCase();
     if (!needle) return list;
-    return list.filter(
-      (r) =>
-        r.fromLocationName.toLowerCase().includes(needle) ||
-        r.toLocationName.toLowerCase().includes(needle) ||
-        (r.notes ?? "").toLowerCase().includes(needle) ||
-        r.actorName.toLowerCase().includes(needle) ||
-        r.lines.some(
-          (l) =>
-            l.productName.toLowerCase().includes(needle) ||
-            l.sku.toLowerCase().includes(needle),
-        ),
-    );
-  }, [history.data, q]);
+    return list.filter((t) => {
+      const hay = [
+        t.fromLocationName,
+        t.toLocationName,
+        t.notes,
+        t.actorName,
+        ...t.lines.map((l) => `${l.productName} ${l.sku}`),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return hay.includes(needle);
+    });
+  }, [history.data?.items, q]);
+  const meta = history.data?.meta;
 
   if (history.isLoading && !history.data) {
     return <PageSkeleton rows={8} />;
@@ -201,6 +208,9 @@ export default function StockTransferPage() {
               </tbody>
             </table>
           </div>
+          <TablePager
+            {...pagerFromMeta(meta, page, pageSize, setPage, items.length)}
+          />
         </section>
       )}
 

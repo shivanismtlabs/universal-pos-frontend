@@ -7,9 +7,11 @@ import { customersApi, jobsApi } from "@/lib/api";
 import { useBootstrap } from "@/lib/bootstrap";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { TablePager } from "@/components/table-pager";
+import { pagerFromMeta } from "@/lib/use-paged-list";
 
 export default function JobsPage() {
-  const { hasCapability, hasModule } = useBootstrap();
+  const { hasCapability, hasModule, money } = useBootstrap();
   const qc = useQueryClient();
   const [customerId, setCustomerId] = useState("");
   const [title, setTitle] = useState("");
@@ -17,6 +19,8 @@ export default function JobsPage() {
   const [assetName, setAssetName] = useState("");
   const [assetType, setAssetType] = useState("phone");
   const [identifier, setIdentifier] = useState("");
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
 
   const allowed =
     hasCapability("REPAIR_JOB") ||
@@ -24,14 +28,15 @@ export default function JobsPage() {
     hasModule("jobs");
 
   const jobs = useQuery({
-    queryKey: ["jobs"],
-    queryFn: () => jobsApi.listJobs({ limit: 50 }),
+    queryKey: ["jobs", page],
+    queryFn: () => jobsApi.listJobs({ page, limit: pageSize }),
     enabled: allowed,
+    placeholderData: (prev) => prev,
   });
 
   const customers = useQuery({
     queryKey: ["customers-lite"],
-    queryFn: () => customersApi.list({ limit: 50 }),
+    queryFn: () => customersApi.list({ limit: 100 }),
     enabled: allowed,
   });
 
@@ -170,7 +175,7 @@ export default function JobsPage() {
                 <td className="px-3 py-2">{j.asset?.name ?? "—"}</td>
                 <td className="px-3 py-2">{j.status}</td>
                 <td className="px-3 py-2">
-                  {j.estimatedCost != null ? j.estimatedCost : "—"}
+                  {j.estimatedCost != null ? money(j.estimatedCost) : "—"}
                 </td>
               </tr>
             ))}
@@ -183,6 +188,23 @@ export default function JobsPage() {
             ) : null}
           </tbody>
         </table>
+        <TablePager
+          {...pagerFromMeta(
+            jobs.data?.meta
+              ? {
+                  ...jobs.data.meta,
+                  totalPages: Math.max(
+                    1,
+                    Math.ceil((jobs.data.meta.total || 0) / pageSize) || 1,
+                  ),
+                }
+              : undefined,
+            page,
+            pageSize,
+            setPage,
+            jobs.data?.data?.length ?? 0,
+          )}
+        />
       </div>
     </div>
   );

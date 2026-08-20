@@ -4,6 +4,10 @@ import { useEffect, useId, useRef } from "react";
 import JsBarcode from "jsbarcode";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import {
+  copyBarcodeToClipboard,
+  printBarcodeLabel,
+} from "@/lib/print-barcode";
 
 type ProductBarcodePreviewProps = {
   value: string;
@@ -64,25 +68,16 @@ export function ProductBarcodePreview({
   }, [trimmed, barcodeFormat, variant]);
 
   function printLabel() {
-    if (!trimmed) return;
-    const w = window.open("", "_blank", "noopener,noreferrer,width=420,height=360");
-    if (!w) return;
-    const safeName = (captionName || "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    const svgHtml = svgRef.current?.outerHTML || "";
-    w.document.write(`<!DOCTYPE html><html><head><title>Barcode ${trimmed}</title>
-<style>
-  @page { margin: 8mm; size: auto; }
-  body { font-family: ui-monospace, Consolas, monospace; text-align: center; padding: 16px; color: #111; }
-  .name { font-family: system-ui, sans-serif; font-size: 12px; margin-bottom: 10px; color: #333; }
-  svg { max-width: 100%; height: auto; }
-  .code { margin-top: 8px; font-size: 14px; letter-spacing: 0.06em; font-weight: 600; }
-</style></head><body>
-  ${safeName ? `<div class="name">${safeName}</div>` : ""}
-  ${svgHtml}
-  <div class="code">${trimmed}</div>
-  <script>window.onload=function(){window.print();}</script>
-</body></html>`);
-    w.document.close();
+    printBarcodeLabel({
+      value: trimmed,
+      productName: captionName,
+      sku,
+      format: barcodeFormat,
+    });
+  }
+
+  function copyLabel() {
+    void copyBarcodeToClipboard(trimmed);
   }
 
   if (!trimmed) {
@@ -109,9 +104,14 @@ export function ProductBarcodePreview({
           </p>
         </div>
         {showPrint ? (
-          <Button type="button" variant="secondary" size="sm" onClick={printLabel}>
-            Print
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="secondary" size="sm" onClick={printLabel}>
+              Print
+            </Button>
+            <Button type="button" variant="ghost" size="sm" onClick={copyLabel}>
+              Copy
+            </Button>
+          </div>
         ) : null}
       </div>
     );
@@ -141,9 +141,14 @@ export function ProductBarcodePreview({
           <span className="text-[0.7rem] font-medium tracking-wide text-[#94a3b8] uppercase">
             {barcodeFormat === "EAN13" ? "EAN-13" : "Code 128"}
           </span>
-          <Button type="button" variant="secondary" size="sm" className="h-8" onClick={printLabel}>
-            Print barcode
-          </Button>
+          <div className="flex items-center gap-1.5">
+            <Button type="button" variant="ghost" size="sm" className="h-8" onClick={copyLabel}>
+              Copy
+            </Button>
+            <Button type="button" variant="secondary" size="sm" className="h-8" onClick={printLabel}>
+              Print barcode
+            </Button>
+          </div>
         </div>
       ) : null}
     </div>

@@ -8,8 +8,8 @@
   --bg: #f3f5f9;
   --surface: #ffffff;
   --ink: #0b1f33;
-  --ink-soft: #2c3e50;
-  --muted: #5a6b7d;
+  --ink-soft: #1e293b;
+  --muted: #475569;
   --line: #d9e0ea;
   --line-strong: #cfd8e6;
   --accent: #1a56db;
@@ -87,9 +87,12 @@ body {
   color: #0b1f33;
   font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;
   font-size: var(--text-body);
+  font-weight: 500;
   line-height: 1.55;
-  letter-spacing: -0.011em;
-  -webkit-font-smoothing: antialiased;
+  letter-spacing: -0.005em;
+  /* auto = thicker strokes on Windows POS screens; antialiased looks too light */
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
   text-rendering: optimizeLegibility;
   overflow-x: hidden;
 }
@@ -122,7 +125,7 @@ textarea:focus {
 
 .page-title {
   font-size: var(--text-page);
-  font-weight: 500;
+  font-weight: 650;
   letter-spacing: -0.02em;
   line-height: 1.25;
   color: var(--ink);
@@ -130,26 +133,26 @@ textarea:focus {
 
 .page-subtitle {
   font-size: var(--text-body);
-  font-weight: 400;
+  font-weight: 500;
   line-height: 1.5;
   color: var(--muted);
 }
 
 .section-title {
   font-size: var(--text-section);
-  font-weight: 500;
+  font-weight: 650;
   letter-spacing: -0.015em;
   color: var(--ink);
 }
 
 .text-body {
   font-size: var(--text-body);
-  font-weight: 400;
+  font-weight: 500;
 }
 
 .text-caption {
   font-size: var(--text-caption);
-  font-weight: 400;
+  font-weight: 500;
 }
 
 .panel {
@@ -189,7 +192,7 @@ textarea:focus {
 
 .eyebrow {
   font-size: 0.6875rem;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: #1a56db;

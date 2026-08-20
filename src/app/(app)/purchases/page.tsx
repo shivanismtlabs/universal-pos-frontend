@@ -13,6 +13,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { PageHeader, EmptyState, PageSkeleton } from "@/components/page-header";
+import { TablePager } from "@/components/table-pager";
+import { pagerFromMeta } from "@/lib/use-paged-list";
 import { FieldError } from "@/components/ui/form";
 import {
   createSupplierInvoiceSchema,
@@ -57,6 +59,8 @@ export default function PurchasesPage() {
   const { money } = useBootstrap();
   const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>("grn");
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
 
   const suppliers = useQuery({
     queryKey: ["suppliers"],
@@ -64,15 +68,17 @@ export default function PurchasesPage() {
   });
 
   const grns = useQuery({
-    queryKey: ["goods-receipts"],
-    queryFn: () => suppliersApi.listGrns(),
+    queryKey: ["goods-receipts", page],
+    queryFn: () => suppliersApi.listGrns({ page, limit: pageSize }),
     enabled: tab === "grn",
+    placeholderData: (prev) => prev,
   });
 
   const invoices = useQuery({
-    queryKey: ["supplier-invoices"],
-    queryFn: () => suppliersApi.listInvoices(),
+    queryKey: ["supplier-invoices", page],
+    queryFn: () => suppliersApi.listInvoices({ page, limit: pageSize }),
     enabled: tab === "invoices",
+    placeholderData: (prev) => prev,
   });
 
   const outstanding = useQuery({
@@ -82,9 +88,10 @@ export default function PurchasesPage() {
   });
 
   const payments = useQuery({
-    queryKey: ["supplier-payments"],
-    queryFn: () => suppliersApi.listPayments(),
+    queryKey: ["supplier-payments", page],
+    queryFn: () => suppliersApi.listPayments({ page, limit: pageSize }),
     enabled: tab === "payments",
+    placeholderData: (prev) => prev,
   });
 
   // ── Invoice create form ──────────────────────────────────────────────────
@@ -229,7 +236,7 @@ export default function PurchasesPage() {
     <div className="mx-auto max-w-6xl space-y-5">
       <PageHeader
         title="Purchases"
-        subtitle="Goods receipts, supplier invoices, payments, and AP ledger."
+        subtitle="Goods receipts, supplier invoices, payments, and AP ledger. Vendor master lives under Suppliers."
       />
 
       <div className="flex flex-wrap gap-1 border-b border-[#eef1f4]">
@@ -237,7 +244,10 @@ export default function PurchasesPage() {
           <button
             key={t.id}
             type="button"
-            onClick={() => setTab(t.id)}
+            onClick={() => {
+              setTab(t.id);
+              setPage(1);
+            }}
             className={cn(
               "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
               tab === t.id
@@ -255,7 +265,7 @@ export default function PurchasesPage() {
       {/* ── GRN ─────────────────────────────────────────────────────────── */}
       {tab === "grn" && !grns.isLoading ? (
         <section className="overflow-hidden rounded-xl border border-[#d9e0ea] bg-white">
-          {(grns.data ?? []).length === 0 ? (
+          {(grns.data?.items ?? []).length === 0 ? (
             <EmptyState
               title="No goods receipts"
               detail="Receive a purchase order to create a GRN."
@@ -274,7 +284,7 @@ export default function PurchasesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {(grns.data ?? []).map((g) => (
+                  {(grns.data?.items ?? []).map((g) => (
                     <tr
                       key={g.id}
                       className="border-b border-[#eef1f4] last:border-0"
@@ -311,10 +321,19 @@ export default function PurchasesPage() {
               </table>
             </div>
           )}
+          {(grns.data?.items?.length ?? 0) > 0 ? (
+            <TablePager
+              {...pagerFromMeta(
+                grns.data?.meta,
+                page,
+                pageSize,
+                setPage,
+                grns.data?.items?.length ?? 0,
+              )}
+            />
+          ) : null}
         </section>
       ) : null}
-
-      {/* ── Invoices ────────────────────────────────────────────────────── */}
       {tab === "invoices" && !invoices.isLoading ? (
         <div className="grid gap-5 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
           <section className="space-y-3 rounded-xl border border-[#d9e0ea] bg-white p-4">
@@ -401,7 +420,7 @@ export default function PurchasesPage() {
           </section>
 
           <section className="overflow-hidden rounded-xl border border-[#d9e0ea] bg-white">
-            {(invoices.data ?? []).length === 0 ? (
+            {(invoices.data?.items ?? []).length === 0 ? (
               <EmptyState title="No invoices yet" />
             ) : (
               <div className="overflow-x-auto">
@@ -417,7 +436,7 @@ export default function PurchasesPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {(invoices.data ?? []).map((inv) => (
+                    {(invoices.data?.items ?? []).map((inv) => (
                       <tr
                         key={inv.id}
                         className="border-b border-[#eef1f4] last:border-0"
@@ -451,11 +470,20 @@ export default function PurchasesPage() {
                 </table>
               </div>
             )}
+            {(invoices.data?.items?.length ?? 0) > 0 ? (
+              <TablePager
+                {...pagerFromMeta(
+                  invoices.data?.meta,
+                  page,
+                  pageSize,
+                  setPage,
+                  invoices.data?.items?.length ?? 0,
+                )}
+              />
+            ) : null}
           </section>
         </div>
       ) : null}
-
-      {/* ── Outstanding ─────────────────────────────────────────────────── */}
       {tab === "outstanding" && !outstanding.isLoading ? (
         <div className="space-y-4">
           {payId ? (
@@ -668,7 +696,7 @@ export default function PurchasesPage() {
       {/* ── Payments ────────────────────────────────────────────────────── */}
       {tab === "payments" && !payments.isLoading ? (
         <section className="overflow-hidden rounded-xl border border-[#d9e0ea] bg-white">
-          {(payments.data ?? []).length === 0 ? (
+          {(payments.data?.items ?? []).length === 0 ? (
             <EmptyState title="No payments recorded" />
           ) : (
             <div className="overflow-x-auto">
@@ -684,7 +712,7 @@ export default function PurchasesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {(payments.data ?? []).map((p) => (
+                  {(payments.data?.items ?? []).map((p) => (
                     <tr
                       key={p.id}
                       className="border-b border-[#eef1f4] last:border-0"
@@ -711,6 +739,17 @@ export default function PurchasesPage() {
               </table>
             </div>
           )}
+          {(payments.data?.items?.length ?? 0) > 0 ? (
+            <TablePager
+              {...pagerFromMeta(
+                payments.data?.meta,
+                page,
+                pageSize,
+                setPage,
+                payments.data?.items?.length ?? 0,
+              )}
+            />
+          ) : null}
         </section>
       ) : null}
 

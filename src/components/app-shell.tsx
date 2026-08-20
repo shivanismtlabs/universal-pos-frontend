@@ -55,7 +55,7 @@ import {
   CalendarClock,
   type LucideIcon,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, mediaUrl } from "@/lib/utils";
 import { authApi, notifyApi } from "@/lib/api";
 import { useAuthStore } from "@/lib/auth-store";
 import { useBootstrap } from "@/lib/bootstrap";
@@ -226,19 +226,35 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    id: "suppliers",
+    label: "Suppliers",
+    icon: Building2,
+    section: "Commerce",
+    commerce: "sale",
+    children: [
+      {
+        href: "/suppliers",
+        label: "Supplier directory",
+        icon: Building2,
+        commerce: "sale",
+        module: "inventory",
+      },
+      {
+        href: "/suppliers/orders",
+        label: "Purchase orders",
+        icon: ClipboardList,
+        commerce: "sale",
+        module: "inventory",
+      },
+    ],
+  },
+  {
     id: "purchases",
     label: "Purchases",
     icon: Truck,
     section: "Commerce",
     commerce: "sale",
     children: [
-      {
-        href: "/suppliers",
-        label: "Suppliers & POs",
-        icon: Truck,
-        commerce: "sale",
-        module: "inventory",
-      },
       {
         href: "/purchases",
         label: "GRN & payables",
@@ -666,6 +682,11 @@ function isLeafActive(pathname: string, search: string, href: string) {
     return pathname === "/settings";
   }
 
+  // `/suppliers` directory only — not /suppliers/orders
+  if (base === "/suppliers") {
+    return pathname === "/suppliers";
+  }
+
   return pathname === base || pathname.startsWith(`${base}/`);
 }
 
@@ -815,30 +836,41 @@ function SidebarBody({
     refetchOnWindowFocus: true,
   });
   const unread = unreadQ.data?.unreadCount ?? 0;
+  const logoSrc = mediaUrl(boot?.tenant?.branding?.logoUrl);
+  const brandInitial = (productName.trim()[0] || "P").toUpperCase();
 
   const linkClass = (active: boolean) =>
     cn(
-      "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[0.8125rem] transition",
+      "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[0.8125rem] font-medium transition",
       active
         ? "bg-[#eef2ff] font-semibold text-[#1a56db]"
-        : "text-[#475569] hover:bg-[#f1f5f9] hover:text-[#0b1f33]",
+        : "text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0b1f33]",
     );
 
   const subLinkClass = (active: boolean) =>
     cn(
-      "flex items-center gap-2 rounded-lg py-1.5 pr-2 pl-7 text-[0.8125rem] transition",
+      "flex items-center gap-2 rounded-lg py-1.5 pr-2 pl-7 text-[0.8125rem] font-medium transition",
       active
         ? "bg-[#eef2ff] font-semibold text-[#1a56db]"
-        : "text-[#64748b] hover:bg-[#f8fafc] hover:text-[#0b1f33]",
+        : "text-[#475569] hover:bg-[#f8fafc] hover:text-[#0b1f33]",
     );
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-[#fafbfc] text-[#0b1f33] print:bg-white">
       <div className="shrink-0 border-b border-[#e8ecf1] px-4 pt-4 pb-3">
         <div className="flex items-center gap-2.5">
-          <div className="grid h-9 w-9 place-items-center rounded-lg bg-[#1a56db] text-sm font-bold text-white">
-            P
-          </div>
+          {logoSrc ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={logoSrc}
+              alt=""
+              className="h-9 w-9 shrink-0 rounded-lg border border-[#e2e8f0] bg-white object-contain p-0.5"
+            />
+          ) : (
+            <div className="grid h-9 w-9 place-items-center rounded-lg bg-[#1a56db] text-sm font-bold text-white">
+              {brandInitial}
+            </div>
+          )}
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold text-[#0b1f33]">
               Universal POS
@@ -880,7 +912,7 @@ function SidebarBody({
                 onClick={onNavigate}
                 className={cn(linkClass(active), "mb-0.5")}
               >
-                <Icon className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+                <Icon className="h-4 w-4 shrink-0" strokeWidth={2} />
                 <span className="min-w-0 flex-1 truncate">{g.label}</span>
               </Link>
             );
@@ -913,7 +945,7 @@ function SidebarBody({
                     : "text-[#334155] hover:bg-[#f1f5f9]",
                 )}
               >
-                <Icon className="h-4 w-4 shrink-0 text-[#64748b]" strokeWidth={1.75} />
+                <Icon className="h-4 w-4 shrink-0 text-[#475569]" strokeWidth={2} />
                 <span className="min-w-0 flex-1 truncate font-medium">
                   {g.label}
                 </span>
@@ -1003,7 +1035,7 @@ function SidebarBody({
                         ) : (
                           <CIcon
                             className="h-3.5 w-3.5 shrink-0 opacity-60"
-                            strokeWidth={1.75}
+                            strokeWidth={2}
                           />
                         )}
                         <span className="truncate">{c.label}</span>
@@ -1026,7 +1058,7 @@ function SidebarBody({
             "relative",
           )}
         >
-          <Bell className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+          <Bell className="h-4 w-4 shrink-0" strokeWidth={2} />
           <span className="min-w-0 flex-1 truncate">Notifications</span>
           {unread > 0 ? (
             <span className="rounded-full bg-[#dc2626] px-1.5 py-0.5 text-[0.65rem] font-bold text-white">
@@ -1334,6 +1366,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   const initial = (productName.trim()[0] || "P").toUpperCase();
+  const logoSrc = mediaUrl(boot?.tenant?.branding?.logoUrl);
 
   const acting = user ?? stationUser;
   const sidebarProps = {
@@ -1385,9 +1418,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden print:overflow-visible">
         <header className="app-shell-mobile-header flex shrink-0 items-center justify-between border-b border-[#d9e0ea] bg-white px-4 py-3 md:hidden print:hidden">
           <div className="flex min-w-0 items-center gap-2.5">
-            <div className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-[#1a56db] text-xs font-semibold text-white">
-              {initial}
-            </div>
+            {logoSrc ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={logoSrc}
+                alt=""
+                className="h-8 w-8 shrink-0 rounded-md border border-[#e2e8f0] bg-white object-contain p-0.5"
+              />
+            ) : (
+              <div className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-[#1a56db] text-xs font-semibold text-white">
+                {initial}
+              </div>
+            )}
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold tracking-tight text-[#0b1f33]">
                 {productName}

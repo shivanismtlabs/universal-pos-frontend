@@ -11,6 +11,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { PageHeader } from "@/components/page-header";
+import { TablePager } from "@/components/table-pager";
+import { pagerFromMeta } from "@/lib/use-paged-list";
 import { AccountingNav } from "../accounting-nav";
 
 type Journal = {
@@ -30,16 +32,23 @@ export default function JournalsPage() {
   const qc = useQueryClient();
   const [status, setStatus] = useState("");
   const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
+  const pageSize = 25;
   const list = useQuery({
-    queryKey: ["accounting", "journals", status, q],
+    queryKey: ["accounting", "journals", status, q, page],
     queryFn: () =>
       accountingApi.listJournals({
         status: status || undefined,
         q: q || undefined,
-        limit: "50",
+        page: String(page),
+        limit: String(pageSize),
       }),
+    placeholderData: (prev) => prev,
   });
   const items = (list.data?.items ?? []) as Journal[];
+  const meta = list.data?.meta as
+    | { page?: number; totalPages?: number; total?: number; limit?: number }
+    | undefined;
 
   const post = useMutation({
     mutationFn: (id: string) => accountingApi.postJournal(id),
@@ -143,6 +152,9 @@ export default function JournalsPage() {
             ))}
           </tbody>
         </table>
+        <TablePager
+          {...pagerFromMeta(meta, page, pageSize, setPage, items.length)}
+        />
       </div>
     </div>
   );

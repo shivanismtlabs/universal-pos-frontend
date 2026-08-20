@@ -20,7 +20,9 @@ import { useBranchStore } from "@/lib/branch-store";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { PageSkeleton } from "@/components/page-header";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { TablePager } from "@/components/table-pager";
+import { pagerFromMeta } from "@/lib/use-paged-list";
 import {
   isFirebaseWebConfigured,
   pushFailureMessage,
@@ -60,16 +62,25 @@ export default function NotificationsPage() {
   const branchId = useBranchStore((s) => s.currentLocationId);
   const [filterBranch, setFilterBranch] = useState(false);
   const [status, setStatus] = useState<"unread" | "all">("all");
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
   const [pushBusy, setPushBusy] = useState(false);
 
   const inbox = useQuery({
-    queryKey: ["notify-inbox", status, filterBranch ? branchId : null],
+    queryKey: [
+      "notify-inbox",
+      status,
+      filterBranch ? branchId : null,
+      page,
+    ],
     queryFn: () =>
       notifyApi.inbox({
         status: status === "unread" ? "unread" : undefined,
         locationId: filterBranch && branchId ? branchId : undefined,
-        limit: 80,
+        page,
+        limit: pageSize,
       }),
+    placeholderData: (prev) => prev,
   });
 
   const markRead = useMutation({
@@ -93,6 +104,11 @@ export default function NotificationsPage() {
 
   const unreadCount = inbox.data?.unreadCount ?? 0;
   const items = inbox.data?.items ?? [];
+  const meta = inbox.data?.meta;
+
+  useEffect(() => {
+    setPage(1);
+  }, [status, filterBranch, branchId]);
 
   const grouped = useMemo(() => {
     const map = new Map<string, typeof items>();
@@ -356,6 +372,11 @@ export default function NotificationsPage() {
           ))}
         </div>
       )}
+      {items.length > 0 ? (
+        <TablePager
+          {...pagerFromMeta(meta, page, pageSize, setPage, items.length)}
+        />
+      ) : null}
     </div>
   );
 }

@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import JsBarcode from "jsbarcode";
 import { X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -9,6 +10,34 @@ import { moneyNumber } from "@/lib/utils";
 import { useBootstrapOptional } from "@/lib/bootstrap";
 import { notifyApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
+
+function ReceiptOrderBarcode({ value }: { value: string }) {
+  const ref = useRef<SVGSVGElement | null>(null);
+  const trimmed = value.trim();
+  useEffect(() => {
+    if (!ref.current || !trimmed) return;
+    try {
+      JsBarcode(ref.current, trimmed, {
+        format: "CODE128",
+        displayValue: false,
+        height: 36,
+        width: 1.4,
+        margin: 0,
+        background: "#ffffff",
+        lineColor: "#111827",
+      });
+    } catch {
+      /* ignore invalid */
+    }
+  }, [trimmed]);
+  if (!trimmed) return null;
+  return (
+    <div className="mt-2 flex flex-col items-center">
+      <svg ref={ref} className="max-w-full" />
+      <p className="mt-0.5 font-mono text-[10px] tracking-wide">{trimmed}</p>
+    </div>
+  );
+}
 
 export type ReceiptData = {
   store: {
@@ -532,6 +561,7 @@ export function ReceiptModal({
                 </div>
               ) : null}
               {dash}
+              <ReceiptOrderBarcode value={data.orderNumber} />
               <p className="text-center font-bold">
                 {receiptFooter || "Thank you! Visit again."}
               </p>
