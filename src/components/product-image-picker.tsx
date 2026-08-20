@@ -221,6 +221,45 @@ export const ProductImagePicker = forwardRef<
     }
   }
 
+  async function applyImageDataUrl(dataUrl: string, successMsg: string) {
+    const prepared = await prepareProductImageFromDataUrl(dataUrl);
+    pushPrepared(prepared, slotsRef.current.length === 0 ? 0 : "append");
+    toast.success(successMsg);
+  }
+
+  async function findRealPhoto() {
+    const name = productName?.trim() ?? "";
+    if (name.length < 2) {
+      toast.error("Enter the product name first (e.g. Pani Kofta / Malai Kofta)");
+      return;
+    }
+    if (slotsRef.current.length >= max) {
+      toast.error(`Maximum ${max} images`);
+      return;
+    }
+    setAiBusy(true);
+    try {
+      const res = await aiApi.searchRealProductImage({
+        name,
+        hint: productHint?.trim() || undefined,
+      });
+      await applyImageDataUrl(
+        res.imageBase64,
+        "Real photo found — save the item to keep it",
+      );
+    } catch (e) {
+      toast.error(
+        e instanceof ApiError
+          ? e.messages.join(", ")
+          : e instanceof Error
+            ? e.message
+            : "No real photo found",
+      );
+    } finally {
+      setAiBusy(false);
+    }
+  }
+
   async function generateWithAi() {
     const name = productName?.trim() ?? "";
     if (name.length < 2) {
@@ -241,7 +280,6 @@ export const ProductImagePicker = forwardRef<
         });
         dataUrl = res.imageBase64;
       } catch (serverErr) {
-        // Server TLS/network fail — load Pollinations from the browser
         toast.message("Server AI busy — trying from your browser…");
         let url: string;
         try {
@@ -251,7 +289,6 @@ export const ProductImagePicker = forwardRef<
           });
           url = fb.url;
         } catch {
-          // Build URL locally if fallback endpoint missing / old API
           const prompt = [
             `Photorealistic food and product photograph of ${name.slice(0, 100)}`,
             "authentic Indian restaurant style plating if it is a dish",
@@ -278,15 +315,16 @@ export const ProductImagePicker = forwardRef<
           throw serverErr instanceof ApiError
             ? serverErr
             : new Error(
-                "Could not generate image. Try again or upload a photo.",
+                "Could not generate image. Try Find real photo or upload.",
               );
         }
       }
 
       if (!dataUrl) throw new Error("No image returned");
-      const prepared = await prepareProductImageFromDataUrl(dataUrl);
-      pushPrepared(prepared, slotsRef.current.length === 0 ? 0 : "append");
-      toast.success("AI image ready — save the item to keep it");
+      await applyImageDataUrl(
+        dataUrl,
+        "AI image ready — save the item to keep it",
+      );
     } catch (e) {
       toast.error(
         e instanceof ApiError
@@ -310,20 +348,35 @@ export const ProductImagePicker = forwardRef<
 
   function AiGenerateBar() {
     return (
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={busy || aiBusy}
-          onClick={() => void generateWithAi()}
-          className="gap-1.5 border-[#c5d0e0] text-[#1a56db] hover:bg-[#eef3fb]"
-        >
-          <Sparkles className="h-3.5 w-3.5" />
-          {aiBusy ? "Generating…" : "Generate image from name"}
-        </Button>
-        <p className="text-[0.7rem] text-[#8b9bb0]">
-          Free AI · real dish name use karo (e.g. Pani Kofta) · 15–40 sec
+      <div className="space-y-2 rounded-lg border border-[#d9e0ea] bg-[#f8fafc] p-3">
+        <p className="text-[0.72rem] font-medium text-[#0b1f33]">
+          Free images from product name
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            disabled={busy || aiBusy}
+            onClick={() => void findRealPhoto()}
+            className="gap-1.5"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            {aiBusy ? "Searching…" : "Find real photo"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={busy || aiBusy}
+            onClick={() => void generateWithAi()}
+            className="gap-1.5 border-[#c5d0e0] text-[#1a56db] hover:bg-[#eef3fb]"
+          >
+            {aiBusy ? "Working…" : "AI generate"}
+          </Button>
+        </div>
+        <p className="text-[0.65rem] leading-snug text-[#8b9bb0]">
+          Prefer <strong>Find real photo</strong> (Openverse) — camera photos.
+          AI is free but often looks fake for food.
         </p>
       </div>
     );

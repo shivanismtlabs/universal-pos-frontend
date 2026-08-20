@@ -10,8 +10,29 @@ function token() {
   return useAuthStore.getState().accessToken;
 }
 
-/** Pollinations-backed product image generation */
+/** Product image helpers: real photo search (Openverse) + optional AI (Pollinations) */
 export const aiApi = {
+  /** Real Creative Commons photos — use this for catalog realism */
+  searchRealProductImage(body: { name: string; hint?: string }) {
+    return apiRequest<{
+      provider: string;
+      prompt: string;
+      mime: string;
+      bytes: number;
+      imageBase64: string;
+      sourceUrl?: string;
+      attribution?: {
+        title?: string;
+        license?: string;
+        landingUrl?: string | null;
+      };
+    }>("/ai/product-image/search-real", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+
   generateProductImage(body: { name: string; hint?: string }) {
     return apiRequest<{
       provider: string;
