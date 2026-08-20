@@ -158,6 +158,7 @@ function RentalReturnsDesk() {
             No returns yet. Record a return on the right.
           </div>
         ) : (
+          <>
           <ul className="scroll-soft max-h-[32rem] divide-y divide-[#f3f4f6] overflow-y-auto">
             {pagedReturns.slice.map((r) => {
               const unit = r.stockUnit ?? r.inventoryUnit;
@@ -242,6 +243,7 @@ function RentalReturnsDesk() {
             })}
           </ul>
           <TablePager {...pagedReturns.pagerProps} />
+          </>
         )}
       </section>
 
@@ -552,9 +554,13 @@ function SaleReturnsDesk() {
                     {r.orderNumber ?? r.orderId.slice(0, 8)}
                   </p>
                   <p className="text-xs text-[#6b7280]">
-                    {r.customerName ?? "—"} · {money(r.refundAmount ?? 0)} ·{" "}
-                    {r.reasonCode ?? "—"} · {r.receivedBy ?? "—"}
+                    {r.customerName ?? "—"} · Refund {money(r.refundAmount ?? 0)}{" "}
+                    · Reason: {r.reasonCode ?? "—"} · Staff:{" "}
+                    {r.receivedBy ?? "—"}
                   </p>
+                  {r.notes ? (
+                    <p className="mt-0.5 text-xs text-[#5a6b7d]">{r.notes}</p>
+                  ) : null}
                 </div>
                 {canApprove ? (
                   <div className="flex gap-2">
@@ -597,29 +603,56 @@ function SaleReturnsDesk() {
           <h2 className="text-lg font-semibold text-[#111827]">History</h2>
           <ul className="mt-4 divide-y divide-[#f3f4f6] text-sm">
             {historyItems.map((r) => (
-              <li key={r.id} className="flex justify-between gap-3 py-3">
-                <div>
-                  <p className="font-semibold text-[#111827]">
-                    {r.orderNumber ?? r.orderId.slice(0, 8)} ·{" "}
-                    {r.statusLabel ??
-                      (r.status === "completed"
-                        ? "✓ Return Completed"
-                        : r.status)}
-                  </p>
-                  <p className="text-xs text-[#6b7280]">
-                    {money(r.refundAmount ?? 0)}
-                    {r.refundMethod ? ` · ${r.refundMethod}` : ""} ·{" "}
-                    {r.reasonCode ?? "—"} · {formatDate(r.createdAt)}
-                  </p>
-                  {r.exchangeOrderNumber || r.invoiceNumber ? (
-                    <p className="mt-0.5 text-xs text-[#1a56db]">
-                      {r.exchangeOrderNumber
-                        ? `Exchange ${r.exchangeOrderNumber}`
-                        : null}
-                      {r.exchangeOrderNumber && r.invoiceNumber ? " · " : null}
-                      {r.invoiceNumber ? `Invoice ${r.invoiceNumber}` : null}
+              <li key={r.id} className="py-3">
+                <div className="flex justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-[#111827]">
+                      {r.orderNumber ?? r.orderId.slice(0, 8)} ·{" "}
+                      {r.statusLabel ??
+                        (r.status === "completed"
+                          ? "✓ Return Completed"
+                          : r.status)}
                     </p>
-                  ) : null}
+                    <p className="text-xs text-[#6b7280]">
+                      Refund {money(r.refundAmount ?? 0)}
+                      {r.refundMethod ? ` via ${r.refundMethod}` : ""} · Reason:{" "}
+                      {r.reasonCode ?? "—"} · {formatDate(r.createdAt)}
+                    </p>
+                    {r.customerName ? (
+                      <p className="text-xs text-[#6b7280]">
+                        Customer: {r.customerName}
+                      </p>
+                    ) : null}
+                    {r.notes ? (
+                      <p className="mt-0.5 text-xs text-[#5a6b7d]">{r.notes}</p>
+                    ) : null}
+                    {r.exchangeOrderNumber || r.invoiceNumber ? (
+                      <p className="mt-0.5 text-xs text-[#1a56db]">
+                        {r.exchangeOrderNumber
+                          ? `Exchange ${r.exchangeOrderNumber}`
+                          : null}
+                        {r.exchangeOrderNumber && r.invoiceNumber ? " · " : null}
+                        {r.invoiceNumber ? `Invoice ${r.invoiceNumber}` : null}
+                      </p>
+                    ) : null}
+                    {Array.isArray(r.items) && r.items.length ? (
+                      <ul className="mt-1 list-disc pl-4 text-xs text-[#334155]">
+                        {(r.items as Array<Record<string, unknown>>).map(
+                          (it, i) => (
+                            <li key={i}>
+                              {String(it.name ?? it.sku ?? "Item")}
+                              {it.quantity != null
+                                ? ` × ${String(it.quantity)}`
+                                : ""}
+                              {it.condition
+                                ? ` (${String(it.condition)})`
+                                : ""}
+                            </li>
+                          ),
+                        )}
+                      </ul>
+                    ) : null}
+                  </div>
                 </div>
               </li>
             ))}

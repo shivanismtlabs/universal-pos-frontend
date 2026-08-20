@@ -32,6 +32,8 @@ import {
   zodFieldErrors,
   zodMessages,
 } from "@/lib/validations";
+import { GEO_COUNTRIES, geoDial } from "@/lib/geo";
+import { CountryStateFields } from "@/components/country-state-fields";
 
 export type SettingsSection =
   | "branding"
@@ -79,23 +81,6 @@ const SECTION_META: Record<
   },
 };
 
-const COUNTRY_OPTIONS = [
-  { id: "IN", label: "India" },
-  { id: "AE", label: "United Arab Emirates" },
-  { id: "US", label: "United States" },
-  { id: "GB", label: "United Kingdom" },
-  { id: "AU", label: "Australia" },
-  { id: "SG", label: "Singapore" },
-] as const;
-
-const PHONE_CODES = [
-  { id: "+91", label: "+91" },
-  { id: "+971", label: "+971" },
-  { id: "+1", label: "+1" },
-  { id: "+44", label: "+44" },
-  { id: "+61", label: "+61" },
-  { id: "+65", label: "+65" },
-] as const;
 
 const FISCAL_YEAR_OPTIONS = [
   { id: "April", label: "April – March" },
@@ -795,26 +780,10 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
                 </p>
               </div>
               <div>
-                <Label>Business location *</Label>
-                <select
-                  className="mt-1 w-full rounded-lg border border-[#e5e7eb] bg-white px-3 py-2 text-sm"
-                  value={profile.countryCode}
-                  onChange={(e) =>
-                    setProfile((p) => ({ ...p, countryCode: e.target.value }))
-                  }
-                >
-                  {COUNTRY_OPTIONS.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
                 <Label>Phone *</Label>
                 <div className="mt-1 flex gap-2">
                   <select
-                    className="w-[5.5rem] rounded-lg border border-[#e5e7eb] bg-white px-2 py-2 text-sm"
+                    className="w-[7.25rem] rounded-lg border border-[#e5e7eb] bg-white px-2 py-2 text-sm"
                     value={profile.phoneCountryCode}
                     onChange={(e) =>
                       setProfile((p) => ({
@@ -823,9 +792,9 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
                       }))
                     }
                   >
-                    {PHONE_CODES.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.label}
+                    {GEO_COUNTRIES.map((c) => (
+                      <option key={c.code} value={c.dial}>
+                        {c.dial} {c.code}
                       </option>
                     ))}
                   </select>
@@ -973,6 +942,22 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
                 }
               />
             </div>
+            <div className="grid gap-3 sm:col-span-2 sm:grid-cols-2">
+              <CountryStateFields
+                countryCode={profile.countryCode}
+                state={profile.state}
+                countryRequired
+                countryLabel="Business location"
+                onCountry={(code) =>
+                  setProfile((p) => ({
+                    ...p,
+                    countryCode: code,
+                    phoneCountryCode: geoDial(code) || p.phoneCountryCode,
+                  }))
+                }
+                onState={(state) => setProfile((p) => ({ ...p, state }))}
+              />
+            </div>
             <div>
               <Label>City</Label>
               <Input
@@ -980,16 +965,6 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
                 value={profile.city}
                 onChange={(e) =>
                   setProfile((p) => ({ ...p, city: e.target.value }))
-                }
-              />
-            </div>
-            <div>
-              <Label>State</Label>
-              <Input
-                className="mt-1"
-                value={profile.state}
-                onChange={(e) =>
-                  setProfile((p) => ({ ...p, state: e.target.value }))
                 }
               />
             </div>

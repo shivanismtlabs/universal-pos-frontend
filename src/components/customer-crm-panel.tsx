@@ -450,10 +450,13 @@ export function CustomerCrmPanel({ customerId }: { customerId: string }) {
         {tab === "wallet" ? (
           <div className="space-y-4">
             <p className="text-sm text-[#5a6b7d]">
-              Store credit balance:{" "}
+              This is real shop money for this customer. Put money in with
+              Credit. At the counter, tap Wallet to take it off this balance.
+              Right now they have{" "}
               <span className="font-semibold text-[#0b1f33]">
                 {money(s?.storeCreditBalance ?? 0)}
               </span>
+              .
             </p>
             <div className="grid max-w-lg gap-2 rounded-xl border border-[#e4e9f0] bg-[#f8fafc] p-3 sm:grid-cols-[1fr_1fr_auto]">
               <div>

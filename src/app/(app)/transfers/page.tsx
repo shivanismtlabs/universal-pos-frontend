@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, Fragment } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowRightLeft, Package } from "lucide-react";
+import { ArrowRightLeft, Package, X } from "lucide-react";
 import { inventoryApi, tenantsApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { canWriteCatalog } from "@/lib/roles";
@@ -326,11 +326,21 @@ function TransferComposer({
         onClick={onClose}
       />
       <div className="relative z-10 flex max-h-[92dvh] w-full max-w-4xl flex-col overflow-hidden rounded-t-2xl border border-[#e4e9f0] bg-white shadow-xl sm:rounded-xl">
-        <div className="shrink-0 border-b border-[#eef1f4] px-5 py-4">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-[#eef1f4] px-5 py-4">
+          <div>
           <h2 className="text-lg font-semibold text-[#0b1f33]">New transfer</h2>
           <p className="mt-1 text-[0.8rem] text-[#5a6b7d]">
-            Move stock from one location to another.
+            Move stock from one shop to another.
           </p>
+          </div>
+          <button
+            type="button"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-[#5a6b7d] hover:bg-[#f1f5f9]"
+            aria-label="Close"
+            onClick={onClose}
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-5">

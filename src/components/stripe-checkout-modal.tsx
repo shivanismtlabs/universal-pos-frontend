@@ -8,6 +8,7 @@ import {
   useStripe,
 } from "@stripe/react-stripe-js";
 import { loadStripe, type PaymentIntent, type Stripe } from "@stripe/stripe-js";
+import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatInr } from "@/lib/utils";
 
@@ -227,8 +228,22 @@ export function StripeCheckoutModal(props: Props) {
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#111827]/45 p-4">
-      <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button
+        type="button"
+        className="absolute inset-0 bg-[#111827]/45"
+        aria-label="Close"
+        onClick={props.onClose}
+      />
+      <div className="relative z-10 w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl">
+        <button
+          type="button"
+          className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-lg text-[#5a6b7d] hover:bg-[#f1f5f9]"
+          aria-label="Close"
+          onClick={props.onClose}
+        >
+          <X className="h-4 w-4" />
+        </button>
         <Elements
           stripe={stripePromise}
           options={{

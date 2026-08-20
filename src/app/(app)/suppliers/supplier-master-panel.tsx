@@ -18,6 +18,8 @@ import { canFinance } from "@/lib/roles";
 import { useAuthStore } from "@/lib/auth-store";
 import { mediaUrl } from "@/lib/utils";
 import { prepareProductImageDataUrl } from "@/lib/image-prepare";
+import { CountryStateFields } from "@/components/country-state-fields";
+import { geoCountry } from "@/lib/geo";
 
 const STATUSES = [
   { id: "active", label: "Active" },
@@ -236,7 +238,9 @@ export function SupplierMasterPanel() {
         city: addrCity.trim() || undefined,
         state: addrState.trim() || undefined,
         postalCode: addrPostal.trim() || undefined,
-        country: addrCountry.trim() || undefined,
+        country:
+          geoCountry(addrCountry)?.name ??
+          (addrCountry.trim() || undefined),
       }),
     onSuccess: async () => {
       toast.success("Address added");
@@ -647,9 +651,15 @@ export function SupplierMasterPanel() {
                 </Select>
                 <Input placeholder="Line 1" value={addrLine} onChange={(e) => setAddrLine(e.target.value)} />
                 <Input placeholder="City" value={addrCity} onChange={(e) => setAddrCity(e.target.value)} />
-                <Input placeholder="State / region" value={addrState} onChange={(e) => setAddrState(e.target.value)} />
+                <div className="sm:col-span-2 lg:col-span-3 grid gap-2 sm:grid-cols-2">
+                  <CountryStateFields
+                    countryCode={addrCountry}
+                    state={addrState}
+                    onCountry={setAddrCountry}
+                    onState={setAddrState}
+                  />
+                </div>
                 <Input placeholder="Postal code" value={addrPostal} onChange={(e) => setAddrPostal(e.target.value)} />
-                <Input placeholder="Country" value={addrCountry} onChange={(e) => setAddrCountry(e.target.value)} />
               </div>
               <Button type="button" size="sm" variant="secondary" disabled={!addrLine.trim() || addAddr.isPending} onClick={() => addAddr.mutate()}>
                 Add address

@@ -28,6 +28,7 @@ import { cn } from "@/lib/utils";
 import { ModeBadge } from "@/components/mode-badge";
 import { ProductThumb } from "@/components/product-thumb";
 import { ImageLightbox } from "@/components/image-lightbox";
+import { catalogStockOnHandLabel, productKindLabel } from "@/lib/product-kind";
 import { FieldError } from "@/components/ui/form";
 import { useAuthStore } from "@/lib/auth-store";
 import { useBranchStore } from "@/lib/branch-store";
@@ -37,14 +38,18 @@ import {
   zodFieldErrors,
   zodMessages,
 } from "@/lib/validations";
+import { ItemsImportDialog } from "@/components/items-import-dialog";
 import { EntityRowActions } from "@/components/entity-row-actions";
+
+/** Row action buttons for catalog tables (explicit alias avoids Turbopack HMR misses). */
+const CatalogRowActions = EntityRowActions;
 
 const KINDS: { value: CatalogProductKind | ""; label: string }[] = [
   { value: "", label: "All types" },
-  { value: "physical", label: "Physical" },
+  { value: "physical", label: "Goods" },
   { value: "service", label: "Service" },
   { value: "digital", label: "Digital" },
-  { value: "bundle", label: "Bundle" },
+  { value: "bundle", label: "Combo pack" },
   { value: "rental", label: "Rental" },
 ];
 
@@ -173,6 +178,7 @@ function ProductsPanel() {
     index: number;
     label: string;
   } | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
 
   const cats = useQuery({
     queryKey: ["catalog-categories", tenantId],
@@ -345,6 +351,13 @@ function ProductsPanel() {
             </option>
           ))}
         </select>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => setImportOpen(true)}
+        >
+          Import Excel / CSV
+        </Button>
         <Button asChild>
           <Link href="/catalog/new">
             <Plus className="mr-1 size-4" />
@@ -474,18 +487,18 @@ function ProductsPanel() {
                   <td className="px-3 py-2 text-[#5a6b7d]">
                     {p.category?.name ?? "—"}
                   </td>
-                  <td className="px-3 py-2 capitalize text-[#5a6b7d]">
-                    {p.kind}
+                  <td className="px-3 py-2 text-[#5a6b7d]">
+                    {productKindLabel(p.kind) || p.kind}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">
                     {Number(p.basePrice).toFixed(2)}
                   </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-[#5a6b7d]">
-                    {p.trackInventory === false
-                      ? "—"
-                      : p.stockOnHand == null
-                        ? "—"
-                        : p.stockOnHand}
+                  <td className="px-3 py-2 text-right text-[#5a6b7d]">
+                    {catalogStockOnHandLabel({
+                      kind: p.kind,
+                      trackInventory: p.trackInventory,
+                      stockOnHand: p.stockOnHand,
+                    })}
                   </td>
                   <td className="px-3 py-2 text-[#5a6b7d]">
                     {p.sellUnit || p.unitOfMeasure || "pcs"}
@@ -495,7 +508,7 @@ function ProductsPanel() {
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex items-center justify-end gap-0.5">
-                      <EntityRowActions
+                      <CatalogRowActions
                         onEdit={() =>
                           router.push(`/catalog/edit?id=${p.id}`)
                         }
@@ -577,6 +590,10 @@ function ProductsPanel() {
         startIndex={lightbox?.index ?? 0}
         label={lightbox?.label}
         onClose={() => setLightbox(null)}
+      />
+      <ItemsImportDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
       />
     </div>
   );
@@ -755,7 +772,7 @@ function BrandsPanel() {
                   {b.isActive ? "Active" : "Inactive"}
                 </td>
                 <td className="px-3 py-2 text-right">
-                  <EntityRowActions
+                  <CatalogRowActions
                     onEdit={() => {
                       setEditId(b.id);
                       setEditName(b.name);
@@ -985,7 +1002,7 @@ function CategoriesPanel() {
                   {c._count?.products ?? 0}
                 </td>
                 <td className="px-3 py-2 text-right">
-                  <EntityRowActions
+                  <CatalogRowActions
                     onEdit={() => {
                       setEditId(c.id);
                       setEditName(c.name);

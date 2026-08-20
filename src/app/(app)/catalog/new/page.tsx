@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { catalogApi, tenantsApi, type CatalogProductKind } from "@/lib/api";
+import { catalogApi, customFieldsApi, tenantsApi, type CatalogProductKind } from "@/lib/api";
 import { PageHeader } from "@/components/page-header";
 import { ApiError } from "@/lib/api/client";
 import { useBootstrap } from "@/lib/bootstrap";
@@ -27,6 +27,7 @@ import {
 } from "@/lib/validations";
 
 import { activeUnitOptions } from "@/lib/measure-units";
+import { mergeProductFormFields } from "@/lib/product-form-fields";
 
 const KINDS: { id: CatalogProductKind; label: string }[] = [
   { id: "physical", label: "Physical" },
@@ -45,8 +46,16 @@ export default function NewCatalogProductPage() {
   const router = useRouter();
   const qc = useQueryClient();
   const imagePickerRef = useRef<ProductImagePickerHandle>(null);
-  const { itemMetaFields, businessConfig, businessType, data: boot } =
+  const { itemMetaFields, data: boot } =
     useBootstrap();
+  const customFieldsQ = useQuery({
+    queryKey: ["custom-fields", "product"],
+    queryFn: () => customFieldsApi.listDefinitions("product"),
+  });
+  const productFormFields = useMemo(
+    () => mergeProductFormFields(itemMetaFields, customFieldsQ.data),
+    [itemMetaFields, customFieldsQ.data],
+  );
   const currentLocationId = useBranchStore((s) => s.currentLocationId);
   const defaultLocationId =
     currentLocationId || boot?.locations?.[0]?.id;
@@ -67,12 +76,8 @@ export default function NewCatalogProductPage() {
     [unitsQ.data],
   );
 
-  /** Org custom / profile extras (from business config itemFields). */
+  /** Extra questions from shop profile + Settings → Custom fields. */
   const [extraFields, setExtraFields] = useState<Record<string, string>>({});
-
-  const profileLabel = useMemo(() => {
-    return businessConfig?.label || businessType || "Shop";
-  }, [businessConfig?.label, businessType]);
 
   const [form, setForm] = useState({
     name: "",
@@ -256,10 +261,10 @@ export default function NewCatalogProductPage() {
           if (Number.isFinite(rate) && rate >= 0) {
             out.taxRatePercent = rate;
           }
-          if (!itemMetaFields.length) {
+          if (!productFormFields.length) {
             return Object.keys(out).length ? out : undefined;
           }
-          for (const f of itemMetaFields) {
+          for (const f of productFormFields) {
             const v = (extraFields[f.key] ?? "").trim();
             if (v) out[f.key] = v;
           }
@@ -287,7 +292,7 @@ export default function NewCatalogProductPage() {
     <div className="mx-auto max-w-3xl space-y-6">
       <PageHeader
         title="New Item"
-        subtitle="Catalog definition - name, pricing, IDs, and inventory flags"
+        subtitle="Name, price, codes, and extra fields you added in Settings → Custom fields"
         action={
           <Button variant="ghost" asChild>
             <Link href="/catalog">Cancel</Link>
@@ -639,15 +644,14 @@ export default function NewCatalogProductPage() {
           ))}
         </div>
 
-        {itemMetaFields.length ? (
+        {productFormFields.length ? (
           <div className="space-y-3">
-            <p className="text-xs text-[#6b7280]">
-              Extra fields for{" "}
-              <span className="font-medium text-[#0b1f33]">{profileLabel}</span>{" "}
-              {" "}- set when the organization was created.
+            <p className="text-sm text-[#5a6b7d]">
+              Extra questions for this item. Add more under Settings → Custom
+              fields (Product).
             </p>
             <div className="grid gap-3 sm:grid-cols-2">
-              {itemMetaFields.map((field) => (
+              {productFormFields.map((field) => (
                 <div
                   key={field.key}
                   className={

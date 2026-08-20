@@ -1,5 +1,6 @@
 import { apiRequest, ApiError } from "./client";
 import { useAuthStore } from "../auth-store";
+import type { TenantBootstrap } from "../bootstrap-types";
 import {
   parseUnitsFromSettings,
   type MeasureUnitRow,
@@ -2291,6 +2292,7 @@ export const posApi = {
       taxCode?: string | null;
       taxRatePercent?: number | null;
       category?: { id: string; name: string } | null;
+      kind?: string;
       requiresVariant?: boolean;
       variantOptions?: Array<{
         id: string;
@@ -2552,6 +2554,7 @@ export const posApi = {
         exchangeOrderId?: string | null;
         exchangeOrderNumber?: string | null;
         invoiceNumber?: string | null;
+        items?: unknown;
       }>;
     }>(`/pos/sale/returns${q ? `?${q}` : ""}`, { token: token() });
   },
@@ -5848,6 +5851,13 @@ export const notifyApi = {
     });
   },
 
+  scanDuePayments() {
+    return apiRequest<{ ok?: boolean; skipped?: boolean }>("/notify/due-scan", {
+      method: "POST",
+      token: token(),
+    });
+  },
+
   markRead(id: string) {
     return apiRequest(`/notify/inbox/${id}/read`, {
       method: "PATCH",
@@ -6833,6 +6843,34 @@ export const suppliersApi = {
       }>
     >("/supplier-invoices/outstanding", { token: token() });
   },
+  getInvoice(id: string) {
+    return apiRequest<{
+      id: string;
+      supplierId: string;
+      invoiceNumber: string;
+      invoiceDate: string;
+      dueDate?: string | null;
+      subtotal: number;
+      taxTotal: number;
+      grandTotal: number;
+      amountPaid: number;
+      balanceDue: number;
+      status: string;
+      notes?: string | null;
+      supplier?: { id: string; name: string; phone?: string | null; email?: string | null };
+      purchaseOrder?: { id: string; poNumber: string | null };
+      goodsReceipt?: { id: string; grnNumber: string };
+      payments: Array<{
+        id: string;
+        amount: number;
+        method: string;
+        kind?: string;
+        reference?: string | null;
+        notes?: string | null;
+        paidAt: string;
+      }>;
+    }>(`/supplier-invoices/${id}`, { token: token() });
+  },
   createInvoice(body: {
     supplierId: string;
     purchaseOrderId?: string;
@@ -6859,6 +6897,10 @@ export const suppliersApi = {
       kind?: "payment" | "refund";
       reference?: string;
       notes?: string;
+      chequeNumber?: string;
+      chequeBank?: string;
+      chequeDate?: string;
+      chequePayee?: string;
     },
   ) {
     return apiRequest<{

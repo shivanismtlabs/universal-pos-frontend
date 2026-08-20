@@ -94,7 +94,7 @@ export default function ResourcesPage() {
   const total = meta?.total ?? rows.length;
   const totalPages = Math.max(
     1,
-    meta?.totalPages ?? Math.ceil(total / PAGE_SIZE) || 1,
+    meta?.totalPages ?? (Math.ceil(total / PAGE_SIZE) || 1),
   );
 
   const create = useMutation({

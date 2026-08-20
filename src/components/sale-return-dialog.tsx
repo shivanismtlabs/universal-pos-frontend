@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { moneyNumber, newIdempotencyKey } from "@/lib/utils";
+import { X } from "lucide-react";
 
 /**
  * Return / refund a closed Sale ticket — restocks qty + records refund.
@@ -282,11 +283,17 @@ export function SaleReturnDialog({
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#0b1f33]/45 p-3 sm:items-center">
+    <div className="fixed inset-0 z-50 flex items-end justify-center p-3 sm:items-center">
+      <button
+        type="button"
+        className="absolute inset-0 bg-[#0b1f33]/45"
+        aria-label="Close"
+        onClick={onClose}
+      />
       <div
         role="dialog"
         aria-modal
-        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-[14px] border border-[#d9e0ea] bg-white p-4 shadow-xl"
+        className="relative z-10 max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-[14px] border border-[#d9e0ea] bg-white p-4 shadow-xl"
       >
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -298,13 +305,18 @@ export function SaleReturnDialog({
             </h2>
             <p className="mt-0.5 text-sm text-[#5a6b7d]">
               {mode === "exchange"
-                ? "Return selected qty and sell replacements; settle the difference."
-                : "Restock selected qty and refund the customer."}
+                ? "Give items back, then sell new ones. Pay or refund the difference."
+                : "Give items back to stock and return money to the customer."}
             </p>
           </div>
-          <Button type="button" size="sm" variant="secondary" onClick={onClose}>
-            Close
-          </Button>
+          <button
+            type="button"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-[#5a6b7d] hover:bg-[#f1f5f9]"
+            aria-label="Close"
+            onClick={onClose}
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
 
         <div className="mt-3 flex gap-1 rounded-[10px] bg-[#eef2f8] p-1">

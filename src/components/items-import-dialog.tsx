@@ -122,24 +122,20 @@ function mapHeader(h: string): string | null {
   return aliases[n] ?? null;
 }
 
-export function rowsFromCsvText(text: string): ImportableRow[] {
-  const table = parseCsv(text);
+export function rowsFromTable(table: string[][]): ImportableRow[] {
   if (table.length < 2) {
     throw new Error("File needs a header row and at least one data row");
   }
   const headers = table[0]!.map(mapHeader);
   if (!headers.includes("title") || !headers.includes("sku")) {
-    throw new Error("CSV must include name and sku columns");
-  }
-  if (!headers.includes("price") && !headers.includes("price" as never)) {
-    /* price check below per row */
+    throw new Error("File must include name and sku columns");
   }
   const out: ImportableRow[] = [];
   for (let r = 1; r < table.length; r++) {
     const cells = table[r]!;
     const obj: Record<string, string> = {};
     headers.forEach((key, i) => {
-      if (key) obj[key] = cells[i] ?? "";
+      if (key) obj[key] = String(cells[i] ?? "");
     });
     if (!obj.title?.trim() && !obj.sku?.trim()) continue;
     const unitRaw = (obj.sellUnit || "pcs").toLowerCase();
@@ -186,6 +182,27 @@ export function rowsFromCsvText(text: string): ImportableRow[] {
   }
   if (!out.length) throw new Error("No data rows found");
   return out;
+}
+
+export function rowsFromCsvText(text: string): ImportableRow[] {
+  return rowsFromTable(parseCsv(text));
+}
+
+async function rowsFromExcelFile(file: File): Promise<ImportableRow[]> {
+  const ExcelJS = (await import("exceljs")).default;
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(await file.arrayBuffer());
+  const ws = wb.worksheets[0];
+  if (!ws) throw new Error("Excel file has no sheet");
+  const table: string[][] = [];
+  ws.eachRow({ includeEmpty: false }, (row) => {
+    const cells: string[] = [];
+    row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+      cells[colNumber - 1] = String(cell.text ?? cell.value ?? "").trim();
+    });
+    table.push(cells);
+  });
+  return rowsFromTable(table);
 }
 
 export function downloadItemsTemplate() {
@@ -244,7 +261,9 @@ export function ItemsImportDialog({
         createCategories: true,
       }),
     onSuccess: (res) => {
-      void qc.invalidateQueries({ queryKey: ["pos-sale"] });
+      void qc.invalidateQueries({ queryKey: ["catalog-products"] });
+      void qc.invalidateQueries({ queryKey: ["catalog-products-home"] });
+      void qc.invalidateQueries({ queryKey: ["inv-levels"] });
       void qc.invalidateQueries({ queryKey: ["pos-sale-products"] });
       void qc.invalidateQueries({ queryKey: ["pos-sale-categories"] });
       void qc.invalidateQueries({ queryKey: ["pos-sale-floor"] });
@@ -281,8 +300,10 @@ export function ItemsImportDialog({
     setParseError(null);
     setFileName(file.name);
     try {
-      const text = await file.text();
-      const rows = rowsFromCsvText(text);
+      const lower = file.name.toLowerCase();
+      const rows = lower.endsWith(".xlsx") || lower.endsWith(".xls")
+        ? await rowsFromExcelFile(file)
+        : rowsFromCsvText(await file.text());
       setPreview(rows);
     } catch (e) {
       setPreview(null);
@@ -308,8 +329,8 @@ export function ItemsImportDialog({
               Import items
             </h2>
             <p className="mt-1 text-[0.8rem] text-[#5a6b7d]">
-              Bulk import items/services with CSV or TSV — works for any
-              Universal POS shop, not just one industry.
+              Bulk import from Excel (.xlsx) or CSV. First row must be headers
+              like name, sku, selling_price. Stock is added for this shop.
             </p>
           </div>
           <button
@@ -341,7 +362,7 @@ export function ItemsImportDialog({
             <input
               ref={fileRef}
               type="file"
-              accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values"
+              accept=".csv,.tsv,.txt,.xlsx,.xls,text/csv,text/tab-separated-values,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
               className="sr-only"
               onChange={(e) => void onFile(e.target.files?.[0] ?? null)}
             />

@@ -65,6 +65,8 @@ export default function InventoryAdjustmentsPage() {
       setPickOpen(false);
       void qc.invalidateQueries({ queryKey: ["pos-sale-stock-adjustments"] });
       void qc.invalidateQueries({ queryKey: ["pos-sale-products"] });
+      void qc.invalidateQueries({ queryKey: ["pos-sale-products-adj-pick"] });
+      void qc.invalidateQueries({ queryKey: ["catalog-products"] });
       void qc.invalidateQueries({ queryKey: ["inventory-stock"] });
       void qc.invalidateQueries({ queryKey: ["pos-sale"] });
     },
@@ -232,15 +234,27 @@ export default function InventoryAdjustmentsPage() {
             onClick={() => setPickOpen(false)}
           />
           <div className="relative z-10 flex max-h-[85dvh] w-full max-w-lg flex-col overflow-hidden rounded-xl border border-[#e4e9f0] bg-white shadow-xl">
-            <div className="shrink-0 border-b border-[#eef1f4] px-5 py-4">
+            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-[#eef1f4] px-5 py-4">
+              <div>
               <h2 className="text-lg font-semibold text-[#0b1f33]">
                 New adjustment
               </h2>
               <p className="mt-1 text-[0.8rem] text-[#5a6b7d]">
-                Select an item, then enter the quantity change and reason.
+                Pick an item, then type how much to add or remove.
               </p>
+              </div>
+              <button
+                type="button"
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-[#5a6b7d] hover:bg-[#f1f5f9]"
+                aria-label="Close"
+                onClick={() => setPickOpen(false)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="shrink-0 px-5 pb-3">
               <Input
-                className="mt-3 h-9"
+                className="h-9"
                 placeholder="Search items…"
                 value={pickQ}
                 onChange={(e) => setPickQ(e.target.value)}

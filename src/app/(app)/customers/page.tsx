@@ -27,8 +27,9 @@ import { useBootstrap } from "@/lib/bootstrap";
 import { useAuthStore } from "@/lib/auth-store";
 import { PageHeader } from "@/components/page-header";
 import { EntityRowActions } from "@/components/entity-row-actions";
-import { CustomerCrmPanel } from "@/components/customer-crm-panel";
 import { TablePager } from "@/components/table-pager";
+import { CustomerCrmPanel } from "@/components/customer-crm-panel";
+import { PhoneCountryInput } from "@/components/phone-country-input";
 
 function numOrUndef(v: unknown) {
   if (v === "" || v === undefined || v === null) return undefined;
@@ -462,8 +463,13 @@ export default function CustomersPage() {
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <Label>Phone</Label>
-                  <Input className="mt-1.5" {...form.register("phone")} />
+                  <PhoneCountryInput
+                    required
+                    value={form.watch("phone")}
+                    onChange={(v) =>
+                      form.setValue("phone", v, { shouldValidate: true })
+                    }
+                  />
                   <FieldError message={form.formState.errors.phone?.message} />
                 </div>
                 {rental ? (

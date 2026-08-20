@@ -12,16 +12,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { GEO_COUNTRIES } from "@/lib/geo";
 import { PageHeader } from "@/components/page-header";
 
-const TAX_COUNTRIES = [
-  { id: "IN", label: "India (IN)" },
-  { id: "AE", label: "United Arab Emirates (AE)" },
-  { id: "US", label: "United States (US)" },
-  { id: "GB", label: "United Kingdom (GB)" },
-  { id: "AU", label: "Australia (AU)" },
-  { id: "SG", label: "Singapore (SG)" },
-] as const;
 
 function blankForm() {
   return {
@@ -168,13 +161,13 @@ export default function AccountingSettingsPage() {
             }
           >
             <option value="">Select country</option>
-            {!TAX_COUNTRIES.some((c) => c.id === form.taxCountry) &&
+            {!GEO_COUNTRIES.some((c) => c.code === form.taxCountry) &&
             form.taxCountry ? (
               <option value={form.taxCountry}>{form.taxCountry}</option>
             ) : null}
-            {TAX_COUNTRIES.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.label}
+            {GEO_COUNTRIES.map((c) => (
+              <option key={c.code} value={c.code}>
+                {c.name} ({c.code})
               </option>
             ))}
           </Select>

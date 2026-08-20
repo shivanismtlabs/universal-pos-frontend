@@ -393,8 +393,8 @@ textarea:focus {
   }
 
   .receipt-paid-bar {
-    background: #0b1f33 !important;
-    color: #fff !important;
+    background: #fff !important;
+    color: #000 !important;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }

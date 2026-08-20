@@ -221,7 +221,7 @@ export default function StaffPage() {
     <div className="mx-auto max-w-6xl space-y-5">
       <PageHeader
         title="User & role management"
-        subtitle="Admin, Store Manager, Cashier, Inventory Manager, Accountant · custom roles · attendance · shifts · PIN · biometrics"
+        subtitle="Add people who work in your shops. Store Managers can be assigned to a location."
       />
 
       {/* Role coverage strip */}
@@ -377,8 +377,9 @@ export default function StaffPage() {
 
         <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5">
           <h2 className="text-lg font-semibold text-[#111827]">Add staff</h2>
-          <p className="mt-1 text-xs text-[#6b7280]">
-            Choose a system role or a custom role from Roles & permissions.
+          <p className="mt-1 text-sm text-[#6b7280]">
+            Name, email, password, and a role. Pick Store Manager if they will
+            run a branch.
           </p>
           {!canManage ? (
             <p className="mt-3 text-sm text-[#6b7280]">

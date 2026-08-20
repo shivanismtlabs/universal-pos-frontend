@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import { ItemsImportDialog } from "@/components/items-import-dialog";
 import { EntityRowActions } from "@/components/entity-row-actions";
 import { PageHeader, PageSkeleton } from "@/components/page-header";
 import { FieldError } from "@/components/ui/form";
@@ -80,6 +81,7 @@ function InventoryPageInner() {
   /** URL is source of truth — avoids stale state when opening /inventory?tab=alerts */
   const tab = parseTab(search.get("tab"));
   const [locationId, setLocationId] = useState("");
+  const [importOpen, setImportOpen] = useState(false);
   const branchId = useBranchStore((s) => s.currentLocationId);
   const setBranchId = useBranchStore((s) => s.setCurrentLocationId);
 
@@ -120,9 +122,14 @@ function InventoryPageInner() {
     <div className="mx-auto max-w-3xl space-y-6">
       <PageHeader
         title="Inventory"
-        subtitle="Stock on hand, receipts, issues, damage, and physical counts"
+        subtitle="How much stock you have in this shop. Import an Excel file to add items and opening qty."
         action={
           <div className="flex flex-wrap gap-2">
+            {canWrite ? (
+              <Button type="button" onClick={() => setImportOpen(true)}>
+                Import Excel / CSV
+              </Button>
+            ) : null}
             <Button variant="ghost" asChild>
               <Link href="/transfers">Stock transfer</Link>
             </Button>
@@ -202,6 +209,10 @@ function InventoryPageInner() {
       {tab === "ledger" ? <LedgerTab locationId={activeLoc} /> : null}
       {tab === "warehouses" ? <WarehousesTab canWrite={canWrite} /> : null}
       </section>
+      <ItemsImportDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+      />
     </div>
   );
 }
@@ -352,15 +363,31 @@ function LevelsTab({
       <TablePager {...pagedLevels.pagerProps} />
 
       {reorderId ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4">
-          <div className="w-full max-w-md space-y-5 rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-lg">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <button
+            type="button"
+            className="absolute inset-0 bg-[#0b1f33]/45"
+            aria-label="Close"
+            onClick={() => setReorderId(null)}
+          />
+          <div className="relative z-10 w-full max-w-md space-y-5 rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-lg">
+            <div className="flex items-start justify-between gap-2">
             <div>
               <h3 className="text-base font-semibold text-[#0b1f33]">
                 Branch price & reorder
               </h3>
               <p className="mt-1 text-[0.8rem] text-[#6b7280]">
-                Applies only at this location.
+                Change selling price and when to reorder — only for this shop.
               </p>
+            </div>
+              <button
+                type="button"
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-[#5a6b7d] hover:bg-[#f1f5f9]"
+                aria-label="Close"
+                onClick={() => setReorderId(null)}
+              >
+                ×
+              </button>
             </div>
             <div>
               <Label>Sell price (this branch)</Label>

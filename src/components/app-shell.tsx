@@ -33,7 +33,6 @@ import {
   TicketPercent,
   ChevronDown,
   ChevronRight,
-  ChevronLeft,
   Home,
   Building2,
   Search,
@@ -679,17 +678,6 @@ function isPathActive(pathname: string, href: string) {
   return pathname === base || pathname.startsWith(`${base}/`);
 }
 
-function groupActiveFromPath(
-  pathname: string,
-  groups: Array<NavGroup & { children: NavLeaf[] }>,
-): string {
-  for (const g of groups) {
-    if (g.href && isPathActive(pathname, g.href)) return g.id;
-    if (g.children.some((c) => isPathActive(pathname, c.href))) return g.id;
-  }
-  return groups[0]?.id ?? "home";
-}
-
 function modeBadge(modes: string[]) {
   if (!modes.length) return "Setup";
   const labels: Record<string, string> = {
@@ -702,9 +690,7 @@ function modeBadge(modes: string[]) {
 }
 
 /**
- * Zoho-style dual sidebar:
- *  - narrow icon rail (primary modules)
- *  - secondary panel (group title + search + nested links)
+ * Light Untitled-style sidebar — expandable sections, readable on white.
  */
 function SidebarBody({
   onNavigate,
@@ -759,107 +745,68 @@ function SidebarBody({
     }).filter(Boolean) as Array<NavGroup & { children: NavLeaf[] }>;
   }, [roles, permissions, hasModule, hasMode, hasCapability, showGroup]);
 
-  const pathGroupId = useMemo(
-    () => groupActiveFromPath(pathname, groups),
-    [pathname, groups],
-  );
-
-  const [railId, setRailId] = useState(pathGroupId);
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
-
-  useEffect(() => {
-    setRailId(pathGroupId);
-  }, [pathGroupId]);
 
   useEffect(() => {
     setSearch(typeof window !== "undefined" ? window.location.search : "");
   }, [pathname]);
 
-  const activeGroup =
-    groups.find((g) => g.id === railId) ?? groups[0] ?? null;
-
   useEffect(() => {
-    const hrefs = new Set<string>();
-    if (activeGroup?.href) hrefs.add(activeGroup.href);
-    for (const c of activeGroup?.children ?? []) hrefs.add(c.href);
-    hrefs.forEach((href) => {
-      try {
-        router.prefetch(href);
-      } catch {
-        /* ignore */
-      }
-    });
-  }, [activeGroup, router]);
-
-  const q = navQuery.trim().toLowerCase();
-  const panelLinks = useMemo(() => {
-    if (!activeGroup) return [] as NavLeaf[];
-    if (activeGroup.href) {
-      return [
-        {
-          href: activeGroup.href,
-          label: activeGroup.label,
-          icon: activeGroup.icon,
-        },
-      ];
-    }
-    let list = activeGroup.children;
-    if (q) {
-      list = list.filter((c) => c.label.toLowerCase().includes(q));
-    }
-    return list;
-  }, [activeGroup, q]);
-
-  // Expand folder that contains the current route
-  useEffect(() => {
-    if (!activeGroup) return;
     const next: Record<string, boolean> = {};
-    for (const c of activeGroup.children) {
-      if (c.folder && isLeafActive(pathname, search, c.href)) {
-        next[c.folder] = true;
-      }
+    for (const g of groups) {
+      if (g.href && isPathActive(pathname, g.href)) next[g.id] = true;
+      else if (g.children.some((c) => isPathActive(pathname, c.href)))
+        next[g.id] = true;
     }
     if (Object.keys(next).length) {
-      setOpenFolders((prev) => ({ ...prev, ...next }));
+      setOpenGroups((prev) => ({ ...prev, ...next }));
     }
-  }, [pathname, search, activeGroup]);
+  }, [pathname, groups]);
 
-  const folderOrder = useMemo(() => {
-    const order: string[] = [];
-    for (const c of panelLinks) {
-      const f = c.folder ?? "";
-      if (f && !order.includes(f)) order.push(f);
+  useEffect(() => {
+    for (const g of groups) {
+      for (const c of g.children) {
+        if (c.folder && isLeafActive(pathname, search, c.href)) {
+          setOpenFolders((prev) => ({ ...prev, [c.folder!]: true }));
+        }
+      }
     }
-    return order;
-  }, [panelLinks]);
+  }, [pathname, search, groups]);
 
-  const unfoldered = panelLinks.filter((c) => !c.folder);
-  const hasFolders = folderOrder.length > 0;
-
-  const railTop = groups.filter((g) =>
-    ["home", "inventory", "sales", "purchases", "customers", "people", "docs"].includes(
-      g.id,
-    ),
-  );
-  const railBottom = groups.filter((g) => g.id === "setup");
-
-  function onRailClick(g: NavGroup & { children: NavLeaf[] }) {
-    setRailId(g.id);
-    setNavQuery("");
-    if (g.href) {
-      router.push(g.href);
-      onNavigate?.();
-    } else if (g.children[0]?.href) {
-      // Stay on panel; optional first nav only for home-less groups — skip auto-nav
+  useEffect(() => {
+    for (const g of groups) {
+      const hrefs = g.href ? [g.href] : g.children.map((c) => c.href);
+      hrefs.forEach((href) => {
+        try {
+          router.prefetch(href);
+        } catch {
+          /* ignore */
+        }
+      });
     }
+  }, [groups, router]);
+
+  const q = navQuery.trim().toLowerCase();
+
+  function toggleGroup(id: string) {
+    setOpenGroups((prev) => ({ ...prev, [id]: !prev[id] }));
   }
 
   function toggleFolder(name: string) {
     setOpenFolders((prev) => ({ ...prev, [name]: !prev[name] }));
   }
 
-  const railCaption = (g: NavGroup) =>
-    g.railLabel ?? g.label.split(" ")[0] ?? g.label;
+  function filteredChildren(g: NavGroup & { children: NavLeaf[] }) {
+    if (!q) return g.children;
+    return g.children.filter((c) => c.label.toLowerCase().includes(q));
+  }
+
+  function groupExpanded(g: NavGroup & { children: NavLeaf[] }) {
+    if (q && filteredChildren(g).length) return true;
+    if (openGroups[g.id] !== undefined) return openGroups[g.id];
+    return g.children.some((c) => isLeafActive(pathname, search, c.href));
+  }
 
   const unreadQ = useQuery({
     queryKey: ["notify-unread"],
@@ -869,311 +816,269 @@ function SidebarBody({
   });
   const unread = unreadQ.data?.unreadCount ?? 0;
 
+  const linkClass = (active: boolean) =>
+    cn(
+      "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[0.8125rem] transition",
+      active
+        ? "bg-[#eef2ff] font-semibold text-[#1a56db]"
+        : "text-[#475569] hover:bg-[#f1f5f9] hover:text-[#0b1f33]",
+    );
+
+  const subLinkClass = (active: boolean) =>
+    cn(
+      "flex items-center gap-2 rounded-lg py-1.5 pr-2 pl-7 text-[0.8125rem] transition",
+      active
+        ? "bg-[#eef2ff] font-semibold text-[#1a56db]"
+        : "text-[#64748b] hover:bg-[#f8fafc] hover:text-[#0b1f33]",
+    );
+
   return (
-    <div className="flex h-full min-h-0 w-full bg-[#0b1016] text-[#e8edf4] print:bg-white print:text-[#0b1f33]">
-      {/* —— Zoho icon rail —— */}
-      <div className="flex w-[4.35rem] shrink-0 flex-col border-r border-white/[0.06] bg-[#06090e]">
-        <div className="flex justify-center pt-2.5 pb-1">
-          <button
-            type="button"
-            className="grid h-8 w-8 place-items-center rounded-md text-[#8b96a5] transition hover:bg-white/[0.06] hover:text-white"
-            title="Collapse"
-            aria-label="Collapse navigation"
-            onClick={() => onNavigate?.()}
-          >
-            <ChevronLeft className="h-4 w-4" strokeWidth={1.75} />
-          </button>
-        </div>
-
-        <nav className="flex min-h-0 flex-1 flex-col items-center gap-0.5 overflow-y-auto px-1 py-1 [scrollbar-width:none]">
-          {railTop.map((g) => {
-            const Icon = g.icon;
-            const on = g.id === railId;
-            return (
-              <button
-                key={g.id}
-                type="button"
-                title={g.label}
-                onClick={() => onRailClick(g)}
-                className={cn(
-                  "relative flex w-full flex-col items-center gap-0.5 rounded-md px-0.5 py-2 transition",
-                  on
-                    ? "bg-[#152238] text-white"
-                    : "text-[#8b96a5] hover:bg-white/[0.06] hover:text-white",
-                )}
-              >
-                {on ? (
-                  <span className="absolute top-1 bottom-1 left-0 w-[3px] rounded-r-full bg-[#1a56db]" />
-                ) : null}
-                <Icon className="h-[1.15rem] w-[1.15rem]" strokeWidth={1.75} />
-                <span className="max-w-full px-0.5 text-center text-[0.55rem] leading-tight font-medium">
-                  {railCaption(g)}
-                </span>
-              </button>
-            );
-          })}
-
-          <div className="my-2 w-7 border-t border-white/10" />
-
-          <button
-            type="button"
-            title="Search"
-            className="flex w-full flex-col items-center gap-0.5 rounded-md px-0.5 py-2 text-[#8b96a5] transition hover:bg-white/[0.06] hover:text-white"
-            onClick={() => {
-              document.getElementById("shell-nav-search")?.focus();
-            }}
-          >
-            <Search className="h-[1.15rem] w-[1.15rem]" strokeWidth={1.75} />
-            <span className="text-[0.55rem] font-medium">Search</span>
-          </button>
-
-          <div className="min-h-2 flex-1" />
-
-          <Link
-            href="/notifications"
-            onClick={onNavigate}
-            title="Notifications"
-            className="relative flex w-full flex-col items-center gap-0.5 rounded-md px-0.5 py-2 text-[#8b96a5] transition hover:bg-white/[0.06] hover:text-white"
-          >
-            <Bell className="h-[1.15rem] w-[1.15rem]" strokeWidth={1.75} />
-            {unread > 0 ? (
-              <span className="absolute top-1 right-1.5 grid min-w-[1rem] place-items-center rounded-full bg-[#dc2626] px-0.5 text-[0.55rem] font-bold text-white">
-                {unread > 9 ? "9+" : unread}
-              </span>
-            ) : null}
-            <span className="text-[0.55rem] font-medium">Alerts</span>
-          </Link>
-
-          {railBottom.map((g) => {
-            const Icon = g.icon;
-            const on = g.id === railId;
-            return (
-              <button
-                key={g.id}
-                type="button"
-                title={g.label}
-                onClick={() => onRailClick(g)}
-                className={cn(
-                  "relative flex w-full flex-col items-center gap-0.5 rounded-md px-0.5 py-2 transition",
-                  on
-                    ? "bg-[#152238] text-white"
-                    : "text-[#8b96a5] hover:bg-white/[0.06] hover:text-white",
-                )}
-              >
-                {on ? (
-                  <span className="absolute top-1 bottom-1 left-0 w-[3px] rounded-r-full bg-[#1a56db]" />
-                ) : null}
-                <Icon className="h-[1.15rem] w-[1.15rem]" strokeWidth={1.75} />
-                <span className="text-[0.55rem] font-medium">{railCaption(g)}</span>
-              </button>
-            );
-          })}
-        </nav>
-
-        <div className="flex justify-center border-t border-white/[0.06] py-3">
-          <div
-            className="grid h-8 w-8 place-items-center rounded-full bg-[#1e2733] text-[0.7rem] font-semibold text-white ring-1 ring-white/10"
-            title={userName ?? "Staff"}
-          >
-            {(userName?.trim()?.[0] || "U").toUpperCase()}
+    <div className="flex h-full min-h-0 w-full flex-col bg-[#fafbfc] text-[#0b1f33] print:bg-white">
+      <div className="shrink-0 border-b border-[#e8ecf1] px-4 pt-4 pb-3">
+        <div className="flex items-center gap-2.5">
+          <div className="grid h-9 w-9 place-items-center rounded-lg bg-[#1a56db] text-sm font-bold text-white">
+            P
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-semibold text-[#0b1f33]">
+              Universal POS
+            </p>
+            <p className="truncate text-[0.72rem] text-[#64748b]">
+              {productName}
+            </p>
           </div>
         </div>
+        <div className="relative mt-3">
+          <Search className="pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 -translate-y-1/2 text-[#94a3b8]" />
+          <input
+            id="shell-nav-search"
+            type="search"
+            placeholder="Search menu, product, customer…"
+            value={navQuery}
+            onChange={(e) => setNavQuery(e.target.value)}
+            className="h-9 w-full rounded-lg border border-[#e2e8f0] bg-white pr-2 pl-9 text-[0.8125rem] text-[#0b1f33] outline-none placeholder:text-[#94a3b8] focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/15"
+          />
+        </div>
+        <ShellEntitySearch
+          query={navQuery}
+          onNavigate={() => {
+            setNavQuery("");
+            onNavigate?.();
+          }}
+        />
       </div>
 
-      {/* —— Secondary panel —— */}
-      <div className="flex min-w-0 flex-1 flex-col bg-[#11161e]">
-        <div className="shrink-0 px-3.5 pt-3.5 pb-2">
-          <div className="flex items-center gap-2">
-            <LayoutGrid className="h-4 w-4 text-[#7aa2ff]" strokeWidth={1.75} />
-            <p className="text-[0.72rem] font-bold tracking-[0.14em] text-white uppercase">
-              POS
-            </p>
-          </div>
-          <p className="mt-0.5 truncate text-[0.65rem] text-[#7a8796]">{productName}</p>
+      <nav className="min-h-0 flex-1 overflow-y-auto px-2 py-2 [scrollbar-width:thin]">
+        {groups.map((g) => {
+          const Icon = g.icon;
+          if (g.href) {
+            const active = isLeafActive(pathname, search, g.href);
+            return (
+              <Link
+                key={g.id}
+                href={g.href}
+                onClick={onNavigate}
+                className={cn(linkClass(active), "mb-0.5")}
+              >
+                <Icon className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+                <span className="min-w-0 flex-1 truncate">{g.label}</span>
+              </Link>
+            );
+          }
 
-          <div className="mt-3 border-b border-white/10">
-            <h2 className="inline-block border-b-2 border-[#1a56db] pb-1.5 text-[0.95rem] font-semibold text-white">
-              {activeGroup?.label ?? "Menu"}
-            </h2>
-          </div>
+          const kids = filteredChildren(g);
+          if (q && !kids.length) return null;
+          const expanded = groupExpanded(g);
+          const groupActive = kids.some((c) =>
+            isLeafActive(pathname, search, c.href),
+          );
 
-          <div className="relative mt-3">
-            <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-[#6b7785]" />
-            <input
-              id="shell-nav-search"
-              type="search"
-              placeholder="Product or customer…"
-              value={navQuery}
-              onChange={(e) => setNavQuery(e.target.value)}
-              className="h-8 w-full rounded-lg border-0 bg-[#0a0e14] pr-2 pl-8 text-[0.78rem] text-[#e8edf4] outline-none ring-1 ring-white/10 placeholder:text-[#5a6573] focus:ring-[#1a56db]/50"
-            />
-          </div>
-          <ShellEntitySearch
-            query={navQuery}
-            onNavigate={() => {
-              setNavQuery("");
-              onNavigate?.();
-            }}
-          />
+          const folderOrder: string[] = [];
+          for (const c of kids) {
+            const f = c.folder ?? "";
+            if (f && !folderOrder.includes(f)) folderOrder.push(f);
+          }
+          const hasFolders = folderOrder.length > 0;
+          const unfoldered = kids.filter((c) => !c.folder);
 
-          {activeGroup?.id === "setup" ? (
-            <Link
-              href="/settings"
-              onClick={onNavigate}
-              className="mt-2.5 flex items-center gap-2 rounded-md px-2 py-2 text-[0.8rem] text-[#a8b3c0] transition hover:bg-white/[0.05] hover:text-white"
-            >
-              <Settings className="h-3.5 w-3.5 shrink-0 opacity-80" strokeWidth={1.75} />
-              All Settings
-            </Link>
-          ) : null}
-        </div>
+          return (
+            <div key={g.id} className="mb-0.5">
+              <button
+                type="button"
+                onClick={() => toggleGroup(g.id)}
+                className={cn(
+                  "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[0.8125rem] transition",
+                  groupActive && !expanded
+                    ? "bg-[#f1f5f9] font-semibold text-[#0b1f33]"
+                    : "text-[#334155] hover:bg-[#f1f5f9]",
+                )}
+              >
+                <Icon className="h-4 w-4 shrink-0 text-[#64748b]" strokeWidth={1.75} />
+                <span className="min-w-0 flex-1 truncate font-medium">
+                  {g.label}
+                </span>
+                {expanded ? (
+                  <ChevronDown className="h-4 w-4 shrink-0 text-[#94a3b8]" />
+                ) : (
+                  <ChevronRight className="h-4 w-4 shrink-0 text-[#94a3b8]" />
+                )}
+              </button>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-2 [scrollbar-width:thin]">
-          {activeGroup?.section ? (
-            <p className="px-2 pt-1 pb-1.5 text-[0.62rem] font-semibold tracking-[0.14em] text-[#6b8ab8] uppercase">
-              {activeGroup.section}
-            </p>
-          ) : null}
+              {expanded ? (
+                <div className="mt-0.5 space-y-0.5 pb-1">
+                  {g.section ? (
+                    <p className="px-3 pt-1 pb-0.5 text-[0.65rem] font-semibold tracking-wide text-[#94a3b8] uppercase">
+                      {g.section}
+                    </p>
+                  ) : null}
 
-          {/* Zoho nested folders (Settings Business → Profile…) */}
-          {hasFolders
-            ? folderOrder.map((folder) => {
-                const kids = panelLinks.filter((c) => c.folder === folder);
-                const expanded =
-                  openFolders[folder] !== undefined
-                    ? openFolders[folder]
-                    : kids.some((c) => isLeafActive(pathname, search, c.href)) ||
-                      folder === folderOrder[0];
-                const FolderIcon = Folder;
-                return (
-                  <div key={folder} className="mb-0.5">
-                    <button
-                      type="button"
-                      onClick={() => toggleFolder(folder)}
-                      className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-[0.8125rem] text-[#c5cdd8] transition hover:bg-white/[0.05] hover:text-white"
-                    >
-                      <FolderIcon className="h-3.5 w-3.5 shrink-0 opacity-80" strokeWidth={1.75} />
-                      <span className="min-w-0 flex-1 truncate text-left font-medium">
-                        {folder}
-                      </span>
-                      {expanded ? (
-                        <ChevronDown className="h-3.5 w-3.5 shrink-0 text-[#7a8796]" />
-                      ) : (
-                        <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[#7a8796]" />
-                      )}
-                    </button>
-                    {expanded ? (
-                      <ul className="mb-1 ml-2 border-l border-white/10 pl-2">
-                        {kids.map((c) => {
-                          const active = isLeafActive(pathname, search, c.href);
-                          return (
-                            <li key={`${c.href}:${c.label}`}>
-                              <Link
-                                href={c.href}
-                                onClick={onNavigate}
-                                className={cn(
-                                  "block rounded-md px-2.5 py-1.5 text-[0.8rem] transition",
-                                  active
-                                    ? "bg-[#2a3444] font-semibold text-white"
-                                    : "text-[#9aa6b5] hover:bg-white/[0.05] hover:text-white",
-                                )}
-                              >
-                                {c.label}
-                              </Link>
-                            </li>
+                  {hasFolders
+                    ? folderOrder.map((folder) => {
+                        const folderKids = kids.filter(
+                          (c) => c.folder === folder,
+                        );
+                        const folderOpen =
+                          openFolders[folder] ??
+                          folderKids.some((c) =>
+                            isLeafActive(pathname, search, c.href),
                           );
-                        })}
-                      </ul>
-                    ) : null}
-                  </div>
-                );
-              })
-            : null}
+                        return (
+                          <div key={folder} className="mb-0.5">
+                            <button
+                              type="button"
+                              onClick={() => toggleFolder(folder)}
+                              className="flex w-full items-center gap-2 rounded-lg py-1.5 pr-2 pl-7 text-[0.8125rem] font-medium text-[#475569] hover:bg-[#f8fafc]"
+                            >
+                              <Folder className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                              <span className="min-w-0 flex-1 truncate text-left">
+                                {folder}
+                              </span>
+                              {folderOpen ? (
+                                <ChevronDown className="h-3.5 w-3.5 text-[#94a3b8]" />
+                              ) : (
+                                <ChevronRight className="h-3.5 w-3.5 text-[#94a3b8]" />
+                              )}
+                            </button>
+                            {folderOpen
+                              ? folderKids.map((c) => {
+                                  const active = isLeafActive(
+                                    pathname,
+                                    search,
+                                    c.href,
+                                  );
+                                  return (
+                                    <Link
+                                      key={`${c.href}:${c.label}`}
+                                      href={c.href}
+                                      onClick={onNavigate}
+                                      className={subLinkClass(active)}
+                                    >
+                                      {active ? (
+                                        <span className="size-1.5 shrink-0 rounded-full bg-[#1a56db]" />
+                                      ) : (
+                                        <span className="size-1.5 shrink-0 rounded-full bg-transparent" />
+                                      )}
+                                      <span className="truncate">{c.label}</span>
+                                    </Link>
+                                  );
+                                })
+                              : null}
+                          </div>
+                        );
+                      })
+                    : null}
 
-          <ul className="space-y-0.5">
-            {(hasFolders ? unfoldered : panelLinks).map((c) => {
-              const CIcon = c.icon;
-              const active = isLeafActive(pathname, search, c.href);
-              return (
-                <li key={`${c.href}:${c.label}`}>
-                  <Link
-                    href={c.href}
-                    onClick={onNavigate}
-                    className={cn(
-                      "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[0.8125rem] transition",
-                      active
-                        ? "bg-[#2a3444] font-semibold text-white"
-                        : "text-[#a8b3c0] hover:bg-white/[0.05] hover:text-white",
-                    )}
-                  >
-                    <CIcon
-                      className={cn(
-                        "h-3.5 w-3.5 shrink-0",
-                        active ? "text-[#7aa2ff]" : "opacity-80",
-                      )}
-                      strokeWidth={1.75}
-                    />
-                    <span className="min-w-0 flex-1 truncate">{c.label}</span>
-                  </Link>
-                </li>
-              );
-            })}
-            {!panelLinks.length ? (
-              <li className="px-2.5 py-3 text-[0.75rem] text-[#6b7785]">
-                No items match
-              </li>
-            ) : null}
-          </ul>
+                  {(hasFolders ? unfoldered : kids).map((c) => {
+                    const CIcon = c.icon;
+                    const active = isLeafActive(pathname, search, c.href);
+                    return (
+                      <Link
+                        key={`${c.href}:${c.label}`}
+                        href={c.href}
+                        onClick={onNavigate}
+                        className={subLinkClass(active)}
+                      >
+                        {active ? (
+                          <span className="size-1.5 shrink-0 rounded-full bg-[#1a56db]" />
+                        ) : (
+                          <CIcon
+                            className="h-3.5 w-3.5 shrink-0 opacity-60"
+                            strokeWidth={1.75}
+                          />
+                        )}
+                        <span className="truncate">{c.label}</span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+
+        <div className="my-2 border-t border-[#e8ecf1]" />
+
+        <Link
+          href="/notifications"
+          onClick={onNavigate}
+          className={cn(
+            linkClass(pathname.startsWith("/notifications")),
+            "relative",
+          )}
+        >
+          <Bell className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+          <span className="min-w-0 flex-1 truncate">Notifications</span>
+          {unread > 0 ? (
+            <span className="rounded-full bg-[#dc2626] px-1.5 py-0.5 text-[0.65rem] font-bold text-white">
+              {unread > 99 ? "99+" : unread}
+            </span>
+          ) : null}
+        </Link>
+      </nav>
+
+      <div className="shrink-0 space-y-2 border-t border-[#e8ecf1] bg-white px-3 py-3">
+        <div className="rounded-lg border border-[#e2e8f0] bg-[#f8fafc] px-3 py-2.5">
+          <p className="text-[0.72rem] leading-snug text-[#475569]">
+            Premium trial — upgrade when you are ready.
+          </p>
+          <div className="mt-2 flex gap-3 text-[0.72rem] font-semibold text-[#1a56db]">
+            <Link href="/plan" onClick={onNavigate} className="hover:underline">
+              Upgrade
+            </Link>
+            <Link href="/plan" onClick={onNavigate} className="hover:underline">
+              Switch trial
+            </Link>
+          </div>
         </div>
 
-        <div className="shrink-0 space-y-2 border-t border-white/[0.06] px-2.5 py-2.5">
-          <div className="rounded-lg bg-gradient-to-br from-[#5b21b6] via-[#3730a3] to-[#1a56db] px-3 py-2.5">
-            <p className="text-[0.72rem] leading-snug font-medium text-white/95">
-              You&apos;re currently on our Premium Trial
-            </p>
-            <div className="mt-2 flex items-center gap-0 text-[0.72rem] font-semibold text-white">
-              <Link
-                href="/plan"
-                onClick={onNavigate}
-                className="pr-2.5 transition hover:underline"
-              >
-                Upgrade
-              </Link>
-              <span className="h-3 w-px bg-white/35" />
-              <Link
-                href="/plan"
-                onClick={onNavigate}
-                className="pl-2.5 transition hover:underline"
-              >
-                Switch Trial
-              </Link>
-            </div>
+        <div className="flex items-center gap-2 px-0.5">
+          <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#e2e8f0] text-[0.7rem] font-semibold text-[#475569]">
+            {(userName?.trim()?.[0] || "U").toUpperCase()}
           </div>
-
-          <div className="px-0.5">
-            <p className="truncate text-[0.72rem] font-semibold text-white">
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[0.75rem] font-semibold text-[#0b1f33]">
               {userName ?? "Staff"}
             </p>
-            <p className="truncate text-[0.62rem] text-[#8b9bb0]">{userEmail}</p>
+            <p className="truncate text-[0.65rem] text-[#94a3b8]">{userEmail}</p>
           </div>
-          {onSwitchOrg ? (
-            <button
-              type="button"
-              className="w-full rounded-md px-2 py-1.5 text-left text-[0.72rem] font-medium text-[#a8b3c0] transition hover:bg-white/[0.05] hover:text-white"
-              onClick={onSwitchOrg}
-            >
-              Switch shop
-            </button>
-          ) : null}
+        </div>
+        {onSwitchOrg ? (
           <button
             type="button"
-            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[0.72rem] font-medium text-[#a8b3c0] transition hover:bg-white/[0.05] hover:text-white"
-            onClick={onLogout}
+            className="w-full rounded-lg px-2 py-1.5 text-left text-[0.75rem] font-medium text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#0b1f33]"
+            onClick={onSwitchOrg}
           >
-            <LogOut className="h-3.5 w-3.5" />
-            Sign out
+            Switch shop
           </button>
-        </div>
+        ) : null}
+        <button
+          type="button"
+          className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[0.75rem] font-medium text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#0b1f33]"
+          onClick={onLogout}
+        >
+          <LogOut className="h-3.5 w-3.5" />
+          Sign out
+        </button>
       </div>
     </div>
   );
@@ -1264,7 +1169,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       });
   }, [accessToken, pinLocked]);
 
-  /** Offline local-first: run after first paint so nav stays snappy */}
+  /** Offline local-first: run after first paint so nav stays snappy */
   useEffect(() => {
     if (!accessToken || pinLocked || !user?.tenantId || !user.id) return;
     const idle =
@@ -1470,9 +1375,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           setShowSetPin(false);
         }}
       />
-      {/* Zoho dual dark nav: icon rail + secondary */}
-      <aside className="app-shell-aside hidden h-dvh w-[17.5rem] shrink-0 flex-col md:flex print:hidden">
-        <Suspense fallback={<div className="h-full bg-[#0a0e14]" />}>
+      {/* Light expandable sidebar */}
+      <aside className="app-shell-aside hidden h-dvh w-[16.5rem] shrink-0 flex-col border-r border-[#e2e8f0] md:flex print:hidden">
+        <Suspense fallback={<div className="h-full bg-[#fafbfc]" />}>
           <SidebarBody {...sidebarProps} />
         </Suspense>
       </aside>
@@ -1543,7 +1448,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   </button>
                 </div>
                 <div className="min-h-0 flex-1">
-                  <Suspense fallback={<div className="h-full bg-[#0a0e14]" />}>
+                  <Suspense fallback={<div className="h-full bg-[#fafbfc]" />}>
                     <SidebarBody
                       {...sidebarProps}
                       onNavigate={() => setOpen(false)}

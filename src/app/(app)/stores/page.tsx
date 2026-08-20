@@ -7,7 +7,7 @@ import { useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Building2, Plus, Pencil } from "lucide-react";
+import { Building2, Plus, Pencil, X } from "lucide-react";
 import { tenantsApi, usersApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useAuthStore } from "@/lib/auth-store";
@@ -110,6 +110,11 @@ export default function StoresPage() {
   const [errors, setErrors] = useState<Partial<Record<keyof LocForm, string>>>(
     {},
   );
+  const [mgrOpen, setMgrOpen] = useState(false);
+  const [mgrName, setMgrName] = useState("");
+  const [mgrEmail, setMgrEmail] = useState("");
+  const [mgrPassword, setMgrPassword] = useState("");
+  const [mgrPhone, setMgrPhone] = useState("");
 
   const list = useQuery({
     queryKey: ["stores-branches"],
@@ -187,6 +192,34 @@ export default function StoresPage() {
     },
   });
 
+  const addManager = useMutation({
+    mutationFn: () =>
+      usersApi.create({
+        fullName: mgrName.trim(),
+        email: mgrEmail.trim(),
+        password: mgrPassword,
+        phone: mgrPhone.trim() || undefined,
+        roleCode: "manager",
+        primaryStoreId: editingId || undefined,
+      }),
+    onSuccess: (row) => {
+      const created = row as { id?: string };
+      toast.success("Manager added. You can assign them to this location.");
+      if (created.id) {
+        setForm((f) => ({ ...f, managerUserId: created.id! }));
+      }
+      setMgrOpen(false);
+      setMgrName("");
+      setMgrEmail("");
+      setMgrPassword("");
+      setMgrPhone("");
+      void qc.invalidateQueries({ queryKey: ["stores-staff"] });
+      void qc.invalidateQueries({ queryKey: ["users"] });
+    },
+    onError: (e) =>
+      toast.error(e instanceof ApiError ? e.messages.join(", ") : "Could not add manager"),
+  });
+
   function openCreate() {
     setEditingId(null);
     setForm(emptyForm());
@@ -234,9 +267,9 @@ export default function StoresPage() {
             {inSettings ? "Locations" : "Stores"}
           </h1>
           <p className="mt-0.5 text-sm text-[#5a6b7d]">
-            Organization → location tree. Catalog is shared; stock and sales stay
-            per store. Nest a branch under HQ (or another location) with Parent
-            location.
+            These are your shops / warehouses. Stock and bills use the location
+            you pick at the top. Open Add location to create one — the list
+            stays on this page when you are not editing.
           </p>
         </div>
         {canEdit ? (
@@ -329,7 +362,8 @@ export default function StoresPage() {
                   ))}
               </select>
               <p className="text-[0.7rem] text-[#8a9bb0]">
-                Optional HQ / parent branch. Prevents circular trees.
+                Optional: this shop sits under another location (like HO). You
+                cannot pick a child as its own parent.
               </p>
             </div>
             <div className="space-y-1">
@@ -348,6 +382,18 @@ export default function StoresPage() {
                   </option>
                 ))}
               </select>
+              {canEdit ? (
+                <button
+                  type="button"
+                  className="text-[0.75rem] font-semibold text-[#1a56db]"
+                  onClick={() => setMgrOpen(true)}
+                >
+                  + Add manager
+                </button>
+              ) : null}
+              <p className="text-[0.7rem] text-[#8a9bb0]">
+                A manager can run this branch. Add them here, or in Team.
+              </p>
             </div>
             <div className="space-y-1 sm:col-span-2">
               <Label>Address</Label>
@@ -440,6 +486,87 @@ export default function StoresPage() {
         </div>
       ) : null}
 
+      {mgrOpen ? (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
+          <button
+            type="button"
+            className="absolute inset-0 bg-[#0b1f33]/45"
+            aria-label="Close"
+            onClick={() => setMgrOpen(false)}
+          />
+          <div className="relative z-10 w-full max-w-md rounded-xl border border-[#d9e0ea] bg-white p-5 shadow-xl">
+            <div className="mb-3 flex items-start justify-between gap-2">
+              <div>
+                <h3 className="text-base font-semibold text-[#0b1f33]">
+                  Add manager
+                </h3>
+                <p className="mt-0.5 text-sm text-[#5a6b7d]">
+                  Creates a Store Manager login. Then assign them to a
+                  location.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-[#5a6b7d] hover:bg-[#f1f5f9]"
+                aria-label="Close"
+                onClick={() => setMgrOpen(false)}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <Label>Full name</Label>
+                <Input
+                  className="mt-1"
+                  value={mgrName}
+                  onChange={(e) => setMgrName(e.target.value)}
+                />
+              </div>
+              <div>
+                <Label>Email</Label>
+                <Input
+                  className="mt-1"
+                  type="email"
+                  value={mgrEmail}
+                  onChange={(e) => setMgrEmail(e.target.value)}
+                />
+              </div>
+              <div>
+                <Label>Password</Label>
+                <Input
+                  className="mt-1"
+                  type="password"
+                  value={mgrPassword}
+                  onChange={(e) => setMgrPassword(e.target.value)}
+                />
+              </div>
+              <div>
+                <Label>Phone (optional)</Label>
+                <Input
+                  className="mt-1"
+                  value={mgrPhone}
+                  onChange={(e) => setMgrPhone(e.target.value)}
+                />
+              </div>
+              <Button
+                type="button"
+                disabled={
+                  addManager.isPending ||
+                  !mgrName.trim() ||
+                  !mgrEmail.trim() ||
+                  mgrPassword.length < 8
+                }
+                onClick={() => addManager.mutate()}
+              >
+                {addManager.isPending ? "Saving…" : "Save manager"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {!showForm ? (
       <div className="overflow-hidden rounded-xl border border-[#d9e0ea] bg-white">
         <table className="w-full text-left text-sm">
           <thead className="border-b border-[#e8eef5] bg-[#f8fafc] text-[0.7rem] tracking-wide text-[#8a9bb0] uppercase">
@@ -546,6 +673,11 @@ export default function StoresPage() {
           </tbody>
         </table>
       </div>
+      ) : (
+        <p className="text-sm text-[#5a6b7d]">
+          Save or cancel the form to see the location list again.
+        </p>
+      )}
     </div>
   );
 }

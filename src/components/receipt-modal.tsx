@@ -2,11 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { formatMoney, moneyNumber } from "@/lib/utils";
+import { moneyNumber } from "@/lib/utils";
 import { useBootstrapOptional } from "@/lib/bootstrap";
-import { ModeBadge } from "@/components/mode-badge";
 import { notifyApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 
@@ -14,6 +14,8 @@ export type ReceiptData = {
   store: {
     name: string;
     address?: string | null;
+    phone?: string | null;
+    email?: string | null;
     shopName?: string | null;
     taxId?: string | null;
   };
@@ -22,6 +24,7 @@ export type ReceiptData = {
   kind?: string | null;
   cashier?: string | null;
   receiptFooter?: string | null;
+  printedAt?: string | Date | null;
   customer?: {
     id?: string;
     fullName: string;
@@ -34,6 +37,10 @@ export type ReceiptData = {
     quantity?: string | number;
     unitPrice: string | number;
     lineTotal?: string | number;
+    taxAmount?: string | number;
+    taxRatePercent?: string | number | null;
+    taxCode?: string | null;
+    hsnOrSac?: string | null;
     inventoryUnit?: { barcodeSku: string; size?: string | null } | null;
     retailSku?: { sku: string } | null;
     product?: { name?: string; skuCode?: string } | null;
@@ -83,11 +90,44 @@ function moneyLabel(method: string) {
   if (m === "upi") return "UPI";
   if (m === "emi") return "EMI";
   if (m === "qr") return "QR";
-  if (m === "wallet") return "Wallet";
+  if (m === "wallet") return "App pay";
   if (m === "bank_transfer") return "Bank transfer";
-  if (m === "store_credit") return "Store credit";
+  if (m === "store_credit") return "Wallet";
   if (m === "gift_card") return "Gift card";
   return method.charAt(0).toUpperCase() + method.slice(1).replace(/_/g, " ");
+}
+
+function pad2(n: number) {
+  return n.toFixed(2);
+}
+
+function gstSlabs(
+  items: ReceiptData["items"],
+  taxTotal: number,
+): Array<{ rate: number; tax: number }> {
+  const map = new Map<number, number>();
+  let summed = 0;
+  for (const item of items) {
+    const tax = moneyNumber(item.taxAmount);
+    if (tax <= 0) continue;
+    let rate = moneyNumber(item.taxRatePercent ?? 0);
+    if (!rate) {
+      const line = moneyNumber(item.lineTotal);
+      if (line > 0) rate = (tax / line) * 100;
+    }
+    const key = Math.round(rate * 10) / 10;
+    map.set(key, (map.get(key) ?? 0) + tax);
+    summed += tax;
+  }
+  if (!map.size && taxTotal > 0) {
+    return [{ rate: 0, tax: taxTotal }];
+  }
+  if (map.size && Math.abs(summed - taxTotal) > 0.05 && taxTotal > summed) {
+    map.set(0, (map.get(0) ?? 0) + (taxTotal - summed));
+  }
+  return [...map.entries()]
+    .map(([rate, tax]) => ({ rate, tax }))
+    .sort((a, b) => b.rate - a.rate);
 }
 
 export function ReceiptModal({
@@ -109,21 +149,23 @@ export function ReceiptModal({
     boot?.data?.tenant?.name?.trim() ||
     boot?.productName?.trim() ||
     "Store";
-  const productName = boot?.productName ?? "Universal POS";
-  const tagline = boot?.tagline ?? "Point of sale";
-  const money =
-    boot?.money ??
-    ((amount: string | number | null | undefined) =>
-      formatMoney(amount, "INR", "en-IN"));
-  const initial = (shopName.trim()[0] || "S").toUpperCase();
   const settings = boot?.data?.tenant?.settings as
-    | { tax?: { receiptFooter?: string } }
+    | {
+        tax?: { receiptFooter?: string };
+        pos?: { upiVpa?: string; upiPayeeName?: string };
+      }
     | undefined;
   const receiptFooter =
     data?.receiptFooter?.trim() ||
     settings?.tax?.receiptFooter?.trim() ||
     "";
   const taxId = data?.store?.taxId?.trim() || "";
+  const pos =
+    settings?.pos && typeof settings.pos === "object" ? settings.pos : {};
+  const upiVpa = typeof pos.upiVpa === "string" ? pos.upiVpa.trim() : "";
+  const upiPayee =
+    (typeof pos.upiPayeeName === "string" && pos.upiPayeeName.trim()) ||
+    shopName;
 
   const paidFromPayments = (data?.payments ?? []).reduce(
     (s, p) => s + moneyNumber(p.amount),
@@ -143,29 +185,45 @@ export function ReceiptModal({
   useEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
     return () => {
       document.body.style.overflow = prev;
+      window.removeEventListener("keydown", onKey);
     };
-  }, []);
+  }, [onClose]);
 
   const changeAmt = change ?? data?.change;
   const tenderedAmt = cashTendered ?? data?.cashTendered;
   const balanceDue = moneyNumber(data?.totals.balanceDue);
   const isPaid = balanceDue <= 0;
-  const [invoiceMode, setInvoiceMode] = useState(false);
   const [sending, setSending] = useState(false);
+
+  const subtotal = moneyNumber(data?.totals.subtotal);
+  const taxTotal = moneyNumber(data?.totals.taxTotal);
+  const discount = moneyNumber(data?.totals.discountTotal);
+  const grand = Math.max(0, subtotal - discount + taxTotal);
+  const rounded = Math.round(grand);
+  const roundOff = Number((rounded - grand).toFixed(2));
+  const slabs = data ? gstSlabs(data.items, taxTotal) : [];
+  const when = data?.printedAt
+    ? new Date(data.printedAt)
+    : new Date();
+  const whenLabel = `${when.getFullYear()}-${String(when.getMonth() + 1).padStart(2, "0")}-${String(when.getDate()).padStart(2, "0")} ${String(when.getHours()).padStart(2, "0")}:${String(when.getMinutes()).padStart(2, "0")}`;
 
   async function sendChannels(channels: Array<"email" | "sms">) {
     if (!data?.customer?.id) {
-      toast.error("Attach a customer to send invoice");
+      toast.error("Add a customer on the bill to send it");
       return;
     }
     if (channels.includes("email") && !data.customer.email) {
-      toast.error("Customer has no email on file");
+      toast.error("This customer has no email");
       return;
     }
     if (channels.includes("sms") && !data.customer.phone) {
-      toast.error("Customer has no phone on file");
+      toast.error("This customer has no phone");
       return;
     }
     setSending(true);
@@ -181,7 +239,7 @@ export function ReceiptModal({
         toast.success(
           ok
             ? `Invoice sent on ${ok} channel(s)`
-            : "Invoice send attempted — check Notify logs",
+            : "Send attempted — check Alerts / Notify",
         );
       } else {
         for (const channel of channels) {
@@ -213,28 +271,32 @@ export function ReceiptModal({
     }
   }
 
+  const dash = (
+    <p className="my-1.5 overflow-hidden text-center text-[11px] tracking-tight text-black">
+      ----------------------------------------
+    </p>
+  );
+
   const content = (
     <div className="receipt-print-root fixed inset-0 z-[100] flex items-center justify-center bg-[#0b1f33]/45 p-4 print:static print:block print:bg-white print:p-0">
-      <div className="receipt-sheet flex max-h-[92vh] w-full max-w-[400px] flex-col overflow-hidden rounded-2xl bg-white shadow-[0_24px_48px_-20px_rgba(11,31,51,0.35)] print:max-h-none print:w-full print:max-w-none print:overflow-visible print:rounded-none print:shadow-none">
-        <div className="flex items-center justify-between border-b border-[#e8ebf0] px-5 py-3 print:hidden">
+      <button
+        type="button"
+        className="absolute inset-0 print:hidden"
+        aria-label="Close"
+        onClick={onClose}
+      />
+      <div className="receipt-sheet relative z-10 flex max-h-[92vh] w-full max-w-[400px] flex-col overflow-hidden rounded-2xl bg-white shadow-[0_24px_48px_-20px_rgba(11,31,51,0.35)] print:max-h-none print:w-full print:max-w-none print:overflow-visible print:rounded-none print:shadow-none">
+        <div className="flex items-center justify-between border-b border-[#e8ebf0] px-4 py-3 print:hidden">
           <div>
-            <p className="text-[0.65rem] font-semibold tracking-[0.14em] text-[#5a6b7d] uppercase">
-              {invoiceMode ? "Tax invoice" : "Receipt"}
+            <p className="text-[0.7rem] font-semibold text-[#5a6b7d]">
+              GST invoice
             </p>
-            <p className="text-lg font-semibold tracking-tight text-[#0b1f33]">
-              {invoiceMode ? "Print invoice" : "Print slip"}
+            <p className="text-base font-semibold text-[#0b1f33]">
+              Print this bill
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              onClick={() => setInvoiceMode((v) => !v)}
-            >
-              {invoiceMode ? "Receipt view" : "Invoice view"}
-            </Button>
-            {data?.customer?.phone || data?.customer ? (
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {data?.customer ? (
               <>
                 <Button
                   type="button"
@@ -259,273 +321,223 @@ export function ReceiptModal({
             <Button type="button" size="sm" onClick={() => window.print()}>
               Print
             </Button>
-            <Button type="button" size="sm" variant="secondary" onClick={onClose}>
-              Close
-            </Button>
+            <button
+              type="button"
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-[#5a6b7d] hover:bg-[#f1f5f9]"
+              aria-label="Close"
+              onClick={onClose}
+            >
+              <X className="h-4 w-4" />
+            </button>
           </div>
         </div>
 
-        <div className="scroll-soft flex-1 overflow-y-auto px-6 py-6 print:overflow-visible print:px-0 print:py-0">
+        <div className="scroll-soft flex-1 overflow-y-auto px-4 py-4 print:overflow-visible print:px-0 print:py-0">
           {loading ? (
             <p className="py-10 text-center text-sm text-[#5a6b7d] print:hidden">
-              Loading receipt…
+              Loading bill…
             </p>
           ) : !data ? (
             <p className="py-10 text-center text-sm text-[#c81e1e] print:hidden">
-              Receipt unavailable
+              Bill not found
             </p>
           ) : (
-            <div className="receipt-print mx-auto w-full max-w-[320px] text-[#0b1f33] print:max-w-none">
-              {/* Header */}
+            <div className="receipt-print mx-auto w-full max-w-[280px] bg-white font-mono text-[12px] leading-[1.35] text-black print:max-w-none">
               <header className="text-center">
-                <div className="mx-auto mb-3 grid h-11 w-11 place-items-center rounded-full bg-[#0b1f33] text-[1.05rem] font-bold tracking-tight text-white">
-                  {initial}
-                </div>
-                <p className="text-[0.68rem] font-semibold tracking-[0.18em] text-[#5a6b7d] uppercase">
-                  {shopName}
+                <p className="text-[13px] font-bold tracking-wide uppercase">
+                  POS GST INVOICE
                 </p>
-                <h1 className="mt-1.5 text-[1.45rem] font-bold tracking-[-0.03em] text-[#0b1f33]">
-                  {data.store.name}
-                </h1>
+                <p className="mt-1 font-bold">{shopName}</p>
                 {data.store.address ? (
-                  <p className="mx-auto mt-1.5 max-w-[260px] text-[0.78rem] leading-snug text-[#5a6b7d]">
-                    {data.store.address}
-                  </p>
+                  <p className="whitespace-pre-wrap">{data.store.address}</p>
                 ) : null}
-                {taxId ? (
-                  <p className="mt-1 text-[0.72rem] tabular-nums text-[#5a6b7d]">
-                    Tax ID: {taxId}
-                  </p>
-                ) : null}
-                {data.cashier ? (
-                  <p className="mt-1 text-[0.72rem] text-[#5a6b7d]">
-                    Cashier: {data.cashier}
-                  </p>
-                ) : null}
-                <div className="mt-3.5 flex flex-wrap items-center justify-center gap-2">
-                  <p className="inline-block rounded-full bg-[#eef1f5] px-3.5 py-1 font-mono text-[0.78rem] font-semibold tracking-wide text-[#0b1f33]">
-                    {data.orderNumber}
-                  </p>
-                  {data.kind ? <ModeBadge mode={data.kind} /> : null}
-                </div>
+                {taxId ? <p>GSTIN: {taxId}</p> : null}
+                {data.store.phone ? <p>Phone: {data.store.phone}</p> : null}
               </header>
-
-              {/* Customer */}
-              <section className="mt-6">
-                <p className="text-[0.62rem] font-semibold tracking-[0.14em] text-[#8b9bb0] uppercase">
-                  Customer
-                </p>
-                <p className="mt-1 text-[0.95rem] font-semibold tracking-tight text-[#0b1f33]">
-                  {data.customer?.fullName ?? "Walk-in"}
-                </p>
+              {dash}
+              <section>
+                <p>Invoice No: {data.orderNumber}</p>
+                <p>Date & Time: {whenLabel}</p>
+                {data.cashier ? <p>Cashier: {data.cashier}</p> : null}
+                <p>Bill To: {data.customer ? "Customer" : "Walk-in"}</p>
+                {data.customer?.fullName ? (
+                  <p>Customer Name: {data.customer.fullName}</p>
+                ) : null}
                 {data.customer?.phone ? (
-                  <p className="mt-0.5 text-sm tabular-nums text-[#5a6b7d]">
-                    {data.customer.phone}
-                  </p>
+                  <p>Customer Phone: {data.customer.phone}</p>
                 ) : null}
               </section>
-
-              {(data.fulfillment?.orderType ||
-                data.fulfillment?.covers ||
-                data.fulfillment?.note ||
-                data.rentalWindow?.returnDueDate) && (
-                <section className="mt-4 rounded-[10px] border border-[#eef2f7] bg-[#f8fafc] px-3 py-2.5 text-[0.82rem] text-[#5a6b7d]">
-                  {data.fulfillment?.orderType ? (
-                    <p>
-                      Type:{" "}
-                      <span className="font-medium capitalize text-[#0b1f33]">
-                        {data.fulfillment.orderType.replace(/_/g, " ")}
+              {dash}
+              <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-1 font-bold">
+                <span>Item</span>
+                <span className="w-8 text-right">Qty</span>
+                <span className="w-12 text-right">Rate</span>
+                <span className="w-12 text-right">Amt</span>
+              </div>
+              {dash}
+              {data.items.map((item, i) => {
+                const qty = moneyNumber(item.quantity ?? 1);
+                const label =
+                  item.description ||
+                  item.product?.name ||
+                  item.inventoryUnit?.barcodeSku ||
+                  item.retailSku?.sku ||
+                  item.itemType;
+                const amt =
+                  item.lineTotal !== undefined
+                    ? moneyNumber(item.lineTotal)
+                    : moneyNumber(item.unitPrice) * qty;
+                const rate = moneyNumber(item.unitPrice);
+                const gst = moneyNumber(item.taxRatePercent ?? 0);
+                const hsn = (item.hsnOrSac || item.taxCode || "").trim();
+                return (
+                  <div key={i} className="mb-1.5">
+                    <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-1">
+                      <span className="min-w-0 break-words pr-1">{label}</span>
+                      <span className="w-8 text-right tabular-nums">
+                        {qty % 1 === 0 ? String(qty) : pad2(qty)}
                       </span>
-                    </p>
-                  ) : null}
-                  {data.fulfillment?.covers ? (
-                    <p>Guests / covers: {data.fulfillment.covers}</p>
-                  ) : null}
-                  {data.rentalWindow?.pickupDate ? (
-                    <p>
-                      Pickup: {String(data.rentalWindow.pickupDate).slice(0, 10)}
-                    </p>
-                  ) : null}
-                  {data.rentalWindow?.returnDueDate ? (
-                    <p>
-                      Return due:{" "}
-                      {String(data.rentalWindow.returnDueDate).slice(0, 10)}
-                    </p>
-                  ) : null}
-                  {data.fulfillment?.note ? (
-                    <p className="mt-1">{data.fulfillment.note}</p>
-                  ) : null}
-                </section>
-              )}
-
-              {/* Items */}
-              <section className="mt-5">
-                <div className="flex justify-between border-b border-[#e5e9ef] pb-2 text-[0.62rem] font-semibold tracking-[0.14em] text-[#8b9bb0] uppercase">
-                  <span>Item</span>
-                  <span>Amount</span>
+                      <span className="w-12 text-right tabular-nums">
+                        {pad2(rate)}
+                      </span>
+                      <span className="w-12 text-right tabular-nums">
+                        {pad2(amt)}
+                      </span>
+                    </div>
+                    {hsn || gst ? (
+                      <p className="text-[11px]">
+                        {hsn ? `HSN: ${hsn}` : null}
+                        {hsn && gst ? " | " : null}
+                        {gst ? `GST: ${gst}%` : null}
+                      </p>
+                    ) : null}
+                  </div>
+                );
+              })}
+              {dash}
+              <div className="flex justify-between">
+                <span>Subtotal</span>
+                <span className="tabular-nums">{pad2(subtotal)}</span>
+              </div>
+              {discount > 0 ? (
+                <div className="flex justify-between">
+                  <span>Discount</span>
+                  <span className="tabular-nums">{pad2(discount)}</span>
                 </div>
-                <ul className="divide-y divide-[#f0f3f7]">
-                  {data.items.map((item, i) => {
-                    const qty = moneyNumber(item.quantity ?? 1);
-                    const label =
-                      item.description ||
-                      item.product?.name ||
-                      item.inventoryUnit?.barcodeSku ||
-                      item.retailSku?.sku ||
-                      item.itemType;
-                    const amount =
-                      item.lineTotal !== undefined
-                        ? item.lineTotal
-                        : moneyNumber(item.unitPrice) * qty;
+              ) : (
+                <div className="flex justify-between">
+                  <span>Discount</span>
+                  <span className="tabular-nums">0.00</span>
+                </div>
+              )}
+              <div className="flex justify-between">
+                <span>Taxable Value</span>
+                <span className="tabular-nums">{pad2(subtotal - discount)}</span>
+              </div>
+              {slabs.length ? (
+                <div className="mt-1 bg-[#f3f4f6] px-1 py-1 print:bg-[#f3f4f6]">
+                  <p className="font-bold">GST Breakup</p>
+                  {slabs.map((s) => {
+                    const half = s.tax / 2;
+                    const halfPct = s.rate / 2;
+                    if (s.rate <= 0) {
+                      return (
+                        <div key="tax" className="flex justify-between">
+                          <span>Tax</span>
+                          <span className="tabular-nums">{pad2(s.tax)}</span>
+                        </div>
+                      );
+                    }
                     return (
-                      <li
-                        key={i}
-                        className="flex items-start justify-between gap-4 py-3 text-[0.9rem]"
-                      >
-                        <span className="min-w-0 leading-snug">
-                          <span className="font-medium text-[#0b1f33]">
-                            {label}
-                          </span>
-                          {qty !== 1 ? (
-                            <span className="block text-[0.78rem] text-[#5a6b7d]">
-                              × {qty} @ {money(item.unitPrice)}
-                            </span>
-                          ) : null}
-                          {item.inventoryUnit?.size ? (
-                            <span className="block text-[0.78rem] text-[#5a6b7d]">
-                              {item.inventoryUnit.size}
-                            </span>
-                          ) : null}
-                          {item.tracking?.serialNumber ? (
-                            <span className="block font-mono text-[0.72rem] text-[#8b9bb0]">
-                              S/N {item.tracking.serialNumber}
-                            </span>
-                          ) : null}
-                          {item.tracking?.batchId ? (
-                            <span className="block font-mono text-[0.72rem] text-[#8b9bb0]">
-                              Lot {item.tracking.batchId.slice(0, 8)}
-                            </span>
-                          ) : null}
-                        </span>
-                        <span className="shrink-0 tabular-nums font-medium text-[#0b1f33]">
-                          {money(amount)}
-                        </span>
-                      </li>
+                      <div key={s.rate}>
+                        <div className="flex justify-between">
+                          <span>CGST {pad2(halfPct)}%</span>
+                          <span className="tabular-nums">{pad2(half)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>SGST {pad2(halfPct)}%</span>
+                          <span className="tabular-nums">{pad2(half)}</span>
+                        </div>
+                      </div>
                     );
                   })}
-                </ul>
-              </section>
-
-              {/* Totals */}
-              <section className="mt-1 border-t border-[#e5e9ef] pt-3 text-[0.9rem]">
-                <div className="flex justify-between gap-3 py-1 text-[#5a6b7d]">
-                  <span>Subtotal</span>
-                  <span className="tabular-nums text-[#0b1f33]">
-                    {money(data.totals.subtotal)}
-                  </span>
                 </div>
-                {moneyNumber(data.totals.taxTotal) > 0 ? (
-                  <div className="flex justify-between gap-3 py-1 text-[#5a6b7d]">
-                    <span>Tax</span>
-                    <span className="tabular-nums text-[#0b1f33]">
-                      {money(data.totals.taxTotal)}
-                    </span>
-                  </div>
-                ) : null}
-                {moneyNumber(data.totals.discountTotal) > 0 ? (
-                  <div className="flex justify-between gap-3 py-1 text-[#5a6b7d]">
-                    <span>Discount</span>
-                    <span className="tabular-nums text-[#0b1f33]">
-                      −{money(data.totals.discountTotal)}
-                    </span>
-                  </div>
-                ) : null}
-                {moneyNumber(data.totals.depositTotal) > 0 ? (
-                  <div className="flex justify-between gap-3 py-1 text-[#5a6b7d]">
-                    <span>Deposit</span>
-                    <span className="tabular-nums text-[#0b1f33]">
-                      {money(data.totals.depositTotal)}
-                    </span>
-                  </div>
-                ) : null}
-                {tenderedAmt != null && moneyNumber(tenderedAmt) > 0 ? (
-                  <div className="flex justify-between gap-3 py-1 text-[#5a6b7d]">
-                    <span>Cash tendered</span>
-                    <span className="tabular-nums text-[#0b1f33]">
-                      {money(tenderedAmt)}
-                    </span>
-                  </div>
-                ) : null}
-                {changeAmt != null && moneyNumber(changeAmt) > 0 ? (
-                  <div className="flex justify-between gap-3 py-1 font-semibold text-[#0b1f33]">
-                    <span>Change</span>
-                    <span className="tabular-nums">{money(changeAmt)}</span>
-                  </div>
-                ) : null}
-
-                <div className="receipt-paid-bar mt-3 flex items-center justify-between rounded-md bg-[#0b1f33] px-3.5 py-3 text-white">
-                  <span className="text-[0.95rem] font-semibold">
-                    {isPaid ? "Paid" : "Balance due"}
-                  </span>
-                  <span className="text-[1.05rem] font-bold tabular-nums tracking-tight">
-                    {money(isPaid ? paidTotal : data.totals.balanceDue)}
-                  </span>
-                </div>
-              </section>
-
-              {/* Payments */}
-              {(data.payments ?? []).length ? (
-                <section className="mt-4 border-t border-[#e5e9ef] pt-3">
-                  <p className="mb-2 text-[0.62rem] font-semibold tracking-[0.14em] text-[#8b9bb0] uppercase">
-                    Payments
-                  </p>
-                  <ul className="space-y-1.5 text-[0.9rem]">
-                    {data.payments!.map((p, i) => (
-                      <li key={i} className="flex justify-between gap-3">
-                        <span className="text-[#5a6b7d]">
-                          {moneyLabel(p.method)}
-                          {p.status && p.status !== "succeeded"
-                            ? ` (${p.status})`
-                            : ""}
-                          {p.gatewayRef ? (
-                            <span className="mt-0.5 block font-mono text-[0.65rem] text-[#8b9bb0]">
-                              {p.gatewayRef}
-                            </span>
-                          ) : null}
-                        </span>
-                        <span className="tabular-nums font-medium text-[#0b1f33]">
-                          {money(p.amount)}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                  {moneyNumber(data.totals.balanceDue) > 0 ? (
-                    <p className="mt-2 text-[0.8rem] font-semibold text-[#b45309]">
-                      Remaining due {money(data.remainingDue ?? data.totals.balanceDue)}
-                    </p>
-                  ) : (
-                    <p className="mt-2 text-[0.8rem] font-semibold text-[#0b1f33]">
-                      Total paid{" "}
-                      {money(
-                        data.amountPaid ??
-                          (data.payments ?? [])
-                            .filter((p) => !p.status || p.status === "succeeded")
-                            .reduce((s, p) => s + moneyNumber(p.amount), 0),
-                      )}
-                    </p>
-                  )}
-                </section>
               ) : null}
-
-              {/* Footer */}
-              <footer className="mt-5 border-t border-dashed border-[#d9e0ea] pt-5 text-center">
-                <p className="text-[0.95rem] font-semibold tracking-tight text-[#0b1f33]">
-                  {receiptFooter || "Thank you for your business"}
-                </p>
-                <p className="mt-1.5 text-[0.68rem] leading-snug text-[#8b9bb0]">
-                  {tagline} · {productName}
-                </p>
-              </footer>
+              <div className="mt-1 flex justify-between font-bold">
+                <span>Grand Total</span>
+                <span className="tabular-nums">{pad2(grand)}</span>
+              </div>
+              {roundOff !== 0 ? (
+                <div className="flex justify-between">
+                  <span>Round Off</span>
+                  <span className="tabular-nums">
+                    {roundOff > 0 ? "+" : ""}
+                    {pad2(roundOff)}
+                  </span>
+                </div>
+              ) : null}
+              <div className="flex justify-between font-bold">
+                <span>Rounded Total</span>
+                <span className="tabular-nums">{pad2(rounded)}</span>
+              </div>
+              {tenderedAmt != null && moneyNumber(tenderedAmt) > 0 ? (
+                <div className="flex justify-between">
+                  <span>Cash tendered</span>
+                  <span className="tabular-nums">
+                    {pad2(moneyNumber(tenderedAmt))}
+                  </span>
+                </div>
+              ) : null}
+              {changeAmt != null && moneyNumber(changeAmt) > 0 ? (
+                <div className="flex justify-between">
+                  <span>Change</span>
+                  <span className="tabular-nums">
+                    {pad2(moneyNumber(changeAmt))}
+                  </span>
+                </div>
+              ) : null}
+              {dash}
+              {(data.payments ?? []).map((p, i) => (
+                <div key={i} className="flex justify-between">
+                  <span>
+                    {moneyLabel(p.method)}
+                    {p.status && p.status !== "succeeded"
+                      ? ` (${p.status})`
+                      : ""}
+                  </span>
+                  <span className="tabular-nums">
+                    {pad2(moneyNumber(p.amount))}
+                  </span>
+                </div>
+              ))}
+              <div className="mt-1 flex justify-between font-bold">
+                <span>{isPaid ? "Amount Paid" : "Balance due"}</span>
+                <span className="tabular-nums">
+                  {pad2(isPaid ? paidTotal : balanceDue)}
+                </span>
+              </div>
+              {upiVpa ? (
+                <div className="mt-3 text-center">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    alt="Pay QR"
+                    className="mx-auto h-28 w-28 bg-white"
+                    src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(
+                      `upi://pay?pa=${encodeURIComponent(upiVpa)}&pn=${encodeURIComponent(upiPayee)}&am=${rounded.toFixed(2)}&cu=INR&tn=${encodeURIComponent(data.orderNumber)}`,
+                    )}`}
+                  />
+                  <p className="mt-1 font-bold">Scan & Pay</p>
+                  <p>UPI ID: {upiVpa}</p>
+                  <p>Account Name: {upiPayee}</p>
+                </div>
+              ) : null}
+              {dash}
+              <p className="text-center font-bold">
+                {receiptFooter || "Thank you! Visit again."}
+              </p>
+              <p className="mt-1 text-center text-[11px]">
+                GST included as applicable.
+              </p>
             </div>
           )}
         </div>

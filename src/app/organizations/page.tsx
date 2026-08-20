@@ -40,12 +40,11 @@ import { applyPortalResponse } from "@/lib/auth-portal";
 import { defaultHomeForRoles } from "@/lib/roles";
 import { TotpChallengeForm, is2faChallenge } from "@/components/totp-challenge-form";
 import { cn } from "@/lib/utils";
-import {
-  INDIAN_STATES,
-  citiesForState,
-  isKnownIndianState,
-} from "@/lib/india-locations";
 import { phoneSchema } from "@/lib/validations";
+import { geoStates, isKnownGeoState } from "@/lib/geo";
+import { CountryStateFields } from "@/components/country-state-fields";
+import { PhoneCountryInput } from "@/components/phone-country-input";
+import { citiesForState } from "@/lib/india-locations";
 
 const createOrgSchema = z
   .object({
@@ -62,26 +61,14 @@ const createOrgSchema = z
       .trim()
       .min(3, "Enter street address")
       .max(255, "Address is too long"),
-    state: z
-      .string()
-      .min(1, "Select a state")
-      .refine(isKnownIndianState, "Select a valid state"),
-    city: z.string().min(1, "Select a city"),
-    postalCode: z
-      .string()
-      .trim()
-      .regex(/^\d{6}$/, "Enter a valid 6-digit PIN code"),
+    countryCode: z.string().min(1, "Select a country"),
+    state: z.string().min(1, "Select a state"),
+    city: z.string().min(1, "Enter a city"),
+    postalCode: z.string().trim().min(3, "Enter postal / PIN code").max(12),
     currencyCode: z.string().min(3).max(3),
     fiscalYearStart: z.string().min(1),
     inventoryStartDate: z.string().min(1, "Inventory start date is required"),
-    taxId: z
-      .string()
-      .trim()
-      .max(20)
-      .refine(
-        (v) => !v || /^[0-9A-Z]{15}$/i.test(v.replace(/\s/g, "")),
-        "GSTIN must be 15 characters (letters/numbers)",
-      ),
+    taxId: z.string().trim().max(20).optional().or(z.literal("")),
     storeName: z.string().trim().max(100).optional().or(z.literal("")),
     email: z
       .string()
@@ -108,12 +95,30 @@ const createOrgSchema = z
       ),
   })
   .superRefine((v, ctx) => {
-    const cities = citiesForState(v.state);
+    if (!isKnownGeoState(v.countryCode, v.state) && geoStates(v.countryCode).length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["state"],
+        message: "Select a valid state",
+      });
+    }
+    const cities = v.countryCode === "IN" ? citiesForState(v.state) : [];
     if (cities.length && !cities.includes(v.city)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["city"],
         message: "Select a city for the chosen state",
+      });
+    }
+    if (
+      v.countryCode === "IN" &&
+      v.taxId &&
+      !/^[0-9A-Z]{15}$/i.test(v.taxId.replace(/\s/g, ""))
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["taxId"],
+        message: "GSTIN must be 15 characters (letters/numbers)",
       });
     }
   });
@@ -290,6 +295,7 @@ function OrganizationsPageInner() {
       organizationName: "",
       phone: "",
       addressLine1: "",
+      countryCode: "IN",
       city: "",
       state: "",
       postalCode: "",
@@ -310,9 +316,11 @@ function OrganizationsPageInner() {
 
   const selectedBusinessType = form.watch("businessType");
   const selectedState = form.watch("state");
+  const selectedCountry = form.watch("countryCode");
   const cityOptions = useMemo(
-    () => citiesForState(selectedState || ""),
-    [selectedState],
+    () =>
+      selectedCountry === "IN" ? citiesForState(selectedState || "") : [],
+    [selectedCountry, selectedState],
   );
   const isOther = selectedBusinessType === "other";
 
@@ -528,7 +536,7 @@ function OrganizationsPageInner() {
           city: values.city.trim() || undefined,
           state: values.state.trim() || undefined,
           postalCode: values.postalCode.trim() || undefined,
-          countryCode: "IN",
+          countryCode: values.countryCode || "IN",
           currencyCode: values.currencyCode || "INR",
           locale: values.locale || "en-IN",
           fiscalYearStart: values.fiscalYearStart || undefined,
@@ -857,11 +865,11 @@ function OrganizationsPageInner() {
                     />
                   </div>
                   <div>
-                    <Label>Phone</Label>
-                    <Input
-                      className="mt-1"
-                      placeholder="+91 …"
-                      {...form.register("phone")}
+                    <PhoneCountryInput
+                      value={form.watch("phone") ?? ""}
+                      onChange={(v) =>
+                        form.setValue("phone", v, { shouldValidate: true })
+                      }
                     />
                     <FieldError
                       message={form.formState.errors.phone?.message}
@@ -906,38 +914,50 @@ function OrganizationsPageInner() {
                       {...form.register("addressLine2")}
                     />
                   </div>
-                  <div>
-                    <Label>State *</Label>
-                    <Select className="mt-1" {...form.register("state")}>
-                      <option value="">Select state first</option>
-                      {INDIAN_STATES.map((s) => (
-                        <option key={s} value={s}>
-                          {s}
-                        </option>
-                      ))}
-                    </Select>
-                    <FieldError
-                      message={form.formState.errors.state?.message}
+                  <div className="grid gap-3 sm:col-span-2 sm:grid-cols-2">
+                    <CountryStateFields
+                      countryRequired
+                      stateRequired
+                      countryCode={form.watch("countryCode")}
+                      state={form.watch("state")}
+                      onCountry={(code) => {
+                        form.setValue("countryCode", code, {
+                          shouldValidate: true,
+                        });
+                        form.setValue("state", "");
+                        form.setValue("city", "");
+                      }}
+                      onState={(state) => {
+                        form.setValue("state", state, { shouldValidate: true });
+                      }}
                     />
                   </div>
                   <div>
                     <Label>City *</Label>
-                    <Select
-                      className="mt-1"
-                      disabled={!selectedState}
-                      {...form.register("city")}
-                    >
-                      <option value="">
-                        {selectedState
-                          ? "Select city"
-                          : "Select state first"}
-                      </option>
-                      {cityOptions.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
+                    {cityOptions.length ? (
+                      <Select
+                        className="mt-1"
+                        disabled={!selectedState}
+                        {...form.register("city")}
+                      >
+                        <option value="">
+                          {selectedState
+                            ? "Select city"
+                            : "Select state first"}
                         </option>
-                      ))}
-                    </Select>
+                        {cityOptions.map((c) => (
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
+                        ))}
+                      </Select>
+                    ) : (
+                      <Input
+                        className="mt-1"
+                        placeholder="City"
+                        {...form.register("city")}
+                      />
+                    )}
                     <FieldError
                       message={form.formState.errors.city?.message}
                     />
@@ -946,9 +966,7 @@ function OrganizationsPageInner() {
                     <Label>Postal code *</Label>
                     <Input
                       className="mt-1"
-                      inputMode="numeric"
-                      maxLength={6}
-                      placeholder="6-digit PIN"
+                      placeholder="PIN / ZIP"
                       {...form.register("postalCode")}
                     />
                     <FieldError

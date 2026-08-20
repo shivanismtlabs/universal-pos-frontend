@@ -63,6 +63,7 @@ export default function OfflineSettingsPage() {
       });
     },
     onSuccess: (snap) => {
+      if (!snap) return;
       toast.success(
         `Synced — ${snap.counts.products} products, ${snap.counts.stockLevels} stock rows`,
       );

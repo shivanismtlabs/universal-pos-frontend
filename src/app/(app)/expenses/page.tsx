@@ -118,6 +118,7 @@ export default function ExpensesPage() {
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [receiptOverride, setReceiptOverride] = useState(false);
   const [newCat, setNewCat] = useState("");
+  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
 
   const [pettyLocationId, setPettyLocationId] = useState("");
   const [openingAmount, setOpeningAmount] = useState("");
@@ -215,6 +216,7 @@ export default function ExpensesPage() {
     setSpentAt(todayYmd());
     setTaxable(true);
     setFieldErrors({});
+    setEditingExpenseId(null);
   };
 
   const seed = useMutation({
@@ -300,6 +302,66 @@ export default function ExpensesPage() {
       if (e instanceof ApiError) toast.error(e.messages.join(", "));
     },
   });
+
+  const updateExp = useMutation({
+    mutationFn: async () => {
+      if (!editingExpenseId) throw new Error("Nothing to update");
+      const isPetty = petty || paymentMethod === "petty_cash";
+      const method = isPetty ? "petty_cash" : paymentMethod;
+      const parsed = createExpenseSchema.safeParse({
+        amount: Number(amount),
+        spentAt,
+        categoryId,
+        paymentMethod: method,
+        payee,
+        notes,
+      });
+      if (!parsed.success) {
+        setFieldErrors(zodFieldErrors(parsed.error));
+        toast.error(zodMessages(parsed.error).join(", "));
+        throw new Error(zodMessages(parsed.error)[0] ?? "Check the form");
+      }
+      setFieldErrors({});
+      return expensesApi.update(editingExpenseId, {
+        amount: parsed.data.amount,
+        spentAt: parsed.data.spentAt,
+        categoryId: parsed.data.categoryId || undefined,
+        locationId: locationId || undefined,
+        paymentMethod: parsed.data.paymentMethod,
+        notes: parsed.data.notes?.trim() || undefined,
+        payee: parsed.data.payee?.trim() || undefined,
+        reference: reference.trim() || undefined,
+        isPettyCash: isPetty,
+        isReimbursement: reimbursement,
+        taxable,
+      });
+    },
+    onSuccess: () => {
+      toast.success("Expense updated");
+      resetForm();
+      invalidateExpenses();
+    },
+    onError: (e) => {
+      if (e instanceof ApiError) toast.error(e.messages.join(", "));
+    },
+  });
+
+  function startEdit(e: ExpenseRow) {
+    setDeskTab("expenses");
+    setEditingExpenseId(e.id);
+    setAmount(String(e.amount ?? ""));
+    setSpentAt(String(e.spentAt).slice(0, 10));
+    setCategoryId(e.category?.id ?? "");
+    setLocationId(e.location?.id ?? "");
+    setPaymentMethod(e.paymentMethod || "cash");
+    setPayee(e.payee ?? "");
+    setReference(e.reference ?? "");
+    setNotes(e.notes ?? "");
+    setPetty(Boolean(e.isPettyCash));
+    setReimbursement(Boolean(e.isReimbursement));
+    setReceiptFile(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
 
   const attach = useMutation({
     mutationFn: async ({ id, file }: { id: string; file: File }) => {
@@ -480,6 +542,16 @@ export default function ExpensesPage() {
     const href = mediaUrl(e.receiptUrl);
     return (
       <div className="flex flex-wrap items-center justify-end gap-1">
+        {e.status === "draft" || e.status === "pending" ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            onClick={() => startEdit(e)}
+          >
+            Edit
+          </Button>
+        ) : null}
         {href ? (
           <a
             href={href}
@@ -641,8 +713,8 @@ export default function ExpensesPage() {
   return (
     <div className="mx-auto max-w-6xl space-y-5">
       <PageHeader
-        title="Expense Management"
-        subtitle="Track shop costs, approvals, receipts, and petty cash — Universal POS."
+        title="Shop costs"
+        subtitle="Write down money the shop spent (rent, travel, supplies). Approve, edit drafts, or delete mistakes."
       />
 
       <div className="flex gap-1 rounded-[12px] bg-[#eef2f8] p-1 sm:w-fit">
@@ -736,7 +808,19 @@ export default function ExpensesPage() {
       {deskTab === "expenses" ? (
         <div className="grid gap-5 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.25fr)]">
           <section className="space-y-4 rounded-xl border border-[#d9e0ea] bg-white p-4">
-            <h2 className="text-sm font-semibold text-[#0b1f33]">Add expense</h2>
+            <h2 className="text-sm font-semibold text-[#0b1f33]">
+              {editingExpenseId ? "Edit expense" : "Add expense"}
+            </h2>
+            {editingExpenseId ? (
+              <p className="text-xs text-[#5a6b7d]">
+                You can change draft or waiting expenses. Approved ones stay
+                locked — void them instead.
+              </p>
+            ) : (
+              <p className="text-xs text-[#5a6b7d]">
+                Date, how much, who you paid, and how you paid. Keep it simple.
+              </p>
+            )}
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <Label>Date</Label>
@@ -904,6 +988,25 @@ export default function ExpensesPage() {
               ) : null}
             </div>
             <div className="flex flex-wrap gap-2">
+              {editingExpenseId ? (
+                <>
+                  <Button
+                    type="button"
+                    disabled={updateExp.isPending || !amount}
+                    onClick={() => updateExp.mutate()}
+                  >
+                    {updateExp.isPending ? "Saving…" : "Save changes"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => resetForm()}
+                  >
+                    Cancel edit
+                  </Button>
+                </>
+              ) : (
+                <>
               <Button
                 type="button"
                 disabled={create.isPending || !amount}
@@ -919,6 +1022,8 @@ export default function ExpensesPage() {
               >
                 Save draft
               </Button>
+                </>
+              )}
             </div>
 
             <div className="border-t border-[#eef2f7] pt-4">

@@ -69,8 +69,14 @@ export function SetPinDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-[#0b1f33]/65 p-4 backdrop-blur-[2px]">
-      <div className="w-full max-w-sm overflow-hidden rounded-2xl border border-[#d9e0ea] bg-white shadow-[0_24px_64px_rgba(11,31,51,0.28)]">
+    <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 backdrop-blur-[2px]">
+      <button
+        type="button"
+        className="absolute inset-0 bg-[#0b1f33]/65"
+        aria-label="Close"
+        onClick={closeAll}
+      />
+      <div className="relative z-10 w-full max-w-sm overflow-hidden rounded-2xl border border-[#d9e0ea] bg-white shadow-[0_24px_64px_rgba(11,31,51,0.28)]">
         <div className="border-b border-[#e8eef5] bg-[#f8fafc] px-5 py-4">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-3">

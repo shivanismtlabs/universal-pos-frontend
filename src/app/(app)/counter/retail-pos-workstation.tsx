@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { loyaltyApi, paymentsApi, posApi, resourcesApi, tenantsApi } from "@/lib/api";
+import { customersApi, loyaltyApi, paymentsApi, posApi, resourcesApi, tenantsApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useBootstrap } from "@/lib/bootstrap";
 import { useBranchStore } from "@/lib/branch-store";
@@ -36,6 +36,7 @@ import {
   qtyStep,
   type SellUnit,
 } from "@/lib/sell-units";
+import { productKindLabel, productStockHint } from "@/lib/product-kind";
 
 type CartLine = {
   stockLevelId: string;
@@ -67,6 +68,7 @@ type CartLine = {
   }>;
   requiresSerial?: boolean;
   serialNumber?: string;
+  kind?: string | null;
 };
 
 type PayMethod =
@@ -163,6 +165,18 @@ export default function RetailPosWorkstation({
   const [lowStockOnly, setLowStockOnly] = useState(false);
   const [category, setCategory] = useState<string>("all");
   const [customerId, setCustomerId] = useState("");
+  const customerWalletQ = useQuery({
+    queryKey: ["customer", customerId],
+    queryFn: () => customersApi.get(customerId),
+    enabled: Boolean(customerId),
+  });
+  const walletBalance = customerId
+    ? Number(
+        customerWalletQ.data?.summary?.storeCreditBalance ??
+          customerWalletQ.data?.storeCreditBalance ??
+          0,
+      )
+    : 0;
   const [cart, setCart] = useState<CartLine[]>([]);
   const [discountAmount, setDiscountAmount] = useState("");
   const [couponCode, setCouponCode] = useState("");
@@ -505,6 +519,7 @@ export default function RetailPosWorkstation({
       expiresAt?: string | null;
     }>;
     requiresSerial?: boolean;
+    kind?: string | null;
   }) {
     const price = moneyNumber(row.sellPrice);
     const image =
@@ -539,6 +554,7 @@ export default function RetailPosWorkstation({
                 requiresBatch: row.requiresBatch === true,
                 batchOptions: row.batchOptions ?? [],
                 requiresSerial: row.requiresSerial === true,
+                kind: row.kind ?? l.kind,
               }
             : l,
         );
@@ -574,6 +590,7 @@ export default function RetailPosWorkstation({
             row.requiresBatch && row.batchOptions?.length === 1
               ? row.batchOptions[0].id
               : undefined,
+          kind: row.kind ?? null,
         },
       ];
     });
@@ -660,7 +677,13 @@ export default function RetailPosWorkstation({
       return;
     }
     if (payMethod === "store_credit" && !customerId) {
-      toast.error("Select a customer for store credit");
+      toast.error("Select a customer to pay from their wallet");
+      return;
+    }
+    if (payMethod === "store_credit" && walletBalance + 1e-9 < chargeAmount) {
+      toast.error(
+        `Wallet has ${money(walletBalance)} — not enough for ${money(chargeAmount)}`,
+      );
       return;
     }
     if (payMethod === "gift_card" && !giftCardCode.trim()) {
@@ -800,7 +823,7 @@ export default function RetailPosWorkstation({
       };
 
       if (payMethod === "store_credit" && !customerId) {
-        toast.error("Select a customer to pay with store credit");
+        toast.error("Select a customer to pay from their wallet");
         return;
       }
 
@@ -980,6 +1003,10 @@ export default function RetailPosWorkstation({
       void qc.invalidateQueries({ queryKey: ["pos-sale-parked"] });
       void qc.invalidateQueries({ queryKey: ["pos-sale-recent"] });
       void qc.invalidateQueries({ queryKey: ["customers"] });
+      if (customerId) {
+        void qc.invalidateQueries({ queryKey: ["customer", customerId] });
+        void qc.invalidateQueries({ queryKey: ["customer-crm"] });
+      }
       if (result.partial) {
         toast.success(
           `Sale ${result.order.orderNumber} · partial pay · balance ${money(result.balanceDue ?? result.order.balanceDue)}`,
@@ -1443,11 +1470,17 @@ export default function RetailPosWorkstation({
                 const src = gallery[0] ?? row.image ?? row.photoUrl;
                 const inCart = cart.find((l) => l.stockLevelId === row.id);
                 const cartQty = inCart?.qty ?? 0;
-                const tracks = row.trackQty !== false;
-                const available = tracks
-                  ? Math.max(0, Number(row.qtyOnHand) - cartQty)
-                  : 999;
-                const low = tracks && available < 5;
+                const available =
+                  row.trackQty !== false
+                    ? Math.max(0, Number(row.qtyOnHand) - cartQty)
+                    : 999;
+                const kindLabel = productKindLabel(row.kind);
+                const stock = productStockHint({
+                  kind: row.kind,
+                  trackQty: row.trackQty,
+                  available,
+                  qtyLeftLabel: formatQtyWithUnit(available, row.sellUnit),
+                });
                 return (
                   <li key={row.id}>
                     <button
@@ -1477,6 +1510,11 @@ export default function RetailPosWorkstation({
                         </p>
                         <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[0.7rem] text-[#8b9bb0]">
                           <span>{row.sku}</span>
+                          {kindLabel ? (
+                            <span className="rounded-md bg-[#eef2f7] px-1.5 py-0.5 font-sans text-[0.65rem] font-semibold text-[#334155]">
+                              {kindLabel}
+                            </span>
+                          ) : null}
                           {row.category?.name ? (
                             <span className="font-sans text-[#5a6b7d]">
                               · {row.category.name}
@@ -1485,18 +1523,14 @@ export default function RetailPosWorkstation({
                           <span
                             className={cn(
                               "rounded-md px-1.5 py-0.5 font-sans text-[0.65rem] font-semibold",
-                              available <= 0 && tracks
+                              stock.tone === "out"
                                 ? "bg-[#fef2f2] text-[#c81e1e]"
-                                : low
+                                : stock.tone === "low"
                                   ? "bg-[#fff7ed] text-[#9a3412]"
                                   : "bg-[#e8eefb] text-[#1a56db]",
                             )}
                           >
-                            {tracks
-                              ? available <= 0
-                                ? "In ticket"
-                                : `${formatQtyWithUnit(available, row.sellUnit)} left`
-                              : "No stock limit"}
+                            {stock.label}
                           </span>
                         </p>
                       </div>
@@ -1542,7 +1576,7 @@ export default function RetailPosWorkstation({
                   Page {catalogPage} of {catalogTotalPages}
                   <span className="text-[#8b9bb0]">
                     {" "}
-                    · {catalogTotal} in stock
+                    · {catalogTotal} in this list
                   </span>
                 </p>
                 <div className="flex items-center gap-1">
@@ -1574,7 +1608,7 @@ export default function RetailPosWorkstation({
               </div>
             ) : catalogTotal > 0 ? (
               <p className="border-t border-[#eef2f8] px-3 py-2 text-[0.72rem] text-[#8b9bb0]">
-                {catalogTotal} product{catalogTotal === 1 ? "" : "s"} in stock
+                {catalogTotal} product{catalogTotal === 1 ? "" : "s"} shown
               </p>
             ) : null}
           </div>
@@ -1669,10 +1703,23 @@ export default function RetailPosWorkstation({
               value={customerId}
               onChange={(id) => setCustomerId(id)}
               allowWalkIn
-              placeholder="Search customer book…"
+              placeholder="Search name or phone…"
               showBalances
               money={money}
             />
+            {customerId ? (
+              <p className="text-[0.75rem] text-[#5a6b7d]">
+                Wallet (store credit):{" "}
+                <span className="font-semibold tabular-nums text-[#0b1f33]">
+                  {money(walletBalance)}
+                </span>
+                . Use the Wallet button below to take money from this balance.
+              </p>
+            ) : (
+              <p className="text-[0.75rem] text-[#5a6b7d]">
+                Wallet pay needs a customer. Walk-in has no wallet.
+              </p>
+            )}
           </div>
 
           {foodFulfillment || resourceDesk ? (
@@ -1752,6 +1799,11 @@ export default function RetailPosWorkstation({
                   <p className="truncate text-sm font-semibold text-[#0b1f33]">
                     {l.name}
                   </p>
+                  {productKindLabel(l.kind) ? (
+                    <p className="text-[0.65rem] font-medium text-[#5a6b7d]">
+                      {productKindLabel(l.kind)}
+                    </p>
+                  ) : null}
                   <p className="truncate font-mono text-[0.65rem] text-[#8b9bb0]">
                     {money(l.unitPrice)} {priceUnitLabel(l.sellUnit)}
                     {l.taxRatePercent != null
@@ -2145,7 +2197,7 @@ export default function RetailPosWorkstation({
               const frontRow = [
                 "cash",
                 "qr",
-                "wallet",
+                "store_credit",
                 "card",
                 "upi",
               ] as const;
@@ -2154,13 +2206,13 @@ export default function RetailPosWorkstation({
                 const alwaysOn =
                   method === "cash" ||
                   method === "qr" ||
-                  method === "wallet";
+                  method === "store_credit";
                 return {
                   method,
                   displayName:
                     method === "qr"
                       ? "QR"
-                      : method === "wallet"
+                      : method === "store_credit"
                         ? "Wallet"
                         : m?.displayName ?? method,
                   available: alwaysOn || Boolean(m?.available),
@@ -2174,7 +2226,8 @@ export default function RetailPosWorkstation({
                 ? [...shownPrimary, ...more]
                 : shownPrimary;
               const methodLabel = (method: string, displayName: string) => {
-                if (method === "store_credit") return "Credit";
+                if (method === "store_credit") return "Wallet";
+                if (method === "wallet") return "App pay";
                 if (method === "gift_card") return "Gift";
                 if (method === "bank_transfer") return "Bank";
                 return displayName;
@@ -2228,9 +2281,23 @@ export default function RetailPosWorkstation({
               );
             })()}
             {payMethod === "store_credit" ? (
-              <p className="text-[0.7rem] text-[#5a6b7d]">
-                Debits customer store credit balance. Needs a linked customer.
-              </p>
+              <div className="rounded-[10px] border border-[#d9e0ea] bg-white p-3 text-[0.75rem] text-[#5a6b7d]">
+                {customerId ? (
+                  <p>
+                    This takes money from the customer wallet (
+                    <span className="font-semibold tabular-nums text-[#0b1f33]">
+                      {money(walletBalance)}
+                    </span>{" "}
+                    left). Same as adding / using wallet on the customer
+                    profile.
+                  </p>
+                ) : (
+                  <p className="text-amber-800">
+                    Pick a customer first. Wallet is their store credit, not
+                    PhonePe / Paytm.
+                  </p>
+                )}
+              </div>
             ) : null}
             {payMethod === "qr" ? (
               <div className="space-y-2 rounded-[10px] border border-[#d9e0ea] bg-white p-3">
@@ -2317,9 +2384,10 @@ export default function RetailPosWorkstation({
             ) : null}
             {payMethod === "wallet" ? (
               <div className="space-y-1 rounded-[10px] border border-[#d9e0ea] bg-white p-3">
-                <p className="text-[0.7rem] text-[#5a6b7d]">
-                  Collect on PhonePe / Paytm / GPay (or any wallet), then tap
-                  Charge to record it.
+                <p className="text-[0.75rem] text-[#5a6b7d]">
+                  App pay records PhonePe / Paytm / GPay you already collected.
+                  It does not use the customer wallet on their profile. Use
+                  Wallet for that.
                 </p>
               </div>
             ) : null}

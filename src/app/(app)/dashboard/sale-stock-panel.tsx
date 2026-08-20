@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { catalogApi, posApi, tenantsApi } from "@/lib/api";
+import { catalogApi, customFieldsApi, posApi, tenantsApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { canWriteCatalog } from "@/lib/roles";
 import { useAuthStore } from "@/lib/auth-store";
@@ -29,6 +29,7 @@ import {
 } from "@/components/stock-adjust-dialog";
 import { useBootstrap } from "@/lib/bootstrap";
 import type { MetaFieldDef } from "@/lib/business-config";
+import { mergeProductFormFields } from "@/lib/product-form-fields";
 import { ItemsImportDialog } from "@/components/items-import-dialog";
 import { AddCategoryModal } from "@/components/add-category-modal";
 import {
@@ -216,6 +217,14 @@ export function SaleStockPanel({
   const roles = useAuthStore((s) => s.user?.roles);
   const canWrite = canWriteCatalog(roles);
   const { itemMetaFields, businessConfig, businessType } = useBootstrap();
+  const customFieldsQ = useQuery({
+    queryKey: ["custom-fields", "product"],
+    queryFn: () => customFieldsApi.listDefinitions("product"),
+  });
+  const productFormFields = useMemo(
+    () => mergeProductFormFields(itemMetaFields, customFieldsQ.data),
+    [itemMetaFields, customFieldsQ.data],
+  );
 
   const [panel, setPanel] = useState<"add" | "products" | "categories">(
     initialPanel ?? "products",
@@ -410,7 +419,7 @@ export function SaleStockPanel({
           const out: Record<string, unknown> = {};
           for (const [k, raw] of Object.entries(extraFields)) {
             if (raw === "" || raw == null) continue;
-            const def = itemMetaFields.find((f) => f.key === k);
+            const def = productFormFields.find((f) => f.key === k);
             if (def?.type === "boolean") {
               out[k] = raw === "true" || raw === "1";
             } else if (def?.type === "number") {
@@ -628,8 +637,8 @@ export function SaleStockPanel({
               {businessConfig?.label || businessType ? (
                 <p className="mt-0.5 text-[0.72rem] text-[#6b7c93]">
                   {businessConfig?.label ?? businessType}
-                  {itemMetaFields.length
-                    ? ` · ${itemMetaFields.length} extra field${itemMetaFields.length === 1 ? "" : "s"} from profile`
+                  {productFormFields.length
+                    ? ` · ${productFormFields.length} extra field${productFormFields.length === 1 ? "" : "s"}`
                     : null}
                 </p>
               ) : null}
@@ -1437,18 +1446,17 @@ export function SaleStockPanel({
               </section>
 
               {/* —— 7. BusinessConfig + extra —— */}
-              {itemMetaFields.length ? (
+              {productFormFields.length ? (
                 <section className="py-7">
                   <h3 className="text-[0.78rem] font-bold tracking-[0.04em] text-[#21263c] uppercase">
-                    Profile extras
+                    Extra fields
                   </h3>
-                  <p className="mt-1 text-[0.72rem] text-[#6b7c93]">
-                    From business type config →{" "}
-                    <code className="text-[0.7rem]">products.meta</code>{" "}
-                    (extra_fields).
+                  <p className="mt-1 text-[0.8rem] text-[#5a6b7d]">
+                    These boxes come from Settings → Custom fields. Fill them
+                    when you add an item.
                   </p>
                   <div className="mt-4 space-y-3.5">
-                    {itemMetaFields.map((field) => (
+                    {productFormFields.map((field) => (
                       <ItemMetaFieldRow
                         key={field.key}
                         field={field}

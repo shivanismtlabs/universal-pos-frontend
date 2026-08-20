@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { suppliersApi } from "@/lib/api";
@@ -36,6 +37,7 @@ const PAY_METHODS = [
   { value: "upi", label: "UPI" },
   { value: "bank_transfer", label: "Bank transfer" },
   { value: "wallet", label: "Wallet" },
+  { value: "cheque", label: "Cheque" },
 ] as const;
 
 function errMsg(e: unknown) {
@@ -149,6 +151,10 @@ export default function PurchasesPage() {
   const [payRef, setPayRef] = useState("");
   const [payKind, setPayKind] = useState<"payment" | "refund">("payment");
   const [payErrors, setPayErrors] = useState<Record<string, string>>({});
+  const [chequeNumber, setChequeNumber] = useState("");
+  const [chequeBank, setChequeBank] = useState("");
+  const [chequeDate, setChequeDate] = useState("");
+  const [chequePayee, setChequePayee] = useState("");
 
   const payInvoice = useMutation({
     mutationFn: () => {
@@ -163,12 +169,21 @@ export default function PurchasesPage() {
         toast.error(zodMessages(parsed.error)[0] ?? "Check the form");
         throw new Error(zodMessages(parsed.error)[0] ?? "Invalid payment");
       }
+      if (payMethod === "cheque" && !chequeNumber.trim()) {
+        setPayErrors({ chequeNumber: "Enter cheque number" });
+        toast.error("Enter cheque number");
+        throw new Error("Enter cheque number");
+      }
       setPayErrors({});
       return suppliersApi.payInvoice(payId!, {
         amount: parsed.data.amount,
         method: parsed.data.method,
         kind: parsed.data.kind,
-        reference: parsed.data.reference?.trim() || undefined,
+        reference: parsed.data.reference?.trim() || chequeNumber.trim() || undefined,
+        chequeNumber: chequeNumber.trim() || undefined,
+        chequeBank: chequeBank.trim() || undefined,
+        chequeDate: chequeDate || undefined,
+        chequePayee: chequePayee.trim() || undefined,
       });
     },
     onSuccess: () => {
@@ -181,6 +196,10 @@ export default function PurchasesPage() {
       setPayAmount("");
       setPayRef("");
       setPayKind("payment");
+      setChequeNumber("");
+      setChequeBank("");
+      setChequeDate("");
+      setChequePayee("");
       setPayErrors({});
       void qc.invalidateQueries({ queryKey: ["supplier-invoices-outstanding"] });
       void qc.invalidateQueries({ queryKey: ["supplier-invoices"] });
@@ -404,7 +423,12 @@ export default function PurchasesPage() {
                         className="border-b border-[#eef1f4] last:border-0"
                       >
                         <td className="px-3 py-2 font-medium text-[#0b1f33]">
-                          {inv.invoiceNumber}
+                          <Link
+                            href={`/purchases/invoices/${inv.id}`}
+                            className="text-[#1a56db] hover:underline"
+                          >
+                            {inv.invoiceNumber}
+                          </Link>
                         </td>
                         <td className="px-3 py-2">
                           {inv.supplier?.name ?? "—"}
@@ -497,10 +521,48 @@ export default function PurchasesPage() {
                       setPayRef(e.target.value);
                       setPayErrors((f) => ({ ...f, reference: "" }));
                     }}
-                    placeholder="Cheque / UTR / note"
+                    placeholder="UTR / note"
                   />
                   <FieldError message={payErrors.reference} />
                 </div>
+                {payMethod === "cheque" ? (
+                  <>
+                    <div>
+                      <Label>Cheque number *</Label>
+                      <Input
+                        className="mt-1"
+                        value={chequeNumber}
+                        onChange={(e) => setChequeNumber(e.target.value)}
+                      />
+                      <FieldError message={payErrors.chequeNumber} />
+                    </div>
+                    <div>
+                      <Label>Bank name</Label>
+                      <Input
+                        className="mt-1"
+                        value={chequeBank}
+                        onChange={(e) => setChequeBank(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <Label>Cheque date</Label>
+                      <Input
+                        type="date"
+                        className="mt-1"
+                        value={chequeDate}
+                        onChange={(e) => setChequeDate(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <Label>Payee name</Label>
+                      <Input
+                        className="mt-1"
+                        value={chequePayee}
+                        onChange={(e) => setChequePayee(e.target.value)}
+                      />
+                    </div>
+                  </>
+                ) : null}
               </div>
               <div className="flex gap-2">
                 <Button
@@ -556,7 +618,12 @@ export default function PurchasesPage() {
                         className="border-b border-[#eef1f4] last:border-0"
                       >
                         <td className="px-3 py-2 font-medium text-[#0b1f33]">
-                          {inv.invoiceNumber}
+                          <Link
+                            href={`/purchases/invoices/${inv.id}`}
+                            className="text-[#1a56db] hover:underline"
+                          >
+                            {inv.invoiceNumber}
+                          </Link>
                         </td>
                         <td className="px-3 py-2">
                           {inv.supplier?.name ?? "—"}
