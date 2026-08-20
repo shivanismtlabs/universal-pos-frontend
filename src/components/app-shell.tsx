@@ -63,7 +63,6 @@ import { useBootstrap } from "@/lib/bootstrap";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { StationPinLock } from "@/components/station-pin-lock";
-import { SetPinDialog } from "@/components/set-pin-dialog";
 import { ShellEntitySearch } from "@/components/shell-entity-search";
 import { BranchSelector } from "@/components/branch-selector";
 import { OfflineStatusBanner } from "@/components/offline-status-banner";
@@ -1177,7 +1176,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     data: boot,
   } = useBootstrap();
   const [open, setOpen] = useState(false);
-  const [showSetPin, setShowSetPin] = useState(false);
   const wide =
     pathname === "/counter" ||
     pathname.startsWith("/counter/") ||
@@ -1192,9 +1190,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     [user?.permissions, stationUser?.permissions],
   );
   const modeLabel = modeBadge(commerceModes) || "POS";
-  const pinSwitchEnabled =
-    (boot?.tenant?.settings as { pos?: { pinSwitchEnabled?: boolean } } | null)
-      ?.pos?.pinSwitchEnabled !== false;
 
   const accessToken = useAuthStore((s) => s.accessToken);
 
@@ -1290,13 +1285,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     });
     return () => cancel(handle as number);
   }, [accessToken, pinLocked, user?.tenantId]);
-
-  useEffect(() => {
-    if (pinLocked || !user || !pinSwitchEnabled) return;
-    if (user.pinSet === false) {
-      setShowSetPin(true);
-    }
-  }, [user, pinLocked, pinSwitchEnabled]);
 
   useEffect(() => {
     if (pinLocked || !roles.length || isLoading) return;
@@ -1431,22 +1419,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       ) : null}
       <SessionIdleWatcher />
       <InboxPopupListener />
-      <SetPinDialog
-        open={showSetPin && !pinLocked}
-        title="Set your counter PIN"
-        onClose={() => setShowSetPin(false)}
-        onSaved={() => {
-          if (user) {
-            useAuthStore.setState({
-              user: { ...user, pinSet: true },
-              stationUser: stationUser
-                ? { ...stationUser, pinSet: true }
-                : stationUser,
-            });
-          }
-          setShowSetPin(false);
-        }}
-      />
       {/* Light expandable sidebar */}
       <aside className="app-shell-aside hidden h-dvh w-[17.5rem] shrink-0 flex-col border-r border-[#e2e8f0] md:flex print:hidden">
         <Suspense fallback={<div className="h-full bg-[#fafbfc]" />}>
