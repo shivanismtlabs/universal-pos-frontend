@@ -19,11 +19,24 @@ export const aiApi = {
       mime: string;
       bytes: number;
       imageBase64: string;
+      sourceUrl?: string;
     }>("/ai/product-image", {
       method: "POST",
       body,
       token: token(),
     });
+  },
+
+  /** When server cannot reach Pollinations, FE fetches this URL in the browser. */
+  productImageFallbackUrl(body: { name: string; hint?: string }) {
+    return apiRequest<{ prompt: string; url: string }>(
+      "/ai/product-image/fallback-url",
+      {
+        method: "POST",
+        body,
+        token: token(),
+      },
+    );
   },
 };
 

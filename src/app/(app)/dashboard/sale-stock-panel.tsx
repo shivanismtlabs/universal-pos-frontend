@@ -1501,7 +1501,11 @@ export function SaleStockPanel({
                   First image is used as the item thumbnail.
                 </p>
                 <div className="mt-3">
-                  <ProductImagePicker ref={imagePickerRef} />
+                  <ProductImagePicker
+                    ref={imagePickerRef}
+                    productName={form.title}
+                    productHint={form.description}
+                  />
                 </div>
               </div>
 
