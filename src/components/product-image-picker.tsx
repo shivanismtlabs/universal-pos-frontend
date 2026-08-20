@@ -253,18 +253,21 @@ export const ProductImagePicker = forwardRef<
         } catch {
           // Build URL locally if fallback endpoint missing / old API
           const prompt = [
-            "Product photo for online store",
-            name.slice(0, 80),
-            productHint?.trim()?.slice(0, 100) || null,
-            "white background, centered, sharp, no text",
+            `Photorealistic food and product photograph of ${name.slice(0, 100)}`,
+            "authentic Indian restaurant style plating if it is a dish",
+            productHint?.trim()?.slice(0, 120) || null,
+            "real edible food on a clean white or marble surface",
+            "natural colors appetizing professional food photography",
+            "no text no watermark no illustration no cartoon no surreal art",
           ]
             .filter(Boolean)
             .join(", ");
           const qs = new URLSearchParams({
-            width: "768",
-            height: "768",
+            width: "1024",
+            height: "1024",
             model: "flux",
             nologo: "true",
+            enhance: "true",
             seed: String(Math.floor(Math.random() * 1_000_000_000)),
           });
           url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?${qs}`;
@@ -320,7 +323,7 @@ export const ProductImagePicker = forwardRef<
           {aiBusy ? "Generating…" : "Generate image from name"}
         </Button>
         <p className="text-[0.7rem] text-[#8b9bb0]">
-          Free AI · name se image · 10–40 sec lag sakta hai
+          Free AI · real dish name use karo (e.g. Pani Kofta) · 15–40 sec
         </p>
       </div>
     );
