@@ -1680,7 +1680,7 @@ export default function RetailPosWorkstation({
           ) : null}
         </section>
 
-        <aside className="flex min-h-0 flex-col self-start overflow-hidden rounded-[16px] border border-[#d9e0ea] bg-white shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
+        <aside className="flex min-h-0 max-h-[calc(100vh-6.5rem)] flex-col self-start overflow-y-auto rounded-[16px] border border-[#d9e0ea] bg-white shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
           {compact ? (
             <div className="flex flex-wrap items-center gap-2 border-b border-[#e8edf4] bg-[#f8fafc] px-3 py-2">
               {registerSession ? (

@@ -29,7 +29,7 @@ import {
 } from "@/components/stock-adjust-dialog";
 import { useBootstrap } from "@/lib/bootstrap";
 import type { MetaFieldDef } from "@/lib/business-config";
-import { mergeProductFormFields } from "@/lib/product-form-fields";
+import { customFieldDefsToMeta } from "@/lib/product-form-fields";
 import { ItemsImportDialog } from "@/components/items-import-dialog";
 import { AddCategoryModal } from "@/components/add-category-modal";
 import {
@@ -216,14 +216,14 @@ export function SaleStockPanel({
   const qc = useQueryClient();
   const roles = useAuthStore((s) => s.user?.roles);
   const canWrite = canWriteCatalog(roles);
-  const { itemMetaFields, businessConfig, businessType } = useBootstrap();
+  const { businessConfig, businessType } = useBootstrap();
   const customFieldsQ = useQuery({
     queryKey: ["custom-fields", "product"],
     queryFn: () => customFieldsApi.listDefinitions("product"),
   });
   const productFormFields = useMemo(
-    () => mergeProductFormFields(itemMetaFields, customFieldsQ.data),
-    [itemMetaFields, customFieldsQ.data],
+    () => customFieldDefsToMeta(customFieldsQ.data),
+    [customFieldsQ.data],
   );
 
   const [panel, setPanel] = useState<"add" | "products" | "categories">(
@@ -239,7 +239,7 @@ export function SaleStockPanel({
     }
   }, []);
   const [form, setForm] = useState(EMPTY);
-  /** Zoho-style extra item fields from BusinessConfig (size, brand, duration…) */
+  /** Values for Settings → Custom fields (Product). */
   const [extraFields, setExtraFields] = useState<Record<string, string>>({});
   const [formErrors, setFormErrors] = useState<
     Partial<Record<string, string>>

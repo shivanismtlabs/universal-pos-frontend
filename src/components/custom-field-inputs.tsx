@@ -61,7 +61,7 @@ export function CustomFieldInputs({
                   </option>
                 ))}
               </select>
-            ) : field.type === "textarea" || field.type === "text" ? (
+            ) : field.type === "textarea" ? (
               <textarea
                 className={textareaClass}
                 value={value}
@@ -78,7 +78,11 @@ export function CustomFieldInputs({
                       ? "date"
                       : field.type === "datetime"
                         ? "datetime-local"
-                        : "text"
+                        : field.type === "email"
+                          ? "email"
+                          : field.type === "phone"
+                            ? "tel"
+                            : "text"
                 }
                 value={value}
                 onChange={(e) => set(e.target.value)}

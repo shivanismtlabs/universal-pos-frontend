@@ -1,11 +1,14 @@
 import type { MetaFieldDef } from "@/lib/business-config";
 
 export type CustomFieldDefLite = {
-  fieldKey: string;
+  fieldKey?: string;
+  key?: string;
   label: string;
-  dataType: string;
+  dataType?: string;
+  type?: string;
   required?: boolean;
   options?: unknown;
+  sortOrder?: number | null;
 };
 
 /** Settings/API may return a bare array or `{ data }` / `{ items }`. */
@@ -54,33 +57,25 @@ function mapDataType(dataType: string): string {
   if (t === "textarea") return "textarea";
   if (t === "date") return "date";
   if (t === "datetime") return "datetime";
+  if (t === "email") return "email";
+  if (t === "phone") return "phone";
   return "text";
 }
 
 export function customFieldDefsToMeta(
   defs: CustomFieldDefLite[] | unknown,
 ): MetaFieldDef[] {
-  return normalizeCustomFieldDefs(defs).map((d) => ({
-    key: d.fieldKey,
-    label: d.label,
-    type: mapDataType(d.dataType),
-    required: Boolean(d.required),
-    entity: "item",
-    options: parseOptions(d.options),
-  }));
-}
-
-/** Profile extras + Settings → Custom fields (product), no duplicate keys. */
-export function mergeProductFormFields(
-  itemMeta: MetaFieldDef[],
-  custom: CustomFieldDefLite[] | unknown,
-): MetaFieldDef[] {
   const skip = new Set(["taxRatePercent"]);
-  const seen = new Set(itemMeta.map((f) => f.key));
-  const extra = customFieldDefsToMeta(custom).filter((f) => {
-    if (!f.key || skip.has(f.key) || seen.has(f.key)) return false;
-    seen.add(f.key);
-    return true;
-  });
-  return [...itemMeta.filter((f) => !skip.has(f.key)), ...extra];
+  return normalizeCustomFieldDefs(defs)
+    .slice()
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+    .map((d) => ({
+      key: String(d.fieldKey ?? d.key ?? "").trim(),
+      label: d.label,
+      type: mapDataType(String(d.dataType ?? d.type ?? "text")),
+      required: Boolean(d.required),
+      entity: "item" as const,
+      options: parseOptions(d.options),
+    }))
+    .filter((f) => f.key && !skip.has(f.key));
 }

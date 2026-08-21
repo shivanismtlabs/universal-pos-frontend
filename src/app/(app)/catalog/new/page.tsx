@@ -27,7 +27,7 @@ import {
 } from "@/lib/validations";
 
 import { activeUnitOptions } from "@/lib/measure-units";
-import { mergeProductFormFields } from "@/lib/product-form-fields";
+import { customFieldDefsToMeta } from "@/lib/product-form-fields";
 import { CustomFieldsSection } from "@/components/custom-field-inputs";
 
 const KINDS: { id: CatalogProductKind; label: string }[] = [
@@ -47,15 +47,14 @@ export default function NewCatalogProductPage() {
   const router = useRouter();
   const qc = useQueryClient();
   const imagePickerRef = useRef<ProductImagePickerHandle>(null);
-  const { itemMetaFields, data: boot } =
-    useBootstrap();
+  const { data: boot } = useBootstrap();
   const customFieldsQ = useQuery({
     queryKey: ["custom-fields", "product"],
     queryFn: () => customFieldsApi.listDefinitions("product"),
   });
   const productFormFields = useMemo(
-    () => mergeProductFormFields(itemMetaFields, customFieldsQ.data),
-    [itemMetaFields, customFieldsQ.data],
+    () => customFieldDefsToMeta(customFieldsQ.data),
+    [customFieldsQ.data],
   );
   const currentLocationId = useBranchStore((s) => s.currentLocationId);
   const defaultLocationId =
@@ -77,7 +76,7 @@ export default function NewCatalogProductPage() {
     [unitsQ.data],
   );
 
-  /** Extra questions from shop profile + Settings → Custom fields. */
+  /** Values for Settings → Custom fields (Product). */
   const [extraFields, setExtraFields] = useState<Record<string, string>>({});
 
   const [form, setForm] = useState({

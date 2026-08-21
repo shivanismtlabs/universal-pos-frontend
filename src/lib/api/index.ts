@@ -1683,6 +1683,27 @@ export const restaurantApi = {
       token: token(),
     });
   },
+  updateTable(
+    id: string,
+    body: {
+      name?: string;
+      capacity?: number;
+      floorId?: string;
+      status?: string;
+    },
+  ) {
+    return apiRequest(`/restaurant/tables/${id}`, {
+      method: "PATCH",
+      body,
+      token: token(),
+    });
+  },
+  deleteTable(id: string) {
+    return apiRequest(`/restaurant/tables/${id}`, {
+      method: "DELETE",
+      token: token(),
+    });
+  },
   openTable(
     id: string,
     body?: { covers?: number; customerId?: string; guestName?: string },

@@ -20,7 +20,6 @@ import {
 } from "@/lib/api";
 import { PageHeader } from "@/components/page-header";
 import { ApiError } from "@/lib/api/client";
-import { useBootstrap } from "@/lib/bootstrap";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -40,7 +39,7 @@ import {
 } from "@/lib/validations";
 
 import { activeUnitOptions } from "@/lib/measure-units";
-import { mergeProductFormFields } from "@/lib/product-form-fields";
+import { customFieldDefsToMeta } from "@/lib/product-form-fields";
 import { CustomFieldsSection } from "@/components/custom-field-inputs";
 
 const KINDS: { id: CatalogProductKind; label: string }[] = [
@@ -72,14 +71,13 @@ function EditCatalogProductPage() {
   const search = useSearchParams();
   const id = search.get("id")?.trim() || "";
   const imagePickerRef = useRef<ProductImagePickerHandle>(null);
-  const { itemMetaFields } = useBootstrap();
   const customFieldsQ = useQuery({
     queryKey: ["custom-fields", "product"],
     queryFn: () => customFieldsApi.listDefinitions("product"),
   });
   const productFormFields = useMemo(
-    () => mergeProductFormFields(itemMetaFields, customFieldsQ.data),
-    [itemMetaFields, customFieldsQ.data],
+    () => customFieldDefsToMeta(customFieldsQ.data),
+    [customFieldsQ.data],
   );
   const cats = useQuery({
     queryKey: ["catalog-categories"],
@@ -103,7 +101,7 @@ function EditCatalogProductPage() {
     enabled: Boolean(id),
   });
 
-  /** Extra questions from shop profile + Settings → Custom fields. */
+  /** Values for Settings → Custom fields (Product). */
   const [extraFields, setExtraFields] = useState<Record<string, string>>({});
   const [hydrated, setHydrated] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
