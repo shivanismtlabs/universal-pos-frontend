@@ -18,6 +18,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import { Pencil, Trash2 } from "lucide-react";
+import { ModalFrame } from "@/components/modal-frame";
 
 const TILE: Record<string, string> = {
   available:
@@ -46,6 +48,12 @@ export default function RestaurantTablesPage() {
   const [moveFrom, setMoveFrom] = useState("");
   const [moveTo, setMoveTo] = useState("");
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
+  const [editingTable, setEditingTable] = useState<{
+    id: string;
+    name: string;
+    capacity: number;
+    floorId: string | null;
+  } | null>(null);
 
   const floors = useQuery({
     queryKey: ["restaurant-floors", locationId],
@@ -125,6 +133,31 @@ export default function RestaurantTablesPage() {
       toast.success("Order moved");
       setMoveFrom("");
       setMoveTo("");
+      void qc.invalidateQueries({ queryKey: ["restaurant-tables"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const updateTable = useMutation({
+    mutationFn: (args: { id: string; name: string; capacity: number; floorId?: string }) =>
+      restaurantApi.updateTable(args.id, {
+        name: args.name,
+        capacity: args.capacity,
+        floorId: args.floorId,
+      }),
+    onSuccess: () => {
+      toast.success("Table updated");
+      setEditingTable(null);
+      void qc.invalidateQueries({ queryKey: ["restaurant-tables"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const deleteTable = useMutation({
+    mutationFn: (id: string) => restaurantApi.deleteTable(id),
+    onSuccess: () => {
+      toast.success("Table deleted");
+      setEditingTable(null);
       void qc.invalidateQueries({ queryKey: ["restaurant-tables"] });
     },
     onError: (e: Error) => toast.error(e.message),
@@ -305,7 +338,7 @@ export default function RestaurantTablesPage() {
             </div>
             <ul className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
               {list.map((t) => (
-                <li key={t.id}>
+                <li key={t.id} className="relative group">
                   <button
                     type="button"
                     onClick={() => {
@@ -317,7 +350,7 @@ export default function RestaurantTablesPage() {
                       TILE[t.status] ?? TILE.available,
                     )}
                   >
-                    <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-start justify-between gap-2 pr-6">
                       <p className="text-[0.95rem] font-semibold text-[#0b1f33]">
                         {t.name}
                       </p>
@@ -343,6 +376,22 @@ export default function RestaurantTablesPage() {
                         </p>
                       ) : null}
                     </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditingTable({
+                        id: t.id,
+                        name: t.name,
+                        capacity: t.capacity,
+                        floorId: t.floorId,
+                      });
+                    }}
+                    className="absolute right-2 top-2 rounded p-1 text-[#8b9bb0] opacity-0 hover:bg-black/5 hover:text-[#0b1f33] focus:opacity-100 group-hover:opacity-100 transition-opacity"
+                    aria-label="Edit table"
+                  >
+                    <Pencil className="h-4 w-4" />
                   </button>
                   {hasCapability("QR_ORDER") && t.qrToken ? (
                     <button
@@ -464,6 +513,92 @@ export default function RestaurantTablesPage() {
             </p>
           ) : null}
         </DiningPanel>
+      ) : null}
+
+      {editingTable ? (
+        <ModalFrame
+          title="Edit table"
+          onClose={() => setEditingTable(null)}
+          footer={
+            <div className="flex items-center justify-between">
+              <Button
+                type="button"
+                variant="danger"
+                onClick={() => {
+                  if (confirm("Are you sure you want to delete this table?")) {
+                    deleteTable.mutate(editingTable.id);
+                  }
+                }}
+                disabled={deleteTable.isPending}
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                Delete
+              </Button>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setEditingTable(null)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => updateTable.mutate({
+                    id: editingTable.id,
+                    name: editingTable.name,
+                    capacity: editingTable.capacity,
+                    floorId: editingTable.floorId ?? undefined,
+                  })}
+                  disabled={!editingTable.name.trim() || updateTable.isPending}
+                >
+                  Save changes
+                </Button>
+              </div>
+            </div>
+          }
+        >
+          <div className="grid gap-4">
+            <div>
+              <Label>Table name</Label>
+              <Input
+                className="mt-1"
+                value={editingTable.name}
+                onChange={(e) =>
+                  setEditingTable({ ...editingTable, name: e.target.value })
+                }
+              />
+            </div>
+            <div>
+              <Label>Capacity (Seats)</Label>
+              <Input
+                className="mt-1"
+                type="number"
+                value={editingTable.capacity}
+                onChange={(e) =>
+                  setEditingTable({ ...editingTable, capacity: Number(e.target.value) })
+                }
+              />
+            </div>
+            <div>
+              <Label>Floor / Zone</Label>
+              <select
+                className={cn(diningSelectClass, "mt-1 w-full")}
+                value={editingTable.floorId ?? ""}
+                onChange={(e) =>
+                  setEditingTable({ ...editingTable, floorId: e.target.value || null })
+                }
+              >
+                <option value="">No floor</option>
+                {(floors.data ?? []).map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </ModalFrame>
       ) : null}
     </DiningShell>
   );
