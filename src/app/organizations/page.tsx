@@ -41,50 +41,116 @@ import { defaultHomeForRoles } from "@/lib/roles";
 import { TotpChallengeForm, is2faChallenge } from "@/components/totp-challenge-form";
 import { cn } from "@/lib/utils";
 import { phoneSchema } from "@/lib/validations";
-import { geoStates, isKnownGeoState } from "@/lib/geo";
+import { geoStates, isKnownGeoState, splitE164 } from "@/lib/geo";
 import { CountryStateFields } from "@/components/country-state-fields";
 import { PhoneCountryInput } from "@/components/phone-country-input";
 import { citiesForState } from "@/lib/india-locations";
 
+function isValidNationalPhone(e164: string, countryCode: string): boolean {
+  const raw = e164.trim();
+  if (!raw) return true;
+  const { dial, local } = splitE164(raw, countryCode);
+  if (!local) return true;
+  if (dial === "+91") return /^[6-9]\d{9}$/.test(local);
+  if (dial === "+1") return /^\d{10}$/.test(local);
+  if (dial === "+971") return /^\d{8,9}$/.test(local);
+  const digits = raw.replace(/\D/g, "");
+  return digits.length >= 8 && digits.length <= 15;
+}
+
+function isValidPostal(countryCode: string, postal: string): boolean {
+  const p = postal.trim();
+  if (countryCode === "IN") return /^\d{6}$/.test(p);
+  if (countryCode === "US") return /^\d{5}(-\d{4})?$/.test(p);
+  if (countryCode === "GB") return /^[A-Z0-9]{5,8}$/i.test(p.replace(/\s/g, ""));
+  if (countryCode === "AE") return /^\d{5}$/.test(p);
+  return /^[A-Z0-9][A-Z0-9\s-]{2,11}$/i.test(p);
+}
+
 const createOrgSchema = z
   .object({
-    businessType: z.string().min(1, "Pick a starting setup, or My business isn’t listed"),
-    businessLabel: z.string().trim().max(80).optional().or(z.literal("")),
+    businessType: z.string().min(1, "Pick a starting setup, or Not listed"),
+    businessLabel: z.string().trim().max(80, "Business name is too long"),
     organizationName: z
       .string()
       .trim()
       .min(2, "Organization name must be at least 2 characters")
-      .max(100, "Organization name is too long"),
-    phone: phoneSchema.optional().or(z.literal("")),
+      .max(100, "Organization name is too long")
+      .refine((v) => /[A-Za-z]/.test(v), "Organization name must include letters"),
+    phone: z.string().trim().max(22, "Phone is too long"),
     addressLine1: z
       .string()
       .trim()
-      .min(3, "Enter street address")
+      .min(5, "Enter a full street address")
       .max(255, "Address is too long"),
     countryCode: z.string().min(1, "Select a country"),
-    state: z.string().min(1, "Select a state"),
-    city: z.string().min(1, "Enter a city"),
-    postalCode: z.string().trim().min(3, "Enter postal / PIN code").max(12),
-    currencyCode: z.string().min(3).max(3),
-    fiscalYearStart: z.string().min(1),
-    inventoryStartDate: z.string().min(1, "Inventory start date is required"),
-    taxId: z.string().trim().max(20).optional().or(z.literal("")),
-    storeName: z.string().trim().max(100).optional().or(z.literal("")),
+    state: z.string().min(1, "Select a state / region"),
+    city: z
+      .string()
+      .trim()
+      .min(2, "Enter a city")
+      .max(80, "City name is too long"),
+    postalCode: z
+      .string()
+      .trim()
+      .min(3, "Enter postal / PIN code")
+      .max(12, "Postal code is too long"),
+    currencyCode: z.enum(["INR", "USD", "EUR", "GBP", "AED"], {
+      errorMap: () => ({ message: "Select a currency" }),
+    }),
+    fiscalYearStart: z.enum(["January", "April", "July", "October"], {
+      errorMap: () => ({ message: "Select when the fiscal year starts" }),
+    }),
+    inventoryStartDate: z
+      .string()
+      .min(1, "Inventory start date is required")
+      .refine((v) => !Number.isNaN(Date.parse(v)), "Enter a valid date"),
+    taxId: z.string().trim().max(20, "Tax ID is too long"),
+    storeName: z
+      .string()
+      .trim()
+      .max(100, "Branch name is too long")
+      .refine(
+        (v) => !v || v.length >= 2,
+        "Branch name must be at least 2 characters",
+      ),
     email: z
       .string()
       .trim()
-      .max(120)
-      .refine((v) => !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), "Enter a valid email"),
+      .max(120, "Email is too long")
+      .refine(
+        (v) => !v || /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v),
+        "Enter a valid email (name@domain.com)",
+      ),
     website: z
       .string()
       .trim()
-      .max(200)
-      .optional()
-      .or(z.literal("")),
-    addressLine2: z.string().trim().max(200).optional().or(z.literal("")),
-    timezone: z.string().min(1).max(64),
-    locale: z.string().min(2).max(16),
-    organizationType: z.string().max(40).optional().or(z.literal("")),
+      .max(200, "Website is too long")
+      .refine(
+        (v) => !v || /^https?:\/\/([\w-]+\.)+[\w-]{2,}(\/[^\s]*)?$/i.test(v),
+        "Enter a full URL starting with http:// or https://",
+      ),
+    addressLine2: z.string().trim().max(200, "Address line 2 is too long"),
+    timezone: z.enum(["Asia/Kolkata", "Asia/Dubai", "UTC", "America/New_York"], {
+      errorMap: () => ({ message: "Select a time zone" }),
+    }),
+    locale: z.enum(["en-IN", "hi-IN", "en-US"], {
+      errorMap: () => ({ message: "Select a language" }),
+    }),
+    organizationType: z.string().refine(
+      (v) =>
+        !v ||
+        [
+          "proprietorship",
+          "partnership",
+          "llp",
+          "pvt_ltd",
+          "public",
+          "trust",
+          "other",
+        ].includes(v),
+      "Select a valid organization type",
+    ),
     pan: z
       .string()
       .trim()
@@ -95,6 +161,32 @@ const createOrgSchema = z
       ),
   })
   .superRefine((v, ctx) => {
+    if (v.businessType === "other" && v.businessLabel.trim().length < 2) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["businessLabel"],
+        message: "Enter your business type (at least 2 characters)",
+      });
+    }
+    if (v.phone && !isValidNationalPhone(v.phone, v.countryCode)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["phone"],
+        message:
+          v.countryCode === "IN" || v.phone.startsWith("+91")
+            ? "Enter a valid 10-digit Indian mobile (starts with 6–9)"
+            : "Enter a valid phone number for the selected country",
+      });
+    } else if (v.phone) {
+      const parsed = phoneSchema.safeParse(v.phone);
+      if (!parsed.success) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["phone"],
+          message: parsed.error.issues[0]?.message ?? "Enter a valid phone",
+        });
+      }
+    }
     if (!isKnownGeoState(v.countryCode, v.state) && geoStates(v.countryCode).length) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -110,6 +202,16 @@ const createOrgSchema = z
         message: "Select a city for the chosen state",
       });
     }
+    if (!isValidPostal(v.countryCode, v.postalCode)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["postalCode"],
+        message:
+          v.countryCode === "IN"
+            ? "PIN code must be exactly 6 digits"
+            : "Enter a valid postal code for the selected country",
+      });
+    }
     if (
       v.countryCode === "IN" &&
       v.taxId &&
@@ -120,6 +222,17 @@ const createOrgSchema = z
         path: ["taxId"],
         message: "GSTIN must be 15 characters (letters/numbers)",
       });
+    }
+    const start = Date.parse(v.inventoryStartDate);
+    if (!Number.isNaN(start)) {
+      const max = Date.now() + 366 * 24 * 60 * 60 * 1000;
+      if (start > max) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["inventoryStartDate"],
+          message: "Inventory start date cannot be more than a year ahead",
+        });
+      }
     }
   });
 
@@ -289,6 +402,7 @@ function OrganizationsPageInner() {
   const form = useForm<CreateForm>({
     resolver: zodResolver(createOrgSchema),
     mode: "onBlur",
+    reValidateMode: "onChange",
     defaultValues: {
       businessType: "",
       businessLabel: "",
@@ -711,7 +825,9 @@ function OrganizationsPageInner() {
               >
                 <form
                   className="mx-auto grid max-w-2xl gap-2.5 sm:grid-cols-2"
-                  onSubmit={form.handleSubmit(onCreate)}
+                  onSubmit={form.handleSubmit(onCreate, () =>
+                    toast.error("Please fix the highlighted fields"),
+                  )}
                   noValidate
                 >
                   <div className="sm:col-span-2">
@@ -785,6 +901,9 @@ function OrganizationsPageInner() {
                             placeholder="e.g. Swimming academy"
                             {...form.register("businessLabel")}
                           />
+                          <FieldError
+                            message={form.formState.errors.businessLabel?.message}
+                          />
                         </div>
                         <button
                           type="button"
@@ -801,11 +920,12 @@ function OrganizationsPageInner() {
                           <li key={idx} className="flex items-center gap-2">
                             <Input
                               className="h-9"
+                              maxLength={40}
                               placeholder={`Custom field ${idx + 1}`}
                               value={val}
                               onChange={(e) => {
                                 const next = [...customFields];
-                                next[idx] = e.target.value;
+                                next[idx] = e.target.value.slice(0, 40);
                                 setCustomFields(next);
                               }}
                             />
@@ -891,8 +1011,11 @@ function OrganizationsPageInner() {
                     <Label>Website</Label>
                     <Input
                       className="mt-1"
-                      placeholder="https://"
+                      placeholder="https://www.example.com"
                       {...form.register("website")}
+                    />
+                    <FieldError
+                      message={form.formState.errors.website?.message}
                     />
                   </div>
                   <div className="sm:col-span-2">
@@ -913,6 +1036,9 @@ function OrganizationsPageInner() {
                       placeholder="Area, landmark (optional)"
                       {...form.register("addressLine2")}
                     />
+                    <FieldError
+                      message={form.formState.errors.addressLine2?.message}
+                    />
                   </div>
                   <div className="grid gap-3 sm:col-span-2 sm:grid-cols-2">
                     <CountryStateFields
@@ -930,6 +1056,12 @@ function OrganizationsPageInner() {
                       onState={(state) => {
                         form.setValue("state", state, { shouldValidate: true });
                       }}
+                    />
+                    <FieldError
+                      message={form.formState.errors.countryCode?.message}
+                    />
+                    <FieldError
+                      message={form.formState.errors.state?.message}
                     />
                   </div>
                   <div>
@@ -967,6 +1099,8 @@ function OrganizationsPageInner() {
                     <Input
                       className="mt-1"
                       placeholder="PIN / ZIP"
+                      inputMode="numeric"
+                      maxLength={12}
                       {...form.register("postalCode")}
                     />
                     <FieldError
@@ -1011,6 +1145,9 @@ function OrganizationsPageInner() {
                       <option value="trust">Trust / Society</option>
                       <option value="other">Other</option>
                     </Select>
+                    <FieldError
+                      message={form.formState.errors.organizationType?.message}
+                    />
                   </div>
                   <div>
                     <Label>Currency</Label>
@@ -1024,6 +1161,9 @@ function OrganizationsPageInner() {
                       <option value="GBP">GBP</option>
                       <option value="AED">AED</option>
                     </Select>
+                    <FieldError
+                      message={form.formState.errors.currencyCode?.message}
+                    />
                   </div>
                   <div>
                     <Label>Time zone</Label>
@@ -1037,6 +1177,9 @@ function OrganizationsPageInner() {
                         America/New York
                       </option>
                     </Select>
+                    <FieldError
+                      message={form.formState.errors.timezone?.message}
+                    />
                   </div>
                   <div>
                     <Label>Language</Label>
@@ -1045,6 +1188,9 @@ function OrganizationsPageInner() {
                       <option value="hi-IN">Hindi</option>
                       <option value="en-US">English (US)</option>
                     </Select>
+                    <FieldError
+                      message={form.formState.errors.locale?.message}
+                    />
                   </div>
                   <div>
                     <Label>Fiscal year starts</Label>
@@ -1058,6 +1204,9 @@ function OrganizationsPageInner() {
                         </option>
                       ))}
                     </Select>
+                    <FieldError
+                      message={form.formState.errors.fiscalYearStart?.message}
+                    />
                   </div>
                   <div>
                     <Label>Inventory start date</Label>
@@ -1065,6 +1214,9 @@ function OrganizationsPageInner() {
                       className="mt-1"
                       type="date"
                       {...form.register("inventoryStartDate")}
+                    />
+                    <FieldError
+                      message={form.formState.errors.inventoryStartDate?.message}
                     />
                   </div>
 

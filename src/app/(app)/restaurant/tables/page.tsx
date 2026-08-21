@@ -7,18 +7,27 @@ import { toast } from "sonner";
 import { restaurantApi } from "@/lib/api";
 import { useBootstrap } from "@/lib/bootstrap";
 import { useBranchStore } from "@/lib/branch-store";
-import { PageHeader } from "@/components/page-header";
+import {
+  DiningEmpty,
+  DiningPanel,
+  DiningShell,
+  DiningStatusBadge,
+  diningSelectClass,
+} from "@/components/dining-chrome";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
-const STATUS_TONE: Record<string, string> = {
-  available: "border-[#bbf7d0] bg-[#f0fdf4] text-[#166534]",
-  occupied: "border-[#bfdbfe] bg-[#eff6ff] text-[#1e40af]",
-  reserved: "border-[#ddd6fe] bg-[#f5f3ff] text-[#5b21b6]",
-  cleaning: "border-[#fde68a] bg-[#fffbeb] text-[#92400e]",
-  blocked: "border-[#e5e7eb] bg-[#f8fafc] text-[#64748b]",
+const TILE: Record<string, string> = {
+  available:
+    "border-[#bbf7d0] bg-white hover:border-[#86efac] hover:shadow-[0_1px_8px_rgba(22,101,52,0.08)]",
+  occupied:
+    "border-[#93c5fd] bg-[#f8fbff] hover:border-[#60a5fa] hover:shadow-[0_1px_8px_rgba(30,64,175,0.08)]",
+  reserved:
+    "border-[#fdba74] bg-[#fffaf5] hover:border-[#fb923c]",
+  cleaning: "border-[#fde68a] bg-[#fffbeb]",
+  blocked: "border-[#e2e8f0] bg-[#f8fafc] opacity-80",
 };
 
 export default function RestaurantTablesPage() {
@@ -32,6 +41,8 @@ export default function RestaurantTablesPage() {
   const [tableName, setTableName] = useState("");
   const [capacity, setCapacity] = useState("4");
   const [floorId, setFloorId] = useState("");
+  const [floorFilter, setFloorFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [moveFrom, setMoveFrom] = useState("");
   const [moveTo, setMoveTo] = useState("");
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
@@ -119,158 +130,264 @@ export default function RestaurantTablesPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const allTables = tables.data ?? [];
+  const counts = useMemo(() => {
+    const c: Record<string, number> = { all: allTables.length };
+    for (const t of allTables) c[t.status] = (c[t.status] ?? 0) + 1;
+    return c;
+  }, [allTables]);
+
   const grouped = useMemo(() => {
-    const list = tables.data ?? [];
+    const list = allTables.filter((t) => {
+      if (floorFilter !== "all" && (t.floorName || "Unassigned") !== floorFilter)
+        return false;
+      if (statusFilter !== "all" && t.status !== statusFilter) return false;
+      return true;
+    });
     const map = new Map<string, typeof list>();
     for (const t of list) {
       const key = t.floorName || "Unassigned";
       map.set(key, [...(map.get(key) ?? []), t]);
     }
     return [...map.entries()];
-  }, [tables.data]);
+  }, [allTables, floorFilter, statusFilter]);
 
   if (!allowed) {
     return (
-      <div className="p-6 text-sm text-[#5a6b7d]">
-        Enable the Tables capability to use the dining floor.
-      </div>
+      <DiningShell
+        title="Tables"
+        subtitle="Enable the Tables capability to use the dining floor."
+      >
+        <DiningEmpty
+          title="Dining floor is off"
+          detail="Turn on Tables in Settings → Capabilities. Retail, rental, and service shops stay unchanged."
+        />
+      </DiningShell>
     );
   }
 
   return (
-    <div className="space-y-6 p-6">
-      <PageHeader
-        eyebrow="Dining"
-        title="Tables"
-        subtitle="Open, move, and merge tables without duplicating orders or stock. Add items at Counter, then send KOT from the open ticket."
-        action={
-          <Button asChild variant="secondary">
-            <Link href="/restaurant/setup">Setup</Link>
-          </Button>
-        }
-      />
+    <DiningShell
+      title="Tables"
+      subtitle="Open, move, and merge tables on one order. Add items at Counter, then send KOT — stock deducts at billing."
+      action={
+        <Button asChild variant="secondary">
+          <Link href="/restaurant/setup">Setup</Link>
+        </Button>
+      }
+    >
+      <DiningPanel title="Add floor or table">
+        <div className="grid gap-4 lg:grid-cols-3">
+          <div>
+            <Label>Floor name</Label>
+            <div className="mt-1 flex gap-2">
+              <Input
+                value={floorName}
+                onChange={(e) => setFloorName(e.target.value)}
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={!floorName.trim() || createFloor.isPending}
+                onClick={() => createFloor.mutate()}
+              >
+                Add floor
+              </Button>
+            </div>
+          </div>
+          <div className="lg:col-span-2">
+            <Label>New table</Label>
+            <div className="mt-1 flex flex-wrap gap-2">
+              <Input
+                className="min-w-[8rem] flex-1"
+                placeholder="T12"
+                value={tableName}
+                onChange={(e) => setTableName(e.target.value)}
+              />
+              <Input
+                className="w-20"
+                aria-label="Seats"
+                value={capacity}
+                onChange={(e) => setCapacity(e.target.value)}
+              />
+              <select
+                className={cn(diningSelectClass, "w-40")}
+                value={floorId}
+                onChange={(e) => setFloorId(e.target.value)}
+              >
+                <option value="">No floor</option>
+                {(floors.data ?? []).map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name}
+                  </option>
+                ))}
+              </select>
+              <Button
+                type="button"
+                disabled={!tableName.trim() || createTable.isPending}
+                onClick={() => createTable.mutate()}
+              >
+                + New table
+              </Button>
+            </div>
+          </div>
+        </div>
+      </DiningPanel>
 
-      <div className="grid gap-3 rounded-xl border border-[#e2e8f0] bg-white p-4 lg:grid-cols-3">
-        <div>
-          <Label>New floor</Label>
-          <div className="mt-1 flex gap-2">
-            <Input value={floorName} onChange={(e) => setFloorName(e.target.value)} />
-            <Button
-              type="button"
-              disabled={!floorName.trim() || createFloor.isPending}
-              onClick={() => createFloor.mutate()}
-            >
-              Add
-            </Button>
-          </div>
-        </div>
-        <div className="lg:col-span-2">
-          <Label>New table</Label>
-          <div className="mt-1 flex flex-wrap gap-2">
-            <Input
-              placeholder="Table 12"
-              value={tableName}
-              onChange={(e) => setTableName(e.target.value)}
-            />
-            <Input
-              className="w-20"
-              value={capacity}
-              onChange={(e) => setCapacity(e.target.value)}
-            />
-            <select
-              className="h-10 rounded-md border border-[#d9e0ea] px-2 text-sm"
-              value={floorId}
-              onChange={(e) => setFloorId(e.target.value)}
-            >
-              <option value="">No floor</option>
-              {(floors.data ?? []).map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.name}
-                </option>
-              ))}
-            </select>
-            <Button
-              type="button"
-              disabled={!tableName.trim() || createTable.isPending}
-              onClick={() => createTable.mutate()}
-            >
-              Add table
-            </Button>
-          </div>
-        </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {(
+          [
+            ["all", "All"],
+            ["available", "Available"],
+            ["occupied", "Occupied"],
+            ["reserved", "Reserved"],
+            ["cleaning", "Cleaning"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setStatusFilter(id)}
+            className={cn(
+              "rounded-full px-3 py-1 text-xs font-semibold ring-1 transition",
+              statusFilter === id
+                ? "bg-[#1a56db] text-white ring-[#1a56db]"
+                : "bg-white text-[#5a6b7d] ring-[#e2e8f0] hover:text-[#0b1f33]",
+            )}
+          >
+            {label}
+            <span className="ml-1 tabular-nums opacity-80">
+              {counts[id] ?? 0}
+            </span>
+          </button>
+        ))}
+        <span className="mx-1 h-4 w-px bg-[#e2e8f0]" />
+        <button
+          type="button"
+          onClick={() => setFloorFilter("all")}
+          className={cn(
+            "rounded-full px-3 py-1 text-xs font-semibold ring-1",
+            floorFilter === "all"
+              ? "bg-[#eff6ff] text-[#1a56db] ring-[#bfdbfe]"
+              : "bg-white text-[#5a6b7d] ring-[#e2e8f0]",
+          )}
+        >
+          All floors
+        </button>
+        {(floors.data ?? []).map((f) => (
+          <button
+            key={f.id}
+            type="button"
+            onClick={() => setFloorFilter(f.name)}
+            className={cn(
+              "rounded-full px-3 py-1 text-xs font-semibold ring-1",
+              floorFilter === f.name
+                ? "bg-[#eff6ff] text-[#1a56db] ring-[#bfdbfe]"
+                : "bg-white text-[#5a6b7d] ring-[#e2e8f0]",
+            )}
+          >
+            {f.name}
+          </button>
+        ))}
       </div>
 
-      {grouped.map(([floor, list]) => (
-        <section key={floor}>
-          <h2 className="mb-2 text-sm font-semibold text-[#0b1f33]">{floor}</h2>
-          <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
-            {list.map((t) => (
-              <li key={t.id}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (t.currentOrderId) setActiveOrderId(t.currentOrderId);
-                    else openTable.mutate(t.id);
-                  }}
-                  className={cn(
-                    "w-full rounded-xl border px-3 py-3 text-left transition",
-                    STATUS_TONE[t.status] ?? STATUS_TONE.available,
-                  )}
-                >
-                  <p className="text-sm font-semibold">{t.name}</p>
-                  <p className="text-[0.7rem] uppercase tracking-wide opacity-80">
-                    {t.status} · {t.capacity} seats
-                  </p>
-                  {t.orderNumber ? (
-                    <p className="mt-1 text-xs font-medium">{t.orderNumber}</p>
-                  ) : (
-                    <p className="mt-1 text-xs">Tap to open</p>
-                  )}
-                </button>
-                {hasCapability("QR_ORDER") && t.qrToken ? (
+      {!allTables.length ? (
+        <DiningEmpty
+          title="No tables yet"
+          detail="Add a floor and at least one table. Then tap a table to open a dining ticket."
+        />
+      ) : (
+        grouped.map(([floor, list]) => (
+          <section key={floor}>
+            <div className="mb-2 flex items-baseline justify-between">
+              <h2 className="text-sm font-semibold text-[#0b1f33]">{floor}</h2>
+              <p className="text-xs text-[#8b9bb0]">{list.length} tables</p>
+            </div>
+            <ul className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+              {list.map((t) => (
+                <li key={t.id}>
                   <button
                     type="button"
-                    className="mt-1 text-[0.65rem] font-semibold text-[#1a56db]"
                     onClick={() => {
-                      const url = `${window.location.origin}/order/${t.qrToken}`;
-                      void navigator.clipboard.writeText(url);
-                      toast.success("QR order link copied");
+                      if (t.currentOrderId) setActiveOrderId(t.currentOrderId);
+                      else openTable.mutate(t.id);
                     }}
+                    className={cn(
+                      "flex min-h-[7.5rem] w-full flex-col rounded-xl border px-3 py-3 text-left transition",
+                      TILE[t.status] ?? TILE.available,
+                    )}
                   >
-                    Copy guest QR link
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-[0.95rem] font-semibold text-[#0b1f33]">
+                        {t.name}
+                      </p>
+                      <DiningStatusBadge value={t.status} />
+                    </div>
+                    <p className="mt-1 text-xs text-[#5a6b7d]">
+                      {t.capacity} seats
+                      {t.covers ? ` · ${t.covers} covers` : ""}
+                    </p>
+                    <div className="mt-auto pt-2">
+                      {t.orderNumber ? (
+                        <p className="font-mono text-[0.7rem] font-semibold text-[#1a56db]">
+                          {t.orderNumber}
+                        </p>
+                      ) : (
+                        <p className="text-[0.7rem] text-[#8b9bb0]">
+                          Tap to open
+                        </p>
+                      )}
+                      {t.guestName ? (
+                        <p className="truncate text-xs text-[#0b1f33]">
+                          {t.guestName}
+                        </p>
+                      ) : null}
+                    </div>
                   </button>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))}
+                  {hasCapability("QR_ORDER") && t.qrToken ? (
+                    <button
+                      type="button"
+                      className="mt-1 text-[0.65rem] font-semibold text-[#1a56db] hover:underline"
+                      onClick={() => {
+                        const url = `${window.location.origin}/order/${t.qrToken}`;
+                        void navigator.clipboard.writeText(url);
+                        toast.success("Guest QR link copied");
+                      }}
+                    >
+                      Copy guest QR
+                    </button>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))
+      )}
 
-      <section className="rounded-xl border border-[#e2e8f0] bg-white p-4">
-        <h2 className="text-sm font-semibold text-[#0b1f33]">Move / merge</h2>
-        <p className="mt-1 text-xs text-[#5a6b7d]">
-          Merge keeps one order. Move never clones tickets or stock.
-        </p>
-        <div className="mt-3 flex flex-wrap gap-2">
+      <DiningPanel
+        title="Move / merge"
+        hint="Merge keeps one order. Move never clones tickets or stock."
+      >
+        <div className="flex flex-wrap gap-2">
           <select
-            className="h-10 rounded-md border border-[#d9e0ea] px-2 text-sm"
+            className={cn(diningSelectClass, "w-44")}
             value={moveFrom}
             onChange={(e) => setMoveFrom(e.target.value)}
           >
             <option value="">From table</option>
-            {(tables.data ?? []).map((t) => (
+            {allTables.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.name}
               </option>
             ))}
           </select>
           <select
-            className="h-10 rounded-md border border-[#d9e0ea] px-2 text-sm"
+            className={cn(diningSelectClass, "w-44")}
             value={moveTo}
             onChange={(e) => setMoveTo(e.target.value)}
           >
             <option value="">To table</option>
-            {(tables.data ?? []).map((t) => (
+            {allTables.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.name}
               </option>
@@ -292,22 +409,16 @@ export default function RestaurantTablesPage() {
             Merge
           </Button>
         </div>
-      </section>
+      </DiningPanel>
 
       {order.data ? (
-        <section className="rounded-xl border border-[#e2e8f0] bg-white p-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h2 className="text-sm font-semibold text-[#0b1f33]">
-                {order.data.orderNumber}
-              </h2>
-              <p className="text-xs text-[#5a6b7d]">
-                {order.data.restaurant?.diningMode} · draft until billed
-              </p>
-            </div>
-            <div className="flex gap-2">
+        <DiningPanel
+          title={order.data.orderNumber}
+          hint={`${order.data.restaurant?.diningMode?.replaceAll("_", " ") ?? "Dining"} · parked until billed`}
+          action={
+            <div className="flex flex-wrap gap-2">
               <Button asChild variant="secondary">
-                <Link href="/counter">Add items at Counter</Link>
+                <Link href="/counter">Add items</Link>
               </Button>
               <Button
                 type="button"
@@ -320,25 +431,40 @@ export default function RestaurantTablesPage() {
                 <Link href={`/orders/view?id=${order.data.id}`}>Bill</Link>
               </Button>
             </div>
-          </div>
-          <ul className="mt-3 divide-y divide-[#eef1f4] text-sm">
-            {order.data.items.map((i) => (
-              <li key={i.id} className="flex justify-between py-1.5">
-                <span>
-                  {i.quantity} × {i.description || "Item"}
-                </span>
-                <span className="tabular-nums">{i.lineTotal}</span>
-              </li>
-            ))}
-            {!order.data.items.length ? (
-              <li className="py-2 text-[#5a6b7d]">
-                No items yet. Use Counter to add products to this parked sale,
-                then send KOT.
-              </li>
-            ) : null}
-          </ul>
-        </section>
+          }
+        >
+          <table className="w-full text-left text-sm">
+            <thead className="text-[0.68rem] uppercase tracking-wide text-[#8b9bb0]">
+              <tr>
+                <th className="pb-2 font-semibold">Item</th>
+                <th className="pb-2 text-right font-semibold">Qty</th>
+                <th className="pb-2 text-right font-semibold">Amount</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#eef1f4]">
+              {order.data.items.map((i) => (
+                <tr key={i.id}>
+                  <td className="py-2 text-[#0b1f33]">
+                    {i.description || "Item"}
+                  </td>
+                  <td className="py-2 text-right tabular-nums text-[#5a6b7d]">
+                    {i.quantity}
+                  </td>
+                  <td className="py-2 text-right tabular-nums font-medium">
+                    {i.lineTotal}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!order.data.items.length ? (
+            <p className="text-sm text-[#5a6b7d]">
+              No items yet. Open Counter, add products to this parked sale, then
+              send KOT.
+            </p>
+          ) : null}
+        </DiningPanel>
       ) : null}
-    </div>
+    </DiningShell>
   );
 }

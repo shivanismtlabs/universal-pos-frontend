@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { catalogApi, restaurantApi } from "@/lib/api";
 import { useBootstrap } from "@/lib/bootstrap";
-import { PageHeader } from "@/components/page-header";
+import { DiningPanel, DiningShell, diningSelectClass } from "@/components/dining-chrome";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -65,26 +65,24 @@ export default function RecipesPage() {
 
   if (!allowed) {
     return (
-      <div className="p-6 text-sm text-[#5a6b7d]">
-        Recipes need the Recipes / BOM capability.
-      </div>
+      <DiningShell title="Recipes" subtitle="Recipes need the Recipes / BOM capability.">
+        <p className="text-sm text-[#5a6b7d]">This shop does not have Recipes enabled.</p>
+      </DiningShell>
     );
   }
 
   return (
-    <div className="space-y-6 p-6">
-      <PageHeader
-        title="Recipes"
-        subtitle="Bill of materials on catalog items. Checkout consumes ingredients once; KOT never deducts stock."
-      />
-
-      <section className="rounded-xl border border-[#e2e8f0] bg-white p-4 space-y-3">
-        <h2 className="text-sm font-semibold text-[#0b1f33]">Add ingredient line</h2>
+    <DiningShell
+      title="Recipes"
+      subtitle="Bill of materials on catalog items. Checkout consumes ingredients once; KOT never deducts stock."
+    >
+      <DiningPanel title="Add ingredient line">
+        <div className="space-y-3">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <div>
             <Label>Menu item</Label>
             <select
-              className="mt-1 h-9 w-full rounded-md border border-[#d9e0ea] px-2 text-sm"
+              className={`${diningSelectClass} mt-1`}
               value={parentId}
               onChange={(e) => setParentId(e.target.value)}
             >
@@ -99,7 +97,7 @@ export default function RecipesPage() {
           <div>
             <Label>Ingredient</Label>
             <select
-              className="mt-1 h-9 w-full rounded-md border border-[#d9e0ea] px-2 text-sm"
+              className={`${diningSelectClass} mt-1`}
               value={compId}
               onChange={(e) => setCompId(e.target.value)}
             >
@@ -143,29 +141,30 @@ export default function RecipesPage() {
             ))}
           </ul>
         ) : null}
-      </section>
+        </div>
+      </DiningPanel>
 
-      <section className="overflow-hidden rounded-xl border border-[#e2e8f0] bg-white">
+      <DiningPanel title="Recipes">
         <table className="w-full text-left text-sm">
-          <thead className="bg-[#f7f9fc] text-[0.68rem] uppercase tracking-wide text-[#8b9bb0]">
+          <thead className="text-[0.68rem] uppercase tracking-wide text-[#8b9bb0]">
             <tr>
-              <th className="px-3 py-2">Item</th>
-              <th className="px-3 py-2">SKU</th>
-              <th className="px-3 py-2">Ingredients</th>
-              <th className="px-3 py-2 text-right">Rate</th>
+              <th className="pb-2 font-semibold">Item</th>
+              <th className="pb-2 font-semibold">SKU</th>
+              <th className="pb-2 font-semibold">Ingredients</th>
+              <th className="pb-2 text-right font-semibold">Rate</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="divide-y divide-[#eef1f4]">
             {(recipes.data ?? []).map((r) => (
-              <tr key={r.productId} className="border-t border-[#eef1f4]">
-                <td className="px-3 py-2 font-medium text-[#0b1f33]">{r.name}</td>
-                <td className="px-3 py-2 font-mono text-xs">{r.skuCode}</td>
-                <td className="px-3 py-2 text-[#5a6b7d]">
+              <tr key={r.productId}>
+                <td className="py-2 font-medium text-[#0b1f33]">{r.name}</td>
+                <td className="py-2 font-mono text-xs">{r.skuCode}</td>
+                <td className="py-2 text-[#5a6b7d]">
                   {r.lines
                     .map((l) => `${l.quantity} ${l.unit} ${l.name}`)
                     .join(", ") || "—"}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums">
+                <td className="py-2 text-right tabular-nums">
                   {r.basePrice.toFixed(2)}
                 </td>
               </tr>
@@ -173,9 +172,9 @@ export default function RecipesPage() {
           </tbody>
         </table>
         {!recipes.data?.length ? (
-          <p className="px-3 py-6 text-sm text-[#5a6b7d]">No recipes yet.</p>
+          <p className="py-4 text-sm text-[#5a6b7d]">No recipes yet.</p>
         ) : null}
-      </section>
-    </div>
+      </DiningPanel>
+    </DiningShell>
   );
 }

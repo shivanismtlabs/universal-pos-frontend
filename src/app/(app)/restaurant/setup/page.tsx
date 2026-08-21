@@ -5,10 +5,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { restaurantApi } from "@/lib/api";
 import { useBootstrap } from "@/lib/bootstrap";
-import { PageHeader } from "@/components/page-header";
+import {
+  DiningEmpty,
+  DiningPanel,
+  DiningShell,
+  DiningToggle,
+} from "@/components/dining-chrome";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
 
 const MODES = [
   { id: "dine_in", label: "Dine-in" },
@@ -25,6 +31,11 @@ export default function RestaurantSetupPage() {
   const cfg = useQuery({
     queryKey: ["restaurant-config"],
     queryFn: () => restaurantApi.config(),
+    enabled: allowed,
+  });
+  const stations = useQuery({
+    queryKey: ["restaurant-stations"],
+    queryFn: () => restaurantApi.stations(),
     enabled: allowed,
   });
   const [stationName, setStationName] = useState("Main kitchen");
@@ -46,7 +57,7 @@ export default function RestaurantSetupPage() {
         code: stationCode.trim(),
       }),
     onSuccess: () => {
-      toast.success("Kitchen station added");
+      toast.success("Kitchen station saved");
       void qc.invalidateQueries({ queryKey: ["restaurant-stations"] });
     },
     onError: (e: Error) => toast.error(e.message),
@@ -55,9 +66,9 @@ export default function RestaurantSetupPage() {
   const data = cfg.data;
   if (!allowed) {
     return (
-      <div className="p-6 text-sm text-[#5a6b7d]">
-        Enable Tables or KOT capabilities first.
-      </div>
+      <DiningShell title="Setup" subtitle="Enable Tables or KOT first.">
+        <DiningEmpty title="Dining setup is locked" />
+      </DiningShell>
     );
   }
 
@@ -70,20 +81,19 @@ export default function RestaurantSetupPage() {
   }
 
   return (
-    <div className="space-y-6 p-6">
-      <PageHeader
-        eyebrow="Dining pack"
-        title="Restaurant setup"
-        subtitle="Optional dining modes and kitchen stations. Consumption policy defaults to checkout — KOT never writes stock."
-      />
-
+    <DiningShell
+      title="Setup"
+      subtitle="Dining modes, kitchen stations, and consumption. KOT never writes stock."
+    >
       {!data ? (
         <p className="text-sm text-[#5a6b7d]">Loading…</p>
       ) : (
         <>
-          <section className="rounded-xl border border-[#e2e8f0] bg-white p-4">
-            <h2 className="text-sm font-semibold text-[#0b1f33]">Dining modes</h2>
-            <div className="mt-3 flex flex-wrap gap-2">
+          <DiningPanel
+            title="Dining modes"
+            hint="Guests and staff can only open tickets in the modes you turn on."
+          >
+            <div className="flex flex-wrap gap-2">
               {MODES.map((m) => {
                 const on = data.enabledDiningModes.includes(m.id);
                 return (
@@ -91,121 +101,141 @@ export default function RestaurantSetupPage() {
                     key={m.id}
                     type="button"
                     onClick={() => toggleMode(m.id)}
-                    className={
+                    className={cn(
+                      "rounded-full px-3.5 py-1.5 text-sm font-semibold ring-1 transition",
                       on
-                        ? "rounded-lg border border-[#1a56db] bg-[#eff6ff] px-3 py-1.5 text-sm font-semibold text-[#1a56db]"
-                        : "rounded-lg border border-[#e2e8f0] px-3 py-1.5 text-sm text-[#5a6b7d]"
-                    }
+                        ? "bg-[#1a56db] text-white ring-[#1a56db]"
+                        : "bg-white text-[#5a6b7d] ring-[#e2e8f0] hover:text-[#0b1f33]",
+                    )}
                   >
                     {m.label}
                   </button>
                 );
               })}
             </div>
-          </section>
+          </DiningPanel>
 
-          <section className="rounded-xl border border-[#e2e8f0] bg-white p-4">
-            <h2 className="text-sm font-semibold text-[#0b1f33]">
-              Inventory consumption
-            </h2>
-            <p className="mt-1 text-sm text-[#5a6b7d]">{data.inventoryNote}</p>
+          <DiningPanel
+            title="Inventory consumption"
+            hint="Same catalog and stock engine as every other shop."
+          >
+            <p className="text-sm text-[#334155]">{data.inventoryNote}</p>
             <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-[#8b9bb0]">
-              Policy: {data.consumptionPolicy}
+              Policy: {data.consumptionPolicy.replaceAll("_", " ")}
             </p>
-          </section>
+          </DiningPanel>
 
-          <section className="grid gap-3 rounded-xl border border-[#e2e8f0] bg-white p-4 sm:grid-cols-2">
-            <label className="flex items-center justify-between gap-3 text-sm">
-              KDS
-              <input
-                type="checkbox"
+          <DiningPanel title="Kitchen & ordering">
+            <div className="grid gap-2 sm:grid-cols-2">
+              <DiningToggle
+                label="Kitchen display (KDS)"
+                hint="New / Preparing / Ready columns"
                 checked={data.kdsEnabled}
-                onChange={(e) => save.mutate({ kdsEnabled: e.target.checked })}
+                onChange={(v) => save.mutate({ kdsEnabled: v })}
               />
-            </label>
-            <label className="flex items-center justify-between gap-3 text-sm">
-              Captain ordering
-              <input
-                type="checkbox"
+              <DiningToggle
+                label="Captain ordering"
+                hint="Floor staff can open tables"
                 checked={data.captainOrdering}
-                onChange={(e) =>
-                  save.mutate({ captainOrdering: e.target.checked })
-                }
+                onChange={(v) => save.mutate({ captainOrdering: v })}
               />
-            </label>
-            <label className="flex items-center justify-between gap-3 text-sm">
-              QR ordering (Phase 3)
-              <input
-                type="checkbox"
+              <DiningToggle
+                label="QR guest order"
+                hint="Parked order — no stock until bill"
                 checked={data.qrOrdering}
-                onChange={(e) => save.mutate({ qrOrdering: e.target.checked })}
+                onChange={(v) => save.mutate({ qrOrdering: v })}
               />
-            </label>
-            <label className="flex items-center justify-between gap-3 text-sm">
-              Recipes (Phase 2)
-              <input
-                type="checkbox"
+              <DiningToggle
+                label="Recipes / BOM"
+                hint="Ingredients consume at checkout"
                 checked={data.recipesEnabled}
-                onChange={(e) =>
-                  save.mutate({ recipesEnabled: e.target.checked })
-                }
-              />
-            </label>
-            <div>
-              <Label>Prep warning (minutes)</Label>
-              <Input
-                className="mt-1"
-                defaultValue={String(data.prepWarnMinutes)}
-                onBlur={(e) => {
-                  const n = Number(e.target.value);
-                  if (Number.isFinite(n) && n > 0) {
-                    save.mutate({ prepWarnMinutes: n });
-                  }
-                }}
+                onChange={(v) => save.mutate({ recipesEnabled: v })}
               />
             </div>
-            <div>
-              <Label>Prep critical (minutes)</Label>
-              <Input
-                className="mt-1"
-                defaultValue={String(data.prepCriticalMinutes)}
-                onBlur={(e) => {
-                  const n = Number(e.target.value);
-                  if (Number.isFinite(n) && n > 0) {
-                    save.mutate({ prepCriticalMinutes: n });
-                  }
-                }}
-              />
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div>
+                <Label>Prep warning (minutes)</Label>
+                <Input
+                  className="mt-1"
+                  defaultValue={String(data.prepWarnMinutes)}
+                  onBlur={(e) => {
+                    const n = Number(e.target.value);
+                    if (Number.isFinite(n) && n > 0) {
+                      save.mutate({ prepWarnMinutes: n });
+                    }
+                  }}
+                />
+              </div>
+              <div>
+                <Label>Prep critical (minutes)</Label>
+                <Input
+                  className="mt-1"
+                  defaultValue={String(data.prepCriticalMinutes)}
+                  onBlur={(e) => {
+                    const n = Number(e.target.value);
+                    if (Number.isFinite(n) && n > 0) {
+                      save.mutate({ prepCriticalMinutes: n });
+                    }
+                  }}
+                />
+              </div>
             </div>
-          </section>
+          </DiningPanel>
 
-          <section className="rounded-xl border border-[#e2e8f0] bg-white p-4">
-            <h2 className="text-sm font-semibold text-[#0b1f33]">
-              Kitchen stations
-            </h2>
-            <div className="mt-3 flex flex-wrap gap-2">
+          <DiningPanel
+            title="Kitchen stations"
+            hint="Same code can be saved again — it updates the existing station."
+          >
+            <div className="flex flex-wrap gap-2">
               <Input
+                className="min-w-[10rem] flex-1"
                 value={stationName}
                 onChange={(e) => setStationName(e.target.value)}
-                placeholder="Pizza"
+                placeholder="Hot kitchen"
               />
               <Input
                 className="w-32"
                 value={stationCode}
                 onChange={(e) => setStationCode(e.target.value)}
-                placeholder="pizza"
+                placeholder="hot"
               />
               <Button
                 type="button"
                 disabled={!stationName.trim() || !stationCode.trim()}
                 onClick={() => addStation.mutate()}
               >
-                Add station
+                Save station
               </Button>
             </div>
-          </section>
+            {(stations.data ?? []).length ? (
+              <table className="mt-4 w-full text-left text-sm">
+                <thead className="text-[0.68rem] uppercase tracking-wide text-[#8b9bb0]">
+                  <tr>
+                    <th className="pb-2 font-semibold">Name</th>
+                    <th className="pb-2 font-semibold">Code</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#eef1f4]">
+                  {(stations.data ?? []).map((s) => (
+                    <tr key={s.id}>
+                      <td className="py-2 font-medium text-[#0b1f33]">
+                        {s.name}
+                      </td>
+                      <td className="py-2 font-mono text-xs text-[#5a6b7d]">
+                        {s.code}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p className="mt-3 text-sm text-[#5a6b7d]">
+                No stations yet. Add Main kitchen to route KOTs.
+              </p>
+            )}
+          </DiningPanel>
         </>
       )}
-    </div>
+    </DiningShell>
   );
 }

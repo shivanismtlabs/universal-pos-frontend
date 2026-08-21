@@ -6,7 +6,11 @@ import { toast } from "sonner";
 import { restaurantApi } from "@/lib/api";
 import { useBootstrap } from "@/lib/bootstrap";
 import { cn } from "@/lib/utils";
-import { PageHeader } from "@/components/page-header";
+import {
+  DiningEmpty,
+  DiningShell,
+  DiningStatusBadge,
+} from "@/components/dining-chrome";
 import { Button } from "@/components/ui/button";
 
 const STEPS = [
@@ -18,16 +22,21 @@ const STEPS = [
   "cancelled",
 ] as const;
 
-const AGING: Record<string, string> = {
-  waiting: "bg-[#dbeafe] text-[#1e40af]",
-  delayed: "bg-[#fef3c7] text-[#92400e]",
-  critical: "bg-[#fee2e2] text-[#991b1b]",
-};
+const COLS = [
+  { id: "new", title: "New", match: (s: string) => s === "new" },
+  {
+    id: "preparing",
+    title: "Preparing",
+    match: (s: string) => s === "accepted" || s === "preparing",
+  },
+  { id: "ready", title: "Ready", match: (s: string) => s === "ready" },
+] as const;
 
 export default function KitchenPage() {
   const qc = useQueryClient();
   const { hasCapability } = useBootstrap();
-  const allowed = hasCapability("KOT") || hasCapability("KITCHEN") || hasCapability("KDS");
+  const allowed =
+    hasCapability("KOT") || hasCapability("KITCHEN") || hasCapability("KDS");
   const [cancelId, setCancelId] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState("");
 
@@ -54,184 +63,231 @@ export default function KitchenPage() {
 
   if (!allowed) {
     return (
-      <div className="p-6">
-        <h1 className="text-xl font-semibold text-[#0b1f33]">Kitchen</h1>
-        <p className="mt-2 text-sm text-[#5a6b7d]">
-          Enable KOT in Capabilities. This screen is off for retail, rental, and
-          service shops that do not use kitchen tickets.
-        </p>
-      </div>
+      <DiningShell
+        title="Kitchen"
+        subtitle="Enable KOT in Capabilities to show kitchen tickets."
+      >
+        <DiningEmpty
+          title="Kitchen is off"
+          detail="This screen stays hidden for shops that do not use kitchen tickets."
+        />
+      </DiningShell>
     );
   }
 
   const items = kots.data ?? [];
 
   return (
-    <div className="space-y-6 p-6">
-      <PageHeader
-        eyebrow="Kitchen"
-        title="Kitchen display"
-        subtitle="KOT status only. Tickets are never deleted. Inventory is not deducted here."
-      />
-
+    <DiningShell
+      title="Kitchen"
+      subtitle="Ticket status only. KOTs are never deleted. Inventory is not deducted here."
+    >
       {!kots.isLoading && !items.length ? (
-        <div className="rounded-xl border border-[#d9e0ea] bg-white p-8 text-center text-sm text-[#5a6b7d]">
-          No kitchen tickets. Open a dining order, add items, then Send KOT.
-        </div>
+        <DiningEmpty
+          title="No kitchen tickets"
+          detail="Open a dining order, add items at Counter, then Send KOT."
+        />
       ) : hasCapability("KDS") ? (
-        <div className="grid gap-4 md:grid-cols-3">
-          {(["new", "preparing", "ready"] as const).map((col) => (
-            <section key={col} className="rounded-xl border border-[#e2e8f0] bg-[#f8fafc] p-3">
-              <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#8b9bb0]">
-                {col}
-              </h2>
-              <div className="space-y-3">
-                {items
-                  .filter((o) =>
-                    col === "preparing"
-                      ? o.status === "accepted" || o.status === "preparing"
-                      : o.status === col,
-                  )
-                  .map((o) => (
-                    <div key={o.id} className="rounded-xl border border-[#d9e0ea] bg-white p-3">
-                      <p className="text-sm font-semibold">
-                        {o.kotNumber}
-                        {o.tableName ? ` · ${o.tableName}` : ""}
-                      </p>
-                      <p className="text-xs text-[#5a6b7d]">
-                        {o.stationName ?? "Unassigned"} · {o.aging}
-                      </p>
-                      <ul className="mt-2 text-sm">
-                        {o.lines.map((l) => (
-                          <li key={l.id}>
-                            {l.quantity} × {l.name}
-                          </li>
-                        ))}
-                      </ul>
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        {STEPS.filter((s) => s !== "cancelled").map((step) => (
-                          <Button
-                            key={step}
-                            variant="secondary"
-                            className="h-7 px-2 text-[0.65rem]"
-                            disabled={setStatus.isPending}
-                            onClick={() =>
-                              setStatus.mutate({ id: o.id, status: step })
-                            }
-                          >
-                            {step}
-                          </Button>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-              </div>
-            </section>
-          ))}
-        </div>
-      ) : (
-        <div className="grid gap-4 xl:grid-cols-2">
-          {items.map((o) => (
-            <section
-              key={o.id}
-              className="rounded-2xl border border-[#d9e0ea] bg-white p-4 shadow-sm"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold text-[#0b1f33]">
-                    {o.kotNumber}
-                    <span className="ml-2 text-xs font-medium text-[#5a6b7d]">
-                      {o.orderNumber}
-                    </span>
-                  </p>
-                  <p className="mt-1 text-xs text-[#5a6b7d]">
-                    {o.diningMode.replaceAll("_", " ")}
-                    {o.tableName ? ` · ${o.tableName}` : ""}
-                    {o.stationName ? ` · ${o.stationName}` : ""}
-                  </p>
+        <div className="grid gap-3 md:grid-cols-3">
+          {COLS.map((col) => {
+            const list = items.filter((o) => col.match(o.status));
+            return (
+              <section
+                key={col.id}
+                className="rounded-xl border border-[#e2e8f0] bg-[#f8fafc]"
+              >
+                <div className="flex items-center justify-between border-b border-[#eef1f4] px-3 py-2.5">
+                  <h2 className="text-xs font-semibold uppercase tracking-[0.12em] text-[#8b9bb0]">
+                    {col.title}
+                  </h2>
+                  <span className="rounded-full bg-white px-2 py-0.5 text-[0.7rem] font-semibold tabular-nums text-[#0b1f33] ring-1 ring-[#e2e8f0]">
+                    {list.length}
+                  </span>
                 </div>
-                <span
-                  className={cn(
-                    "rounded-full px-2.5 py-1 text-[0.7rem] font-semibold",
-                    AGING[o.aging] ?? AGING.waiting,
-                  )}
-                >
-                  {o.aging}
-                </span>
-              </div>
-
-              <ul className="mt-3 space-y-1 rounded-xl bg-[#f8fafc] p-3 text-sm text-[#0b1f33]">
-                {o.lines.map((line) => (
-                  <li key={line.id}>
-                    {line.quantity} × {line.name}
-                    {line.notes ? (
-                      <span className="text-xs text-[#5a6b7d]"> — {line.notes}</span>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-              {o.specialInstructions ? (
-                <p className="mt-2 text-xs text-[#5a6b7d]">
-                  Note: {o.specialInstructions}
-                </p>
-              ) : null}
-
-              <div className="mt-3 flex flex-wrap gap-2">
-                {STEPS.map((step) => {
-                  const active = o.status === step;
-                  return (
-                    <button
-                      key={step}
-                      type="button"
-                      disabled={active || setStatus.isPending}
-                      onClick={() => {
-                        if (step === "cancelled") {
+                <div className="space-y-2 p-2.5">
+                  {list.map((o) => (
+                    <KotCard
+                      key={o.id}
+                      o={o}
+                      compact
+                      cancelId={cancelId}
+                      cancelReason={cancelReason}
+                      setCancelId={setCancelId}
+                      setCancelReason={setCancelReason}
+                      pending={setStatus.isPending}
+                      onStatus={(status) => {
+                        if (status === "cancelled") {
                           setCancelId(o.id);
                           return;
                         }
-                        setStatus.mutate({ id: o.id, status: step });
+                        setStatus.mutate({ id: o.id, status });
                       }}
-                      className={cn(
-                        "rounded-lg border px-3 py-1.5 text-xs font-semibold transition",
-                        active
-                          ? "border-[#1a56db] bg-[#eff6ff] text-[#1a56db]"
-                          : "border-[#d9e0ea] bg-white text-[#5a6b7d] hover:bg-[#f8fafc]",
-                      )}
-                    >
-                      {step}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {cancelId === o.id ? (
-                <div className="mt-3 flex gap-2">
-                  <input
-                    className="h-9 flex-1 rounded-md border border-[#d9e0ea] px-2 text-sm"
-                    placeholder="Cancel reason (required)"
-                    value={cancelReason}
-                    onChange={(e) => setCancelReason(e.target.value)}
-                  />
-                  <Button
-                    type="button"
-                    size="sm"
-                    disabled={!cancelReason.trim()}
-                    onClick={() =>
-                      setStatus.mutate({
-                        id: o.id,
-                        status: "cancelled",
-                        cancelReason: cancelReason.trim(),
-                      })
-                    }
-                  >
-                    Confirm cancel
-                  </Button>
+                      onCancel={() =>
+                        setStatus.mutate({
+                          id: o.id,
+                          status: "cancelled",
+                          cancelReason: cancelReason.trim(),
+                        })
+                      }
+                    />
+                  ))}
+                  {!list.length ? (
+                    <p className="px-2 py-6 text-center text-xs text-[#8b9bb0]">
+                      Empty
+                    </p>
+                  ) : null}
                 </div>
-              ) : null}
-            </section>
+              </section>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="grid gap-3 xl:grid-cols-2">
+          {items.map((o) => (
+            <KotCard
+              key={o.id}
+              o={o}
+              cancelId={cancelId}
+              cancelReason={cancelReason}
+              setCancelId={setCancelId}
+              setCancelReason={setCancelReason}
+              pending={setStatus.isPending}
+              onStatus={(status) => {
+                if (status === "cancelled") {
+                  setCancelId(o.id);
+                  return;
+                }
+                setStatus.mutate({ id: o.id, status });
+              }}
+              onCancel={() =>
+                setStatus.mutate({
+                  id: o.id,
+                  status: "cancelled",
+                  cancelReason: cancelReason.trim(),
+                })
+              }
+            />
           ))}
         </div>
       )}
-    </div>
+    </DiningShell>
+  );
+}
+
+function KotCard({
+  o,
+  compact,
+  cancelId,
+  cancelReason,
+  setCancelId,
+  setCancelReason,
+  pending,
+  onStatus,
+  onCancel,
+}: {
+  o: {
+    id: string;
+    kotNumber: string;
+    orderNumber?: string;
+    tableName?: string | null;
+    stationName?: string | null;
+    diningMode?: string;
+    aging: string;
+    status: string;
+    specialInstructions?: string | null;
+    lines: Array<{ id: string; quantity: number; name: string; notes?: string | null }>;
+  };
+  compact?: boolean;
+  cancelId: string | null;
+  cancelReason: string;
+  setCancelId: (id: string | null) => void;
+  setCancelReason: (v: string) => void;
+  pending: boolean;
+  onStatus: (status: string) => void;
+  onCancel: () => void;
+}) {
+  return (
+    <article
+      className={cn(
+        "rounded-xl border border-[#e2e8f0] bg-white",
+        compact ? "p-3" : "p-4",
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold text-[#0b1f33]">
+            {o.kotNumber}
+            {o.tableName ? (
+              <span className="ml-1.5 font-medium text-[#5a6b7d]">
+                · {o.tableName}
+              </span>
+            ) : null}
+          </p>
+          <p className="mt-0.5 text-xs text-[#8b9bb0]">
+            {o.stationName ?? "Unassigned"}
+            {o.diningMode ? ` · ${o.diningMode.replaceAll("_", " ")}` : ""}
+          </p>
+        </div>
+        <div className="flex flex-col items-end gap-1">
+          <DiningStatusBadge value={o.status} />
+          <DiningStatusBadge value={o.aging} />
+        </div>
+      </div>
+      <ul className="mt-2.5 space-y-1 rounded-lg bg-[#f8fafc] px-3 py-2 text-sm text-[#0b1f33]">
+        {o.lines.map((line) => (
+          <li key={line.id}>
+            <span className="tabular-nums text-[#5a6b7d]">{line.quantity}×</span>{" "}
+            {line.name}
+            {line.notes ? (
+              <span className="text-xs text-[#5a6b7d]"> — {line.notes}</span>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+      {o.specialInstructions ? (
+        <p className="mt-2 text-xs text-[#5a6b7d]">
+          Note: {o.specialInstructions}
+        </p>
+      ) : null}
+      <div className="mt-2.5 flex flex-wrap gap-1">
+        {STEPS.map((step) => {
+          const active = o.status === step;
+          return (
+            <button
+              key={step}
+              type="button"
+              disabled={active || pending}
+              onClick={() => onStatus(step)}
+              className={cn(
+                "rounded-md border px-2 py-1 text-[0.65rem] font-semibold capitalize",
+                active
+                  ? "border-[#1a56db] bg-[#eff6ff] text-[#1a56db]"
+                  : "border-[#e2e8f0] bg-white text-[#5a6b7d] hover:bg-[#f8fafc]",
+              )}
+            >
+              {step}
+            </button>
+          );
+        })}
+      </div>
+      {cancelId === o.id ? (
+        <div className="mt-2 flex gap-2">
+          <input
+            className="h-8 flex-1 rounded-md border border-[#d9e0ea] px-2 text-sm"
+            placeholder="Cancel reason (required)"
+            value={cancelReason}
+            onChange={(e) => setCancelReason(e.target.value)}
+          />
+          <Button
+            type="button"
+            size="sm"
+            disabled={!cancelReason.trim()}
+            onClick={onCancel}
+          >
+            Confirm
+          </Button>
+        </div>
+      ) : null}
+    </article>
   );
 }

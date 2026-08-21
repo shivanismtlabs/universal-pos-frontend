@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { catalogApi, restaurantApi, tenantsApi } from "@/lib/api";
 import { useBootstrap } from "@/lib/bootstrap";
-import { PageHeader } from "@/components/page-header";
+import { DiningPanel, DiningShell, diningSelectClass } from "@/components/dining-chrome";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -67,26 +67,25 @@ export default function WastagePage() {
 
   if (!allowed) {
     return (
-      <div className="p-6 text-sm text-[#5a6b7d]">
-        Wastage needs the Wastage capability.
-      </div>
+      <DiningShell title="Wastage" subtitle="Wastage needs the Wastage capability.">
+        <p className="text-sm text-[#5a6b7d]">This shop does not have Wastage enabled.</p>
+      </DiningShell>
     );
   }
 
   const locations = locs.data ?? [];
 
   return (
-    <div className="space-y-6 p-6">
-      <PageHeader
-        title="Wastage"
-        subtitle="Spoilage, comps, and staff meals write off ingredient stock through the same ledger as inventory."
-      />
-
-      <section className="rounded-xl border border-[#e2e8f0] bg-white p-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+    <DiningShell
+      title="Wastage"
+      subtitle="Spoilage, comps, and staff meals write off ingredient stock through the same ledger as inventory."
+    >
+      <DiningPanel title="Record">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <div>
           <Label>Location</Label>
           <select
-            className="mt-1 h-9 w-full rounded-md border border-[#d9e0ea] px-2 text-sm"
+            className={`${diningSelectClass} mt-1`}
             value={locationId}
             onChange={(e) => setLocationId(e.target.value)}
           >
@@ -100,9 +99,9 @@ export default function WastagePage() {
         </div>
         <div>
           <Label>Item</Label>
-          <select
-            className="mt-1 h-9 w-full rounded-md border border-[#d9e0ea] px-2 text-sm"
-            value={productId}
+            <select
+              className={`${diningSelectClass} mt-1`}
+              value={productId}
             onChange={(e) => setProductId(e.target.value)}
           >
             <option value="">Select…</option>
@@ -119,9 +118,9 @@ export default function WastagePage() {
         </div>
         <div>
           <Label>Reason</Label>
-          <select
-            className="mt-1 h-9 w-full rounded-md border border-[#d9e0ea] px-2 text-sm"
-            value={reason}
+            <select
+              className={`${diningSelectClass} mt-1`}
+              value={reason}
             onChange={(e) => setReason(e.target.value)}
           >
             {REASONS.map((r) => (
@@ -140,26 +139,27 @@ export default function WastagePage() {
             Record wastage
           </Button>
         </div>
-      </section>
+        </div>
+      </DiningPanel>
 
-      <section className="overflow-hidden rounded-xl border border-[#e2e8f0] bg-white">
+      <DiningPanel title="Ledger">
         <table className="w-full text-left text-sm">
-          <thead className="bg-[#f7f9fc] text-[0.68rem] uppercase tracking-wide text-[#8b9bb0]">
+          <thead className="text-[0.68rem] uppercase tracking-wide text-[#8b9bb0]">
             <tr>
-              <th className="px-3 py-2">When</th>
-              <th className="px-3 py-2">Item</th>
-              <th className="px-3 py-2">Qty</th>
-              <th className="px-3 py-2">Reason</th>
-              <th className="px-3 py-2">Staff</th>
+              <th className="pb-2 font-semibold">When</th>
+              <th className="pb-2 font-semibold">Item</th>
+              <th className="pb-2 font-semibold">Qty</th>
+              <th className="pb-2 font-semibold">Reason</th>
+              <th className="pb-2 font-semibold">Staff</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="divide-y divide-[#eef1f4]">
             {(rows.data ?? []).map((r) => (
-              <tr key={r.id} className="border-t border-[#eef1f4]">
-                <td className="px-3 py-2 text-[#5a6b7d]">
+              <tr key={r.id}>
+                <td className="py-2 text-[#5a6b7d]">
                   {new Date(r.createdAt).toLocaleString()}
                 </td>
-                <td className="px-3 py-2">
+                <td className="py-2">
                   {r.product.name ?? r.product.id}
                   {r.product.skuCode ? (
                     <span className="ml-1 font-mono text-xs text-[#8b9bb0]">
@@ -167,19 +167,19 @@ export default function WastagePage() {
                     </span>
                   ) : null}
                 </td>
-                <td className="px-3 py-2 tabular-nums">
+                <td className="py-2 tabular-nums">
                   {r.qty} {r.unit ?? ""}
                 </td>
-                <td className="px-3 py-2">{r.reason}</td>
-                <td className="px-3 py-2">{r.actor?.name ?? "—"}</td>
+                <td className="py-2 capitalize">{r.reason.replaceAll("_", " ")}</td>
+                <td className="py-2">{r.actor?.name ?? "—"}</td>
               </tr>
             ))}
           </tbody>
         </table>
         {!rows.data?.length ? (
-          <p className="px-3 py-6 text-sm text-[#5a6b7d]">No wastage recorded.</p>
+          <p className="py-4 text-sm text-[#5a6b7d]">No wastage recorded.</p>
         ) : null}
-      </section>
-    </div>
+      </DiningPanel>
+    </DiningShell>
   );
 }
