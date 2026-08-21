@@ -17,7 +17,9 @@ import { Label } from "@/components/ui/label";
 import { ReceiptModal, type ReceiptData } from "@/components/receipt-modal";
 import { StripeCheckoutModal } from "@/components/stripe-checkout-modal";
 import { ProductThumb } from "@/components/product-thumb";
+import { ImageLightbox } from "@/components/image-lightbox";
 import { CustomerPicker } from "@/components/customer-picker";
+import { CustomFieldsSection } from "@/components/custom-field-inputs";
 import { StationPinLock } from "@/components/station-pin-lock";
 import { BarcodeScanInput } from "@/components/barcode-scan-input";
 import { customFieldDefsToMeta } from "@/lib/product-form-fields";
@@ -223,6 +225,11 @@ export default function RetailPosWorkstation({
   const [resourceId, setResourceId] = useState("");
   const [guestCount, setGuestCount] = useState("1");
   const [orderNote, setOrderNote] = useState("");
+  const [lightbox, setLightbox] = useState<{
+    images: string[];
+    index: number;
+    label: string;
+  } | null>(null);
   const [touchMode, setTouchMode] = useState(false);
   const [busy, setBusy] = useState(false);
   const [offlinePending, setOfflinePending] = useState(0);
@@ -1287,20 +1294,29 @@ export default function RetailPosWorkstation({
         onUnlocked={() => setManualPinSwitch(false)}
       />
       {!compact ? (
-        <header className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-base font-bold tracking-tight text-[#0b1f33]">
-              Counter
+        <header className="mb-4 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-[0.75rem] font-medium text-[#5a6b7d]">
+                Counter
+              </p>
+              {registerSession ? (
+                <span className="rounded-md bg-[#ecfdf5] px-2 py-0.5 text-[0.62rem] font-bold text-[#166534] uppercase">
+                  Register open
+                </span>
+              ) : (
+                <span className="rounded-md bg-[#fff7ed] px-2 py-0.5 text-[0.62rem] font-bold text-[#9a3412] uppercase">
+                  Register closed
+                </span>
+              )}
+            </div>
+            <h1 className="mt-1 text-xl font-bold tracking-tight text-[#0b1f33] sm:text-2xl">
+              {productName}
             </h1>
-            {registerSession ? (
-              <span className="rounded-md bg-[#ecfdf5] px-2 py-0.5 text-[0.62rem] font-bold text-[#166534] uppercase">
-                Register open
-              </span>
-            ) : (
-              <span className="rounded-md bg-[#fff7ed] px-2 py-0.5 text-[0.62rem] font-bold text-[#9a3412] uppercase">
-                Register closed
-              </span>
-            )}
+            <p className="mt-1 text-sm text-[#5a6b7d]">
+              Tap a product, then charge. Open the register at shift start; close
+              it when you count the drawer.
+            </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {canApproveRefund(roles) ? (
@@ -1385,12 +1401,12 @@ export default function RetailPosWorkstation({
       ) : null}
 
       {!online ? (
-        <div className="mb-3 shrink-0 rounded-xl border border-[#f5c2c2] bg-[#fff6f6] px-3 py-2 text-sm text-[#a01818]">
+        <div className="mb-3 rounded-xl border border-[#f5c2c2] bg-[#fff6f6] px-3 py-2 text-sm text-[#a01818]">
           Offline — Sale counter needs internet to charge. Reconnect, then try
           again.
         </div>
       ) : offlinePending > 0 ? (
-        <div className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-[#c9d7f5] bg-[#e8eefb] px-3 py-2 text-sm text-[#1341a8]">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#c9d7f5] bg-[#e8eefb] px-3 py-2 text-sm text-[#1341a8]">
           <span>
             Online — {offlinePending} queued offline event(s) waiting to sync
           </span>
@@ -1410,26 +1426,17 @@ export default function RetailPosWorkstation({
       ) : null}
 
       {!compact && !registerSession ? (
-        <p className="mb-2 shrink-0 text-[0.75rem] text-[#9a3412]">
-          Open the register before charging. Close it when you count the drawer.
-        </p>
+        <div className="mb-3 rounded-xl border border-[#fdba74] bg-[#fff7ed] px-3 py-2 text-sm text-[#9a3412]">
+          <strong className="font-semibold">Open register</strong> starts your
+          shift with a cash float. Charging stays locked until the drawer is
+          open. <strong className="font-semibold">Close register</strong> ends
+          the shift and compares counted cash to expected sales.
+        </div>
       ) : null}
 
-      <div
-        className={cn(
-          "grid items-start gap-4",
-          compact
-            ? "xl:grid-cols-[minmax(0,1.25fr)_minmax(20rem,0.85fr)]"
-            : "lg:grid-cols-[minmax(0,1.4fr)_minmax(20rem,0.72fr)]",
-        )}
-      >
-        <section
-          className={cn(
-            "flex min-h-0 flex-col overflow-hidden rounded-[16px] border border-[#d9e0ea] bg-white shadow-[0_1px_2px_rgba(11,31,51,0.04)]",
-            compact ? "" : "h-0 min-h-full",
-          )}
-        >
-          <div className="shrink-0 space-y-2.5 border-b border-[#e8edf4] bg-[#f8fafc] p-3">
+      <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,0.72fr)] items-stretch gap-4">
+        <section className="flex h-0 min-h-full flex-col overflow-hidden rounded-[16px] border border-[#d9e0ea] bg-white shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
+          <div className="shrink-0 space-y-3 border-b border-[#e8edf4] bg-[#f8fafc] p-3.5">
             <BarcodeScanInput
               value={scan}
               onChange={setScan}
@@ -1445,8 +1452,8 @@ export default function RetailPosWorkstation({
               <button type="submit" tabIndex={-1} />
             </form>
 
-            <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center">
-              <div className="relative w-full sm:max-w-[14rem]">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <div className="relative w-0 flex-1">
                 <span
                   aria-hidden
                   className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-[#8b9bb0]"
@@ -1522,22 +1529,19 @@ export default function RetailPosWorkstation({
             </div>
           </div>
 
-          <div
-            className={cn(
-              "min-h-0 overflow-y-auto bg-[#eef1f5]",
-              compact ? "max-h-[24rem]" : "flex-1",
-            )}
-          >
+          <div className="min-h-0 flex-1 overflow-y-auto border-t border-[#eef2f8] bg-[#f4f6f9]">
             <ul
               className={cn(
-                "grid content-start gap-2 p-2.5 sm:p-3",
-                compact
-                  ? "grid-cols-2 sm:grid-cols-3"
-                  : "grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5",
+                "grid min-h-full content-start gap-2 p-2.5",
+                compact ? "grid-cols-3" : "grid-cols-4",
               )}
             >
               {items.map((row) => {
-                const src = row.image ?? row.photoUrl;
+                const gallery =
+                  row.images?.length
+                    ? row.images
+                    : ([row.image ?? row.photoUrl].filter(Boolean) as string[]);
+                const src = gallery[0] ?? row.image ?? row.photoUrl;
                 const inCart = cart.find((l) => l.stockLevelId === row.id);
                 const cartQty = inCart?.qty ?? 0;
                 const available =
@@ -1552,27 +1556,35 @@ export default function RetailPosWorkstation({
                   qtyLeftLabel: formatQtyWithUnit(available, row.sellUnit),
                 });
                 return (
-                  <li
-                    key={row.id}
-                    className="min-w-0 [content-visibility:auto] [contain-intrinsic-size:220px]"
-                  >
+                  <li key={row.id} className="min-w-0">
                     <button
                       type="button"
                       onClick={() => upsertLine(row)}
                       className={cn(
-                        "flex w-full flex-col overflow-hidden rounded-xl border bg-white text-left shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition",
+                        "flex h-full w-full flex-col overflow-hidden rounded-xl border bg-white text-left shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition",
                         inCart
                           ? "border-[#1a56db] ring-1 ring-[#1a56db]/25"
                           : "border-[#e2e8f0] hover:border-[#cbd5e1] hover:shadow-[0_2px_8px_rgba(15,23,42,0.06)]",
                       )}
                     >
-                      <div className="relative aspect-[4/3] w-full shrink-0 overflow-hidden bg-[#eef2f7]">
+                      <div className="relative aspect-[4/3] w-full overflow-hidden bg-[#eef2f7]">
                         <div className="absolute inset-0">
                           <ProductThumb
                             src={src}
                             label={row.name}
                             size="fill"
                             className="h-full w-full rounded-none border-0 shadow-none"
+                            count={gallery.length}
+                            onClick={
+                              gallery.length
+                                ? () =>
+                                    setLightbox({
+                                      images: gallery,
+                                      index: 0,
+                                      label: row.name,
+                                    })
+                                : undefined
+                            }
                           />
                         </div>
                         <span
@@ -1588,7 +1600,7 @@ export default function RetailPosWorkstation({
                           {stock.label}
                         </span>
                       </div>
-                      <div className="flex flex-col gap-1 p-2.5">
+                      <div className="flex min-h-0 flex-1 flex-col gap-1 p-2.5">
                         <p className="line-clamp-2 text-[0.8rem] leading-snug font-semibold text-[#0b1f33]">
                           {row.name}
                         </p>
@@ -1599,7 +1611,7 @@ export default function RetailPosWorkstation({
                             : ""}
                           {kindLabel ? ` · ${kindLabel}` : ""}
                         </p>
-                        <div className="flex items-center justify-between gap-2 pt-1">
+                        <div className="mt-auto flex items-center justify-between gap-2 pt-1">
                           <p className="text-[0.9rem] font-extrabold tabular-nums text-[#0b1f33]">
                             {money(row.sellPrice)}
                           </p>
@@ -1638,7 +1650,7 @@ export default function RetailPosWorkstation({
             </ul>
           </div>
           {catalogTotalPages > 1 ? (
-            <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-[#eef2f8] bg-white px-3 py-2">
+            <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-[#eef2f8] bg-[#fafbfc] px-3 py-2.5">
               <p className="text-[0.75rem] text-[#5a6b7d]">
                 Page {catalogPage} of {catalogTotalPages}
                 <span className="text-[#8b9bb0]">
@@ -1674,13 +1686,13 @@ export default function RetailPosWorkstation({
               </div>
             </div>
           ) : catalogTotal > 0 ? (
-            <p className="shrink-0 border-t border-[#eef2f8] bg-white px-3 py-2 text-[0.72rem] text-[#8b9bb0]">
+            <p className="shrink-0 border-t border-[#eef2f8] bg-[#fafbfc] px-3 py-2 text-[0.72rem] text-[#8b9bb0]">
               {catalogTotal} product{catalogTotal === 1 ? "" : "s"} shown
             </p>
           ) : null}
         </section>
 
-        <aside className="flex min-h-0 max-h-[calc(100vh-6.5rem)] flex-col self-start overflow-y-auto rounded-[16px] border border-[#d9e0ea] bg-white shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
+        <aside className="flex min-h-0 flex-col self-start overflow-hidden rounded-[16px] border border-[#d9e0ea] bg-white shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
           {compact ? (
             <div className="flex flex-wrap items-center gap-2 border-b border-[#e8edf4] bg-[#f8fafc] px-3 py-2">
               {registerSession ? (
@@ -1853,6 +1865,10 @@ export default function RetailPosWorkstation({
               </div>
             </div>
           ) : null}
+
+          {/* <div className="border-b border-[#e8edf4] px-4 py-3">
+            
+          </div> */}
 
           <ul className="max-h-48 flex-1 space-y-1.5 overflow-y-auto px-3 py-3">
             {cart.map((l) => (
@@ -2230,67 +2246,6 @@ export default function RetailPosWorkstation({
                 Save as a draft — no stock or payment until you resume
               </p>
             </div>
-
-            {orderFormFields.length ? (
-              <div className="space-y-2 rounded-lg border border-[#e8edf4] bg-[#f8fafc] p-2.5">
-                <p className="text-[0.65rem] font-semibold tracking-[0.1em] text-[#8b9bb0] uppercase">
-                  Order fields
-                </p>
-                {orderFormFields.map((field) => (
-                  <div key={field.key}>
-                    <Label className="text-[0.7rem]">
-                      {field.label}
-                      {field.required ? " *" : ""}
-                    </Label>
-                    {field.type === "boolean" ? (
-                      <label className="mt-1 flex items-center gap-2 text-sm text-[#0b1f33]">
-                        <input
-                          type="checkbox"
-                          checked={orderExtraFields[field.key] === "true"}
-                          onChange={(e) =>
-                            setOrderExtraFields((prev) => ({
-                              ...prev,
-                              [field.key]: e.target.checked ? "true" : "false",
-                            }))
-                          }
-                        />
-                        Yes
-                      </label>
-                    ) : field.type === "select" && field.options?.length ? (
-                      <select
-                        className="mt-1 h-9 w-full rounded-md border border-[#e2e8f0] bg-white px-2 text-sm"
-                        value={orderExtraFields[field.key] ?? ""}
-                        onChange={(e) =>
-                          setOrderExtraFields((prev) => ({
-                            ...prev,
-                            [field.key]: e.target.value,
-                          }))
-                        }
-                      >
-                        <option value="">Select</option>
-                        {field.options.map((o) => (
-                          <option key={o.value} value={o.value}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <Input
-                        className="mt-1 h-9"
-                        type={field.type === "number" ? "number" : "text"}
-                        value={orderExtraFields[field.key] ?? ""}
-                        onChange={(e) =>
-                          setOrderExtraFields((prev) => ({
-                            ...prev,
-                            [field.key]: e.target.value,
-                          }))
-                        }
-                      />
-                    )}
-                  </div>
-                ))}
-              </div>
-            ) : null}
 
             <div className="flex items-center gap-2">
               <Button
@@ -2980,6 +2935,14 @@ export default function RetailPosWorkstation({
           onClose={() => setReceipt(null)}
         />
       ) : null}
+
+      <ImageLightbox
+        open={Boolean(lightbox)}
+        images={lightbox?.images ?? []}
+        startIndex={lightbox?.index ?? 0}
+        label={lightbox?.label}
+        onClose={() => setLightbox(null)}
+      />
     </div>
   );
 }
