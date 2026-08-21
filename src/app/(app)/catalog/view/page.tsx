@@ -196,6 +196,8 @@ function CatalogProductDetailPage() {
           quantity: Number(compQty) || 1,
           consumeOnSale: p?.kind !== "bundle",
           purpose: p?.kind === "bundle" ? "bundle" : "recipe",
+          unit: undefined,
+          wastagePercent: undefined,
         });
       }
       return catalogApi.setBundleLines(id, existing);

@@ -1840,7 +1840,6 @@ export const restaurantApi = {
       token: token(),
     });
   },
-};
   recipes() {
     return apiRequest<
       Array<{

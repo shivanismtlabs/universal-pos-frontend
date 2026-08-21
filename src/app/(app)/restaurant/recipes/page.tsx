@@ -49,7 +49,7 @@ export default function RecipesPage() {
         lines.push({
           componentProductId: compId,
           quantity: Number(qty) || 1,
-          unit: unit.trim() || undefined,
+          unit: unit.trim(),
           wastagePercent: Number(waste) || 0,
         });
       }
