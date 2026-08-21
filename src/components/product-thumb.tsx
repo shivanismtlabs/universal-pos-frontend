@@ -1,12 +1,17 @@
 "use client";
 
-import { cn, mediaUrl } from "@/lib/utils";
+import { memo, useMemo } from "react";
+import { cn, thumbUrl } from "@/lib/utils";
+
+const INIT_CACHE = new Map<string, string>();
 
 /** Always-available offline SVG cover (no external CDN). */
 function svgCover(label?: string) {
+  const key = (label ?? "IT").trim().slice(0, 32) || "IT";
+  const hit = INIT_CACHE.get(key);
+  if (hit) return hit;
   const text =
-    (label ?? "IT")
-      .trim()
+    key
       .split(/\s+/)
       .filter(Boolean)
       .slice(0, 2)
@@ -14,11 +19,13 @@ function svgCover(label?: string) {
       .join("")
       .slice(0, 3) || "IT";
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120"><rect width="120" height="120" fill="#e8eefb"/><text x="60" y="68" text-anchor="middle" font-family="Arial,sans-serif" font-size="36" font-weight="700" fill="#1a56db">${text}</text></svg>`;
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  INIT_CACHE.set(key, url);
+  return url;
 }
 
-/** Product thumbnail — sm/md for dense rows; lg/xl for counter catalog. */
-export function ProductThumb({
+/** Product thumbnail — sm/md for dense rows; lg/xl/fill for counter catalog. */
+export const ProductThumb = memo(function ProductThumb({
   src,
   label,
   size = "md",
@@ -44,8 +51,8 @@ export function ProductThumb({
             ? "h-full w-full"
             : "h-12 w-12";
 
-  const resolved = mediaUrl(src);
-  const fallback = svgCover(label);
+  const fallback = useMemo(() => svgCover(label), [label]);
+  const resolved = thumbUrl(src, size === "fill" ? 320 : 160);
   const url = resolved || fallback;
   const clickable = Boolean(onClick && resolved);
 
@@ -84,16 +91,19 @@ export function ProductThumb({
         alt={label ? `${label}` : ""}
         className="h-full w-full object-cover"
         loading="lazy"
+        decoding="async"
+        fetchPriority="low"
+        draggable={false}
         onError={(e) => {
           const img = e.currentTarget;
           if (img.src !== fallback) img.src = fallback;
         }}
       />
       {count && count > 1 ? (
-        <span className="absolute bottom-0.5 right-0.5 rounded bg-[#0b1f33]/8 px-1 text-[0.55rem] font-bold text-white">
+        <span className="absolute bottom-0.5 right-0.5 rounded bg-[#0b1f33]/80 px-1 text-[0.55rem] font-bold text-white">
           {count}×
         </span>
       ) : null}
     </div>
   );
-}
+});

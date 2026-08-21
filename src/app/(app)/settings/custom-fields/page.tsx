@@ -22,7 +22,7 @@ const ENTITIES: Array<{
   {
     value: "customer",
     label: "Customer",
-    where: "Shows on customer profile forms (when enabled)",
+    where: "Shows on Customers → Add / Edit",
   },
   {
     value: "order",
@@ -30,19 +30,24 @@ const ENTITIES: Array<{
     where: "Shows on Counter (POS) ticket before payment",
   },
   {
-    value: "service_job",
-    label: "Service Job",
-    where: "Shows on service / job screens",
+    value: "work_job",
+    label: "Service job",
+    where: "Shows on service / job screens when that form is used",
   },
   {
-    value: "rental",
-    label: "Rental",
-    where: "Shows on rental order flows",
-  },
-  {
-    value: "subscription",
-    label: "Subscription",
+    value: "membership",
+    label: "Membership / plan",
     where: "Shows on membership / plan flows",
+  },
+  {
+    value: "employee",
+    label: "Employee",
+    where: "Shows on staff records",
+  },
+  {
+    value: "appointment",
+    label: "Appointment",
+    where: "Shows on appointment booking",
   },
 ];
 

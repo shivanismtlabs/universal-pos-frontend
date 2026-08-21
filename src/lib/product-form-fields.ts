@@ -8,6 +8,18 @@ export type CustomFieldDefLite = {
   options?: unknown;
 };
 
+/** Settings/API may return a bare array or `{ data }` / `{ items }`. */
+export function normalizeCustomFieldDefs(raw: unknown): CustomFieldDefLite[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw as CustomFieldDefLite[];
+  if (typeof raw === "object") {
+    const rec = raw as { data?: unknown; items?: unknown };
+    if (Array.isArray(rec.data)) return rec.data as CustomFieldDefLite[];
+    if (Array.isArray(rec.items)) return rec.items as CustomFieldDefLite[];
+  }
+  return [];
+}
+
 function parseOptions(
   raw: unknown,
 ): Array<{ value: string; label: string }> | undefined {
@@ -40,13 +52,15 @@ function mapDataType(dataType: string): string {
   if (t === "number" || t === "currency") return "number";
   if (t === "select" || t === "multi_select") return "select";
   if (t === "textarea") return "textarea";
+  if (t === "date") return "date";
+  if (t === "datetime") return "datetime";
   return "text";
 }
 
 export function customFieldDefsToMeta(
-  defs: CustomFieldDefLite[],
+  defs: CustomFieldDefLite[] | unknown,
 ): MetaFieldDef[] {
-  return defs.map((d) => ({
+  return normalizeCustomFieldDefs(defs).map((d) => ({
     key: d.fieldKey,
     label: d.label,
     type: mapDataType(d.dataType),
@@ -59,11 +73,11 @@ export function customFieldDefsToMeta(
 /** Profile extras + Settings → Custom fields (product), no duplicate keys. */
 export function mergeProductFormFields(
   itemMeta: MetaFieldDef[],
-  custom: CustomFieldDefLite[] | undefined,
+  custom: CustomFieldDefLite[] | unknown,
 ): MetaFieldDef[] {
   const skip = new Set(["taxRatePercent"]);
   const seen = new Set(itemMeta.map((f) => f.key));
-  const extra = customFieldDefsToMeta(custom ?? []).filter((f) => {
+  const extra = customFieldDefsToMeta(custom).filter((f) => {
     if (!f.key || skip.has(f.key) || seen.has(f.key)) return false;
     seen.add(f.key);
     return true;

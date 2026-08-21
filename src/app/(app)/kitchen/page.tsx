@@ -1,90 +1,55 @@
 "use client";
 
-import { useMemo } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ordersApi } from "@/lib/api";
+import { restaurantApi } from "@/lib/api";
 import { useBootstrap } from "@/lib/bootstrap";
 import { cn } from "@/lib/utils";
+import { PageHeader } from "@/components/page-header";
+import { Button } from "@/components/ui/button";
 
-const KITCHEN_STEPS = [
-  "KOT_CREATED",
-  "KOT_SENT",
-  "PREPARING",
-  "READY",
-  "SERVED",
-  "CANCELLED",
+const STEPS = [
+  "new",
+  "accepted",
+  "preparing",
+  "ready",
+  "served",
+  "cancelled",
 ] as const;
 
-type KitchenStep = (typeof KITCHEN_STEPS)[number];
+const AGING: Record<string, string> = {
+  waiting: "bg-[#dbeafe] text-[#1e40af]",
+  delayed: "bg-[#fef3c7] text-[#92400e]",
+  critical: "bg-[#fee2e2] text-[#991b1b]",
+};
 
 export default function KitchenPage() {
   const qc = useQueryClient();
   const { hasCapability } = useBootstrap();
+  const allowed = hasCapability("KOT") || hasCapability("KITCHEN") || hasCapability("KDS");
+  const [cancelId, setCancelId] = useState<string | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
 
-  const allowed = hasCapability("KOT") || hasCapability("KITCHEN");
-
-  const orders = useQuery({
-    queryKey: ["kitchen-orders"],
-    queryFn: () => ordersApi.list({ kind: "sale", limit: 80 }),
+  const kots = useQuery({
+    queryKey: ["restaurant-kots"],
+    queryFn: () => restaurantApi.kots(),
     enabled: allowed,
-    refetchInterval: 15000,
+    refetchInterval: 8_000,
   });
 
-  const items = useMemo(() => {
-    const raw = orders.data?.items ?? [];
-    return raw
-      .filter((o) => {
-        const meta = (o.meta ?? {}) as Record<string, unknown>;
-        return (
-          meta.tableId != null ||
-          meta.orderType != null ||
-          meta.kitchenStatus != null
-        );
-      })
-      .map((o) => {
-        const meta = (o.meta ?? {}) as Record<string, unknown>;
-        return {
-          ...o,
-          kitchenStatus: String(meta.kitchenStatus ?? "KOT_CREATED"),
-          orderType: String(meta.orderType ?? "walk_in"),
-          tableId: meta.tableId ? String(meta.tableId) : null,
-          covers:
-            typeof meta.covers === "number"
-              ? meta.covers
-              : Number(meta.covers ?? 0) || null,
-          note: typeof meta.note === "string" ? meta.note : null,
-        };
-      })
-      .sort((a, b) => {
-        const ai = KITCHEN_STEPS.indexOf(a.kitchenStatus as KitchenStep);
-        const bi = KITCHEN_STEPS.indexOf(b.kitchenStatus as KitchenStep);
-        return (ai === -1 ? 0 : ai) - (bi === -1 ? 0 : bi);
-      });
-  }, [orders.data]);
-
-  const setKitchenStatus = useMutation({
-    mutationFn: ({
-      orderId,
-      next,
-      existingMeta,
-    }: {
-      orderId: string;
-      next: KitchenStep;
-      existingMeta: Record<string, unknown>;
-    }) =>
-      ordersApi.update(orderId, {
-        meta: {
-          ...existingMeta,
-          kitchenStatus: next,
-          servedAt: next === "SERVED" ? new Date().toISOString() : existingMeta.servedAt,
-        },
+  const setStatus = useMutation({
+    mutationFn: (opts: { id: string; status: string; cancelReason?: string }) =>
+      restaurantApi.updateKot(opts.id, {
+        status: opts.status,
+        cancelReason: opts.cancelReason,
       }),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["kitchen-orders"] });
+      setCancelId(null);
+      setCancelReason("");
+      void qc.invalidateQueries({ queryKey: ["restaurant-kots"] });
     },
-    onError: (e) =>
-      toast.error(e instanceof Error ? e.message : "Could not update order"),
+    onError: (e: Error) => toast.error(e.message),
   });
 
   if (!allowed) {
@@ -92,100 +57,179 @@ export default function KitchenPage() {
       <div className="p-6">
         <h1 className="text-xl font-semibold text-[#0b1f33]">Kitchen</h1>
         <p className="mt-2 text-sm text-[#5a6b7d]">
-          Enable kitchen tickets in Commerce modes &amp; features to use this queue.
+          Enable KOT in Capabilities. This screen is off for retail, rental, and
+          service shops that do not use kitchen tickets.
         </p>
       </div>
     );
   }
 
+  const items = kots.data ?? [];
+
   return (
     <div className="space-y-6 p-6">
-      <div>
-        <p className="text-sm uppercase tracking-[0.18em] text-[#5a6b7d]">
-          Kitchen / prep queue
-        </p>
-        <h1 className="mt-2 text-2xl font-semibold text-[#0b1f33]">
-          Kitchen display
-        </h1>
-        <p className="mt-1 text-sm text-[#5a6b7d]">
-          Generic preparation queue for any business that uses resources, prep
-          stations, or table/order workflows.
-        </p>
-      </div>
+      <PageHeader
+        eyebrow="Kitchen"
+        title="Kitchen display"
+        subtitle="KOT status only. Tickets are never deleted. Inventory is not deducted here."
+      />
 
-      {!orders.isLoading && !items.length ? (
+      {!kots.isLoading && !items.length ? (
         <div className="rounded-xl border border-[#d9e0ea] bg-white p-8 text-center text-sm text-[#5a6b7d]">
-          No kitchen / prep orders right now.
+          No kitchen tickets. Open a dining order, add items, then Send KOT.
+        </div>
+      ) : hasCapability("KDS") ? (
+        <div className="grid gap-4 md:grid-cols-3">
+          {(["new", "preparing", "ready"] as const).map((col) => (
+            <section key={col} className="rounded-xl border border-[#e2e8f0] bg-[#f8fafc] p-3">
+              <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#8b9bb0]">
+                {col}
+              </h2>
+              <div className="space-y-3">
+                {items
+                  .filter((o) =>
+                    col === "preparing"
+                      ? o.status === "accepted" || o.status === "preparing"
+                      : o.status === col,
+                  )
+                  .map((o) => (
+                    <div key={o.id} className="rounded-xl border border-[#d9e0ea] bg-white p-3">
+                      <p className="text-sm font-semibold">
+                        {o.kotNumber}
+                        {o.tableName ? ` · ${o.tableName}` : ""}
+                      </p>
+                      <p className="text-xs text-[#5a6b7d]">
+                        {o.stationName ?? "Unassigned"} · {o.aging}
+                      </p>
+                      <ul className="mt-2 text-sm">
+                        {o.lines.map((l) => (
+                          <li key={l.id}>
+                            {l.quantity} × {l.name}
+                          </li>
+                        ))}
+                      </ul>
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {STEPS.filter((s) => s !== "cancelled").map((step) => (
+                          <Button
+                            key={step}
+                            variant="secondary"
+                            className="h-7 px-2 text-[0.65rem]"
+                            disabled={setStatus.isPending}
+                            onClick={() =>
+                              setStatus.mutate({ id: o.id, status: step })
+                            }
+                          >
+                            {step}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </section>
+          ))}
         </div>
       ) : (
         <div className="grid gap-4 xl:grid-cols-2">
-          {items.map((o) => {
-            const meta = (o.meta ?? {}) as Record<string, unknown>;
-            return (
-              <section
-                key={o.id}
-                className="rounded-2xl border border-[#d9e0ea] bg-white p-4 shadow-sm"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-[#0b1f33]">
+          {items.map((o) => (
+            <section
+              key={o.id}
+              className="rounded-2xl border border-[#d9e0ea] bg-white p-4 shadow-sm"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-[#0b1f33]">
+                    {o.kotNumber}
+                    <span className="ml-2 text-xs font-medium text-[#5a6b7d]">
                       {o.orderNumber}
-                    </p>
-                    <p className="mt-1 text-xs text-[#5a6b7d]">
-                      {o.orderType.replaceAll("_", " ")}
-                      {o.tableId ? ` · table ${o.tableId}` : ""}
-                      {o.covers ? ` · ${o.covers} covers` : ""}
-                    </p>
-                  </div>
-                  <span className="rounded-full bg-[#eff6ff] px-2.5 py-1 text-[0.7rem] font-semibold text-[#1a56db]">
-                    {o.kitchenStatus}
-                  </span>
-                </div>
-
-                <div className="mt-3 rounded-xl bg-[#f8fafc] p-3">
-                  <p className="text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-[#8b9bb0]">
-                    Items
+                    </span>
                   </p>
-                  <p className="mt-1 text-sm text-[#0b1f33]">
-                    {o.productSummary || (o.productNames ?? []).join(", ") || "Order items"}
+                  <p className="mt-1 text-xs text-[#5a6b7d]">
+                    {o.diningMode.replaceAll("_", " ")}
+                    {o.tableName ? ` · ${o.tableName}` : ""}
+                    {o.stationName ? ` · ${o.stationName}` : ""}
                   </p>
-                  {typeof meta.note === "string" && meta.note.trim() ? (
-                    <p className="mt-2 text-xs text-[#5a6b7d]">
-                      Note: {meta.note}
-                    </p>
-                  ) : null}
                 </div>
+                <span
+                  className={cn(
+                    "rounded-full px-2.5 py-1 text-[0.7rem] font-semibold",
+                    AGING[o.aging] ?? AGING.waiting,
+                  )}
+                >
+                  {o.aging}
+                </span>
+              </div>
 
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {KITCHEN_STEPS.map((step) => {
-                    const active = o.kitchenStatus === step;
-                    return (
-                      <button
-                        key={step}
-                        type="button"
-                        disabled={active || setKitchenStatus.isPending}
-                        onClick={() =>
-                          setKitchenStatus.mutate({
-                            orderId: o.id,
-                            next: step,
-                            existingMeta: meta,
-                          })
+              <ul className="mt-3 space-y-1 rounded-xl bg-[#f8fafc] p-3 text-sm text-[#0b1f33]">
+                {o.lines.map((line) => (
+                  <li key={line.id}>
+                    {line.quantity} × {line.name}
+                    {line.notes ? (
+                      <span className="text-xs text-[#5a6b7d]"> — {line.notes}</span>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+              {o.specialInstructions ? (
+                <p className="mt-2 text-xs text-[#5a6b7d]">
+                  Note: {o.specialInstructions}
+                </p>
+              ) : null}
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                {STEPS.map((step) => {
+                  const active = o.status === step;
+                  return (
+                    <button
+                      key={step}
+                      type="button"
+                      disabled={active || setStatus.isPending}
+                      onClick={() => {
+                        if (step === "cancelled") {
+                          setCancelId(o.id);
+                          return;
                         }
-                        className={cn(
-                          "rounded-lg border px-3 py-1.5 text-xs font-semibold transition",
-                          active
-                            ? "border-[#1a56db] bg-[#eff6ff] text-[#1a56db]"
-                            : "border-[#d9e0ea] bg-white text-[#5a6b7d] hover:bg-[#f8fafc]",
-                        )}
-                      >
-                        {step.replaceAll("_", " ")}
-                      </button>
-                    );
-                  })}
+                        setStatus.mutate({ id: o.id, status: step });
+                      }}
+                      className={cn(
+                        "rounded-lg border px-3 py-1.5 text-xs font-semibold transition",
+                        active
+                          ? "border-[#1a56db] bg-[#eff6ff] text-[#1a56db]"
+                          : "border-[#d9e0ea] bg-white text-[#5a6b7d] hover:bg-[#f8fafc]",
+                      )}
+                    >
+                      {step}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {cancelId === o.id ? (
+                <div className="mt-3 flex gap-2">
+                  <input
+                    className="h-9 flex-1 rounded-md border border-[#d9e0ea] px-2 text-sm"
+                    placeholder="Cancel reason (required)"
+                    value={cancelReason}
+                    onChange={(e) => setCancelReason(e.target.value)}
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={!cancelReason.trim()}
+                    onClick={() =>
+                      setStatus.mutate({
+                        id: o.id,
+                        status: "cancelled",
+                        cancelReason: cancelReason.trim(),
+                      })
+                    }
+                  >
+                    Confirm cancel
+                  </Button>
                 </div>
-              </section>
-            );
-          })}
+              ) : null}
+            </section>
+          ))}
         </div>
       )}
     </div>

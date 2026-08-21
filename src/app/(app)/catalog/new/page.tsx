@@ -28,6 +28,7 @@ import {
 
 import { activeUnitOptions } from "@/lib/measure-units";
 import { mergeProductFormFields } from "@/lib/product-form-fields";
+import { CustomFieldsSection } from "@/components/custom-field-inputs";
 
 const KINDS: { id: CatalogProductKind; label: string }[] = [
   { id: "physical", label: "Physical" },
@@ -646,94 +647,15 @@ export default function NewCatalogProductPage() {
           ))}
         </div>
 
-        {productFormFields.length ? (
-          <div className="space-y-3">
-            <p className="text-sm text-[#5a6b7d]">
-              Extra questions for this item. Add more under Settings → Custom
-              fields (Product).
-            </p>
-            <div className="grid gap-3 sm:grid-cols-2">
-              {productFormFields.map((field) => (
-                <div
-                  key={field.key}
-                  className={
-                    field.type === "text" || field.type === "textarea"
-                      ? "sm:col-span-2"
-                      : undefined
-                  }
-                >
-                  <Label>
-                    {field.label}
-                    {field.required ? " *" : ""}
-                  </Label>
-                  {field.type === "select" && field.options?.length ? (
-                    <select
-                      className={fieldSelect}
-                      value={extraFields[field.key] ?? ""}
-                      onChange={(e) =>
-                        setExtraFields((prev) => ({
-                          ...prev,
-                          [field.key]: e.target.value,
-                        }))
-                      }
-                    >
-                      <option value="">Select</option>
-                      {field.options.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
-                  ) : field.type === "number" ? (
-                    <Input
-                      className="mt-1"
-                      type="number"
-                      value={extraFields[field.key] ?? ""}
-                      onChange={(e) =>
-                        setExtraFields((prev) => ({
-                          ...prev,
-                          [field.key]: e.target.value,
-                        }))
-                      }
-                      placeholder={field.hint}
-                    />
-                  ) : field.type === "text" || field.type === "textarea" ? (
-                    <textarea
-                      className={textareaClass}
-                      value={extraFields[field.key] ?? ""}
-                      onChange={(e) =>
-                        setExtraFields((prev) => ({
-                          ...prev,
-                          [field.key]: e.target.value,
-                        }))
-                      }
-                      placeholder={field.hint}
-                    />
-                  ) : (
-                    <Input
-                      className="mt-1"
-                      value={extraFields[field.key] ?? ""}
-                      onChange={(e) =>
-                        setExtraFields((prev) => ({
-                          ...prev,
-                          [field.key]: e.target.value,
-                        }))
-                      }
-                      placeholder={field.hint}
-                    />
-                  )}
-                  {field.hint &&
-                  field.type !== "text" &&
-                  field.type !== "textarea" ? (
-                    <p className="mt-1 text-[0.7rem] leading-snug text-[#6b7280]">
-                      {field.hint}
-                    </p>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
+        <CustomFieldsSection
+          hint="These boxes come from Settings → Custom fields (choose Product). They save with the item."
+          fields={productFormFields}
+          loading={customFieldsQ.isLoading}
+          values={extraFields}
+          onChange={(key, value) =>
+            setExtraFields((prev) => ({ ...prev, [key]: value }))
+          }
+        />
 
         <Button
           disabled={!form.name.trim() || save.isPending}

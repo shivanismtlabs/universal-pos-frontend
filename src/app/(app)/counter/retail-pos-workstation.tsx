@@ -17,7 +17,6 @@ import { Label } from "@/components/ui/label";
 import { ReceiptModal, type ReceiptData } from "@/components/receipt-modal";
 import { StripeCheckoutModal } from "@/components/stripe-checkout-modal";
 import { ProductThumb } from "@/components/product-thumb";
-import { ImageLightbox } from "@/components/image-lightbox";
 import { CustomerPicker } from "@/components/customer-picker";
 import { StationPinLock } from "@/components/station-pin-lock";
 import { BarcodeScanInput } from "@/components/barcode-scan-input";
@@ -72,6 +71,7 @@ type CartLine = {
   requiresSerial?: boolean;
   serialNumber?: string;
   kind?: string | null;
+  modifiers?: string[];
 };
 
 type PayMethod =
@@ -164,7 +164,7 @@ export default function RetailPosWorkstation({
   const [scan, setScan] = useState("");
   const [filter, setFilter] = useState("");
   const [catalogPage, setCatalogPage] = useState(1);
-  const pageSize = compact ? 24 : 40;
+  const pageSize = compact ? 16 : 20;
   const [lowStockOnly, setLowStockOnly] = useState(false);
   const [category, setCategory] = useState<string>("all");
   const [customerId, setCustomerId] = useState("");
@@ -215,6 +215,11 @@ export default function RetailPosWorkstation({
   } | null>(null);
   const [sendReceipt, setSendReceipt] = useState(false);
   const [orderType, setOrderType] = useState("walk_in");
+  const [modPick, setModPick] = useState<{
+    row: Parameters<typeof upsertLine>[0];
+    groups: NonNullable<Parameters<typeof upsertLine>[0]["modifierGroups"]>;
+    selected: string[];
+  } | null>(null);
   const [resourceId, setResourceId] = useState("");
   const [guestCount, setGuestCount] = useState("1");
   const [orderNote, setOrderNote] = useState("");
@@ -224,11 +229,6 @@ export default function RetailPosWorkstation({
   const [online, setOnline] = useState(true);
   const chargeLock = useRef(false);
   const [stripeBusy, setStripeBusy] = useState(false);
-  const [lightbox, setLightbox] = useState<{
-    images: string[];
-    index: number;
-    label: string;
-  } | null>(null);
   const [stripeCheckout, setStripeCheckout] = useState<{
     orderId: string;
     orderNumber: string;
@@ -331,7 +331,8 @@ export default function RetailPosWorkstation({
         maxQty: lowStockOnly ? 5 : undefined,
       }),
     enabled: Boolean(locationId),
-    refetchInterval: 30_000,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
     placeholderData: (prev) => prev,
   });
 
@@ -533,14 +534,31 @@ export default function RetailPosWorkstation({
     }>;
     requiresSerial?: boolean;
     kind?: string | null;
+    soldOut?: boolean;
+    recipeTracked?: boolean;
+    channelPrices?: {
+      dine_in?: number;
+      takeaway?: number;
+      delivery?: number;
+      online?: number;
+    };
+    modifierGroups?: Array<{
+      id?: string;
+      name: string;
+      minSelect?: number;
+      maxSelect?: number;
+      required?: boolean;
+      options: Array<{ id?: string; name: string; priceDelta?: number }>;
+    }>;
+    modifiers?: string[];
+    skipModifierPrompt?: boolean;
   }) {
-    const price = moneyNumber(row.sellPrice);
     const image =
       row.image ?? row.photoUrl ?? row.images?.[0] ?? null;
     const unit = normalizeSellUnit(row.sellUnit);
     const step = qtyStep(unit);
     const onHand = Number(row.qtyOnHand);
-    const tracks = row.trackQty !== false;
+    const tracks = row.trackQty !== false && row.recipeTracked !== true;
     const taxRatePercent =
       row.taxRatePercent != null &&
       Number.isFinite(row.taxRatePercent) &&
@@ -548,8 +566,41 @@ export default function RetailPosWorkstation({
       row.taxRatePercent <= 28
         ? row.taxRatePercent
         : null;
+    if (row.soldOut) {
+      toast.error("86 / sold out");
+      return;
+    }
+    const groups = row.modifierGroups?.filter((g) => g.options?.length) ?? [];
+    if (groups.length && !row.skipModifierPrompt && !row.modifiers?.length) {
+      setModPick({ row, groups, selected: [] });
+      return;
+    }
+    const channelKey =
+      orderType === "dine_in" ||
+      orderType === "takeaway" ||
+      orderType === "delivery" ||
+      orderType === "online"
+        ? orderType
+        : null;
+    const channelPrice = channelKey
+      ? Number(row.channelPrices?.[channelKey])
+      : NaN;
+    const price =
+      Number.isFinite(channelPrice) && channelPrice > 0
+        ? channelPrice
+        : moneyNumber(row.sellPrice) +
+          (row.modifiers?.length
+            ? groups
+                .flatMap((g) => g.options)
+                .filter((o) => row.modifiers?.includes(o.name))
+                .reduce((s, o) => s + Number(o.priceDelta ?? 0), 0)
+            : 0);
     setCart((prev) => {
-      const existing = prev.find((l) => l.stockLevelId === row.id);
+      const modKey = (row.modifiers ?? []).join("|");
+      const existing = prev.find(
+        (l) =>
+          l.stockLevelId === row.id && (l.modifiers ?? []).join("|") === modKey,
+      );
       if (existing) {
         const next = normalizeQty(existing.qty + step, unit);
         if (tracks && next > onHand + 1e-9) {
@@ -570,9 +621,10 @@ export default function RetailPosWorkstation({
                 variantOptions: row.variantOptions ?? [],
                 requiresBatch: row.requiresBatch === true,
                 batchOptions: row.batchOptions ?? [],
-                requiresSerial: row.requiresSerial === true,
-                kind: row.kind ?? l.kind,
-              }
+          requiresSerial: row.requiresSerial === true,
+          kind: row.kind ?? l.kind,
+          modifiers: row.modifiers ?? l.modifiers,
+        }
             : l,
         );
       }
@@ -609,6 +661,7 @@ export default function RetailPosWorkstation({
               ? row.batchOptions[0].id
               : undefined,
           kind: row.kind ?? null,
+          modifiers: row.modifiers,
         },
       ];
     });
@@ -819,6 +872,7 @@ export default function RetailPosWorkstation({
           ...(l.serialNumber?.trim()
             ? { serialNumber: l.serialNumber.trim() }
             : {}),
+          ...(l.modifiers?.length ? { modifiers: l.modifiers } : {}),
         })),
         ...(discountNum > 0 ? { discountAmount: discountNum } : {}),
         ...(couponApplied
@@ -1081,6 +1135,7 @@ export default function RetailPosWorkstation({
             ...(l.serialNumber?.trim()
               ? { serialNumber: l.serialNumber.trim() }
               : {}),
+            ...(l.modifiers?.length ? { modifiers: l.modifiers } : {}),
           })),
           ...(discountNum > 0 ? { discountAmount: discountNum } : {}),
           ...(orderNote.trim() ? { note: orderNote.trim() } : {}),
@@ -1145,6 +1200,7 @@ export default function RetailPosWorkstation({
           ...(l.serialNumber?.trim()
             ? { serialNumber: l.serialNumber.trim() }
             : {}),
+          ...(l.modifiers?.length ? { modifiers: l.modifiers } : {}),
         })),
         ...(discountNum > 0 ? { discountAmount: discountNum } : {}),
         label: parkLabel.trim() || undefined,
@@ -1231,29 +1287,20 @@ export default function RetailPosWorkstation({
         onUnlocked={() => setManualPinSwitch(false)}
       />
       {!compact ? (
-        <header className="mb-4 flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <p className="text-[0.75rem] font-medium text-[#5a6b7d]">
-                Counter
-              </p>
-              {registerSession ? (
-                <span className="rounded-md bg-[#ecfdf5] px-2 py-0.5 text-[0.62rem] font-bold text-[#166534] uppercase">
-                  Register open
-                </span>
-              ) : (
-                <span className="rounded-md bg-[#fff7ed] px-2 py-0.5 text-[0.62rem] font-bold text-[#9a3412] uppercase">
-                  Register closed
-                </span>
-              )}
-            </div>
-            <h1 className="mt-1 text-xl font-bold tracking-tight text-[#0b1f33] sm:text-2xl">
-              {productName}
+        <header className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-base font-bold tracking-tight text-[#0b1f33]">
+              Counter
             </h1>
-            <p className="mt-1 text-sm text-[#5a6b7d]">
-              Tap a product, then charge. Open the register at shift start; close
-              it when you count the drawer.
-            </p>
+            {registerSession ? (
+              <span className="rounded-md bg-[#ecfdf5] px-2 py-0.5 text-[0.62rem] font-bold text-[#166534] uppercase">
+                Register open
+              </span>
+            ) : (
+              <span className="rounded-md bg-[#fff7ed] px-2 py-0.5 text-[0.62rem] font-bold text-[#9a3412] uppercase">
+                Register closed
+              </span>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {canApproveRefund(roles) ? (
@@ -1338,12 +1385,12 @@ export default function RetailPosWorkstation({
       ) : null}
 
       {!online ? (
-        <div className="mb-3 rounded-xl border border-[#f5c2c2] bg-[#fff6f6] px-3 py-2 text-sm text-[#a01818]">
+        <div className="mb-3 shrink-0 rounded-xl border border-[#f5c2c2] bg-[#fff6f6] px-3 py-2 text-sm text-[#a01818]">
           Offline — Sale counter needs internet to charge. Reconnect, then try
           again.
         </div>
       ) : offlinePending > 0 ? (
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#c9d7f5] bg-[#e8eefb] px-3 py-2 text-sm text-[#1341a8]">
+        <div className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-[#c9d7f5] bg-[#e8eefb] px-3 py-2 text-sm text-[#1341a8]">
           <span>
             Online — {offlinePending} queued offline event(s) waiting to sync
           </span>
@@ -1363,24 +1410,26 @@ export default function RetailPosWorkstation({
       ) : null}
 
       {!compact && !registerSession ? (
-        <div className="mb-3 rounded-xl border border-[#fdba74] bg-[#fff7ed] px-3 py-2 text-sm text-[#9a3412]">
-          <strong className="font-semibold">Open register</strong> starts your
-          shift with a cash float. Charging stays locked until the drawer is
-          open. <strong className="font-semibold">Close register</strong> ends
-          the shift and compares counted cash to expected sales.
-        </div>
+        <p className="mb-2 shrink-0 text-[0.75rem] text-[#9a3412]">
+          Open the register before charging. Close it when you count the drawer.
+        </p>
       ) : null}
 
       <div
         className={cn(
-          "grid gap-4",
+          "grid items-start gap-4",
           compact
             ? "xl:grid-cols-[minmax(0,1.25fr)_minmax(20rem,0.85fr)]"
             : "lg:grid-cols-[minmax(0,1.4fr)_minmax(20rem,0.72fr)]",
         )}
       >
-        <section className="flex min-h-0 flex-col overflow-hidden rounded-[16px] border border-[#d9e0ea] bg-white shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
-          <div className="space-y-3 border-b border-[#e8edf4] bg-[#f8fafc] p-3.5 sm:p-4">
+        <section
+          className={cn(
+            "flex min-h-0 flex-col overflow-hidden rounded-[16px] border border-[#d9e0ea] bg-white shadow-[0_1px_2px_rgba(11,31,51,0.04)]",
+            compact ? "" : "h-0 min-h-full",
+          )}
+        >
+          <div className="shrink-0 space-y-2.5 border-b border-[#e8edf4] bg-[#f8fafc] p-3">
             <BarcodeScanInput
               value={scan}
               onChange={setScan}
@@ -1475,30 +1524,24 @@ export default function RetailPosWorkstation({
 
           <div
             className={cn(
-              "flex-1 overflow-y-auto border-t border-[#eef2f8] bg-[#f4f6f9]",
-              compact
-                ? "max-h-[24rem]"
-                : "max-h-[calc(100vh-8.5rem)]",
+              "min-h-0 overflow-y-auto bg-[#eef1f5]",
+              compact ? "max-h-[24rem]" : "flex-1",
             )}
           >
             <ul
               className={cn(
-                "grid gap-2 p-2.5 sm:p-3",
+                "grid content-start gap-2 p-2.5 sm:p-3",
                 compact
                   ? "grid-cols-2 sm:grid-cols-3"
                   : "grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5",
               )}
             >
               {items.map((row) => {
-                const gallery =
-                  row.images?.length
-                    ? row.images
-                    : ([row.image ?? row.photoUrl].filter(Boolean) as string[]);
-                const src = gallery[0] ?? row.image ?? row.photoUrl;
+                const src = row.image ?? row.photoUrl;
                 const inCart = cart.find((l) => l.stockLevelId === row.id);
                 const cartQty = inCart?.qty ?? 0;
                 const available =
-                  row.trackQty !== false
+                  row.trackQty !== false && !row.recipeTracked
                     ? Math.max(0, Number(row.qtyOnHand) - cartQty)
                     : 999;
                 const kindLabel = productKindLabel(row.kind);
@@ -1509,35 +1552,27 @@ export default function RetailPosWorkstation({
                   qtyLeftLabel: formatQtyWithUnit(available, row.sellUnit),
                 });
                 return (
-                  <li key={row.id} className="min-w-0">
+                  <li
+                    key={row.id}
+                    className="min-w-0 [content-visibility:auto] [contain-intrinsic-size:220px]"
+                  >
                     <button
                       type="button"
                       onClick={() => upsertLine(row)}
                       className={cn(
-                        "flex h-full w-full flex-col overflow-hidden rounded-xl border bg-white text-left shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition",
+                        "flex w-full flex-col overflow-hidden rounded-xl border bg-white text-left shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition",
                         inCart
                           ? "border-[#1a56db] ring-1 ring-[#1a56db]/25"
                           : "border-[#e2e8f0] hover:border-[#cbd5e1] hover:shadow-[0_2px_8px_rgba(15,23,42,0.06)]",
                       )}
                     >
-                      <div className="relative aspect-[4/3] w-full overflow-hidden bg-[#eef2f7]">
+                      <div className="relative aspect-[4/3] w-full shrink-0 overflow-hidden bg-[#eef2f7]">
                         <div className="absolute inset-0">
                           <ProductThumb
                             src={src}
                             label={row.name}
                             size="fill"
                             className="h-full w-full rounded-none border-0 shadow-none"
-                            count={gallery.length}
-                            onClick={
-                              gallery.length
-                                ? () =>
-                                    setLightbox({
-                                      images: gallery,
-                                      index: 0,
-                                      label: row.name,
-                                    })
-                                : undefined
-                            }
                           />
                         </div>
                         <span
@@ -1553,7 +1588,7 @@ export default function RetailPosWorkstation({
                           {stock.label}
                         </span>
                       </div>
-                      <div className="flex min-h-0 flex-1 flex-col gap-1 p-2.5">
+                      <div className="flex flex-col gap-1 p-2.5">
                         <p className="line-clamp-2 text-[0.8rem] leading-snug font-semibold text-[#0b1f33]">
                           {row.name}
                         </p>
@@ -1564,7 +1599,7 @@ export default function RetailPosWorkstation({
                             : ""}
                           {kindLabel ? ` · ${kindLabel}` : ""}
                         </p>
-                        <div className="mt-auto flex items-center justify-between gap-2 pt-1">
+                        <div className="flex items-center justify-between gap-2 pt-1">
                           <p className="text-[0.9rem] font-extrabold tabular-nums text-[#0b1f33]">
                             {money(row.sellPrice)}
                           </p>
@@ -1601,48 +1636,48 @@ export default function RetailPosWorkstation({
                 </li>
               ) : null}
             </ul>
-            {catalogTotalPages > 1 ? (
-              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#eef2f8] bg-[#fafbfc] px-3 py-2.5">
-                <p className="text-[0.75rem] text-[#5a6b7d]">
-                  Page {catalogPage} of {catalogTotalPages}
-                  <span className="text-[#8b9bb0]">
-                    {" "}
-                    · {catalogTotal} in this list
-                  </span>
-                </p>
-                <div className="flex items-center gap-1">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    disabled={catalogPage <= 1 || catalog.isFetching}
-                    onClick={() => setCatalogPage((p) => Math.max(1, p - 1))}
-                  >
-                    Prev
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    disabled={
-                      catalogPage >= catalogTotalPages || catalog.isFetching
-                    }
-                    onClick={() =>
-                      setCatalogPage((p) =>
-                        Math.min(catalogTotalPages, p + 1),
-                      )
-                    }
-                  >
-                    Next
-                  </Button>
-                </div>
-              </div>
-            ) : catalogTotal > 0 ? (
-              <p className="border-t border-[#eef2f8] px-3 py-2 text-[0.72rem] text-[#8b9bb0]">
-                {catalogTotal} product{catalogTotal === 1 ? "" : "s"} shown
-              </p>
-            ) : null}
           </div>
+          {catalogTotalPages > 1 ? (
+            <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-[#eef2f8] bg-white px-3 py-2">
+              <p className="text-[0.75rem] text-[#5a6b7d]">
+                Page {catalogPage} of {catalogTotalPages}
+                <span className="text-[#8b9bb0]">
+                  {" "}
+                  · {catalogTotal} in this list
+                </span>
+              </p>
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  disabled={catalogPage <= 1 || catalog.isFetching}
+                  onClick={() => setCatalogPage((p) => Math.max(1, p - 1))}
+                >
+                  Prev
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  disabled={
+                    catalogPage >= catalogTotalPages || catalog.isFetching
+                  }
+                  onClick={() =>
+                    setCatalogPage((p) =>
+                      Math.min(catalogTotalPages, p + 1),
+                    )
+                  }
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          ) : catalogTotal > 0 ? (
+            <p className="shrink-0 border-t border-[#eef2f8] bg-white px-3 py-2 text-[0.72rem] text-[#8b9bb0]">
+              {catalogTotal} product{catalogTotal === 1 ? "" : "s"} shown
+            </p>
+          ) : null}
         </section>
 
         <aside className="flex min-h-0 flex-col self-start overflow-hidden rounded-[16px] border border-[#d9e0ea] bg-white shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
@@ -2866,6 +2901,77 @@ export default function RetailPosWorkstation({
         />
       ) : null}
 
+      {modPick ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-[#0b1f33]/40 p-4">
+          <div className="w-full max-w-md rounded-xl border border-[#e2e8f0] bg-white p-4 shadow-lg">
+            <h3 className="text-sm font-semibold text-[#0b1f33]">
+              Modifiers · {modPick.row.name}
+            </h3>
+            <div className="mt-3 max-h-72 space-y-3 overflow-auto">
+              {modPick.groups.map((g) => (
+                <div key={g.id ?? g.name}>
+                  <p className="text-[0.7rem] font-semibold uppercase tracking-wide text-[#8b9bb0]">
+                    {g.name}
+                    {g.required ? " · required" : ""}
+                  </p>
+                  <ul className="mt-1 space-y-1">
+                    {g.options.map((o) => {
+                      const on = modPick.selected.includes(o.name);
+                      return (
+                        <li key={o.id ?? o.name}>
+                          <label className="flex items-center gap-2 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={on}
+                              onChange={() =>
+                                setModPick((cur) =>
+                                  cur
+                                    ? {
+                                        ...cur,
+                                        selected: on
+                                          ? cur.selected.filter((n) => n !== o.name)
+                                          : [...cur.selected, o.name],
+                                      }
+                                    : cur,
+                                )
+                              }
+                            />
+                            <span>{o.name}</span>
+                            {Number(o.priceDelta) ? (
+                              <span className="tabular-nums text-[#5a6b7d]">
+                                +{Number(o.priceDelta).toFixed(2)}
+                              </span>
+                            ) : null}
+                          </label>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setModPick(null)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  const row = modPick.row;
+                  setModPick(null);
+                  upsertLine({
+                    ...row,
+                    modifiers: modPick.selected,
+                    skipModifierPrompt: true,
+                  });
+                }}
+              >
+                Add
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {receipt ? (
         <ReceiptModal
           data={receipt.data}
@@ -2874,14 +2980,6 @@ export default function RetailPosWorkstation({
           onClose={() => setReceipt(null)}
         />
       ) : null}
-
-      <ImageLightbox
-        open={Boolean(lightbox)}
-        images={lightbox?.images ?? []}
-        startIndex={lightbox?.index ?? 0}
-        label={lightbox?.label}
-        onClose={() => setLightbox(null)}
-      />
     </div>
   );
 }

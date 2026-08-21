@@ -133,10 +133,17 @@ function emptyProfileExtras() {
 
 const BUSINESS_TYPES = [
   { id: "retail", label: "Retail" },
-  { id: "grocery", label: "Grocery / F&B" },
-  { id: "restaurant", label: "Restaurant / café" },
+  { id: "grocery", label: "Grocery" },
+  { id: "restaurant", label: "Restaurant" },
+  { id: "cafe", label: "Café" },
+  { id: "bakery", label: "Bakery" },
+  { id: "qsr", label: "QSR / fast food" },
+  { id: "cloud_kitchen", label: "Cloud kitchen" },
+  { id: "food_truck", label: "Food truck" },
   { id: "salon", label: "Salon & spa" },
   { id: "service", label: "Service business" },
+  { id: "rental", label: "Rental" },
+  { id: "subscription", label: "Subscription / gym" },
   { id: "other", label: "Other / general" },
 ] as const;
 

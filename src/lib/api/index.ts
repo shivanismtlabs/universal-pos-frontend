@@ -540,6 +540,7 @@ export const customersApi = {
       loyaltyPoints?: number;
       storeCreditBalance?: string | number;
       creditLimit?: number | null;
+      extraFields?: Record<string, unknown>;
       summary?: {
         orderCount: number;
         openDueCount: number;
@@ -1586,6 +1587,403 @@ export const resourcesApi = {
   },
 };
 
+export const restaurantApi = {
+  config() {
+    return apiRequest<{
+      id: string | null;
+      enabledDiningModes: string[];
+      tableManagement: boolean;
+      kotEnabled: boolean;
+      kdsEnabled: boolean;
+      captainOrdering: boolean;
+      qrOrdering: boolean;
+      onlineOrdering: boolean;
+      recipesEnabled: boolean;
+      reservationsEnabled: boolean;
+      tokenManagement: boolean;
+      consumptionPolicy: string;
+      serviceChargePercent: number | null;
+      packagingCharge: number | null;
+      deliveryCharge: number | null;
+      prepWarnMinutes: number;
+      prepCriticalMinutes: number;
+      otpOnQrOrder: boolean;
+      inventoryNote?: string;
+    }>("/restaurant/config", { token: token() });
+  },
+  saveConfig(body: Record<string, unknown>) {
+    return apiRequest("/restaurant/config", {
+      method: "PATCH",
+      body,
+      token: token(),
+    });
+  },
+  floors(locationId?: string) {
+    const q = locationId ? `?locationId=${encodeURIComponent(locationId)}` : "";
+    return apiRequest<
+      Array<{
+        id: string;
+        locationId: string;
+        name: string;
+        sortOrder: number;
+        isActive: boolean;
+        tableCount: number;
+      }>
+    >(`/restaurant/floors${q}`, { token: token() });
+  },
+  createFloor(body: { locationId: string; name: string }) {
+    return apiRequest("/restaurant/floors", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  stations(locationId?: string) {
+    const q = locationId ? `?locationId=${encodeURIComponent(locationId)}` : "";
+    return apiRequest<
+      Array<{ id: string; name: string; code: string; isActive: boolean }>
+    >(`/restaurant/stations${q}`, { token: token() });
+  },
+  createStation(body: { name: string; code: string; locationId?: string }) {
+    return apiRequest("/restaurant/stations", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  tables(locationId?: string) {
+    const q = locationId ? `?locationId=${encodeURIComponent(locationId)}` : "";
+    return apiRequest<
+      Array<{
+        id: string;
+        locationId: string;
+        floorId: string | null;
+        floorName: string | null;
+        name: string;
+        capacity: number;
+        status: string;
+        currentOrderId: string | null;
+        orderNumber: string | null;
+        diningMode: string | null;
+        covers: number | null;
+        guestName: string | null;
+        qrToken?: string | null;
+      }>
+    >(`/restaurant/tables${q}`, { token: token() });
+  },
+  createTable(body: {
+    locationId: string;
+    name: string;
+    capacity?: number;
+    floorId?: string;
+  }) {
+    return apiRequest("/restaurant/tables", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  openTable(
+    id: string,
+    body?: { covers?: number; customerId?: string; guestName?: string },
+  ) {
+    return apiRequest<{ id: string; orderNumber: string }>(
+      `/restaurant/tables/${id}/open`,
+      { method: "POST", body: body ?? {}, token: token() },
+    );
+  },
+  moveTable(id: string, toTableId: string) {
+    return apiRequest(`/restaurant/tables/${id}/move`, {
+      method: "POST",
+      body: { toTableId },
+      token: token(),
+    });
+  },
+  mergeTables(sourceTableId: string, targetTableId: string) {
+    return apiRequest("/restaurant/tables/merge", {
+      method: "POST",
+      body: { sourceTableId, targetTableId },
+      token: token(),
+    });
+  },
+  openOrder(body: {
+    locationId: string;
+    diningMode: string;
+    tableId?: string;
+    covers?: number;
+    guestName?: string;
+  }) {
+    return apiRequest<{ id: string; orderNumber: string }>("/restaurant/orders", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  getOrder(id: string) {
+    return apiRequest<{
+      id: string;
+      orderNumber: string;
+      status: string;
+      items: Array<{
+        id: string;
+        description: string | null;
+        quantity: number;
+        unitPrice: number;
+        lineTotal: number;
+      }>;
+      restaurant: {
+        diningMode: string;
+        tableId: string | null;
+        covers: number;
+        consumptionPosted: boolean;
+      } | null;
+      kots: Array<{ id: string; kotNumber: string; status: string }>;
+    }>(`/restaurant/orders/${id}`, { token: token() });
+  },
+  sendKot(
+    orderId: string,
+    body?: { specialInstructions?: string; stationId?: string },
+  ) {
+    return apiRequest(`/restaurant/orders/${orderId}/kot`, {
+      method: "POST",
+      body: body ?? {},
+      token: token(),
+    });
+  },
+  kots(params?: { locationId?: string; status?: string; stationId?: string }) {
+    const qs = new URLSearchParams();
+    if (params?.locationId) qs.set("locationId", params.locationId);
+    if (params?.status) qs.set("status", params.status);
+    if (params?.stationId) qs.set("stationId", params.stationId);
+    const q = qs.toString();
+    return apiRequest<
+      Array<{
+        id: string;
+        kotNumber: string;
+        orderId: string;
+        orderNumber: string;
+        tableName: string | null;
+        diningMode: string;
+        stationName: string | null;
+        status: string;
+        priority: number;
+        specialInstructions: string | null;
+        createdAt: string;
+        aging: "waiting" | "delayed" | "critical";
+        lines: Array<{
+          id: string;
+          name: string;
+          quantity: number;
+          notes: string | null;
+          modifiers: unknown;
+        }>;
+      }>
+    >(`/restaurant/kots${q ? `?${q}` : ""}`, { token: token() });
+  },
+  updateKot(
+    id: string,
+    body: { status: string; cancelReason?: string },
+  ) {
+    return apiRequest(`/restaurant/kots/${id}`, {
+      method: "PATCH",
+      body,
+      token: token(),
+    });
+  },
+  tokens(locationId?: string) {
+    const q = locationId ? `?locationId=${encodeURIComponent(locationId)}` : "";
+    return apiRequest<
+      Array<{
+        orderId: string;
+        orderNumber: string;
+        tokenNumber: number;
+        diningMode: string;
+        tableName: string | null;
+        guestName: string | null;
+        status: string;
+      }>
+    >(`/restaurant/tokens${q}`, { token: token() });
+  },
+  reservations(locationId?: string) {
+    const q = locationId ? `?locationId=${encodeURIComponent(locationId)}` : "";
+    return apiRequest<
+      Array<{
+        id: string;
+        guestName: string;
+        guestPhone: string | null;
+        covers: number;
+        startAt: string;
+        status: string;
+        table: { id: string; name: string } | null;
+      }>
+    >(`/restaurant/reservations${q}`, { token: token() });
+  },
+  createReservation(body: {
+    locationId: string;
+    tableId?: string;
+    guestName: string;
+    guestPhone?: string;
+    covers?: number;
+    startAt: string;
+    notes?: string;
+  }) {
+    return apiRequest("/restaurant/reservations", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  updateReservation(id: string, body: { status: string }) {
+    return apiRequest(`/restaurant/reservations/${id}`, {
+      method: "PATCH",
+      body,
+      token: token(),
+    });
+  },
+};
+  recipes() {
+    return apiRequest<
+      Array<{
+        productId: string;
+        name: string;
+        skuCode: string;
+        basePrice: number;
+        lines: Array<{
+          id: string;
+          componentProductId: string;
+          name: string;
+          skuCode: string;
+          quantity: number;
+          unit: string;
+          wastagePercent: number;
+        }>;
+        stages: Array<{ id: string; name: string; sortOrder: number }>;
+      }>
+    >("/restaurant/recipes", { token: token() });
+  },
+  saveRecipe(
+    productId: string,
+    lines: Array<{
+      componentProductId: string;
+      quantity?: number;
+      unit?: string;
+      wastagePercent?: number;
+      stageId?: string;
+    }>,
+  ) {
+    return apiRequest(`/restaurant/recipes/${productId}`, {
+      method: "PUT",
+      body: { lines },
+      token: token(),
+    });
+  },
+  foodCost(productId?: string) {
+    const qs = productId ? `?productId=${encodeURIComponent(productId)}` : "";
+    return apiRequest<
+      | {
+          productId: string;
+          name: string;
+          recipeCost: number;
+          foodCostPercent: number | null;
+          marginAmount: number;
+          marginPercent: number | null;
+          lines: Array<{
+            name: string;
+            quantity: number;
+            unitCost?: number;
+            wastagePercent: number;
+          }>;
+        }
+      | Array<{
+          productId: string;
+          name: string;
+          skuCode: string;
+          basePrice: number;
+          recipeCost: number;
+          foodCostPercent: number | null;
+          marginAmount: number;
+          marginPercent: number | null;
+        }>
+    >(`/restaurant/food-cost${qs}`, { token: token() });
+  },
+  modifiers() {
+    return apiRequest<
+      Array<{
+        id: string;
+        name: string;
+        minSelect: number;
+        maxSelect: number;
+        required: boolean;
+        options: Array<{
+          id: string;
+          name: string;
+          priceDelta: number;
+        }>;
+      }>
+    >("/restaurant/modifiers", { token: token() });
+  },
+  createModifierGroup(body: {
+    name: string;
+    minSelect?: number;
+    maxSelect?: number;
+    required?: boolean;
+  }) {
+    return apiRequest("/restaurant/modifiers", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  addModifierOption(
+    groupId: string,
+    body: { name: string; priceDelta?: number; linkedProductId?: string },
+  ) {
+    return apiRequest(`/restaurant/modifiers/${groupId}/options`, {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  attachModifier(productId: string, groupId: string) {
+    return apiRequest(`/restaurant/items/${productId}/modifiers`, {
+      method: "POST",
+      body: { groupId },
+      token: token(),
+    });
+  },
+  wastage(locationId?: string) {
+    const qs = locationId ? `?locationId=${encodeURIComponent(locationId)}` : "";
+    return apiRequest<
+      Array<{
+        id: string;
+        qty: number;
+        unit: string | null;
+        reason: string;
+        notes: string | null;
+        createdAt: string;
+        location: { id: string; name: string };
+        actor: { id: string; name: string } | null;
+        product: { id: string; name?: string; skuCode?: string };
+      }>
+    >(`/restaurant/wastage${qs}`, { token: token() });
+  },
+  recordWastage(body: {
+    locationId: string;
+    productId: string;
+    qty: number;
+    reason: string;
+    notes?: string;
+    unit?: string;
+    stockLevelId?: string;
+  }) {
+    return apiRequest("/restaurant/wastage", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+};
+
 export const jobsApi = {
   listJobs(params?: {
     page?: number;
@@ -2356,6 +2754,26 @@ export const posApi = {
           expiresAt?: string | null;
         }>;
         requiresSerial?: boolean;
+        recipeTracked?: boolean;
+        soldOut?: boolean;
+        channelPrices?: {
+          dine_in?: number;
+          takeaway?: number;
+          delivery?: number;
+          online?: number;
+        };
+        modifierGroups?: Array<{
+          id?: string;
+          name: string;
+          minSelect?: number;
+          maxSelect?: number;
+          required?: boolean;
+          options: Array<{
+            id?: string;
+            name: string;
+            priceDelta?: number;
+          }>;
+        }>;
         location?: { id: string; name: string; code?: string | null };
       }>;
     }>(`/pos/sale/catalog${q ? `?${q}` : ""}`, { token: token() });
@@ -3608,9 +4026,10 @@ export type CustomFieldEntityKey =
   | "customer"
   | "product"
   | "order"
-  | "service_job"
-  | "rental"
-  | "subscription";
+  | "work_job"
+  | "membership"
+  | "employee"
+  | "appointment";
 
 export const customFieldsApi = {
   listDefinitions(entity?: CustomFieldEntityKey) {
@@ -7413,6 +7832,10 @@ export const catalogApi = {
           id: string;
           componentProductId: string;
           quantity: number;
+          consumeOnSale?: boolean;
+          purpose?: string;
+          unit?: string | null;
+          wastagePercent?: number;
           component: { id: string; name: string; skuCode: string };
         }>;
         batches: Array<{
@@ -7624,7 +8047,14 @@ export const catalogApi = {
   },
   setBundleLines(
     productId: string,
-    lines: Array<{ componentProductId: string; quantity?: number }>,
+    lines: Array<{
+      componentProductId: string;
+      quantity?: number;
+      consumeOnSale?: boolean;
+      purpose?: string;
+      unit?: string;
+      wastagePercent?: number;
+    }>,
   ) {
     return apiRequest(`/catalog/products/${productId}/bundle-lines`, {
       method: "PUT",

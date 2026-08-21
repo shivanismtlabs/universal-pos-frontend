@@ -28,7 +28,37 @@ const CAPABILITY_META: Record<
     description: "Show live order status on a kitchen screen.",
     group: "Food & Hospitality",
   },
-  MODIFIER: {
+  RECIPE: {
+    label: "Recipes / ingredients",
+    description: "BOM recipes for menu items (Phase 2).",
+    group: "Food & Hospitality",
+  },
+  QR_ORDER: {
+    label: "QR ordering",
+    description: "Guest scans a table QR to order (Phase 3).",
+    group: "Food & Hospitality",
+  },
+  TOKEN: {
+    label: "Token / QSR",
+    description: "Token numbers for counter queues (Phase 3).",
+    group: "Food & Hospitality",
+  },
+  CAPTAIN: {
+    label: "Captain ordering",
+    description: "Waiter floor orders without finance or stock rights.",
+    group: "Food & Hospitality",
+  },
+  DINING_RESERVATION: {
+    label: "Dining reservations",
+    description: "Book tables without colliding with rental reservations.",
+    group: "Food & Hospitality",
+  },
+  WASTAGE: {
+    label: "Wastage",
+    description: "Spoilage and complimentary write-offs (Phase 2).",
+    group: "Food & Hospitality",
+  },
+  MODIFIERS: {
     label: "Item modifiers",
     description:
       "Attach options like size, extras, or preferences to any product/service.",

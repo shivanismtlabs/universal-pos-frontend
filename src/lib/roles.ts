@@ -15,7 +15,9 @@ export type RoleCode =
   | "cashier"
   | "fitter"
   | "inventory"
-  | "accountant";
+  | "accountant"
+  | "captain"
+  | "kitchen";
 
 export const ALL_ROLES: RoleCode[] = [
   "admin",
@@ -24,13 +26,15 @@ export const ALL_ROLES: RoleCode[] = [
   "fitter",
   "inventory",
   "accountant",
+  "captain",
+  "kitchen",
 ];
 
 /** Route prefixes → roles that may open them */
 export const ROUTE_ROLES: Record<string, RoleCode[]> = {
   "/dashboard": ALL_ROLES,
-  "/counter": ["admin", "manager", "cashier"],
-  "/pos": ["admin", "manager", "cashier"],
+  "/counter": ["admin", "manager", "cashier", "captain"],
+  "/pos": ["admin", "manager", "cashier", "captain"],
   "/returns": ["admin", "manager", "cashier", "inventory", "accountant"],
   "/orders": ["admin", "manager", "cashier", "fitter", "inventory", "accountant"],
   "/appointments": ["admin", "manager", "cashier", "fitter"],
@@ -88,6 +92,15 @@ export const ROUTE_ROLES: Record<string, RoleCode[]> = {
   "/expenses": ["admin", "manager", "accountant", "cashier"],
   "/loyalty": ["admin", "manager"],
   "/plan": ["admin"],
+  "/restaurant": ["admin", "manager", "cashier", "captain"],
+  "/restaurant/tables": ["admin", "manager", "cashier", "captain"],
+  "/restaurant/setup": ["admin", "manager"],
+  "/restaurant/recipes": ["admin", "manager", "inventory", "captain", "kitchen"],
+  "/restaurant/wastage": ["admin", "manager", "inventory"],
+  "/restaurant/food-cost": ["admin", "manager", "accountant"],
+  "/restaurant/reservations": ["admin", "manager", "cashier", "captain"],
+  "/restaurant/tokens": ["admin", "manager", "cashier", "captain", "kitchen"],
+  "/kitchen": ["admin", "manager", "cashier", "captain", "kitchen"],
 };
 
 /** Permission codes that also unlock a route (custom roles). */
@@ -100,6 +113,14 @@ export const ROUTE_PERMISSIONS: Record<string, string[]> = {
   "/attendance": ["attendance.self", "attendance.manage"],
   "/counter": ["pos.checkout"],
   "/pos": ["pos.checkout"],
+  "/restaurant": ["dining.floor"],
+  "/restaurant/tables": ["dining.floor"],
+  "/restaurant/recipes": ["catalog.read", "catalog.write", "kitchen.view"],
+  "/restaurant/wastage": ["inventory.write", "inventory.adjust"],
+  "/restaurant/food-cost": ["catalog.cost.read", "reports.profit.read"],
+  "/restaurant/reservations": ["dining.floor"],
+  "/restaurant/tokens": ["dining.floor", "kitchen.view"],
+  "/kitchen": ["kitchen.view"],
   "/catalog": ["catalog.read", "catalog.write"],
   "/inventory": ["inventory.read", "inventory.write"],
   "/suppliers": ["suppliers.manage"],
@@ -163,6 +184,8 @@ export function defaultHomeForRoles(
   userPerms?: string[] | undefined | null,
 ) {
   if (hasAnyRole(userRoles, ["admin", "manager", "cashier"])) return "/dashboard";
+  if (hasAnyRole(userRoles, ["captain"])) return "/restaurant/tables";
+  if (hasAnyRole(userRoles, ["kitchen"])) return "/kitchen";
   if (hasAnyRole(userRoles, ["accountant"])) return "/accounting";
   if (hasAnyRole(userRoles, ["fitter"])) return "/appointments";
   if (hasAnyRole(userRoles, ["inventory"])) return "/inventory";

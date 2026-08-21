@@ -152,7 +152,7 @@ const BUSINESS_TYPES: Array<{
   {
     id: "restaurant",
     label: "Restaurant / café",
-    detail: "Menu items · table meta on orders",
+    detail: "Optional dining pack: tables, KOT, takeaway — still Universal POS",
     Icon: UtensilsCrossed,
   },
   {

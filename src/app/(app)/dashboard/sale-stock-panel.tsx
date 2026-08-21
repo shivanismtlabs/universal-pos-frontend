@@ -1446,7 +1446,7 @@ export function SaleStockPanel({
               </section>
 
               {/* —— 7. BusinessConfig + extra —— */}
-              {productFormFields.length ? (
+              {productFormFields.length || customFieldsQ.isFetching ? (
                 <section className="py-7">
                   <h3 className="text-[0.78rem] font-bold tracking-[0.04em] text-[#21263c] uppercase">
                     Extra fields
@@ -1471,7 +1471,17 @@ export function SaleStockPanel({
                     ))}
                   </div>
                 </section>
-              ) : null}
+              ) : (
+                <section className="py-7">
+                  <h3 className="text-[0.78rem] font-bold tracking-[0.04em] text-[#21263c] uppercase">
+                    Extra fields
+                  </h3>
+                  <p className="mt-1 text-[0.8rem] text-[#5a6b7d]">
+                    None yet. Add them in Settings → Custom fields (Product),
+                    then open this form again.
+                  </p>
+                </section>
+              )}
 
               <div className="flex flex-wrap gap-2 pt-6">
               <Button

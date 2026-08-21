@@ -134,6 +134,30 @@ export function mediaUrl(path?: string | null) {
   return `${origin}${trimmed.startsWith("/") ? trimmed : `/${trimmed}`}`;
 }
 
+/** Small URL for grids — skip huge data-URLs; shrink Unsplash. */
+export function thumbUrl(path?: string | null, width = 240) {
+  const trimmed = path?.trim() || "";
+  if (!trimmed) return null;
+  if (trimmed.startsWith("data:")) {
+    return trimmed.length > 8000 ? null : trimmed;
+  }
+  const full = mediaUrl(trimmed);
+  if (!full) return null;
+  try {
+    if (/images\.unsplash\.com/i.test(full)) {
+      const u = new URL(full);
+      u.searchParams.set("w", String(width));
+      u.searchParams.set("q", "55");
+      u.searchParams.set("auto", "format");
+      u.searchParams.set("fit", "crop");
+      return u.toString();
+    }
+  } catch {
+    /* keep original */
+  }
+  return full;
+}
+
 export function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();

@@ -7,7 +7,9 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 import { Search } from "lucide-react";
-import { customersApi } from "@/lib/api";
+import { customersApi, customFieldsApi } from "@/lib/api";
+import { customFieldDefsToMeta } from "@/lib/product-form-fields";
+import { CustomFieldsSection } from "@/components/custom-field-inputs";
 import { ApiError } from "@/lib/api/client";
 import {
   createCustomerSchema,
@@ -62,6 +64,7 @@ export default function CustomersPage() {
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [extraFields, setExtraFields] = useState<Record<string, string>>({});
   const qc = useQueryClient();
   const { hasModule } = useBootstrap();
   const rental = hasModule("rental");
@@ -118,6 +121,15 @@ export default function CustomersPage() {
     queryFn: () => customersApi.get(selectedId!),
     enabled: Boolean(selectedId),
   });
+
+  const customerFieldsQ = useQuery({
+    queryKey: ["custom-fields", "customer"],
+    queryFn: () => customFieldsApi.listDefinitions("customer"),
+  });
+  const customerFormFields = useMemo(
+    () => customFieldDefsToMeta(customerFieldsQ.data),
+    [customerFieldsQ.data],
+  );
 
   const selected = useMemo(() => {
     const fromPage = items.find((c) => c.id === selectedId);
@@ -178,10 +190,14 @@ export default function CustomersPage() {
         notes: values.notes || undefined,
         marketingOptIn: values.marketingOptIn,
         creditLimit: parseCreditLimit(values.creditLimit),
+        extraFields: Object.fromEntries(
+          Object.entries(extraFields).filter(([, v]) => String(v ?? "").trim()),
+        ),
       }),
     onSuccess: (row) => {
       toast.success("Customer created");
       form.reset();
+      setExtraFields({});
       selectCustomer(row.id);
       void qc.invalidateQueries({ queryKey: ["customers"] });
     },
@@ -203,11 +219,15 @@ export default function CustomersPage() {
         notes: values.notes || undefined,
         marketingOptIn: values.marketingOptIn,
         creditLimit: parseCreditLimit(values.creditLimit),
+        extraFields: Object.fromEntries(
+          Object.entries(extraFields).filter(([, v]) => String(v ?? "").trim()),
+        ),
       });
     },
     onSuccess: () => {
       toast.success("Customer updated");
       setEditingId(null);
+      setExtraFields({});
       form.reset({
         fullName: "",
         phone: "",
@@ -272,6 +292,17 @@ export default function CustomersPage() {
           ? String(c.creditLimit)
           : "",
     });
+    const raw =
+      selectedDetail.data?.id === c.id
+        ? selectedDetail.data.extraFields
+        : undefined;
+    const extras: Record<string, string> = {};
+    if (raw && typeof raw === "object") {
+      for (const [k, v] of Object.entries(raw)) {
+        if (v != null) extras[k] = String(v);
+      }
+    }
+    setExtraFields(extras);
   }
 
   const addMeasurement = useMutation({
@@ -538,6 +569,15 @@ export default function CustomersPage() {
                   Blocks underpay at POS when open dues would exceed this amount
                 </p>
               </div>
+              <CustomFieldsSection
+                hint="From Settings → Custom fields (choose Customer)."
+                fields={customerFormFields}
+                loading={customerFieldsQ.isLoading}
+                values={extraFields}
+                onChange={(key, value) =>
+                  setExtraFields((prev) => ({ ...prev, [key]: value }))
+                }
+              />
               <div className="flex gap-2">
                 {editingId ? (
                   <Button
@@ -556,6 +596,7 @@ export default function CustomersPage() {
                         marketingOptIn: false,
                         creditLimit: "",
                       });
+                      setExtraFields({});
                     }}
                   >
                     Cancel

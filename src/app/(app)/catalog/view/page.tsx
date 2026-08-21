@@ -185,11 +185,17 @@ function CatalogProductDetailPage() {
       const existing = (p?.bundleLines ?? []).map((l) => ({
         componentProductId: l.componentProductId,
         quantity: l.quantity,
+        consumeOnSale: l.consumeOnSale,
+        purpose: l.purpose,
+        unit: l.unit ?? undefined,
+        wastagePercent: l.wastagePercent,
       }));
       if (compId) {
         existing.push({
           componentProductId: compId,
           quantity: Number(compQty) || 1,
+          consumeOnSale: p?.kind !== "bundle",
+          purpose: p?.kind === "bundle" ? "bundle" : "recipe",
         });
       }
       return catalogApi.setBundleLines(id, existing);
@@ -374,7 +380,7 @@ function CatalogProductDetailPage() {
             ["overview", "Overview"],
             ["barcode", "Barcode"],
             ["variants", "Variants"],
-            ["bundle", "Bundle"],
+            ["bundle", "Bundle / recipe"],
             ["batches", "Batch & expiry"],
             ["serials", "Serials"],
             ["inventory", "Inventory (read)"],
@@ -590,12 +596,16 @@ function CatalogProductDetailPage() {
 
       {tab === "bundle" ? (
         <div className="space-y-3 rounded-md border border-[#e4e9f0] bg-white p-4">
-          {p.kind !== "bundle" ? (
-            <p className="text-sm text-amber-700">
-              Set product type to Bundle to manage combo components.
+          {p.kind === "bundle" ? (
+            <p className="text-sm text-[#5a6b7d]">
+              Combo pack components. These do not deduct unless marked consume-on-sale.
             </p>
           ) : (
-            <>
+            <p className="text-sm text-[#5a6b7d]">
+              Recipe / BOM. Selling this item deducts ingredients at checkout, not the
+              finished dish. KOT does not consume stock.
+            </p>
+          )}
               <div className="flex flex-wrap gap-2 items-end">
                 <div className="min-w-[200px] flex-1">
                   <Label>Component product</Label>
@@ -633,8 +643,6 @@ function CatalogProductDetailPage() {
                   </li>
                 ))}
               </ul>
-            </>
-          )}
         </div>
       ) : null}
 
