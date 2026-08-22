@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { customersApi, customFieldsApi, loyaltyApi, paymentsApi, posApi, resourcesApi, tenantsApi } from "@/lib/api";
+import { customersApi, loyaltyApi, paymentsApi, posApi, resourcesApi, restaurantApi, tenantsApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useBootstrap } from "@/lib/bootstrap";
 import { useBranchStore } from "@/lib/branch-store";
@@ -20,9 +20,10 @@ import { ProductThumb } from "@/components/product-thumb";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { CustomerPicker } from "@/components/customer-picker";
 import { CustomFieldsSection } from "@/components/custom-field-inputs";
+import { SplitBillModal } from "@/components/split-bill-modal";
+import { ModalFrame } from "@/components/modal-frame";
 import { StationPinLock } from "@/components/station-pin-lock";
 import { BarcodeScanInput } from "@/components/barcode-scan-input";
-import { customFieldDefsToMeta } from "@/lib/product-form-fields";
 import {
   enqueueOfflineEvent,
   flushOfflineQueue,
@@ -39,6 +40,9 @@ import {
   type SellUnit,
 } from "@/lib/sell-units";
 import { productKindLabel, productStockHint } from "@/lib/product-kind";
+import type { SplitBillMode, SplitBillPart } from "@/lib/split-bill";
+import { diningFeesFromConfig } from "@/lib/dining-fees";
+import { sellingMenuCategoryFilter } from "@/lib/selling-menus";
 
 type CartLine = {
   stockLevelId: string;
@@ -194,9 +198,24 @@ export default function RetailPosWorkstation({
   const [closingCash, setClosingCash] = useState("");
   const [showCloseRegister, setShowCloseRegister] = useState(false);
   const [payMethod, setPayMethod] = useState<PayMethod>("cash");
-  const [showMorePay, setShowMorePay] = useState(false);
   const [splitPay, setSplitPay] = useState(false);
   const [splitCashAmount, setSplitCashAmount] = useState("");
+  const [splitBillOpen, setSplitBillOpen] = useState(false);
+  const [payModal, setPayModal] = useState<"discount" | "draft" | "more" | null>(
+    null,
+  );
+  const [rateEdit, setRateEdit] = useState<{
+    stockLevelId: string;
+    amount: string;
+    percent: string;
+  } | null>(null);
+  const [splitSession, setSplitSession] = useState<{
+    mode: SplitBillMode;
+    parts: SplitBillPart[];
+    index: number;
+    orderId?: string;
+    orderNumber?: string;
+  } | null>(null);
   const [cashTendered, setCashTendered] = useState("");
   const [allowPartial, setAllowPartial] = useState(false);
   const [payAmount, setPayAmount] = useState("");
@@ -217,6 +236,10 @@ export default function RetailPosWorkstation({
   } | null>(null);
   const [sendReceipt, setSendReceipt] = useState(false);
   const [orderType, setOrderType] = useState("walk_in");
+  const [floorFilter, setFloorFilter] = useState("all");
+  const [guestName, setGuestName] = useState("");
+  const [deliveryPhone, setDeliveryPhone] = useState("");
+  const [deliveryAddress, setDeliveryAddress] = useState("");
   const [modPick, setModPick] = useState<{
     row: Parameters<typeof upsertLine>[0];
     groups: NonNullable<Parameters<typeof upsertLine>[0]["modifierGroups"]>;
@@ -245,6 +268,8 @@ export default function RetailPosWorkstation({
     amount: number;
     description: string;
     method: "card" | "upi";
+    keepOrder?: boolean;
+    splitContinue?: boolean;
   } | null>(null);
   const [receipt, setReceipt] = useState<{
     data: ReceiptData;
@@ -291,6 +316,51 @@ export default function RetailPosWorkstation({
     hasCapability("KITCHEN") ||
     hasCapability("DELIVERY");
   const resourceDesk = hasCapability("RESOURCE") || hasCapability("TABLE");
+  const diningCfg = useQuery({
+    queryKey: ["restaurant-config"],
+    queryFn: () => restaurantApi.config(),
+    enabled: foodFulfillment,
+  });
+  const diningFloors = useQuery({
+    queryKey: ["restaurant-floors", locationId],
+    queryFn: () => restaurantApi.floors(locationId),
+    enabled: hasCapability("TABLE") && Boolean(locationId),
+  });
+  const diningTables = useQuery({
+    queryKey: ["restaurant-tables", locationId],
+    queryFn: () => restaurantApi.tables(locationId),
+    enabled: hasCapability("TABLE") && Boolean(locationId),
+  });
+  const selectedDiningTable = (diningTables.data ?? []).find(
+    (t) => t.id === resourceId,
+  );
+  const selectedDiningFloor = (() => {
+    const floors = diningFloors.data ?? [];
+    const floorId =
+      selectedDiningTable?.floorId ||
+      (floorFilter !== "all" ? floorFilter : "");
+    return floors.find((f) => f.id === floorId);
+  })();
+  const areaCategoryIds =
+    selectedDiningTable?.areaCategoryIds?.length
+      ? selectedDiningTable.areaCategoryIds
+      : selectedDiningFloor?.categoryIds ?? [];
+  const sellingMenuFilter = sellingMenuCategoryFilter({
+    menus: diningCfg.data?.sellingMenus ?? [],
+    channel: "pos",
+    locationId,
+  });
+  const allowedCategoryIds = (() => {
+    const area = areaCategoryIds.length ? areaCategoryIds : null;
+    if (!sellingMenuFilter.restrict) return area;
+    if (!sellingMenuFilter.categoryIds.length) return [];
+    if (!area) return sellingMenuFilter.categoryIds;
+    return area.filter((id) => sellingMenuFilter.categoryIds.includes(id));
+  })();
+  const recentSales = useQuery({
+    queryKey: ["pos-sale-recent"],
+    queryFn: () => posApi.listRecentSales(8),
+  });
 
   useEffect(() => {
     if (!pinSwitchEnabled || !stationToken || pinLocked) return;
@@ -350,16 +420,28 @@ export default function RetailPosWorkstation({
   const categories = useMemo(() => {
     const set = new Map<string, string>();
     for (const row of catalog.data?.items ?? []) {
-      if (row.category?.id) set.set(row.category.id, row.category.name);
+      if (!row.category?.id) continue;
+      if (
+        allowedCategoryIds &&
+        (!row.category?.id || !allowedCategoryIds.includes(row.category.id))
+      ) {
+        continue;
+      }
+      set.set(row.category.id, row.category.name);
     }
     return Array.from(set.entries()).map(([id, name]) => ({ id, name }));
-  }, [catalog.data]);
+  }, [catalog.data, allowedCategoryIds]);
 
   const items = useMemo(() => {
-    const list = catalog.data?.items ?? [];
+    let list = catalog.data?.items ?? [];
+    if (allowedCategoryIds) {
+      list = list.filter(
+        (s) => s.category?.id && allowedCategoryIds.includes(s.category.id),
+      );
+    }
     if (category === "all") return list;
     return list.filter((s) => s.category?.id === category);
-  }, [catalog.data, category]);
+  }, [catalog.data, category, allowedCategoryIds]);
 
   const catalogTotal = catalog.data?.total ?? items.length;
   const catalogTotalPages = catalog.data?.totalPages ?? 1;
@@ -370,14 +452,6 @@ export default function RetailPosWorkstation({
     enabled: Boolean(locationId),
     refetchInterval: 60_000,
   });
-  const orderCustomFieldsQ = useQuery({
-    queryKey: ["custom-fields", "order"],
-    queryFn: () => customFieldsApi.listDefinitions("order"),
-  });
-  const orderFormFields = useMemo(
-    () => customFieldDefsToMeta(orderCustomFieldsQ.data ?? []),
-    [orderCustomFieldsQ.data],
-  );
   const registerSession = register.data?.session ?? null;
 
   const openRegister = useMutation({
@@ -467,8 +541,34 @@ export default function RetailPosWorkstation({
   const discountCapped =
     discountEntered > discountNum + 0.001 && !canOverrideDiscount;
   const loyaltyOff = loyaltyQuote?.amountOff ?? 0;
-  const totalDue = Math.max(0, ticketBeforeDiscount - discountNum - loyaltyOff);
+  const ticketNet = Math.max(0, ticketBeforeDiscount - discountNum - loyaltyOff);
+  const diningModeForFees =
+    orderType === "walk_in" ? (resourceId ? "dine_in" : "") : orderType;
+  const diningFeeLines = foodFulfillment
+    ? diningFeesFromConfig({
+        diningMode: diningModeForFees,
+        merchandiseAfterDiscount: ticketNet,
+        serviceChargePercent:
+          selectedDiningTable?.areaServiceChargePercent ??
+          selectedDiningFloor?.serviceChargePercent ??
+          diningCfg.data?.serviceChargePercent,
+        packagingCharge: diningCfg.data?.packagingCharge,
+        deliveryCharge: diningCfg.data?.deliveryCharge,
+        areaTaxPercent:
+          selectedDiningTable?.areaTaxRatePercent ??
+          selectedDiningFloor?.taxRatePercent,
+      })
+    : [];
+  const diningExtras = diningFeeLines.reduce((s, f) => s + f.amount, 0);
+  const totalDue = ticketNet + diningExtras;
+  const splitPart = splitSession?.parts[splitSession.index] ?? null;
+  const splitFollowUp = Boolean(splitSession?.orderId);
+  const splitRemaining = splitSession
+    ? splitSession.parts.length - splitSession.index
+    : 0;
+  const canSplitBill = hasCapability("PARTIAL_PAYMENT");
   const chargeAmount = (() => {
+    if (splitPart) return splitPart.amount;
     if (!allowPartial) return totalDue;
     const entered = moneyNumber(payAmount || 0);
     if (entered <= 0) return totalDue;
@@ -716,6 +816,118 @@ export default function RetailPosWorkstation({
     resolveScan(scan);
   }
 
+  function resetAfterFullSale() {
+    setCart([]);
+    setDiscountAmount("");
+    setCouponCode("");
+    setCouponApplied(null);
+    setCashTendered("");
+    setSplitPay(false);
+    setSplitSession(null);
+    setOrderExtraFields({});
+    setSplitCashAmount("");
+    setAllowPartial(false);
+    setPayAmount("");
+    setOrderNote("");
+    setResourceId("");
+    setGuestCount("1");
+    setOrderType("walk_in");
+    setGiftCardCode("");
+    setGiftCardBalance(null);
+    setBankAccountName("");
+    setBankAccountNumber("");
+    setBankIfsc("");
+    setBankName("");
+    setBankReference("");
+    setEmiTenureMonths("6");
+    setEmiProvider("");
+    setEmiReference("");
+    setLoyaltyPointsInput("");
+    setLoyaltyQuote(null);
+  }
+
+  function settleMethod(): string {
+    return payMethod === "wallet" ? "store_credit" : payMethod;
+  }
+
+  async function collectFollowUpSplitPart() {
+    if (!splitSession?.orderId || !splitPart) return;
+    if (chargeLock.current || busy || stripeBusy) return;
+    chargeLock.current = true;
+    setBusy(true);
+    try {
+      const key = stablePaymentAttemptKey(
+        `${splitSession.orderId}:${splitSession.index}:${payMethod}:${chargeAmount}`,
+        "sale-split-part",
+      );
+      if (payMethod === "card" || payMethod === "upi") {
+        if (!stripeConfig.data?.enabled) {
+          toast.error("Stripe is not configured. Take cash for this part.");
+          return;
+        }
+        const session = await paymentsApi.createStripeIntent({
+          orderId: splitSession.orderId,
+          amount: chargeAmount,
+          method: payMethod,
+          type: "payment",
+          idempotencyKey: key,
+        });
+        setStripeCheckout({
+          orderId: splitSession.orderId,
+          orderNumber: splitSession.orderNumber || "",
+          publishableKey: session.publishableKey,
+          clientSecret: session.clientSecret,
+          paymentIntentId: session.paymentIntentId,
+          amount: chargeAmount,
+          description: session.description,
+          method: payMethod,
+          keepOrder: true,
+          splitContinue: true,
+        });
+        setStripeBusy(true);
+        return;
+      }
+      await paymentsApi.create({
+        orderId: splitSession.orderId,
+        amount: chargeAmount,
+        method: settleMethod(),
+        type: "payment",
+        idempotencyKey: key,
+        ...(payMethod === "gift_card"
+          ? { gatewayRef: giftCardCode.trim() }
+          : {}),
+      });
+      const next = splitSession.index + 1;
+      const last = next >= splitSession.parts.length;
+      setCashTendered("");
+      if (last) {
+        const receiptData = await posApi.receipt(splitSession.orderId);
+        resetAfterFullSale();
+        setReceipt({
+          data: receiptData as ReceiptData,
+          change: changeDue,
+          cashTendered: tenderedNum > 0 ? tenderedNum : null,
+        });
+        toast.success(
+          `Sale ${splitSession.orderNumber} · all parts collected`,
+        );
+      } else {
+        setSplitSession({ ...splitSession, index: next });
+        toast.success(
+          `Part ${next} of ${splitSession.parts.length} collected`,
+        );
+      }
+      clearPaymentAttemptKey();
+    } catch (e) {
+      toast.error(
+        e instanceof ApiError ? e.messages.join(", ") : "Could not collect this part",
+      );
+    } finally {
+      chargeLock.current = false;
+      setBusy(false);
+    }
+  }
+
   async function checkout() {
     if (chargeLock.current || busy || stripeBusy) return;
     if (!locationId) {
@@ -732,22 +944,13 @@ export default function RetailPosWorkstation({
       toast.error("Open the register before charging");
       return;
     }
+    if (splitFollowUp) {
+      await collectFollowUpSplitPart();
+      return;
+    }
     if (!cart.length) {
       toast.error("Cart is empty");
       return;
-    }
-    for (const f of orderFormFields) {
-      if (!f.required) continue;
-      const v = (orderExtraFields[f.key] ?? "").trim();
-      if (f.type === "boolean") {
-        if (v !== "true" && v !== "false") {
-          toast.error(`Fill required field: ${f.label}`);
-          return;
-        }
-      } else if (!v) {
-        toast.error(`Fill required field: ${f.label}`);
-        return;
-      }
     }
     if (payMethod === "cash" && tenderedNum > 0 && tenderedNum < chargeAmount) {
       toast.error("Cash tendered is less than payment amount");
@@ -894,6 +1097,11 @@ export default function RetailPosWorkstation({
           ...(foodFulfillment && Number(guestCount) > 0
             ? { covers: Number(guestCount) }
             : {}),
+          ...(guestName.trim() ? { guestName: guestName.trim() } : {}),
+          ...(deliveryPhone.trim() ? { guestPhone: deliveryPhone.trim() } : {}),
+          ...(deliveryAddress.trim()
+            ? { deliveryAddress: deliveryAddress.trim() }
+            : {}),
           ...(Object.keys(orderExtraFields).length
             ? {
                 customFields: Object.fromEntries(
@@ -903,6 +1111,18 @@ export default function RetailPosWorkstation({
                 ),
               }
             : {}),
+          ...(splitSession
+            ? {
+                splitBill: {
+                  mode: splitSession.mode,
+                  parts: splitSession.parts.map((p) => ({
+                    label: p.label,
+                    amount: p.amount,
+                    lineIds: p.lineIds,
+                  })),
+                },
+              }
+            : {}),
         },
       };
 
@@ -910,7 +1130,8 @@ export default function RetailPosWorkstation({
         ...(loyaltyQuote && loyaltyQuote.points > 0
           ? { loyaltyPointsToRedeem: loyaltyQuote.points }
           : {}),
-        ...(allowPartial && chargeAmount < totalDue - 0.001
+        ...((allowPartial && chargeAmount < totalDue - 0.001) ||
+        (splitSession && splitRemaining > 1)
           ? { allowPartial: true }
           : {}),
         ...(sendReceipt && customerId
@@ -929,7 +1150,12 @@ export default function RetailPosWorkstation({
       }
 
       // Split + partial together is unsupported (prepare has no partial)
-      if (splitPay && allowPartial && chargeAmount < totalDue - 0.001) {
+      if (
+        !splitSession &&
+        splitPay &&
+        allowPartial &&
+        chargeAmount < totalDue - 0.001
+      ) {
         toast.error(
           "Turn off Partial payment when using Split cash + card/UPI",
         );
@@ -937,7 +1163,7 @@ export default function RetailPosWorkstation({
       }
 
       // Split cash + card/UPI: cash recorded, remainder collected via Stripe
-      if (splitPay && payMethod === "cash") {
+      if (!splitSession && splitPay && payMethod === "cash") {
         const cashPart = Math.min(
           totalDue,
           Math.max(0, moneyNumber(splitCashAmount || 0)),
@@ -1022,6 +1248,8 @@ export default function RetailPosWorkstation({
             amount: stripeAmount,
             description: session.description,
             method: payMethod,
+            splitContinue: Boolean(splitSession && splitRemaining > 1),
+            keepOrder: Boolean(splitSession && splitRemaining > 1),
           });
           setStripeBusy(true);
         } catch (e) {
@@ -1032,13 +1260,12 @@ export default function RetailPosWorkstation({
       }
 
       const payAmt = chargeAmount;
-      const settleMethod = payMethod;
       const result = await posApi.saleCheckout({
         ...cartPayload,
         ...checkoutExtras,
         payments: [
           {
-            method: settleMethod,
+            method: settleMethod(),
             amount: payAmt,
             idempotencyKey: attemptKey,
             ...(payMethod === "gift_card"
@@ -1067,32 +1294,26 @@ export default function RetailPosWorkstation({
           : {}),
       });
 
-      setCart([]);
-      setDiscountAmount("");
-      setCouponCode("");
-      setCouponApplied(null);
-      setCashTendered("");
-      setSplitPay(false);
-      setOrderExtraFields({});
-      setSplitCashAmount("");
-      setAllowPartial(false);
-      setPayAmount("");
-      setOrderNote("");
-      setResourceId("");
-      setGuestCount("1");
-      setOrderType("walk_in");
-      setGiftCardCode("");
-      setGiftCardBalance(null);
-      setBankAccountName("");
-      setBankAccountNumber("");
-      setBankIfsc("");
-      setBankName("");
-      setBankReference("");
-      setEmiTenureMonths("6");
-      setEmiProvider("");
-      setEmiReference("");
-      setLoyaltyPointsInput("");
-      setLoyaltyQuote(null);
+      const nextSplit =
+        splitSession && splitSession.index + 1 < splitSession.parts.length;
+      if (nextSplit && splitSession) {
+        setSplitSession({
+          ...splitSession,
+          index: splitSession.index + 1,
+          orderId: result.order.id,
+          orderNumber: result.order.orderNumber,
+        });
+        setCart([]);
+        setCashTendered("");
+        toast.success(
+          `Part ${splitSession.index + 1} of ${splitSession.parts.length} collected · next ${money(splitSession.parts[splitSession.index + 1]?.amount ?? 0)}`,
+        );
+        clearPaymentAttemptKey();
+        void qc.invalidateQueries({ queryKey: ["pos-sale-catalog"] });
+        return;
+      }
+
+      resetAfterFullSale();
       setReceipt({
         data: result.receipt as ReceiptData,
         change: result.change,
@@ -1157,6 +1378,11 @@ export default function RetailPosWorkstation({
             ...(foodFulfillment && Number(guestCount) > 0
               ? { covers: Number(guestCount) }
               : {}),
+            ...(guestName.trim() ? { guestName: guestName.trim() } : {}),
+            ...(deliveryPhone.trim() ? { guestPhone: deliveryPhone.trim() } : {}),
+            ...(deliveryAddress.trim()
+              ? { deliveryAddress: deliveryAddress.trim() }
+              : {}),
             ...(Object.keys(orderExtraFields).length
               ? {
                   customFields: Object.fromEntries(
@@ -1215,6 +1441,7 @@ export default function RetailPosWorkstation({
       setCart([]);
       setDiscountAmount("");
       setParkLabel("");
+      setPayModal(null);
       toast.success(`Draft saved ${parkedSale.orderNumber}`);
     } catch (e) {
       toast.error(
@@ -1225,9 +1452,37 @@ export default function RetailPosWorkstation({
     }
   }
 
+  function openRateEdit(line: CartLine) {
+    const base = line.listPrice ?? line.unitPrice;
+    const pct = base > 0 ? ((line.unitPrice / base - 1) * 100) : 0;
+    setRateEdit({
+      stockLevelId: line.stockLevelId,
+      amount: String(line.unitPrice),
+      percent: Math.abs(pct) < 0.05 ? "" : String(Math.round(pct * 100) / 100),
+    });
+  }
+
+  function applyRateEdit() {
+    if (!rateEdit) return;
+    const next = moneyNumber(rateEdit.amount || 0);
+    if (!Number.isFinite(next) || next < 0) {
+      toast.error("Enter a valid rate");
+      return;
+    }
+    setCart((prev) =>
+      prev.map((x) =>
+        x.stockLevelId === rateEdit.stockLevelId
+          ? { ...x, unitPrice: Math.round(next * 100) / 100 }
+          : x,
+      ),
+    );
+    setRateEdit(null);
+  }
+
   async function finishStripeSale(paymentIntentId: string) {
     if (!stripeCheckout) return;
-    const { orderId, orderNumber, amount, method } = stripeCheckout;
+    const { orderId, orderNumber, amount, method, splitContinue } =
+      stripeCheckout;
     await paymentsApi.verifyStripe({
       orderId,
       paymentIntentId,
@@ -1236,26 +1491,48 @@ export default function RetailPosWorkstation({
       type: "payment",
     });
     const receiptData = await posApi.finalizeStripeSale(orderId);
-    setCart([]);
-    setCashTendered("");
-    setAllowPartial(false);
-    setPayAmount("");
     setStripeCheckout(null);
-    setOrderExtraFields({});
     setStripeBusy(false);
-    setReceipt({
-      data: receiptData as ReceiptData,
-      change: 0,
-      cashTendered: null,
-    });
+    setCashTendered("");
+    if (splitContinue && splitSession) {
+      const next = splitSession.index + 1;
+      const last = next >= splitSession.parts.length;
+      setCart([]);
+      if (last) {
+        resetAfterFullSale();
+        setReceipt({
+          data: receiptData as ReceiptData,
+          change: 0,
+          cashTendered: null,
+        });
+        toast.success(`Sale ${orderNumber} · all parts collected`);
+      } else {
+        setSplitSession({
+          ...splitSession,
+          index: next,
+          orderId,
+          orderNumber,
+        });
+        toast.success(
+          `Part ${next} of ${splitSession.parts.length} collected`,
+        );
+      }
+    } else {
+      resetAfterFullSale();
+      setReceipt({
+        data: receiptData as ReceiptData,
+        change: 0,
+        cashTendered: null,
+      });
+      toast.success(
+        amount + 0.001 < totalDue
+          ? `Sale ${orderNumber} · partial ${money(amount)} via Stripe`
+          : `Sale ${orderNumber} paid via Stripe`,
+      );
+    }
     void qc.invalidateQueries({ queryKey: ["pos-sale-catalog"] });
     void qc.invalidateQueries({ queryKey: ["dashboard-catalog"] });
     void qc.invalidateQueries({ queryKey: ["retail-skus"] });
-    toast.success(
-      amount + 0.001 < totalDue
-        ? `Sale ${orderNumber} · partial ${money(amount)} via Stripe`
-        : `Sale ${orderNumber} paid via Stripe`,
-    );
     clearPaymentAttemptKey();
     scanRef.current?.focus();
   }
@@ -1264,7 +1541,7 @@ export default function RetailPosWorkstation({
     const pending = stripeCheckout;
     setStripeCheckout(null);
     setStripeBusy(false);
-    if (pending?.orderId) {
+    if (pending?.orderId && !pending.keepOrder) {
       await posApi.cancelPreparedSale(pending.orderId).catch(() => null);
       toast.message(
         "Card/UPI cancelled — any cash already taken stays on the ticket",
@@ -1275,6 +1552,7 @@ export default function RetailPosWorkstation({
   function clearCart() {
     setCart([]);
     setCashTendered("");
+    if (!splitFollowUp) setSplitSession(null);
     scanRef.current?.focus();
   }
 
@@ -1772,6 +2050,33 @@ export default function RetailPosWorkstation({
               </Button>
             ) : null}
           </div>
+          {(recentSales.data?.items ?? []).length ? (
+            <div className="flex gap-1.5 overflow-x-auto border-b border-[#e8edf4] px-4 py-2">
+              {(recentSales.data?.items ?? []).slice(0, 6).map((o) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  className="shrink-0 rounded-full border border-[#e2e8f0] bg-white px-2.5 py-1 text-[0.65rem] font-semibold text-[#5a6b7d] hover:border-[#1a56db] hover:text-[#1a56db]"
+                  onClick={async () => {
+                    try {
+                      const data = await posApi.receipt(o.id);
+                      setReceipt({
+                        data: data as ReceiptData,
+                        change: 0,
+                        cashTendered: null,
+                      });
+                    } catch (e) {
+                      toast.error(
+                        e instanceof Error ? e.message : "Could not load bill",
+                      );
+                    }
+                  }}
+                >
+                  Reprint {o.orderNumber}
+                </button>
+              ))}
+            </div>
+          ) : null}
 
           <div className="space-y-1.5 border-b border-[#e8edf4] px-4 py-3">
             <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
@@ -1813,16 +2118,82 @@ export default function RetailPosWorkstation({
                     onChange={(e) => setOrderType(e.target.value)}
                   >
                     <option value="walk_in">Walk-in</option>
-                    <option value="dine_in">Dine-in</option>
-                    <option value="takeaway">Takeaway</option>
-                    <option value="delivery">Delivery</option>
+                    {(diningCfg.data?.enabledDiningModes ?? [
+                      "dine_in",
+                      "takeaway",
+                      "delivery",
+                    ]).map((m) => (
+                      <option key={m} value={m}>
+                        {m.replaceAll("_", " ")}
+                      </option>
+                    ))}
                   </select>
                 </div>
               ) : null}
-              {resourceDesk ? (
+              {hasCapability("TABLE") ? (
+                <>
+                  <div className="field-shell">
+                    <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
+                      Area / floor
+                    </Label>
+                    <select
+                      className="mt-1 flex h-10 w-full rounded-md border border-[#d9e0ea] bg-white px-3 text-sm text-[#0b1f33]"
+                      value={floorFilter}
+                      onChange={(e) => setFloorFilter(e.target.value)}
+                    >
+                      <option value="all">All areas</option>
+                      {(diningFloors.data ?? []).map((f) => (
+                        <option key={f.id} value={f.id}>
+                          {f.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="field-shell">
+                    <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
+                      Table
+                    </Label>
+                    <select
+                      className="mt-1 flex h-10 w-full rounded-md border border-[#d9e0ea] bg-white px-3 text-sm text-[#0b1f33]"
+                      value={resourceId}
+                      onChange={(e) => setResourceId(e.target.value)}
+                    >
+                      <option value="">None</option>
+                      {(diningTables.data ?? [])
+                        .filter(
+                          (t) =>
+                            floorFilter === "all" || t.floorId === floorFilter,
+                        )
+                        .map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.floorName ? `${t.floorName} · ` : ""}
+                            {t.name}
+                            {t.status !== "available" ? ` · ${t.status}` : ""}
+                          </option>
+                        ))}
+                    </select>
+                    {areaCategoryIds.length ||
+                    selectedDiningFloor?.taxRatePercent != null ||
+                    selectedDiningFloor?.serviceChargePercent != null ? (
+                      <p className="mt-1 text-[0.65rem] text-[#5a6b7d]">
+                        {areaCategoryIds.length
+                          ? `Area menu · ${areaCategoryIds.length} ${areaCategoryIds.length === 1 ? "category" : "categories"}`
+                          : "Full menu"}
+                        {selectedDiningFloor?.taxRatePercent != null
+                          ? ` · tax ${selectedDiningFloor.taxRatePercent}%`
+                          : ""}
+                        {(selectedDiningTable?.areaServiceChargePercent ??
+                          selectedDiningFloor?.serviceChargePercent) != null
+                          ? ` · service ${selectedDiningTable?.areaServiceChargePercent ?? selectedDiningFloor?.serviceChargePercent}%`
+                          : ""}
+                      </p>
+                    ) : null}
+                  </div>
+                </>
+              ) : resourceDesk ? (
                 <div className="field-shell">
                   <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
-                    {hasCapability("TABLE") ? "Table" : "Resource"}
+                    Resource
                   </Label>
                   <select
                     className="mt-1 flex h-10 w-full rounded-md border border-[#d9e0ea] bg-white px-3 text-sm text-[#0b1f33]"
@@ -1852,6 +2223,43 @@ export default function RetailPosWorkstation({
                   />
                 </div>
               ) : null}
+              {orderType === "delivery" ? (
+                <>
+                  <div className="field-shell">
+                    <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
+                      Guest name
+                    </Label>
+                    <Input
+                      className="h-10"
+                      value={guestName}
+                      onChange={(e) => setGuestName(e.target.value)}
+                      placeholder="Name"
+                    />
+                  </div>
+                  <div className="field-shell">
+                    <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
+                      Phone
+                    </Label>
+                    <Input
+                      className="h-10"
+                      value={deliveryPhone}
+                      onChange={(e) => setDeliveryPhone(e.target.value)}
+                      placeholder="Mobile"
+                    />
+                  </div>
+                  <div className="field-shell sm:col-span-2">
+                    <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
+                      Delivery address
+                    </Label>
+                    <Input
+                      className="h-10"
+                      value={deliveryAddress}
+                      onChange={(e) => setDeliveryAddress(e.target.value)}
+                      placeholder="Street, area, landmark"
+                    />
+                  </div>
+                </>
+              ) : null}
               <div className="field-shell sm:col-span-2">
                 <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
                   Order notes
@@ -1871,16 +2279,31 @@ export default function RetailPosWorkstation({
           </div> */}
 
           <ul className="max-h-48 flex-1 space-y-1.5 overflow-y-auto px-3 py-3">
-            {cart.map((l) => (
+            {cart.map((l) => {
+              const catalogRate = l.listPrice ?? l.unitPrice;
+              const rateChanged =
+                Math.abs(l.unitPrice - catalogRate) > 0.001;
+              const ratePct =
+                catalogRate > 0
+                  ? Math.round(((l.unitPrice / catalogRate - 1) * 100) * 10) /
+                    10
+                  : 0;
+              return (
               <li
                 key={l.stockLevelId}
-                className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-[10px] border border-[#e8edf4] bg-[#f8fafc] px-2 py-1.5"
+                className="rounded-[10px] border border-[#e8edf4] bg-white px-2 py-2"
               >
+                <div className="flex items-start gap-2">
                 <ProductThumb src={l.image} label={l.name} size="md" />
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-[#0b1f33]">
-                    {l.name}
-                  </p>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="truncate text-sm font-semibold text-[#0b1f33]">
+                      {l.name}
+                    </p>
+                    <p className="shrink-0 text-sm font-bold tabular-nums text-[#0b1f33]">
+                      {money(l.unitPrice * l.qty)}
+                    </p>
+                  </div>
                   {productKindLabel(l.kind) ? (
                     <p className="text-[0.65rem] font-medium text-[#5a6b7d]">
                       {productKindLabel(l.kind)}
@@ -1888,6 +2311,8 @@ export default function RetailPosWorkstation({
                   ) : null}
                   <p className="truncate font-mono text-[0.65rem] text-[#8b9bb0]">
                     {l.sku}
+                    {" · "}
+                    {money(l.unitPrice)} {priceUnitLabel(l.sellUnit)}
                     {l.taxRatePercent != null &&
                     Number.isFinite(l.taxRatePercent) &&
                     l.taxRatePercent > 0 &&
@@ -1897,83 +2322,8 @@ export default function RetailPosWorkstation({
                         ? ` · tax ${Math.round(taxSettings.rate * 1000) / 10}%`
                         : ""}
                   </p>
-                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                    <label className="sr-only" htmlFor={`rate-${l.stockLevelId}`}>
-                      Unit price
-                    </label>
-                    <Input
-                      id={`rate-${l.stockLevelId}`}
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      className="h-7 w-[5.5rem] bg-white px-1.5 text-xs font-semibold tabular-nums"
-                      value={Number.isFinite(l.unitPrice) ? l.unitPrice : ""}
-                      title="Change rate for this sale (urgent / special)"
-                      onChange={(e) => {
-                        const raw = e.target.value;
-                        if (raw === "") return;
-                        const next = moneyNumber(raw);
-                        if (!Number.isFinite(next) || next < 0) return;
-                        setCart((prev) =>
-                          prev.map((x) =>
-                            x.stockLevelId === l.stockLevelId
-                              ? { ...x, unitPrice: Math.round(next * 100) / 100 }
-                              : x,
-                          ),
-                        );
-                      }}
-                    />
-                    <span className="text-[0.65rem] font-medium text-[#94a3b8]">
-                      {priceUnitLabel(l.sellUnit)}
-                    </span>
-                    {Math.abs(l.unitPrice - (l.listPrice ?? l.unitPrice)) >
-                    0.001 ? (
-                      <>
-                        <span className="rounded bg-[#fff7ed] px-1.5 py-0.5 text-[0.62rem] font-bold tracking-wide text-[#c2410c] uppercase">
-                          Urgent / special
-                        </span>
-                        <button
-                          type="button"
-                          className="text-[0.65rem] font-semibold text-[#1a56db] hover:underline"
-                          onClick={() =>
-                            setCart((prev) =>
-                              prev.map((x) =>
-                                x.stockLevelId === l.stockLevelId
-                                  ? {
-                                      ...x,
-                                      unitPrice: x.listPrice ?? x.unitPrice,
-                                    }
-                                  : x,
-                              ),
-                            )
-                          }
-                        >
-                          Reset {money(l.listPrice ?? l.unitPrice)}
-                        </button>
-                      </>
-                    ) : (
-                      <button
-                        type="button"
-                        className="rounded border border-[#e2e8f0] bg-white px-1.5 py-0.5 text-[0.62rem] font-semibold text-[#475569] hover:border-[#1a56db] hover:text-[#1a56db]"
-                        title="Bump rate +20% for urgent sale"
-                        onClick={() =>
-                          setCart((prev) =>
-                            prev.map((x) => {
-                              if (x.stockLevelId !== l.stockLevelId) return x;
-                              const base = x.listPrice ?? x.unitPrice;
-                              const bumped =
-                                Math.round(base * 1.2 * 100) / 100;
-                              return { ...x, unitPrice: bumped };
-                            }),
-                          )
-                        }
-                      >
-                        Urgent +20%
-                      </button>
-                    )}
-                  </div>
-                  <div className="mt-1 flex items-center gap-2">
-                    <div className="flex shrink-0 items-center rounded-lg bg-white p-0.5 ring-1 ring-[#e4e9f0]">
+                  <div className="mt-1.5 flex items-center justify-between gap-2">
+                    <div className="flex shrink-0 items-center rounded-lg bg-[#f8fafc] p-0.5 ring-1 ring-[#e4e9f0]">
                       <button
                         type="button"
                         className="grid h-7 w-7 place-items-center rounded-md text-sm font-bold text-[#0b1f33] transition hover:bg-[#e8eefb]"
@@ -2042,9 +2392,21 @@ export default function RetailPosWorkstation({
                         +
                       </button>
                     </div>
-                    <p className="min-w-0 flex-1 truncate text-right text-sm font-bold tabular-nums text-[#0b1f33]">
-                      {money(l.unitPrice * l.qty)}
-                    </p>
+                    <button
+                      type="button"
+                      className={cn(
+                        "rounded-lg border px-2 py-1 text-[0.65rem] font-semibold",
+                        rateChanged
+                          ? "border-[#fdba74] bg-[#fff7ed] text-[#c2410c]"
+                          : "border-[#e2e8f0] bg-[#f8fafc] text-[#475569] hover:border-[#1a56db] hover:text-[#1a56db]",
+                      )}
+                      title="Urgent / extra % for this item"
+                      onClick={() => openRateEdit(l)}
+                    >
+                      {rateChanged
+                        ? `${ratePct > 0 ? "+" : ""}${ratePct}%`
+                        : "Rate"}
+                    </button>
                   </div>
                   {(l.requiresVariant || l.requiresBatch || l.requiresSerial) && (
                     <div className="mt-2 grid gap-1">
@@ -2111,8 +2473,10 @@ export default function RetailPosWorkstation({
                     </div>
                   )}
                 </div>
+                </div>
               </li>
-            ))}
+              );
+            })}
             {!cart.length ? (
               <li className="flex flex-col items-center justify-center gap-2 rounded-[12px] border border-dashed border-[#d9e0ea] bg-[#f8fafc] px-4 py-10 text-center">
                 <span className="grid h-10 w-10 place-items-center rounded-full bg-[#e8eefb] text-[#1a56db]">
@@ -2137,182 +2501,122 @@ export default function RetailPosWorkstation({
           </ul>
 
           <div className="mt-auto space-y-3 border-t border-[#e8edf4] bg-[#f8fafc] p-4">
-            <div className="grid grid-cols-2 items-start gap-x-3 gap-y-1.5">
-              <Label className="text-[0.65rem] font-semibold leading-4 tracking-[0.12em] text-[#8b9bb0] uppercase">
-                Discount {currencySymbol}
-                {!canOverrideDiscount
-                  ? ` (max ${maxCashierDiscountPercent}%)`
-                  : ""}
-              </Label>
-              <Label className="text-[0.65rem] font-semibold leading-4 tracking-[0.12em] text-[#8b9bb0] uppercase">
-                Coupon
-              </Label>
-
-              <Input
-                className="h-9 rounded-md"
-                placeholder="0"
-                inputMode="decimal"
-                value={discountAmount}
-                onChange={(e) => {
-                  setDiscountAmount(e.target.value);
-                  setCouponApplied(null);
-                }}
-              />
-              <div className="flex h-9 min-w-0 items-stretch gap-1.5">
-                <Input
-                  className="h-9 min-w-0 flex-1 rounded-md uppercase"
-                  placeholder="CODE"
-                  value={couponCode}
-                  onChange={(e) => {
-                    setCouponCode(e.target.value);
-                    setCouponApplied(null);
-                  }}
-                />
-                <Button
-                  type="button"
-                  variant="soft"
-                  className="h-9 shrink-0 rounded-md px-3 text-[0.75rem] font-semibold"
-                  disabled={!couponCode.trim() || !cart.length}
-                  onClick={async () => {
-                    try {
-                      const v = await loyaltyApi.validateCoupon(
-                        couponCode.trim(),
-                        ticketBeforeDiscount,
-                      );
-                      setDiscountAmount(String(v.amountOff));
-                      setCouponApplied(v.code);
-                      toast.success(
-                        `Coupon ${v.code}: −${money(v.amountOff)}`,
-                      );
-                    } catch (e) {
-                      toast.error(
-                        e instanceof ApiError
-                          ? e.messages.join(", ")
-                          : "Invalid coupon",
-                      );
-                    }
-                  }}
-                >
-                  Apply
-                </Button>
-              </div>
-
-              <p
-                className={cn(
-                  "min-h-4 text-[0.65rem] leading-4",
-                  discountCapped ? "text-[#c81e1e]" : "text-[#8b9bb0]",
-                )}
-              >
-                {discountCapped
-                  ? `Applied ${money(discountNum)} — cashier cap ${money(maxDiscountAmount)}`
-                  : canOverrideDiscount
-                    ? `Up to ticket total ${money(ticketBeforeDiscount)}`
-                    : `Cashier cap ${money(maxDiscountAmount)}`}
-              </p>
-              <p className="flex min-h-4 items-start justify-between gap-2 text-[0.65rem] leading-4 text-[#8b9bb0]">
-                <span>
-                  {couponApplied
-                    ? `Applied ${couponApplied}`
-                    : "From Coupons setup"}
-                </span>
-                {couponApplied || moneyNumber(discountAmount || 0) > 0 ? (
-                  <button
-                    type="button"
-                    className="shrink-0 font-semibold text-[#1a56db] hover:underline"
-                    onClick={() => {
-                      setCouponCode("");
-                      setCouponApplied(null);
-                      setDiscountAmount("");
-                    }}
-                  >
-                    Clear
-                  </button>
-                ) : null}
-              </p>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label className="text-[0.65rem] font-semibold leading-4 tracking-[0.12em] text-[#8b9bb0] uppercase">
-                Hold name
-              </Label>
-              <Input
-                className="h-9 rounded-md"
-                placeholder="e.g. Table 4 · Walk-in draft"
-                value={parkLabel}
-                onChange={(e) => setParkLabel(e.target.value)}
-                maxLength={80}
-              />
-              <p className="text-[0.65rem] leading-4 text-[#8b9bb0]">
-                Save as a draft — no stock or payment until you resume
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                className="h-7 px-2.5 text-[0.7rem] font-semibold"
-                disabled={busy || !cart.length}
-                onClick={() => void parkCart()}
-                title="Save this cart as a draft/hold without taking stock or payment"
-              >
-                Save draft
-              </Button>
-            </div>
-
             <div className="rounded-[12px] border border-[#e2e8f0] bg-white px-3.5 py-3">
-              <div className="flex items-baseline justify-between text-sm text-[#5a6b7d]">
-                <span>Subtotal</span>
-                <span className="tabular-nums text-[#0b1f33]">
-                  {money(subtotal)}
-                </span>
-              </div>
-              {taxAmount > 0 ? (
-                <div className="mt-1 flex items-baseline justify-between text-sm text-[#5a6b7d]">
-                  <span>
-                    {taxSettings.inclusive
-                      ? "Tax (included in prices)"
-                      : "Tax (added)"}
-                  </span>
-                  <span className="tabular-nums text-[#0b1f33]">
-                    {taxSettings.inclusive ? "" : "+"}
-                    {money(taxAmount)}
-                  </span>
-                </div>
-              ) : (
-                <div className="mt-1 flex items-baseline justify-between text-xs text-[#8b9bb0]">
-                  <span>Tax</span>
-                  <span>None · set on item or Settings</span>
-                </div>
-              )}
-              {taxSettings.inclusive && taxAmount > 0 ? (
-                <p className="mt-1 text-[0.65rem] leading-snug text-[#8b9bb0]">
-                  Prices already include tax, so Due matches Subtotal. Turn off
-                  “Catalog prices include tax” in Settings to add tax on top.
-                </p>
-              ) : null}
               {discountNum > 0 ? (
-                <div className="mt-1 flex items-baseline justify-between text-sm text-[#0b1f33]">
+                <div className="mb-1 flex items-baseline justify-between text-sm text-[#0b1f33]">
                   <span>Discount</span>
                   <span className="tabular-nums">−{money(discountNum)}</span>
                 </div>
               ) : null}
               {loyaltyOff > 0 ? (
-                <div className="mt-1 flex items-baseline justify-between text-sm text-[#0b1f33]">
-                  <span>Loyalty points</span>
+                <div className="mb-1 flex items-baseline justify-between text-sm text-[#0b1f33]">
+                  <span>Points</span>
                   <span className="tabular-nums">−{money(loyaltyOff)}</span>
                 </div>
               ) : null}
-              <div className="mt-2 flex items-baseline justify-between border-t border-[#eef2f8] pt-2.5">
+              {diningFeeLines.map((f) => (
+                <div
+                  key={f.feeCode}
+                  className="mb-1 flex items-baseline justify-between text-sm text-[#0b1f33]"
+                >
+                  <span>{f.reason}</span>
+                  <span className="tabular-nums">{money(f.amount)}</span>
+                </div>
+              ))}
+              <div className="flex items-baseline justify-between">
                 <span className="text-sm font-semibold text-[#0b1f33]">
-                  Due (pay this)
+                  Pay this
                 </span>
-                <span className="display text-[1.75rem] leading-none tabular-nums text-[#0b1f33]">
-                  {money(totalDue)}
+                <span className="text-[1.75rem] leading-none font-bold tabular-nums text-[#0b1f33]">
+                  {money(splitPart ? chargeAmount : totalDue)}
                 </span>
               </div>
+              {taxAmount > 0 ? (
+                <p className="mt-1 text-[0.65rem] text-[#8b9bb0]">
+                  Includes tax {money(taxAmount)}
+                  {discountNum > 0 ? ` · after discount` : ""}
+                </p>
+              ) : null}
             </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="h-10"
+                disabled={!cart.length && !splitFollowUp}
+                onClick={() => setPayModal("discount")}
+              >
+                {discountNum > 0 ? `Discount ${money(discountNum)}` : "Discount"}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="h-10"
+                disabled={
+                  !canSplitBill ||
+                  (!cart.length && !splitFollowUp) ||
+                  totalDue <= 0
+                }
+                onClick={() => {
+                  if (splitSession) {
+                    toast.message(
+                      "Split is already running. Cancel it below, then start a new split.",
+                    );
+                    return;
+                  }
+                  setSplitBillOpen(true);
+                }}
+              >
+                {splitSession
+                  ? `${splitPart?.label ?? "Split"} · ${money(chargeAmount)}`
+                  : "Split bill"}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="h-10"
+                disabled={busy || !cart.length || Boolean(splitSession)}
+                onClick={() => setPayModal("draft")}
+              >
+                Save later
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="h-10"
+                onClick={() => setPayModal("more")}
+              >
+                More options
+              </Button>
+            </div>
+            {splitSession ? (
+              <p className="text-[0.7rem] text-[#1a56db]">
+                Collect {splitPart?.label} now
+                {splitSession.orderNumber
+                  ? ` · ${splitSession.orderNumber}`
+                  : ""}
+                .{" "}
+                <button
+                  type="button"
+                  className="font-semibold underline"
+                  onClick={() => {
+                    if (splitFollowUp) {
+                      toast.message(
+                        "Earlier parts stay on the ticket. Remaining balance can be collected later.",
+                      );
+                    }
+                    setSplitSession(null);
+                  }}
+                >
+                  {splitFollowUp ? "Stop split" : "Cancel split"}
+                </button>
+              </p>
+            ) : null}
 
             {(() => {
               const catalogItems = payMethods.data?.items ?? [];
@@ -2344,12 +2648,7 @@ export default function RetailPosWorkstation({
                   reason: m?.reason,
                 };
               });
-              const more = catalogItems.filter(
-                (m) => !shownPrimary.some((p) => p.method === m.method),
-              );
-              const visible = showMorePay
-                ? [...shownPrimary, ...more]
-                : shownPrimary;
+              const visible = shownPrimary;
               const methodLabel = (method: string, displayName: string) => {
                 if (method === "store_credit") return "Wallet";
                 if (method === "wallet") return "App pay";
@@ -2393,36 +2692,19 @@ export default function RetailPosWorkstation({
                 </button>
               ))}
             </div>
-            {more.length ? (
-              <button
-                type="button"
-                className="text-[0.65rem] font-semibold tracking-[0.08em] text-[#1a56db] uppercase"
-                onClick={() => setShowMorePay((v) => !v)}
-              >
-                {showMorePay ? "Fewer payment methods" : "More payment methods"}
-              </button>
-            ) : null}
                 </>
               );
             })()}
-            {payMethod === "store_credit" ? (
-              <div className="rounded-[10px] border border-[#d9e0ea] bg-white p-3 text-[0.75rem] text-[#5a6b7d]">
-                {customerId ? (
-                  <p>
-                    This takes money from the customer wallet (
-                    <span className="font-semibold tabular-nums text-[#0b1f33]">
-                      {money(walletBalance)}
-                    </span>{" "}
-                    left). Same as adding / using wallet on the customer
-                    profile.
-                  </p>
-                ) : (
-                  <p className="text-amber-800">
-                    Pick a customer first. Wallet is their store credit, not
-                    PhonePe / Paytm.
-                  </p>
-                )}
-              </div>
+            {["gift_card", "bank_transfer", "emi", "wallet"].includes(
+              payMethod,
+            ) ? (
+              <button
+                type="button"
+                className="w-full rounded-lg border border-[#c9d7f5] bg-[#f5f8ff] px-3 py-2 text-left text-xs font-semibold text-[#1a56db]"
+                onClick={() => setPayModal("more")}
+              >
+                Extra pay details — tap to fill ({payMethod.replace("_", " ")})
+              </button>
             ) : null}
             {payMethod === "qr" ? (
               <div className="space-y-2 rounded-[10px] border border-[#d9e0ea] bg-white p-3">
@@ -2470,342 +2752,58 @@ export default function RetailPosWorkstation({
                 })()}
               </div>
             ) : null}
-            {payMethod === "bank_transfer" ? (
-              <div className="space-y-2 rounded-[10px] border border-[#d9e0ea] bg-white p-3">
-                <p className="text-[0.7rem] text-[#5a6b7d]">
-                  Enter payer bank details, then charge after you confirm the
-                  transfer.
-                </p>
-                <Input
-                  placeholder="Account holder name *"
-                  value={bankAccountName}
-                  onChange={(e) => setBankAccountName(e.target.value)}
-                />
-                <Input
-                  placeholder="Account number *"
-                  value={bankAccountNumber}
-                  onChange={(e) => setBankAccountNumber(e.target.value)}
-                  inputMode="numeric"
-                />
-                <div className="grid grid-cols-2 gap-2">
-                  <Input
-                    placeholder="IFSC / routing"
-                    className="uppercase"
-                    value={bankIfsc}
-                    onChange={(e) => setBankIfsc(e.target.value)}
-                  />
-                  <Input
-                    placeholder="Bank name"
-                    value={bankName}
-                    onChange={(e) => setBankName(e.target.value)}
-                  />
-                </div>
-                <Input
-                  placeholder="UTR / reference *"
-                  value={bankReference}
-                  onChange={(e) => setBankReference(e.target.value)}
-                />
-              </div>
-            ) : null}
-            {payMethod === "wallet" ? (
-              <div className="space-y-1 rounded-[10px] border border-[#d9e0ea] bg-white p-3">
-                <p className="text-[0.75rem] text-[#5a6b7d]">
-                  App pay records PhonePe / Paytm / GPay you already collected.
-                  It does not use the customer wallet on their profile. Use
-                  Wallet for that.
-                </p>
-              </div>
-            ) : null}
-            {payMethod === "emi" ? (
-              <div className="space-y-2 rounded-[10px] border border-[#d9e0ea] bg-white p-3">
-                <p className="text-[0.7rem] text-[#5a6b7d]">
-                  Confirm card / finance EMI with the provider, then record it
-                  here. Customer is required.
-                </p>
-                {!customerId ? (
-                  <p className="text-[0.75rem] text-amber-800">
-                    Select a customer above before charging EMI.
-                  </p>
-                ) : null}
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
-                      Tenure (months)
-                    </Label>
-                    <select
-                      className="mt-1 flex h-10 w-full rounded-md border border-[#d9e0ea] bg-white px-3 text-sm text-[#0b1f33]"
-                      value={emiTenureMonths}
-                      onChange={(e) => setEmiTenureMonths(e.target.value)}
-                    >
-                      {[3, 6, 9, 12, 18, 24].map((m) => (
-                        <option key={m} value={String(m)}>
-                          {m} months
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
-                      Approx / month
-                    </Label>
-                    <p className="mt-1 flex h-10 items-center rounded-md border border-[#eef2f8] bg-[#f8fafc] px-3 text-sm font-semibold tabular-nums text-[#0b1f33]">
-                      {money(
-                        chargeAmount /
-                          Math.max(1, Number(emiTenureMonths) || 1),
-                      )}
-                    </p>
-                  </div>
-                </div>
-                <Input
-                  placeholder="Provider / bank (HDFC, Bajaj, SBI…) *"
-                  value={emiProvider}
-                  onChange={(e) => setEmiProvider(e.target.value)}
-                />
-                <Input
-                  placeholder="Approval / reference (optional)"
-                  value={emiReference}
-                  onChange={(e) => setEmiReference(e.target.value)}
-                />
-              </div>
-            ) : null}
-            {payMethod === "gift_card" ? (
-              <div className="flex gap-2">
-                <Input
-                  className="uppercase"
-                  placeholder="Gift card code"
-                  value={giftCardCode}
-                  onChange={(e) => {
-                    setGiftCardCode(e.target.value);
-                    setGiftCardBalance(null);
-                  }}
-                />
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  disabled={!giftCardCode.trim()}
-                  onClick={async () => {
-                    try {
-                      const card = await loyaltyApi.lookupGiftCard(
-                        giftCardCode.trim(),
-                      );
-                      setGiftCardBalance(moneyNumber(card.balance));
-                      toast.success(`Balance ${money(card.balance)}`);
-                    } catch (e) {
-                      toast.error(
-                        e instanceof ApiError
-                          ? e.messages.join(", ")
-                          : "Gift card not found",
-                      );
-                    }
-                  }}
-                >
-                  Check
-                </Button>
-              </div>
-            ) : null}
-            {giftCardBalance != null && payMethod === "gift_card" ? (
-              <p className="text-[0.7rem] text-[#5a6b7d]">
-                Available {money(giftCardBalance)}
-              </p>
-            ) : null}
-
-            <div className="flex flex-wrap gap-3 text-xs">
-              <label className="flex items-center gap-2 font-medium text-[#0b1f33]">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 accent-[#1a56db]"
-                  checked={allowPartial}
-                  onChange={(e) => setAllowPartial(e.target.checked)}
-                />
-                Partial payment
-              </label>
-              <label className="flex items-center gap-2 font-medium text-[#0b1f33]">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 accent-[#1a56db]"
-                  checked={sendReceipt}
-                  onChange={(e) => setSendReceipt(e.target.checked)}
-                />
-                Email / SMS receipt
-              </label>
-              <label className="flex items-center gap-2 font-medium text-[#0b1f33]">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 accent-[#1a56db]"
-                  checked={touchMode}
-                  onChange={(e) => {
-                    const on = e.target.checked;
-                    setTouchMode(on);
-                    try {
-                      localStorage.setItem(TOUCH_KEY, on ? "1" : "0");
-                    } catch {
-                      /* ignore */
-                    }
-                  }}
-                />
-                Touch mode
-              </label>
-            </div>
-            {allowPartial ? (
-              <div className="field-shell">
-                <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
-                  Amount to collect now
-                </Label>
-                <Input
-                  className="text-base tabular-nums"
-                  inputMode="decimal"
-                  value={payAmount}
-                  onChange={(e) => setPayAmount(e.target.value)}
-                  placeholder={String(totalDue || "")}
-                />
-                <p className="text-xs text-[#5a6b7d]">
-                  Balance left{" "}
-                  {money(Math.max(0, totalDue - chargeAmount))}
-                </p>
-              </div>
-            ) : null}
-
-            {customerId ? (
-              <div className="space-y-1.5">
-                <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
-                  Redeem loyalty points
-                </Label>
-                <div className="flex gap-2">
-                  <Input
-                    inputMode="numeric"
-                    placeholder="Points to redeem"
-                    value={loyaltyPointsInput}
-                    onChange={(e) => {
-                      setLoyaltyPointsInput(e.target.value);
-                      setLoyaltyQuote(null);
-                    }}
-                  />
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    disabled={!loyaltyPointsInput.trim()}
-                    onClick={async () => {
-                      try {
-                        const q = await loyaltyApi.quotePoints(
-                          customerId,
-                          Number(loyaltyPointsInput),
-                          totalDue + loyaltyOff,
-                        );
-                        setLoyaltyQuote({
-                          points: q.points,
-                          amountOff: q.amountOff,
-                        });
-                        toast.success(
-                          `Redeem ${q.points} pts → −${money(q.amountOff)}`,
-                        );
-                      } catch (e) {
-                        toast.error(
-                          e instanceof ApiError
-                            ? e.messages.join(", ")
-                            : "Points quote failed",
-                        );
-                      }
-                    }}
-                  >
-                    Apply pts
-                  </Button>
-                </div>
-                {loyaltyQuote ? (
-                  <p className="text-xs text-[#1a56db]">
-                    Applied on charge: −{money(loyaltyQuote.amountOff)} (
-                    {loyaltyQuote.points} pts)
-                  </p>
-                ) : (
-                  <p className="text-[0.7rem] text-[#8b9bb0]">
-                    Apply points, then Charge — discount applies to Due.
-                  </p>
-                )}
-              </div>
-            ) : null}
-
             {payMethod === "cash" ? (
-              <div className="space-y-2.5">
-                <label className="flex items-center gap-2.5 text-xs font-medium text-[#0b1f33]">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 rounded border-[#cfd8e6] accent-[#1a56db]"
-                    checked={splitPay}
-                    onChange={(e) => setSplitPay(e.target.checked)}
-                  />
-                  Split cash + card/UPI (Stripe collects rest)
-                </label>
-                {splitPay ? (
-                  <div className="field-shell">
-                    <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
-                      Cash portion
-                    </Label>
-                    <Input
-                      className="text-base tabular-nums"
-                      inputMode="decimal"
-                      value={splitCashAmount}
-                      onChange={(e) => setSplitCashAmount(e.target.value)}
-                      placeholder="0"
-                    />
-                    <p className="text-xs text-[#5a6b7d]">
-                      Stripe collects{" "}
-                      {money(
-                        Math.max(
-                          0,
-                          totalDue - moneyNumber(splitCashAmount || 0),
-                        ),
-                      )}
-                    </p>
-                  </div>
+              <div className="field-shell">
+                <Label className="text-[0.75rem] font-semibold text-[#0b1f33]">
+                  Cash given
+                </Label>
+                <Input
+                  className="mt-1 text-base tabular-nums"
+                  inputMode="decimal"
+                  placeholder={String(chargeAmount || "")}
+                  value={cashTendered}
+                  onChange={(e) => setCashTendered(e.target.value)}
+                />
+                {tenderedNum > 0 ? (
+                  <p className="mt-1 text-sm font-semibold text-[#1a56db]">
+                    Return {money(changeDue)}
+                  </p>
                 ) : (
-                  <div className="field-shell">
-                    <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
-                      Cash tendered
-                    </Label>
-                    <Input
-                      className="text-base tabular-nums"
-                      inputMode="decimal"
-                      placeholder={String(chargeAmount || "")}
-                      value={cashTendered}
-                      onChange={(e) => setCashTendered(e.target.value)}
-                    />
-                    {tenderedNum > 0 ? (
-                      <p className="text-sm font-semibold text-[#1a56db]">
-                        Change: {money(changeDue)}
-                      </p>
-                    ) : (
-                      <div className="flex flex-wrap gap-1.5 pt-0.5">
-                        {(currencyCode === "INR"
-                          ? [chargeAmount, 500, 1000, 2000]
-                          : currencyCode === "USD"
-                            ? [chargeAmount, 20, 50, 100]
-                            : [chargeAmount]
-                        )
-                          .filter((n, i, a) => n > 0 && a.indexOf(n) === i)
-                          .map((n) => (
-                            <button
-                              key={n}
-                              type="button"
-                              className={cn(
-                                "rounded-lg border border-[#cfd8e6] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#5a6b7d] transition hover:border-[#1a56db]/45 hover:bg-[#e8eefb] hover:text-[#0b1f33]",
-                                touchMode && "px-3 py-2.5 text-sm",
-                              )}
-                              onClick={() => setCashTendered(String(n))}
-                            >
-                              {n === chargeAmount ? "Exact" : money(n)}
-                            </button>
-                          ))}
-                      </div>
-                    )}
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {(currencyCode === "INR"
+                      ? [chargeAmount, 500, 1000, 2000]
+                      : currencyCode === "USD"
+                        ? [chargeAmount, 20, 50, 100]
+                        : [chargeAmount]
+                    )
+                      .filter((n, i, a) => n > 0 && a.indexOf(n) === i)
+                      .map((n) => (
+                        <button
+                          key={n}
+                          type="button"
+                          className={cn(
+                            "rounded-lg border border-[#cfd8e6] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#5a6b7d] hover:border-[#1a56db]/45 hover:bg-[#e8eefb] hover:text-[#0b1f33]",
+                            touchMode && "px-3 py-2.5 text-sm",
+                          )}
+                          onClick={() => setCashTendered(String(n))}
+                        >
+                          {n === chargeAmount ? "Exact" : money(n)}
+                        </button>
+                      ))}
                   </div>
                 )}
               </div>
             ) : payMethod === "card" || payMethod === "upi" ? (
-              <p className="rounded-[10px] border border-[#d9e0ea] bg-white px-3 py-2 text-xs text-[#5a6b7d]">
+              <p className="text-[0.7rem] text-[#5a6b7d]">
                 {stripeConfig.data?.enabled
-                  ? `Stripe ${stripeConfig.data.mode} · ${payMethod.toUpperCase()}`
-                  : "Stripe keys not set — card/UPI unavailable"}
+                  ? "Card / UPI opens on the next screen."
+                  : "Card / UPI not set up. Use cash or QR."}
+              </p>
+            ) : payMethod === "store_credit" ? (
+              <p className="text-[0.7rem] text-[#5a6b7d]">
+                {customerId
+                  ? `Takes from customer wallet (${money(walletBalance)} left).`
+                  : "Pick a customer first to use wallet."}
               </p>
             ) : null}
 
@@ -2818,7 +2816,7 @@ export default function RetailPosWorkstation({
               disabled={
                 busy ||
                 stripeBusy ||
-                !cart.length ||
+                (!cart.length && !splitFollowUp) ||
                 !registerSession ||
                 (!online &&
                   payMethod !== "cash" &&
@@ -2837,7 +2835,9 @@ export default function RetailPosWorkstation({
                   : "Processing…"
                 : !registerSession
                   ? "Open register to charge"
-                  : allowPartial && chargeAmount < totalDue - 0.001
+                  : splitPart
+                    ? `Collect ${splitPart.label} · ${money(chargeAmount)}`
+                    : allowPartial && chargeAmount < totalDue - 0.001
                     ? `Collect ${money(chargeAmount)}`
                     : `Charge ${money(chargeAmount)}`}
             </Button>
@@ -2935,6 +2935,657 @@ export default function RetailPosWorkstation({
           onClose={() => setReceipt(null)}
         />
       ) : null}
+
+      {rateEdit ? (
+        <ModalFrame
+          title="Change rate"
+          subtitle="Urgent extra or a % on this item only. Then tap Apply."
+          onClose={() => setRateEdit(null)}
+          footer={
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                className="flex-1"
+                onClick={() => setRateEdit(null)}
+              >
+                Cancel
+              </Button>
+              <Button className="flex-1" onClick={applyRateEdit}>
+                Apply
+              </Button>
+            </div>
+          }
+        >
+          {(() => {
+            const line = cart.find(
+              (x) => x.stockLevelId === rateEdit.stockLevelId,
+            );
+            if (!line) return <p className="text-sm">Item is gone.</p>;
+            const base = line.listPrice ?? line.unitPrice;
+            const draft = moneyNumber(rateEdit.amount || 0);
+            const applyPct = (pct: number) => {
+              const amount = Math.round(base * (1 + pct / 100) * 100) / 100;
+              setRateEdit({
+                ...rateEdit,
+                percent: String(pct),
+                amount: String(amount),
+              });
+            };
+            return (
+              <div className="space-y-4">
+                <p className="text-sm font-semibold text-[#0b1f33]">
+                  {line.name}
+                </p>
+                <p className="text-xs text-[#8b9bb0]">
+                  Catalog rate {money(base)} {priceUnitLabel(line.sellUnit)}
+                  {" · "}qty {line.qty}
+                </p>
+                <div className="field-shell">
+                  <Label>New rate</Label>
+                  <Input
+                    className="mt-1 text-lg tabular-nums"
+                    inputMode="decimal"
+                    value={rateEdit.amount}
+                    onChange={(e) => {
+                      const amountStr = e.target.value;
+                      const next = moneyNumber(amountStr || 0);
+                      const pct =
+                        base > 0 && Number.isFinite(next)
+                          ? Math.round(((next / base - 1) * 100) * 100) / 100
+                          : 0;
+                      setRateEdit({
+                        ...rateEdit,
+                        amount: amountStr,
+                        percent:
+                          Math.abs(pct) < 0.05 ? "" : String(pct),
+                      });
+                    }}
+                  />
+                </div>
+                <div className="field-shell">
+                  <Label>Extra % (urgent)</Label>
+                  <Input
+                    className="mt-1 text-lg tabular-nums"
+                    inputMode="decimal"
+                    placeholder="e.g. 20"
+                    value={rateEdit.percent}
+                    onChange={(e) => {
+                      const percentStr = e.target.value;
+                      const pct = moneyNumber(percentStr || 0);
+                      const amount =
+                        Math.round(base * (1 + pct / 100) * 100) / 100;
+                      setRateEdit({
+                        ...rateEdit,
+                        percent: percentStr,
+                        amount: String(amount),
+                      });
+                    }}
+                  />
+                  <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+                    20 means 20% more than catalog. Use minus for less, e.g. −10.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {[10, 20, 50].map((pct) => (
+                    <button
+                      key={pct}
+                      type="button"
+                      className="rounded-lg border border-[#e2e8f0] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#475569] hover:border-[#1a56db] hover:text-[#1a56db]"
+                      onClick={() => applyPct(pct)}
+                    >
+                      Urgent +{pct}%
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    className="rounded-lg border border-[#e2e8f0] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#475569] hover:border-[#1a56db] hover:text-[#1a56db]"
+                    onClick={() =>
+                      setRateEdit({
+                        ...rateEdit,
+                        amount: String(base),
+                        percent: "",
+                      })
+                    }
+                  >
+                    Reset {money(base)}
+                  </button>
+                </div>
+                <p className="text-sm font-semibold text-[#1a56db]">
+                  This line: {money(Math.max(0, draft) * line.qty)}
+                </p>
+              </div>
+            );
+          })()}
+        </ModalFrame>
+      ) : null}
+
+      {payModal === "discount" ? (
+        <ModalFrame
+          title="Discount"
+          subtitle="Type an amount, or apply a coupon. Then tap Done."
+          onClose={() => setPayModal(null)}
+          footer={
+            <Button className="w-full" onClick={() => setPayModal(null)}>
+              Done
+            </Button>
+          }
+        >
+          <div className="space-y-4">
+            <div className="field-shell">
+              <Label>How much off?</Label>
+              <Input
+                className="mt-1 text-lg tabular-nums"
+                inputMode="decimal"
+                placeholder="0"
+                value={discountAmount}
+                onChange={(e) => {
+                  setDiscountAmount(e.target.value);
+                  setCouponApplied(null);
+                }}
+              />
+              {discountNum > 0 ? (
+                <p className="mt-1 text-sm font-semibold text-[#1a56db]">
+                  Off the bill: {money(discountNum)}
+                </p>
+              ) : null}
+              {discountCapped ? (
+                <p className="mt-1 text-xs text-amber-800">
+                  Cashier max is {money(maxDiscountAmount)} (
+                  {maxCashierDiscountPercent}%). Ask a manager for more.
+                </p>
+              ) : (
+                <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+                  Ticket before discount: {money(ticketBeforeDiscount)}
+                </p>
+              )}
+            </div>
+            <div className="field-shell">
+              <Label>Coupon code</Label>
+              <div className="mt-1 flex gap-2">
+                <Input
+                  className="uppercase"
+                  placeholder="CODE"
+                  value={couponCode}
+                  onChange={(e) => {
+                    setCouponCode(e.target.value);
+                    setCouponApplied(null);
+                  }}
+                />
+                {couponApplied ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => {
+                      setCouponCode("");
+                      setCouponApplied(null);
+                      setDiscountAmount("");
+                    }}
+                  >
+                    Clear
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={!couponCode.trim() || ticketBeforeDiscount <= 0}
+                    onClick={async () => {
+                      try {
+                        const v = await loyaltyApi.validateCoupon(
+                          couponCode.trim(),
+                          ticketBeforeDiscount,
+                        );
+                        setDiscountAmount(String(v.amountOff));
+                        setCouponApplied(v.code);
+                        toast.success(
+                          `Coupon ${v.code}: −${money(v.amountOff)}`,
+                        );
+                      } catch (e) {
+                        toast.error(
+                          e instanceof ApiError
+                            ? e.messages.join(", ")
+                            : "Invalid coupon",
+                        );
+                      }
+                    }}
+                  >
+                    Apply
+                  </Button>
+                )}
+              </div>
+              {couponApplied ? (
+                <p className="mt-1 text-xs text-[#1a56db]">
+                  Coupon {couponApplied} applied
+                </p>
+              ) : null}
+            </div>
+          </div>
+        </ModalFrame>
+      ) : null}
+
+      {payModal === "draft" ? (
+        <ModalFrame
+          title="Save for later"
+          subtitle="Hold this ticket. You can open it again from drafts."
+          onClose={() => setPayModal(null)}
+          footer={
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                className="flex-1"
+                onClick={() => setPayModal(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                className="flex-1"
+                disabled={busy || !cart.length}
+                onClick={() => void parkCart()}
+              >
+                {busy ? "Saving…" : "Save draft"}
+              </Button>
+            </div>
+          }
+        >
+          <div className="field-shell">
+            <Label>Name this bill (optional)</Label>
+            <Input
+              className="mt-1"
+              placeholder="e.g. Table 4, walk-in, pickup"
+              value={parkLabel}
+              onChange={(e) => setParkLabel(e.target.value)}
+            />
+            <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+              {cart.length} item{cart.length === 1 ? "" : "s"} ·{" "}
+              {money(totalDue)}
+            </p>
+          </div>
+        </ModalFrame>
+      ) : null}
+
+      {payModal === "more" ? (
+        <ModalFrame
+          title="More options"
+          subtitle="Extra pay methods and extras. Fill what you need, then Done and Charge."
+          onClose={() => setPayModal(null)}
+          className="max-w-lg"
+          footer={
+            <Button className="w-full" onClick={() => setPayModal(null)}>
+              Done
+            </Button>
+          }
+        >
+          <div className="space-y-4">
+            {(() => {
+              const catalogItems = payMethods.data?.items ?? [];
+              const byMethod = new Map(
+                catalogItems.map((m) => [m.method, m] as const),
+              );
+              const extraRow = [
+                "gift_card",
+                "bank_transfer",
+                "emi",
+                "wallet",
+              ] as const;
+              const extras = extraRow.map((method) => {
+                const m = byMethod.get(method);
+                return {
+                  method,
+                  displayName:
+                    method === "gift_card"
+                      ? "Gift card"
+                      : method === "bank_transfer"
+                        ? "Bank transfer"
+                        : method === "emi"
+                          ? "EMI"
+                          : "App pay",
+                  available: Boolean(m?.available),
+                  reason: m?.reason,
+                };
+              });
+              return (
+                <div>
+                  <p className="mb-1.5 text-xs font-semibold text-[#0b1f33]">
+                    Extra pay methods
+                  </p>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {extras.map((m) => (
+                      <button
+                        key={m.method}
+                        type="button"
+                        title={m.reason}
+                        onClick={() => {
+                          if (!m.available) {
+                            toast.message(
+                              m.reason || `${m.displayName} is not set up`,
+                            );
+                            return;
+                          }
+                          setPayMethod(m.method as PayMethod);
+                          if ((m.method as string) !== "cash") setSplitPay(false);
+                        }}
+                        className={cn(
+                          "rounded-lg border px-3 py-2.5 text-left text-sm font-semibold",
+                          !m.available && "cursor-not-allowed opacity-40",
+                          payMethod === m.method
+                            ? "border-[#1a56db] bg-[#e8eefb] text-[#1a56db]"
+                            : "border-[#d9e0ea] bg-white text-[#0b1f33]",
+                        )}
+                      >
+                        {m.displayName}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {payMethod === "gift_card" ? (
+              <div className="field-shell">
+                <Label>Gift card code</Label>
+                <div className="mt-1 flex gap-2">
+                  <Input
+                    value={giftCardCode}
+                    onChange={(e) => {
+                      setGiftCardCode(e.target.value);
+                      setGiftCardBalance(null);
+                    }}
+                    placeholder="Scan or type code"
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={!giftCardCode.trim()}
+                    onClick={async () => {
+                      try {
+                        const g = await loyaltyApi.lookupGiftCard(
+                          giftCardCode.trim(),
+                        );
+                        setGiftCardBalance(Number(g.balance));
+                        toast.success(
+                          `Balance ${money(Number(g.balance))}`,
+                        );
+                      } catch (e) {
+                        setGiftCardBalance(null);
+                        toast.error(
+                          e instanceof ApiError
+                            ? e.messages.join(", ")
+                            : "Gift card not found",
+                        );
+                      }
+                    }}
+                  >
+                    Check
+                  </Button>
+                </div>
+                {giftCardBalance != null ? (
+                  <p className="mt-1 text-sm font-semibold text-[#1a56db]">
+                    Balance {money(giftCardBalance)}
+                  </p>
+                ) : (
+                  <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+                    Check the card, then Charge.
+                  </p>
+                )}
+              </div>
+            ) : null}
+
+            {payMethod === "bank_transfer" ? (
+              <div className="space-y-3">
+                <div className="field-shell">
+                  <Label>Account name</Label>
+                  <Input
+                    className="mt-1"
+                    value={bankAccountName}
+                    onChange={(e) => setBankAccountName(e.target.value)}
+                  />
+                </div>
+                <div className="field-shell">
+                  <Label>Account number</Label>
+                  <Input
+                    className="mt-1"
+                    value={bankAccountNumber}
+                    onChange={(e) => setBankAccountNumber(e.target.value)}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="field-shell">
+                    <Label>IFSC (optional)</Label>
+                    <Input
+                      className="mt-1 uppercase"
+                      value={bankIfsc}
+                      onChange={(e) => setBankIfsc(e.target.value)}
+                    />
+                  </div>
+                  <div className="field-shell">
+                    <Label>Bank name (optional)</Label>
+                    <Input
+                      className="mt-1"
+                      value={bankName}
+                      onChange={(e) => setBankName(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="field-shell">
+                  <Label>Reference / UTR</Label>
+                  <Input
+                    className="mt-1"
+                    value={bankReference}
+                    onChange={(e) => setBankReference(e.target.value)}
+                  />
+                </div>
+              </div>
+            ) : null}
+
+            {payMethod === "emi" ? (
+              <div className="space-y-3">
+                {!customerId ? (
+                  <p className="text-sm text-amber-800">
+                    Pick a customer on the ticket first.
+                  </p>
+                ) : null}
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="field-shell">
+                    <Label>Months</Label>
+                    <Input
+                      className="mt-1"
+                      inputMode="numeric"
+                      value={emiTenureMonths}
+                      onChange={(e) => setEmiTenureMonths(e.target.value)}
+                    />
+                  </div>
+                  <div className="field-shell">
+                    <Label>Bank / provider</Label>
+                    <Input
+                      className="mt-1"
+                      value={emiProvider}
+                      onChange={(e) => setEmiProvider(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="field-shell">
+                  <Label>Reference (optional)</Label>
+                  <Input
+                    className="mt-1"
+                    value={emiReference}
+                    onChange={(e) => setEmiReference(e.target.value)}
+                  />
+                </div>
+              </div>
+            ) : null}
+
+            {payMethod === "wallet" ? (
+              <p className="text-sm text-[#5a6b7d]">
+                Confirm after the customer pays in the wallet app, then Charge.
+              </p>
+            ) : null}
+
+            <label className="flex items-center gap-2 text-sm font-medium text-[#0b1f33]">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-[#1a56db]"
+                checked={allowPartial}
+                disabled={Boolean(splitSession)}
+                onChange={(e) => setAllowPartial(e.target.checked)}
+              />
+              Collect only part now
+            </label>
+            {allowPartial && !splitSession ? (
+              <div className="field-shell">
+                <Label>Amount to collect now</Label>
+                <Input
+                  className="mt-1 text-base tabular-nums"
+                  inputMode="decimal"
+                  value={payAmount}
+                  onChange={(e) => setPayAmount(e.target.value)}
+                  placeholder={String(totalDue || "")}
+                />
+                <p className="mt-1 text-xs text-[#5a6b7d]">
+                  Left after this: {money(Math.max(0, totalDue - chargeAmount))}
+                </p>
+              </div>
+            ) : null}
+
+            {customerId ? (
+              <div className="field-shell">
+                <Label>Loyalty points</Label>
+                <div className="mt-1 flex gap-2">
+                  <Input
+                    inputMode="numeric"
+                    placeholder="Points to use"
+                    value={loyaltyPointsInput}
+                    onChange={(e) => {
+                      setLoyaltyPointsInput(e.target.value);
+                      setLoyaltyQuote(null);
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={!loyaltyPointsInput.trim()}
+                    onClick={async () => {
+                      try {
+                        const q = await loyaltyApi.quotePoints(
+                          customerId,
+                          Number(loyaltyPointsInput),
+                          totalDue + loyaltyOff,
+                        );
+                        setLoyaltyQuote({
+                          points: q.points,
+                          amountOff: q.amountOff,
+                        });
+                        toast.success(
+                          `Redeem ${q.points} pts → −${money(q.amountOff)}`,
+                        );
+                      } catch (e) {
+                        toast.error(
+                          e instanceof ApiError
+                            ? e.messages.join(", ")
+                            : "Points quote failed",
+                        );
+                      }
+                    }}
+                  >
+                    Apply
+                  </Button>
+                </div>
+                {loyaltyQuote ? (
+                  <p className="mt-1 text-xs text-[#1a56db]">
+                    −{money(loyaltyQuote.amountOff)} ({loyaltyQuote.points} pts)
+                  </p>
+                ) : (
+                  <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+                    Apply points, then Charge.
+                  </p>
+                )}
+              </div>
+            ) : null}
+
+            {payMethod === "cash" && !splitSession ? (
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-sm font-medium text-[#0b1f33]">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 accent-[#1a56db]"
+                    checked={splitPay}
+                    onChange={(e) => setSplitPay(e.target.checked)}
+                  />
+                  Split cash + card/UPI
+                </label>
+                {splitPay ? (
+                  <div className="field-shell">
+                    <Label>Cash portion</Label>
+                    <Input
+                      className="mt-1 text-base tabular-nums"
+                      inputMode="decimal"
+                      value={splitCashAmount}
+                      onChange={(e) => setSplitCashAmount(e.target.value)}
+                      placeholder="0"
+                    />
+                    <p className="mt-1 text-xs text-[#5a6b7d]">
+                      Card/UPI collects{" "}
+                      {money(
+                        Math.max(
+                          0,
+                          totalDue - moneyNumber(splitCashAmount || 0),
+                        ),
+                      )}
+                    </p>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            <label className="flex items-center gap-2 text-sm font-medium text-[#0b1f33]">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-[#1a56db]"
+                checked={sendReceipt}
+                onChange={(e) => setSendReceipt(e.target.checked)}
+              />
+              Send receipt by email / SMS
+            </label>
+            <label className="flex items-center gap-2 text-sm font-medium text-[#0b1f33]">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-[#1a56db]"
+                checked={touchMode}
+                onChange={(e) => {
+                  const on = e.target.checked;
+                  setTouchMode(on);
+                  try {
+                    localStorage.setItem(TOUCH_KEY, on ? "1" : "0");
+                  } catch {
+                    /* ignore */
+                  }
+                }}
+              />
+              Bigger buttons (touch mode)
+            </label>
+          </div>
+        </ModalFrame>
+      ) : null}
+
+      <SplitBillModal
+        open={splitBillOpen}
+        total={totalDue}
+        lines={cart.map((l) => ({
+          id: l.stockLevelId,
+          name: l.name,
+          qty: l.qty,
+          amount: l.unitPrice * l.qty,
+        }))}
+        money={money}
+        onClose={() => setSplitBillOpen(false)}
+        onSave={(parts, mode) => {
+          setSplitSession({ mode, parts, index: 0 });
+          setSplitPay(false);
+          setAllowPartial(false);
+          setSplitBillOpen(false);
+          toast.success(
+            `Split into ${parts.length} parts — collect ${parts[0]?.label ?? "Part 1"} first`,
+          );
+        }}
+      />
 
       <ImageLightbox
         open={Boolean(lightbox)}

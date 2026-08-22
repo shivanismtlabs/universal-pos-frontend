@@ -551,6 +551,8 @@ export const customersApi = {
         totalSpent?: number;
         lastVisitAt?: string | null;
         lastVisitOrder?: string | null;
+        firstVisitAt?: string | null;
+        visitEveryDays?: number | null;
         creditLimit?: number | null;
         availableCredit?: number | null;
         activeMembership?: {
@@ -1609,6 +1611,17 @@ export const restaurantApi = {
       prepCriticalMinutes: number;
       otpOnQrOrder: boolean;
       inventoryNote?: string;
+      sellingMenus?: Array<{
+        id: string;
+        name: string;
+        categoryIds: string[];
+        locationId: string | null;
+        channel: "pos" | "qr" | "all";
+        isActive: boolean;
+        days: number[];
+        startTime: string | null;
+        endTime: string | null;
+      }>;
     }>("/restaurant/config", { token: token() });
   },
   saveConfig(body: Record<string, unknown>) {
@@ -1628,12 +1641,31 @@ export const restaurantApi = {
         sortOrder: number;
         isActive: boolean;
         tableCount: number;
+        categoryIds: string[];
+        taxRatePercent: number | null;
+        serviceChargePercent: number | null;
       }>
     >(`/restaurant/floors${q}`, { token: token() });
   },
   createFloor(body: { locationId: string; name: string }) {
-    return apiRequest("/restaurant/floors", {
+    return apiRequest<{ id: string }>("/restaurant/floors", {
       method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  updateFloor(
+    id: string,
+    body: {
+      name?: string;
+      isActive?: boolean;
+      categoryIds?: string[];
+      taxRatePercent?: number | null;
+      serviceChargePercent?: number | null;
+    },
+  ) {
+    return apiRequest(`/restaurant/floors/${id}`, {
+      method: "PATCH",
       body,
       token: token(),
     });
@@ -1641,12 +1673,40 @@ export const restaurantApi = {
   stations(locationId?: string) {
     const q = locationId ? `?locationId=${encodeURIComponent(locationId)}` : "";
     return apiRequest<
-      Array<{ id: string; name: string; code: string; isActive: boolean }>
+      Array<{
+        id: string;
+        name: string;
+        code: string;
+        isActive: boolean;
+        categoryIds?: string[];
+        printerName?: string | null;
+      }>
     >(`/restaurant/stations${q}`, { token: token() });
   },
-  createStation(body: { name: string; code: string; locationId?: string }) {
+  createStation(body: {
+    name: string;
+    code: string;
+    locationId?: string;
+    categoryIds?: string[];
+    printerName?: string;
+  }) {
     return apiRequest("/restaurant/stations", {
       method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  updateStation(
+    id: string,
+    body: {
+      name?: string;
+      isActive?: boolean;
+      categoryIds?: string[];
+      printerName?: string | null;
+    },
+  ) {
+    return apiRequest(`/restaurant/stations/${id}`, {
+      method: "PATCH",
       body,
       token: token(),
     });
@@ -1667,7 +1727,14 @@ export const restaurantApi = {
         diningMode: string | null;
         covers: number | null;
         guestName: string | null;
+        guestOccasion?: string | null;
         qrToken?: string | null;
+        sortOrder?: number;
+        layoutX?: number | null;
+        layoutY?: number | null;
+        areaCategoryIds?: string[];
+        areaTaxRatePercent?: number | null;
+        areaServiceChargePercent?: number | null;
       }>
     >(`/restaurant/tables${q}`, { token: token() });
   },
@@ -1688,8 +1755,10 @@ export const restaurantApi = {
     body: {
       name?: string;
       capacity?: number;
-      floorId?: string;
+      floorId?: string | null;
       status?: string;
+      layoutX?: number;
+      layoutY?: number;
     },
   ) {
     return apiRequest(`/restaurant/tables/${id}`, {
@@ -1727,6 +1796,19 @@ export const restaurantApi = {
       token: token(),
     });
   },
+  splitItems(
+    orderId: string,
+    body: { orderItemIds: string[]; toTableId?: string },
+  ) {
+    return apiRequest<{
+      original: { id: string; orderNumber: string };
+      split: { id: string; orderNumber: string };
+    }>(`/restaurant/orders/${orderId}/split`, {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
   openOrder(body: {
     locationId: string;
     diningMode: string;
@@ -1757,6 +1839,11 @@ export const restaurantApi = {
         tableId: string | null;
         covers: number;
         consumptionPosted: boolean;
+        guestSpecials?: {
+          occasion: string | null;
+          requests: string[];
+          note: string;
+        };
       } | null;
       kots: Array<{ id: string; kotNumber: string; status: string }>;
     }>(`/restaurant/orders/${id}`, { token: token() });
@@ -1768,6 +1855,16 @@ export const restaurantApi = {
     return apiRequest(`/restaurant/orders/${orderId}/kot`, {
       method: "POST",
       body: body ?? {},
+      token: token(),
+    });
+  },
+  patchGuestSpecials(
+    orderId: string,
+    body: { occasion?: string; requests?: string[]; note?: string },
+  ) {
+    return apiRequest(`/restaurant/orders/${orderId}/specials`, {
+      method: "PATCH",
+      body,
       token: token(),
     });
   },
@@ -1785,29 +1882,53 @@ export const restaurantApi = {
         orderNumber: string;
         tableName: string | null;
         diningMode: string;
+        stationId?: string | null;
         stationName: string | null;
+        printerName?: string | null;
         status: string;
         priority: number;
         specialInstructions: string | null;
         createdAt: string;
         aging: "waiting" | "delayed" | "critical";
+        reprintCount?: number;
+        readyAt?: string | null;
         lines: Array<{
           id: string;
           name: string;
           quantity: number;
           notes: string | null;
           modifiers: unknown;
+          status?: string;
         }>;
       }>
     >(`/restaurant/kots${q ? `?${q}` : ""}`, { token: token() });
   },
   updateKot(
     id: string,
-    body: { status: string; cancelReason?: string },
+    body: {
+      status?: string;
+      cancelReason?: string;
+      specialInstructions?: string;
+      priority?: number;
+      lineId?: string;
+    },
   ) {
     return apiRequest(`/restaurant/kots/${id}`, {
       method: "PATCH",
       body,
+      token: token(),
+    });
+  },
+  reprintKot(id: string) {
+    return apiRequest(`/restaurant/kots/${id}/reprint`, {
+      method: "POST",
+      token: token(),
+    });
+  },
+  voidOrder(orderId: string, reason: string) {
+    return apiRequest(`/restaurant/orders/${orderId}/void`, {
+      method: "POST",
+      body: { reason },
       token: token(),
     });
   },
@@ -1876,8 +1997,16 @@ export const restaurantApi = {
           quantity: number;
           unit: string;
           wastagePercent: number;
+          stageId?: string | null;
+          purpose?: string;
         }>;
-        stages: Array<{ id: string; name: string; sortOrder: number }>;
+        stages: Array<{
+          id: string;
+          name: string;
+          sortOrder: number;
+          outputProductId?: string | null;
+          outputQty?: number;
+        }>;
       }>
     >("/restaurant/recipes", { token: token() });
   },
@@ -1889,11 +2018,39 @@ export const restaurantApi = {
       unit?: string;
       wastagePercent?: number;
       stageId?: string;
+      purpose?: string;
     }>,
   ) {
     return apiRequest(`/restaurant/recipes/${productId}`, {
       method: "PUT",
       body: { lines },
+      token: token(),
+    });
+  },
+  createRecipeStage(
+    productId: string,
+    body: {
+      name: string;
+      sortOrder?: number;
+      outputProductId?: string;
+      outputQty?: number;
+    },
+  ) {
+    return apiRequest(`/restaurant/recipes/${productId}/stages`, {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  completeRecipeStage(body: {
+    locationId: string;
+    productId: string;
+    stageId: string;
+    qty: number;
+  }) {
+    return apiRequest("/restaurant/production/complete-stage", {
+      method: "POST",
+      body,
       token: token(),
     });
   },
@@ -2704,7 +2861,10 @@ export const posApi = {
         orderNumber: string;
         status: string;
         subtotal: string | number;
+        taxTotal?: string | number;
+        discountTotal?: string | number;
         balanceDue: string | number;
+        total?: string | number;
         createdAt: string;
         customerName: string;
         itemCount: number;

@@ -397,20 +397,14 @@ export default function CustomersPage() {
                           </p>
                         </div>
                         <div className="shrink-0 text-left sm:text-right">
-                          {rental ? (
-                            <>
-                              <p className="text-[0.65rem] font-semibold tracking-wide text-[#9ca3af] uppercase">
-                                Event
-                              </p>
-                              <p className="text-sm text-[#374151]">
-                                {c.eventDate ? formatDate(c.eventDate) : "—"}
-                              </p>
-                            </>
-                          ) : (
-                            <p className="text-sm text-[#6b7280]">
-                              {c.email ?? "—"}
+                          <p className="text-sm text-[#6b7280]">
+                            {c.email ?? "—"}
+                          </p>
+                          {c.eventDate ? (
+                            <p className="text-[0.7rem] text-[#8b9bb0]">
+                              Anniv. {formatDate(c.eventDate)}
                             </p>
-                          )}
+                          ) : null}
                           <p className="mt-1 text-[0.7rem] tabular-nums text-[#6b7280]">
                             {typeof c.loyaltyPoints === "number"
                               ? `${c.loyaltyPoints} pts`
@@ -504,38 +498,16 @@ export default function CustomersPage() {
                   />
                   <FieldError message={form.formState.errors.phone?.message} />
                 </div>
-                {rental ? (
-                  <div>
-                    <Label>Event date</Label>
-                    <Input
-                      className="mt-1.5"
-                      type="date"
-                      {...form.register("eventDate")}
-                    />
-                  </div>
-                ) : (
-                  <div>
-                    <Label>Email</Label>
-                    <Input
-                      className="mt-1.5"
-                      type="email"
-                      {...form.register("email")}
-                    />
-                    <FieldError message={form.formState.errors.email?.message} />
-                  </div>
-                )}
+                <div>
+                  <Label>Email</Label>
+                  <Input
+                    className="mt-1.5"
+                    type="email"
+                    {...form.register("email")}
+                  />
+                  <FieldError message={form.formState.errors.email?.message} />
+                </div>
               </div>
-              {rental ? (
-              <div>
-                <Label>Email</Label>
-                <Input
-                  className="mt-1.5"
-                  type="email"
-                  {...form.register("email")}
-                />
-                <FieldError message={form.formState.errors.email?.message} />
-              </div>
-              ) : null}
               <div className="grid gap-3 sm:grid-cols-2">
                 <div>
                   <Label>Birthday (optional)</Label>
@@ -548,11 +520,22 @@ export default function CustomersPage() {
                     Used for birthday reminders when marketing is on
                   </p>
                 </div>
-                <label className="flex items-end gap-2 pb-2 text-sm text-[#5a6b7d]">
-                  <input type="checkbox" {...form.register("marketingOptIn")} />
-                  Marketing / birthday opt-in
-                </label>
+                <div>
+                  <Label>Anniversary / event (optional)</Label>
+                  <Input
+                    className="mt-1.5"
+                    type="date"
+                    {...form.register("eventDate")}
+                  />
+                  <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+                    Wedding anniversary, store event, or rental date
+                  </p>
+                </div>
               </div>
+              <label className="flex items-center gap-2 text-sm text-[#5a6b7d]">
+                <input type="checkbox" {...form.register("marketingOptIn")} />
+                Marketing / birthday opt-in
+              </label>
               <div>
                 <Label>Notes</Label>
                 <Input className="mt-1.5" {...form.register("notes")} />

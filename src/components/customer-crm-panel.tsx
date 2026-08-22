@@ -4,13 +4,14 @@ import Link from "next/link";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { customersApi } from "@/lib/api";
+import { customersApi, notifyApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useBootstrap } from "@/lib/bootstrap";
 import { useAuthStore } from "@/lib/auth-store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ModalFrame } from "@/components/modal-frame";
 import { cn, formatDate } from "@/lib/utils";
 
 type CrmTab =
@@ -31,6 +32,12 @@ export function CustomerCrmPanel({ customerId }: { customerId: string }) {
   const [noteBody, setNoteBody] = useState("");
   const [walletAmt, setWalletAmt] = useState("100");
   const [walletNote, setWalletNote] = useState("");
+  const [modal, setModal] = useState<null | "message" | "feedback">(null);
+  const [msgChannel, setMsgChannel] = useState<"sms" | "email" | "whatsapp">(
+    "sms",
+  );
+  const [msgBody, setMsgBody] = useState("");
+  const [feedbackBody, setFeedbackBody] = useState("");
   const canManageWallet = useAuthStore((s) =>
     (s.user?.roles ?? []).some((r) => r === "admin" || r === "manager"),
   );
@@ -112,6 +119,38 @@ export function CustomerCrmPanel({ customerId }: { customerId: string }) {
       toast.error(e instanceof ApiError ? e.messages.join(", ") : "Failed"),
   });
 
+  const sendMessage = useMutation({
+    mutationFn: () =>
+      notifyApi.send({
+        customerId,
+        channel: msgChannel,
+        templateKey: "custom",
+        payload: { message: msgBody.trim() },
+      }),
+    onSuccess: () => {
+      toast.success("Message queued");
+      setMsgBody("");
+      setModal(null);
+    },
+    onError: (e) =>
+      toast.error(e instanceof ApiError ? e.messages.join(", ") : "Failed"),
+  });
+
+  const addFeedback = useMutation({
+    mutationFn: () =>
+      customersApi.addNote(customerId, `[Feedback] ${feedbackBody.trim()}`),
+    onSuccess: () => {
+      toast.success("Feedback saved");
+      setFeedbackBody("");
+      setModal(null);
+      void qc.invalidateQueries({ queryKey: ["customer-notes", customerId] });
+      void qc.invalidateQueries({ queryKey: ["customer-crm", customerId] });
+      void qc.invalidateQueries({ queryKey: ["customer", customerId] });
+    },
+    onError: (e) =>
+      toast.error(e instanceof ApiError ? e.messages.join(", ") : "Failed"),
+  });
+
   const s = detail.data?.summary;
   const tabs: { id: CrmTab; label: string }[] = [
     { id: "overview", label: "Overview" },
@@ -156,14 +195,50 @@ export function CustomerCrmPanel({ customerId }: { customerId: string }) {
               {detail.data.phone}
               {detail.data.email ? ` · ${detail.data.email}` : ""}
             </p>
+            <p className="mt-1 text-[0.75rem] text-[#8b9bb0]">
+              Birthday:{" "}
+              {detail.data.dateOfBirth
+                ? formatDate(detail.data.dateOfBirth)
+                : "—"}
+              {" · Anniversary: "}
+              {detail.data.eventDate ? formatDate(detail.data.eventDate) : "—"}
+            </p>
           </div>
-          <Button asChild size="sm" variant="secondary">
-            <Link href={`/customers/${customerId}`}>Open durable URL</Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => setModal("message")}
+            >
+              Message
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => setModal("feedback")}
+            >
+              Feedback
+            </Button>
+            <Button asChild size="sm" variant="secondary">
+              <Link href={`/customers/${customerId}`}>Open durable URL</Link>
+            </Button>
+          </div>
         </div>
-        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-7">
           <Kpi label="Total spent" value={money(s?.totalSpent ?? 0)} />
           <Kpi label="Orders" value={String(s?.orderCount ?? 0)} />
+          <Kpi
+            label="Visit freq."
+            value={
+              s?.visitEveryDays
+                ? `Every ${s.visitEveryDays}d`
+                : s?.lastVisitAt
+                  ? "Once"
+                  : "—"
+            }
+          />
           <Kpi
             label="Open due"
             value={money(s?.openDueTotal ?? 0)}
@@ -185,6 +260,9 @@ export function CustomerCrmPanel({ customerId }: { customerId: string }) {
           {s?.lastVisitAt
             ? `${formatDate(s.lastVisitAt)}${s.lastVisitOrder ? ` · ${s.lastVisitOrder}` : ""}`
             : "—"}
+          {s?.firstVisitAt
+            ? ` · First visit: ${formatDate(s.firstVisitAt)}`
+            : ""}
           {s?.activeMembership
             ? ` · Member: ${s.activeMembership.planName}`
             : ""}
@@ -221,7 +299,7 @@ export function CustomerCrmPanel({ customerId }: { customerId: string }) {
             {(detail.data.partyMemberships?.length ?? 0) > 0 ? (
               <div>
                 <p className="text-[0.7rem] font-semibold text-[#8b9bb0] uppercase">
-                  Rental parties / groups
+                  Customer groups
                 </p>
                 <ul className="mt-1 space-y-1">
                   {detail.data.partyMemberships!.map((m) => (
@@ -245,9 +323,16 @@ export function CustomerCrmPanel({ customerId }: { customerId: string }) {
               </div>
             ) : (
               <p className="text-xs text-[#8b9bb0]">
-                No rental party membership.{" "}
+                No group membership.{" "}
                 <Link href="/parties" className="text-[#1a56db] hover:underline">
-                  Open parties
+                  Customer groups
+                </Link>
+                {" · "}
+                <Link
+                  href="/reports/customers"
+                  className="text-[#1a56db] hover:underline"
+                >
+                  RFM / loyalty reports
                 </Link>
               </p>
             )}
@@ -548,6 +633,13 @@ export function CustomerCrmPanel({ customerId }: { customerId: string }) {
               >
                 Add note
               </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setModal("feedback")}
+              >
+                Feedback
+              </Button>
             </div>
             <ul className="divide-y divide-[#eef2f8] text-sm">
               {(notes.data?.items ?? []).map((n) => (
@@ -566,6 +658,94 @@ export function CustomerCrmPanel({ customerId }: { customerId: string }) {
           </div>
         ) : null}
       </div>
+
+      {modal === "message" ? (
+        <ModalFrame
+          title="Message customer"
+          subtitle="SMS, email, or WhatsApp using saved phone/email"
+          onClose={() => setModal(null)}
+          footer={
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setModal(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                disabled={!msgBody.trim() || sendMessage.isPending}
+                onClick={() => sendMessage.mutate()}
+              >
+                Send
+              </Button>
+            </div>
+          }
+        >
+          <div className="space-y-3">
+            <div>
+              <Label>Channel</Label>
+              <select
+                className="mt-1.5 h-10 w-full rounded-lg border border-[#d9e0ea] bg-white px-3 text-sm text-[#0b1f33]"
+                value={msgChannel}
+                onChange={(e) =>
+                  setMsgChannel(e.target.value as typeof msgChannel)
+                }
+              >
+                <option value="sms">SMS</option>
+                <option value="email">Email</option>
+                <option value="whatsapp">WhatsApp</option>
+              </select>
+            </div>
+            <div>
+              <Label>Message</Label>
+              <textarea
+                className="mt-1.5 min-h-[7rem] w-full rounded-lg border border-[#d9e0ea] px-3 py-2 text-sm text-[#0b1f33] outline-none focus:border-[#1a56db]"
+                value={msgBody}
+                onChange={(e) => setMsgBody(e.target.value)}
+                placeholder="Write a short note to this customer…"
+              />
+            </div>
+          </div>
+        </ModalFrame>
+      ) : null}
+
+      {modal === "feedback" ? (
+        <ModalFrame
+          title="Customer feedback"
+          subtitle="Saved on the profile Notes tab with a Feedback prefix"
+          onClose={() => setModal(null)}
+          footer={
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setModal(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                disabled={!feedbackBody.trim() || addFeedback.isPending}
+                onClick={() => addFeedback.mutate()}
+              >
+                Save
+              </Button>
+            </div>
+          }
+        >
+          <div>
+            <Label>Feedback</Label>
+            <textarea
+              className="mt-1.5 min-h-[7rem] w-full rounded-lg border border-[#d9e0ea] px-3 py-2 text-sm text-[#0b1f33] outline-none focus:border-[#1a56db]"
+              value={feedbackBody}
+              onChange={(e) => setFeedbackBody(e.target.value)}
+              placeholder="What did they say?"
+            />
+          </div>
+        </ModalFrame>
+      ) : null}
     </section>
   );
 }

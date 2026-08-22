@@ -1,15 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { restaurantApi } from "@/lib/api";
+import { posApi, restaurantApi } from "@/lib/api";
 import { useBootstrap } from "@/lib/bootstrap";
 import { useBranchStore } from "@/lib/branch-store";
 import {
   DiningEmpty,
-  DiningPanel,
   DiningShell,
   DiningStatusBadge,
   diningSelectClass,
@@ -18,7 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { Pencil, Trash2 } from "lucide-react";
+import { LayoutGrid, Map as MapIcon, Pencil } from "lucide-react";
 import { ModalFrame } from "@/components/modal-frame";
 
 const TILE: Record<string, string> = {
@@ -32,28 +31,103 @@ const TILE: Record<string, string> = {
   blocked: "border-[#e2e8f0] bg-[#f8fafc] opacity-80",
 };
 
+const TABLE_STATUSES = [
+  "available",
+  "occupied",
+  "reserved",
+  "cleaning",
+  "blocked",
+] as const;
+
+const GUEST_OCCASION_OPTS = [
+  ["none", "No occasion"],
+  ["birthday", "Birthday"],
+  ["anniversary", "Anniversary"],
+  ["celebration", "Celebration"],
+] as const;
+
+const GUEST_REQUEST_OPTS = [
+  ["water", "Bottle of water", "Bring water to the table"],
+  ["cake", "Cake", "Kitchen prepares / plates cake"],
+  ["decor", "Table décor", "Balloons, flowers, setup"],
+  ["candles", "Candles", "For the cake or table"],
+  ["extra_cutlery", "Extra plates", "Spoons, plates, glasses"],
+  ["complimentary", "On the house", "Do not charge"],
+] as const;
+
+function requestLabel(code: string) {
+  return GUEST_REQUEST_OPTS.find(([id]) => id === code)?.[1] ?? code;
+}
+
+type DiningTable = Awaited<ReturnType<typeof restaurantApi.tables>>[number];
+type DiningFloor = Awaited<ReturnType<typeof restaurantApi.floors>>[number];
+
+type Modal =
+  | { kind: "floor"; id?: string }
+  | { kind: "table"; id?: string; floorId?: string }
+  | { kind: "open"; tableId: string }
+  | { kind: "order"; orderId: string }
+  | { kind: "move"; fromTableId?: string }
+  | { kind: "merge"; fromTableId?: string }
+  | { kind: "split"; orderId: string }
+  | { kind: "reserve"; tableId?: string }
+  | { kind: "layout"; floorId: string }
+  | { kind: "void"; orderId: string }
+  | { kind: "specials"; orderId: string };
+
+function clampPct(n: number) {
+  return Math.min(88, Math.max(2, n));
+}
+
+function layoutSlot(index: number) {
+  const col = index % 6;
+  const row = Math.floor(index / 6);
+  return { layoutX: 4 + col * 15.5, layoutY: 6 + row * 22 };
+}
+
+function localDateTimeIn(minutes: number) {
+  const d = new Date();
+  d.setMinutes(d.getMinutes() + minutes, 0, 0);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function nextBookedFor(
+  reservations: Array<{
+    table: { id: string } | null;
+    status: string;
+    guestName: string;
+    startAt: string;
+  }>,
+  tableId: string,
+) {
+  return reservations
+    .filter((r) => r.table?.id === tableId && r.status === "booked")
+    .sort((a, b) => a.startAt.localeCompare(b.startAt))[0];
+}
+
+function bookingWhen(iso: string) {
+  return new Date(iso).toLocaleString(undefined, {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export default function RestaurantTablesPage() {
   const qc = useQueryClient();
   const { hasCapability, data: boot } = useBootstrap();
   const locationId =
     useBranchStore((s) => s.currentLocationId) || boot?.locations?.[0]?.id;
   const allowed = hasCapability("TABLE") || hasCapability("CAPTAIN");
+  const canReserve =
+    hasCapability("DINING_RESERVATION") || hasCapability("TABLE");
 
-  const [floorName, setFloorName] = useState("Main floor");
-  const [tableName, setTableName] = useState("");
-  const [capacity, setCapacity] = useState("4");
-  const [floorId, setFloorId] = useState("");
   const [floorFilter, setFloorFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [moveFrom, setMoveFrom] = useState("");
-  const [moveTo, setMoveTo] = useState("");
-  const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
-  const [editingTable, setEditingTable] = useState<{
-    id: string;
-    name: string;
-    capacity: number;
-    floorId: string | null;
-  } | null>(null);
+  const [viewMode, setViewMode] = useState<"grid" | "layout">("grid");
+  const [modal, setModal] = useState<Modal | null>(null);
 
   const floors = useQuery({
     queryKey: ["restaurant-floors", locationId],
@@ -66,104 +140,33 @@ export default function RestaurantTablesPage() {
     enabled: allowed && Boolean(locationId),
     refetchInterval: 8_000,
   });
+  const categories = useQuery({
+    queryKey: ["pos-sale-categories"],
+    queryFn: () => posApi.listSaleCategories(),
+    enabled: allowed,
+  });
+  const reservations = useQuery({
+    queryKey: ["dining-reservations", locationId],
+    queryFn: () => restaurantApi.reservations(locationId),
+    enabled: canReserve && Boolean(locationId),
+  });
+  const activeOrderId =
+    modal?.kind === "order" || modal?.kind === "split" || modal?.kind === "void"
+      ? modal.orderId
+      : null;
   const order = useQuery({
     queryKey: ["restaurant-order", activeOrderId],
     queryFn: () => restaurantApi.getOrder(activeOrderId!),
     enabled: Boolean(activeOrderId),
   });
 
-  const createFloor = useMutation({
-    mutationFn: () =>
-      restaurantApi.createFloor({
-        locationId: locationId!,
-        name: floorName.trim(),
-      }),
-    onSuccess: () => {
-      toast.success("Floor added");
-      void qc.invalidateQueries({ queryKey: ["restaurant-floors"] });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-  const createTable = useMutation({
-    mutationFn: () =>
-      restaurantApi.createTable({
-        locationId: locationId!,
-        name: tableName.trim(),
-        capacity: Number(capacity) || 4,
-        floorId: floorId || undefined,
-      }),
-    onSuccess: () => {
-      toast.success("Table added");
-      setTableName("");
-      void qc.invalidateQueries({ queryKey: ["restaurant-tables"] });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-  const openTable = useMutation({
-    mutationFn: (id: string) => restaurantApi.openTable(id, { covers: 2 }),
-    onSuccess: (data) => {
-      toast.success(`Opened ${data.orderNumber}`);
-      setActiveOrderId(data.id);
-      void qc.invalidateQueries({ queryKey: ["restaurant-tables"] });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-  const sendKot = useMutation({
-    mutationFn: (orderId: string) => restaurantApi.sendKot(orderId),
-    onSuccess: () => {
-      toast.success("KOT sent — stock is not deducted until billing");
-      void qc.invalidateQueries({ queryKey: ["restaurant-order"] });
-      void qc.invalidateQueries({ queryKey: ["restaurant-kots"] });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-  const merge = useMutation({
-    mutationFn: () => restaurantApi.mergeTables(moveFrom, moveTo),
-    onSuccess: () => {
-      toast.success("Tables merged onto one order");
-      setMoveFrom("");
-      setMoveTo("");
-      void qc.invalidateQueries({ queryKey: ["restaurant-tables"] });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-  const move = useMutation({
-    mutationFn: () => restaurantApi.moveTable(moveFrom, moveTo),
-    onSuccess: () => {
-      toast.success("Order moved");
-      setMoveFrom("");
-      setMoveTo("");
-      void qc.invalidateQueries({ queryKey: ["restaurant-tables"] });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  const updateTable = useMutation({
-    mutationFn: (args: { id: string; name: string; capacity: number; floorId?: string }) =>
-      restaurantApi.updateTable(args.id, {
-        name: args.name,
-        capacity: args.capacity,
-        floorId: args.floorId,
-      }),
-    onSuccess: () => {
-      toast.success("Table updated");
-      setEditingTable(null);
-      void qc.invalidateQueries({ queryKey: ["restaurant-tables"] });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  const deleteTable = useMutation({
-    mutationFn: (id: string) => restaurantApi.deleteTable(id),
-    onSuccess: () => {
-      toast.success("Table deleted");
-      setEditingTable(null);
-      void qc.invalidateQueries({ queryKey: ["restaurant-tables"] });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
+  const refreshFloor = () => {
+    void qc.invalidateQueries({ queryKey: ["restaurant-floors"] });
+    void qc.invalidateQueries({ queryKey: ["restaurant-tables"] });
+  };
 
   const allTables = tables.data ?? [];
+  const allFloors = floors.data ?? [];
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: allTables.length };
     for (const t of allTables) c[t.status] = (c[t.status] ?? 0) + 1;
@@ -172,18 +175,36 @@ export default function RestaurantTablesPage() {
 
   const grouped = useMemo(() => {
     const list = allTables.filter((t) => {
-      if (floorFilter !== "all" && (t.floorName || "Unassigned") !== floorFilter)
+      if (floorFilter !== "all" && (t.floorId || "unassigned") !== floorFilter)
         return false;
       if (statusFilter !== "all" && t.status !== statusFilter) return false;
       return true;
     });
     const map = new Map<string, typeof list>();
     for (const t of list) {
-      const key = t.floorName || "Unassigned";
+      const key = t.floorId || "unassigned";
       map.set(key, [...(map.get(key) ?? []), t]);
     }
-    return [...map.entries()];
-  }, [allTables, floorFilter, statusFilter]);
+    const keys = [
+      ...allFloors.map((f) => f.id),
+      ...(map.has("unassigned") ? ["unassigned"] : []),
+    ];
+    return keys
+      .filter((k) => map.has(k))
+      .map((k) => [k, map.get(k)!] as const);
+  }, [allTables, allFloors, floorFilter, statusFilter]);
+
+  function onTableActivate(t: DiningTable) {
+    if (t.currentOrderId) {
+      setModal({ kind: "order", orderId: t.currentOrderId });
+      return;
+    }
+    if (t.status === "blocked") {
+      setModal({ kind: "table", id: t.id });
+      return;
+    }
+    setModal({ kind: "open", tableId: t.id });
+  }
 
   if (!allowed) {
     return (
@@ -202,71 +223,67 @@ export default function RestaurantTablesPage() {
   return (
     <DiningShell
       title="Tables"
-      subtitle="Open, move, and merge tables on one order. Add items at Counter, then send KOT — stock deducts at billing."
+      subtitle="Tap a table to seat guests, take a request, or send food to kitchen."
       action={
-        <Button asChild variant="secondary">
-          <Link href="/restaurant/setup">Setup</Link>
-        </Button>
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => setModal({ kind: "floor" })}
+          >
+            New floor
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() =>
+              setModal({
+                kind: "table",
+                floorId: floorFilter !== "all" ? floorFilter : undefined,
+              })
+            }
+          >
+            + New table
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              const floorId =
+                floorFilter !== "all"
+                  ? floorFilter
+                  : allFloors[0]?.id;
+              if (!floorId) {
+                toast.error("Add a floor first");
+                return;
+              }
+              setModal({ kind: "layout", floorId });
+            }}
+          >
+            Seating layout
+          </Button>
+          {canReserve ? (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setModal({ kind: "reserve" })}
+            >
+              Reserve
+            </Button>
+          ) : null}
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => setModal({ kind: "move" })}
+          >
+            Move / merge
+          </Button>
+          <Button asChild variant="secondary">
+            <Link href="/restaurant/setup">Setup</Link>
+          </Button>
+        </div>
       }
     >
-      <DiningPanel title="Add floor or table">
-        <div className="grid gap-4 lg:grid-cols-3">
-          <div>
-            <Label>Floor name</Label>
-            <div className="mt-1 flex gap-2">
-              <Input
-                value={floorName}
-                onChange={(e) => setFloorName(e.target.value)}
-              />
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={!floorName.trim() || createFloor.isPending}
-                onClick={() => createFloor.mutate()}
-              >
-                Add floor
-              </Button>
-            </div>
-          </div>
-          <div className="lg:col-span-2">
-            <Label>New table</Label>
-            <div className="mt-1 flex flex-wrap gap-2">
-              <Input
-                className="min-w-[8rem] flex-1"
-                placeholder="T12"
-                value={tableName}
-                onChange={(e) => setTableName(e.target.value)}
-              />
-              <Input
-                className="w-20"
-                aria-label="Seats"
-                value={capacity}
-                onChange={(e) => setCapacity(e.target.value)}
-              />
-              <select
-                className={cn(diningSelectClass, "w-40")}
-                value={floorId}
-                onChange={(e) => setFloorId(e.target.value)}
-              >
-                <option value="">No floor</option>
-                {(floors.data ?? []).map((f) => (
-                  <option key={f.id} value={f.id}>
-                    {f.name}
-                  </option>
-                ))}
-              </select>
-              <Button
-                type="button"
-                disabled={!tableName.trim() || createTable.isPending}
-                onClick={() => createTable.mutate()}
-              >
-                + New table
-              </Button>
-            </div>
-          </div>
-        </div>
-      </DiningPanel>
-
       <div className="flex flex-wrap items-center gap-2">
         {(
           [
@@ -307,14 +324,14 @@ export default function RestaurantTablesPage() {
         >
           All floors
         </button>
-        {(floors.data ?? []).map((f) => (
+        {allFloors.map((f) => (
           <button
             key={f.id}
             type="button"
-            onClick={() => setFloorFilter(f.name)}
+            onClick={() => setFloorFilter(f.id)}
             className={cn(
               "rounded-full px-3 py-1 text-xs font-semibold ring-1",
-              floorFilter === f.name
+              floorFilter === f.id
                 ? "bg-[#eff6ff] text-[#1a56db] ring-[#bfdbfe]"
                 : "bg-white text-[#5a6b7d] ring-[#e2e8f0]",
             )}
@@ -322,284 +339,1630 @@ export default function RestaurantTablesPage() {
             {f.name}
           </button>
         ))}
+        <span className="mx-1 h-4 w-px bg-[#e2e8f0]" />
+        <button
+          type="button"
+          onClick={() => setViewMode("grid")}
+          className={cn(
+            "inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold ring-1",
+            viewMode === "grid"
+              ? "bg-[#1a56db] text-white ring-[#1a56db]"
+              : "bg-white text-[#5a6b7d] ring-[#e2e8f0]",
+          )}
+        >
+          <LayoutGrid className="h-3.5 w-3.5" />
+          Grid
+        </button>
+        <button
+          type="button"
+          onClick={() => setViewMode("layout")}
+          className={cn(
+            "inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold ring-1",
+            viewMode === "layout"
+              ? "bg-[#1a56db] text-white ring-[#1a56db]"
+              : "bg-white text-[#5a6b7d] ring-[#e2e8f0]",
+          )}
+        >
+          <MapIcon className="h-3.5 w-3.5" />
+          Layout
+        </button>
       </div>
 
       {!allTables.length ? (
         <DiningEmpty
           title="No tables yet"
-          detail="Add a floor and at least one table. Then tap a table to open a dining ticket."
+          detail="Use New floor and New table. Then tap a table to open a dining ticket."
         />
       ) : (
-        grouped.map(([floor, list]) => (
-          <section key={floor}>
-            <div className="mb-2 flex items-baseline justify-between">
-              <h2 className="text-sm font-semibold text-[#0b1f33]">{floor}</h2>
-              <p className="text-xs text-[#8b9bb0]">{list.length} tables</p>
-            </div>
-            <ul className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
-              {list.map((t) => (
-                <li key={t.id} className="relative group">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (t.currentOrderId) setActiveOrderId(t.currentOrderId);
-                      else openTable.mutate(t.id);
-                    }}
-                    className={cn(
-                      "flex min-h-[7.5rem] w-full flex-col rounded-xl border px-3 py-3 text-left transition",
-                      TILE[t.status] ?? TILE.available,
-                    )}
-                  >
-                    <div className="flex items-start justify-between gap-2 pr-6">
-                      <p className="text-[0.95rem] font-semibold text-[#0b1f33]">
-                        {t.name}
-                      </p>
-                      <DiningStatusBadge value={t.status} />
-                    </div>
-                    <p className="mt-1 text-xs text-[#5a6b7d]">
-                      {t.capacity} seats
-                      {t.covers ? ` · ${t.covers} covers` : ""}
+        grouped.map(([floorKey, list]) => {
+          const floor = allFloors.find((f) => f.id === floorKey);
+          const title = floor?.name ?? "Unassigned";
+          const bits = [
+            floor?.categoryIds?.length
+              ? `${floor.categoryIds.length} menu ${floor.categoryIds.length === 1 ? "category" : "categories"}`
+              : null,
+            floor?.taxRatePercent != null
+              ? `Tax ${floor.taxRatePercent}%`
+              : null,
+            floor?.serviceChargePercent != null
+              ? `Service ${floor.serviceChargePercent}%`
+              : null,
+          ].filter(Boolean);
+          return (
+            <section key={floorKey}>
+              <div className="mb-2 flex items-baseline justify-between gap-2">
+                <div>
+                  <h2 className="text-sm font-semibold text-[#0b1f33]">
+                    {title}
+                  </h2>
+                  {bits.length ? (
+                    <p className="text-[0.7rem] text-[#8b9bb0]">
+                      {bits.join(" · ")}
                     </p>
-                    <div className="mt-auto pt-2">
-                      {t.orderNumber ? (
-                        <p className="font-mono text-[0.7rem] font-semibold text-[#1a56db]">
-                          {t.orderNumber}
-                        </p>
-                      ) : (
-                        <p className="text-[0.7rem] text-[#8b9bb0]">
-                          Tap to open
-                        </p>
-                      )}
-                      {t.guestName ? (
-                        <p className="truncate text-xs text-[#0b1f33]">
-                          {t.guestName}
-                        </p>
-                      ) : null}
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setEditingTable({
-                        id: t.id,
-                        name: t.name,
-                        capacity: t.capacity,
-                        floorId: t.floorId,
-                      });
-                    }}
-                    className="absolute right-2 top-2 rounded p-1 text-[#8b9bb0] opacity-0 hover:bg-black/5 hover:text-[#0b1f33] focus:opacity-100 group-hover:opacity-100 transition-opacity"
-                    aria-label="Edit table"
-                  >
-                    <Pencil className="h-4 w-4" />
-                  </button>
-                  {hasCapability("QR_ORDER") && t.qrToken ? (
+                  ) : null}
+                </div>
+                <div className="flex items-center gap-2">
+                  <p className="text-xs text-[#8b9bb0]">{list.length} tables</p>
+                  {floor ? (
                     <button
                       type="button"
-                      className="mt-1 text-[0.65rem] font-semibold text-[#1a56db] hover:underline"
-                      onClick={() => {
-                        const url = `${window.location.origin}/order/${t.qrToken}`;
-                        void navigator.clipboard.writeText(url);
-                        toast.success("Guest QR link copied");
-                      }}
+                      className="rounded p-1 text-[#8b9bb0] hover:bg-black/5 hover:text-[#0b1f33]"
+                      aria-label="Edit floor"
+                      onClick={() => setModal({ kind: "floor", id: floor.id })}
                     >
-                      Copy guest QR
+                      <Pencil className="h-3.5 w-3.5" />
                     </button>
                   ) : null}
-                </li>
-              ))}
-            </ul>
-          </section>
-        ))
+                </div>
+              </div>
+              {viewMode === "layout" ? (
+                <FloorLayoutPreview
+                  tables={list}
+                  onActivate={onTableActivate}
+                  onEdit={(t) => setModal({ kind: "table", id: t.id })}
+                />
+              ) : (
+                <ul className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+                  {list.map((t) => (
+                    <li key={t.id} className="relative group">
+                      <button
+                        type="button"
+                        onClick={() => onTableActivate(t)}
+                        className={cn(
+                          "flex min-h-[7.5rem] w-full flex-col rounded-xl border px-3 py-3 text-left transition",
+                          TILE[t.status] ?? TILE.available,
+                        )}
+                      >
+                        <div className="flex items-start justify-between gap-2 pr-6">
+                          <p className="text-[0.95rem] font-semibold text-[#0b1f33]">
+                            {t.name}
+                          </p>
+                          <DiningStatusBadge value={t.status} />
+                        </div>
+                        <p className="mt-1 text-xs text-[#5a6b7d]">
+                          {t.capacity} seats
+                          {t.covers ? ` · ${t.covers} covers` : ""}
+                        </p>
+                        <div className="mt-auto pt-2">
+                          {t.orderNumber ? (
+                            <p className="text-[0.7rem] font-semibold text-[#1a56db]">
+                              Open bill
+                            </p>
+                          ) : t.status === "reserved" ? (
+                            <p className="text-[0.7rem] text-[#9a3412]">
+                              Seat guest
+                            </p>
+                          ) : t.status === "available" ? (
+                            <p className="text-[0.7rem] text-[#8b9bb0]">
+                              Seat guests
+                            </p>
+                          ) : (
+                            <p className="text-[0.7rem] text-[#8b9bb0]">
+                              {t.status}
+                            </p>
+                          )}
+                          {t.guestOccasion ? (
+                            <p className="truncate text-[0.65rem] font-semibold capitalize text-[#1a56db]">
+                              {t.guestOccasion}
+                            </p>
+                          ) : null}
+                          {t.guestName ? (
+                            <p className="truncate text-xs text-[#0b1f33]">
+                              {t.guestName}
+                            </p>
+                          ) : null}
+                          {(() => {
+                            const next = nextBookedFor(
+                              reservations.data ?? [],
+                              t.id,
+                            );
+                            return next ? (
+                              <p className="truncate text-[0.65rem] text-[#9a3412]">
+                                Next: {next.guestName} · {bookingWhen(next.startAt)}
+                              </p>
+                            ) : null;
+                          })()}
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setModal({ kind: "table", id: t.id });
+                        }}
+                        className="absolute right-2 top-2 rounded p-1 text-[#8b9bb0] opacity-0 hover:bg-black/5 hover:text-[#0b1f33] focus:opacity-100 group-hover:opacity-100 transition-opacity"
+                        aria-label="Edit table"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                      {hasCapability("QR_ORDER") && t.qrToken ? (
+                        <button
+                          type="button"
+                          className="mt-1 text-[0.65rem] font-semibold text-[#1a56db] hover:underline"
+                          onClick={() => {
+                            const url = `${window.location.origin}/order/${t.qrToken}`;
+                            void navigator.clipboard.writeText(url);
+                            toast.success("Guest QR link copied");
+                          }}
+                        >
+                          Copy guest QR
+                        </button>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          );
+        })
       )}
 
-      <DiningPanel
-        title="Move / merge"
-        hint="Merge keeps one order. Move never clones tickets or stock."
-      >
-        <div className="flex flex-wrap gap-2">
-          <select
-            className={cn(diningSelectClass, "w-44")}
-            value={moveFrom}
-            onChange={(e) => setMoveFrom(e.target.value)}
-          >
-            <option value="">From table</option>
-            {allTables.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </select>
-          <select
-            className={cn(diningSelectClass, "w-44")}
-            value={moveTo}
-            onChange={(e) => setMoveTo(e.target.value)}
-          >
-            <option value="">To table</option>
-            {allTables.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </select>
-          <Button
+      {modal?.kind === "floor" ? (
+        <FloorModal
+          floor={allFloors.find((f) => f.id === modal.id) ?? null}
+          categories={categories.data ?? []}
+          locationId={locationId!}
+          onClose={() => setModal(null)}
+          onSaved={refreshFloor}
+        />
+      ) : null}
+      {modal?.kind === "table" ? (
+        <TableModal
+          table={allTables.find((t) => t.id === modal.id) ?? null}
+          floors={allFloors}
+          locationId={locationId!}
+          defaultFloorId={modal.floorId}
+          onClose={() => setModal(null)}
+          onSaved={refreshFloor}
+        />
+      ) : null}
+      {modal?.kind === "open" &&
+      allTables.find((t) => t.id === modal.tableId) ? (
+        <OpenTableModal
+          table={allTables.find((t) => t.id === modal.tableId)!}
+          reservations={reservations.data ?? []}
+          onClose={() => setModal(null)}
+          onOpened={(orderId) => {
+            refreshFloor();
+            void qc.invalidateQueries({ queryKey: ["dining-reservations"] });
+            setModal({ kind: "order", orderId });
+          }}
+        />
+      ) : null}
+      {modal?.kind === "order" ? (
+        order.data ? (
+          <RunningOrderModal
+            order={order.data}
+            tables={allTables}
+            onClose={() => setModal(null)}
+            onSplit={() =>
+              setModal({ kind: "split", orderId: order.data.id })
+            }
+            onMove={(fromTableId) => setModal({ kind: "move", fromTableId })}
+            onMerge={(fromTableId) => setModal({ kind: "merge", fromTableId })}
+            onVoid={() => setModal({ kind: "void", orderId: order.data.id })}
+            onBookNext={
+              canReserve
+                ? (tableId) => setModal({ kind: "reserve", tableId })
+                : undefined
+            }
+            onGuestSpecials={() =>
+              setModal({ kind: "specials", orderId: order.data.id })
+            }
+            nextBooking={(() => {
+              const tid = allTables.find(
+                (t) => t.currentOrderId === order.data.id,
+              )?.id;
+              return tid
+                ? nextBookedFor(reservations.data ?? [], tid)
+                : undefined;
+            })()}
+            onKot={() => {
+              void qc.invalidateQueries({ queryKey: ["restaurant-order"] });
+              void qc.invalidateQueries({ queryKey: ["restaurant-kots"] });
+            }}
+          />
+        ) : (
+          <ModalFrame title="Running order" onClose={() => setModal(null)}>
+            <p className="text-sm text-[#5a6b7d]">Loading ticket…</p>
+          </ModalFrame>
+        )
+      ) : null}
+      {modal?.kind === "move" || modal?.kind === "merge" ? (
+        <MoveMergeModal
+          mode={modal.kind}
+          tables={allTables}
+          fromTableId={modal.fromTableId ?? ""}
+          onClose={() => setModal(null)}
+          onDone={() => {
+            refreshFloor();
+            setModal(null);
+          }}
+        />
+      ) : null}
+      {modal?.kind === "split" && order.data ? (
+        <SplitModal
+          order={order.data}
+          tables={allTables}
+          onClose={() =>
+            setModal({ kind: "order", orderId: order.data.id })
+          }
+          onDone={(keepOrderId) => {
+            refreshFloor();
+            void qc.invalidateQueries({ queryKey: ["restaurant-order"] });
+            setModal({ kind: "order", orderId: keepOrderId });
+          }}
+        />
+      ) : null}
+      {modal?.kind === "reserve" ? (
+        <ReserveModal
+          tables={allTables}
+          locationId={locationId!}
+          defaultTableId={modal.tableId}
+          onClose={() => setModal(null)}
+          onSaved={() => {
+            refreshFloor();
+            void qc.invalidateQueries({ queryKey: ["dining-reservations"] });
+            setModal(null);
+          }}
+        />
+      ) : null}
+      {modal?.kind === "specials" ? (
+        <GuestSpecialsModal
+          orderId={modal.orderId}
+          onClose={() => setModal({ kind: "order", orderId: modal.orderId })}
+          onSaved={() => {
+            refreshFloor();
+            void qc.invalidateQueries({ queryKey: ["restaurant-order"] });
+            void qc.invalidateQueries({ queryKey: ["restaurant-kots"] });
+            setModal({ kind: "order", orderId: modal.orderId });
+          }}
+        />
+      ) : null}
+      {modal?.kind === "layout" &&
+      allFloors.find((f) => f.id === modal.floorId) ? (
+        <LayoutModal
+          key={modal.floorId}
+          floor={allFloors.find((f) => f.id === modal.floorId)!}
+          tables={allTables.filter((t) => t.floorId === modal.floorId)}
+          floors={allFloors}
+          onFloorChange={(floorId) => setModal({ kind: "layout", floorId })}
+          onClose={() => setModal(null)}
+          onSaved={() => {
+            refreshFloor();
+            setViewMode("layout");
+            setModal(null);
+          }}
+        />
+      ) : null}
+      {modal?.kind === "void" ? (
+        <VoidModal
+          orderId={modal.orderId}
+          onClose={() => setModal({ kind: "order", orderId: modal.orderId })}
+          onDone={() => {
+            refreshFloor();
+            setModal(null);
+          }}
+        />
+      ) : null}
+    </DiningShell>
+  );
+}
+
+function FloorLayoutPreview({
+  tables,
+  onActivate,
+  onEdit,
+}: {
+  tables: DiningTable[];
+  onActivate: (t: DiningTable) => void;
+  onEdit: (t: DiningTable) => void;
+}) {
+  return (
+    <div className="relative h-[22rem] overflow-hidden rounded-xl border border-[#d9e0ea] bg-[#f4f7fb]">
+      {tables.map((t, i) => {
+        const slot = layoutSlot(i);
+        const x = t.layoutX ?? slot.layoutX;
+        const y = t.layoutY ?? slot.layoutY;
+        return (
+          <button
+            key={t.id}
             type="button"
-            variant="secondary"
-            disabled={!moveFrom || !moveTo || move.isPending}
-            onClick={() => move.mutate()}
+            onClick={() => onActivate(t)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              onEdit(t);
+            }}
+            style={{ left: `${x}%`, top: `${y}%` }}
+            className={cn(
+              "absolute w-[14%] min-w-[4.5rem] rounded-lg border px-2 py-2 text-left shadow-sm",
+              TILE[t.status] ?? TILE.available,
+            )}
           >
-            Move order
+            <p className="truncate text-xs font-semibold text-[#0b1f33]">
+              {t.name}
+            </p>
+            <p className="text-[0.65rem] text-[#5a6b7d]">
+              {t.capacity} · {t.status}
+            </p>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function FloorModal({
+  floor,
+  categories,
+  locationId,
+  onClose,
+  onSaved,
+}: {
+  floor: DiningFloor | null;
+  categories: Array<{ id: string; name: string; productCount: number }>;
+  locationId: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [name, setName] = useState(floor?.name ?? "Main floor");
+  const [categoryIds, setCategoryIds] = useState<string[]>(
+    floor?.categoryIds ?? [],
+  );
+  const [tax, setTax] = useState(
+    floor?.taxRatePercent != null ? String(floor.taxRatePercent) : "",
+  );
+  const [service, setService] = useState(
+    floor?.serviceChargePercent != null
+      ? String(floor.serviceChargePercent)
+      : "",
+  );
+  const save = useMutation({
+    mutationFn: async () => {
+      const body = {
+        categoryIds,
+        taxRatePercent: tax.trim() === "" ? null : Number(tax),
+        serviceChargePercent: service.trim() === "" ? null : Number(service),
+      };
+      if (floor) {
+        await restaurantApi.updateFloor(floor.id, { name: name.trim(), ...body });
+        return;
+      }
+      const created = await restaurantApi.createFloor({
+        locationId,
+        name: name.trim(),
+      });
+      await restaurantApi.updateFloor(created.id, body);
+    },
+    onSuccess: () => {
+      toast.success(floor ? "Floor updated" : "Floor added");
+      onSaved();
+      onClose();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  return (
+    <ModalFrame
+      title={floor ? "Edit dining area" : "New floor"}
+      subtitle="Area menu, tax, and service apply when a table on this floor is billed."
+      onClose={onClose}
+      className="max-w-lg"
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Cancel
           </Button>
           <Button
             type="button"
-            disabled={!moveFrom || !moveTo || merge.isPending}
-            onClick={() => merge.mutate()}
+            disabled={!name.trim() || save.isPending}
+            onClick={() => save.mutate()}
           >
-            Merge
+            Save
           </Button>
         </div>
-      </DiningPanel>
+      }
+    >
+      <div className="grid gap-4">
+        <div>
+          <Label>Floor / dining area</Label>
+          <Input
+            className="mt-1"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </div>
+        <div>
+          <Label>Area menu (categories)</Label>
+          <p className="mt-0.5 text-xs text-[#8b9bb0]">
+            Leave empty to show the full catalog at Counter.
+          </p>
+          <div className="mt-2 max-h-40 space-y-1 overflow-y-auto rounded-lg border border-[#e2e8f0] p-2">
+            {categories.length ? (
+              categories.map((c) => (
+                <label
+                  key={c.id}
+                  className="flex items-center gap-2 rounded px-1 py-1 text-sm text-[#0b1f33] hover:bg-[#f8fafc]"
+                >
+                  <input
+                    type="checkbox"
+                    checked={categoryIds.includes(c.id)}
+                    onChange={(e) =>
+                      setCategoryIds((ids) =>
+                        e.target.checked
+                          ? [...ids, c.id]
+                          : ids.filter((id) => id !== c.id),
+                      )
+                    }
+                  />
+                  {c.name}
+                  <span className="text-xs text-[#8b9bb0]">
+                    {c.productCount}
+                  </span>
+                </label>
+              ))
+            ) : (
+              <p className="px-1 py-2 text-sm text-[#8b9bb0]">
+                No item categories yet.
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label>Area tax %</Label>
+            <Input
+              className="mt-1"
+              inputMode="decimal"
+              placeholder="None"
+              value={tax}
+              onChange={(e) => setTax(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label>Service charge %</Label>
+            <Input
+              className="mt-1"
+              inputMode="decimal"
+              placeholder="Use shop default"
+              value={service}
+              onChange={(e) => setService(e.target.value)}
+            />
+          </div>
+        </div>
+      </div>
+    </ModalFrame>
+  );
+}
 
-      {order.data ? (
-        <DiningPanel
-          title={order.data.orderNumber}
-          hint={`${order.data.restaurant?.diningMode?.replaceAll("_", " ") ?? "Dining"} · parked until billed`}
-          action={
-            <div className="flex flex-wrap gap-2">
-              <Button asChild variant="secondary">
-                <Link href="/counter">Add items</Link>
-              </Button>
-              <Button
-                type="button"
-                disabled={sendKot.isPending || !order.data.items.length}
-                onClick={() => sendKot.mutate(order.data.id)}
-              >
-                Send KOT
-              </Button>
-              <Button asChild>
-                <Link href={`/orders/view?id=${order.data.id}`}>Bill</Link>
-              </Button>
-            </div>
-          }
-        >
-          <table className="w-full text-left text-sm">
-            <thead className="text-[0.68rem] uppercase tracking-wide text-[#8b9bb0]">
-              <tr>
-                <th className="pb-2 font-semibold">Item</th>
-                <th className="pb-2 text-right font-semibold">Qty</th>
-                <th className="pb-2 text-right font-semibold">Amount</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#eef1f4]">
-              {order.data.items.map((i) => (
-                <tr key={i.id}>
-                  <td className="py-2 text-[#0b1f33]">
-                    {i.description || "Item"}
-                  </td>
-                  <td className="py-2 text-right tabular-nums text-[#5a6b7d]">
-                    {i.quantity}
-                  </td>
-                  <td className="py-2 text-right tabular-nums font-medium">
-                    {i.lineTotal}
-                  </td>
-                </tr>
+function TableModal({
+  table,
+  floors,
+  locationId,
+  defaultFloorId,
+  onClose,
+  onSaved,
+}: {
+  table: DiningTable | null;
+  floors: DiningFloor[];
+  locationId: string;
+  defaultFloorId?: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [name, setName] = useState(table?.name ?? "");
+  const [capacity, setCapacity] = useState(String(table?.capacity ?? 4));
+  const [floorId, setFloorId] = useState(table?.floorId ?? defaultFloorId ?? "");
+  const [status, setStatus] = useState(table?.status ?? "available");
+  const save = useMutation({
+    mutationFn: async () => {
+      if (table) {
+        await restaurantApi.updateTable(table.id, {
+          name: name.trim(),
+          capacity: Number(capacity) || 4,
+          floorId: floorId || null,
+          status,
+        });
+        return;
+      }
+      await restaurantApi.createTable({
+        locationId,
+        name: name.trim(),
+        capacity: Number(capacity) || 4,
+        floorId: floorId || undefined,
+      });
+    },
+    onSuccess: () => {
+      toast.success(table ? "Table updated" : "Table added");
+      onSaved();
+      onClose();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const remove = useMutation({
+    mutationFn: () => restaurantApi.deleteTable(table!.id),
+    onSuccess: () => {
+      toast.success("Table deleted");
+      onSaved();
+      onClose();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  return (
+    <ModalFrame
+      title={table ? "Edit table" : "New table"}
+      subtitle="Capacity and status stay on the table. Stock lives on inventory, not here."
+      onClose={onClose}
+      footer={
+        <div className="flex items-center justify-between">
+          {table ? (
+            <Button
+              type="button"
+              variant="danger"
+              disabled={remove.isPending}
+              onClick={() => {
+                if (confirm("Delete this table?")) remove.mutate();
+              }}
+            >
+              Delete
+            </Button>
+          ) : (
+            <span />
+          )}
+          <div className="flex gap-2">
+            <Button type="button" variant="secondary" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={!name.trim() || save.isPending}
+              onClick={() => save.mutate()}
+            >
+              Save
+            </Button>
+          </div>
+        </div>
+      }
+    >
+      <div className="grid gap-4">
+        <div>
+          <Label>Table name</Label>
+          <Input
+            className="mt-1"
+            placeholder="T12"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label>Capacity (seats)</Label>
+            <Input
+              className="mt-1"
+              inputMode="numeric"
+              value={capacity}
+              onChange={(e) => setCapacity(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label>Status</Label>
+            <select
+              className={cn(diningSelectClass, "mt-1 w-full")}
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+              disabled={!table}
+            >
+              {TABLE_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
               ))}
-            </tbody>
-          </table>
-          {!order.data.items.length ? (
-            <p className="text-sm text-[#5a6b7d]">
-              No items yet. Open Counter, add products to this parked sale, then
-              send KOT.
-            </p>
-          ) : null}
-        </DiningPanel>
-      ) : null}
+            </select>
+          </div>
+        </div>
+        <div>
+          <Label>Floor / dining area</Label>
+          <select
+            className={cn(diningSelectClass, "mt-1 w-full")}
+            value={floorId}
+            onChange={(e) => setFloorId(e.target.value)}
+          >
+            <option value="">No floor</option>
+            {floors.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+    </ModalFrame>
+  );
+}
 
-      {editingTable ? (
-        <ModalFrame
-          title="Edit table"
-          onClose={() => setEditingTable(null)}
-          footer={
-            <div className="flex items-center justify-between">
+function OpenTableModal({
+  table,
+  reservations,
+  onClose,
+  onOpened,
+}: {
+  table: DiningTable;
+  reservations: Array<{
+    id: string;
+    guestName: string;
+    covers: number;
+    status: string;
+    table: { id: string; name: string } | null;
+  }>;
+  onClose: () => void;
+  onOpened: (orderId: string) => void;
+}) {
+  const booking = reservations.find(
+    (r) => r.table?.id === table.id && r.status === "booked",
+  );
+  const [covers, setCovers] = useState(String(booking?.covers ?? 2));
+  const [guestName, setGuestName] = useState(booking?.guestName ?? "");
+  const open = useMutation({
+    mutationFn: async () => {
+      if (table.status === "reserved") {
+        if (booking) {
+          await restaurantApi.updateReservation(booking.id, {
+            status: "seated",
+          });
+        }
+        await restaurantApi.updateTable(table.id, { status: "available" });
+      }
+      return restaurantApi.openTable(table.id, {
+        covers: Number(covers) || 2,
+        guestName: guestName.trim() || undefined,
+      });
+    },
+    onSuccess: (data) => {
+      toast.success(`Opened ${data.orderNumber}`);
+      onOpened(data.id);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  return (
+    <ModalFrame
+      title={`Open ${table.name}`}
+      subtitle={
+        table.status === "reserved"
+          ? "This table is reserved. Seat the guest to start a running order."
+          : `${table.capacity} seats · ${table.status}`
+      }
+      onClose={onClose}
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            disabled={open.isPending}
+            onClick={() => open.mutate()}
+          >
+            {table.status === "reserved" ? "Seat & open" : "Open table"}
+          </Button>
+        </div>
+      }
+    >
+      <div className="grid gap-4">
+        <div>
+          <Label>Covers</Label>
+          <Input
+            className="mt-1"
+            inputMode="numeric"
+            value={covers}
+            onChange={(e) => setCovers(e.target.value)}
+          />
+        </div>
+        <div>
+          <Label>Guest name</Label>
+          <Input
+            className="mt-1"
+            value={guestName}
+            onChange={(e) => setGuestName(e.target.value)}
+          />
+        </div>
+      </div>
+    </ModalFrame>
+  );
+}
+
+function RunningOrderModal({
+  order,
+  tables,
+  onClose,
+  onSplit,
+  onMove,
+  onMerge,
+  onVoid,
+  onBookNext,
+  onGuestSpecials,
+  nextBooking,
+  onKot,
+}: {
+  order: Awaited<ReturnType<typeof restaurantApi.getOrder>>;
+  tables: DiningTable[];
+  onClose: () => void;
+  onSplit: () => void;
+  onMove: (fromTableId: string) => void;
+  onMerge: (fromTableId: string) => void;
+  onVoid: () => void;
+  onBookNext?: (tableId: string) => void;
+  onGuestSpecials?: () => void;
+  nextBooking?: { guestName: string; startAt: string };
+  onKot: () => void;
+}) {
+  const [more, setMore] = useState(false);
+  const fromTable = tables.find((t) => t.currentOrderId === order.id);
+  const specials = order.restaurant?.guestSpecials;
+  const specialBits = [
+    specials?.occasion
+      ? GUEST_OCCASION_OPTS.find(([id]) => id === specials.occasion)?.[1]
+      : null,
+    ...(specials?.requests ?? []).map(requestLabel),
+    specials?.note || null,
+  ].filter(Boolean) as string[];
+  const sendKot = useMutation({
+    mutationFn: () => restaurantApi.sendKot(order.id),
+    onSuccess: () => {
+      toast.success("Sent to kitchen");
+      onKot();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  return (
+    <ModalFrame
+      title={fromTable ? `${fromTable.name} · running table` : order.orderNumber}
+      subtitle={
+        [
+          order.orderNumber,
+          order.restaurant?.covers
+            ? `${order.restaurant.covers} guests`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      }
+      onClose={onClose}
+      className="max-w-lg"
+      footer={
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <Button type="button" variant="ghost" size="sm" onClick={() => setMore((v) => !v)}>
+            {more ? "Hide extra" : "Move / split / more"}
+          </Button>
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button asChild variant="secondary">
+              <Link href="/counter">Add food</Link>
+            </Button>
+            <Button
+              type="button"
+              disabled={sendKot.isPending || !order.items.length}
+              onClick={() => sendKot.mutate()}
+            >
+              Send to kitchen
+            </Button>
+            <Button asChild>
+              <Link href={`/orders/view?id=${order.id}`}>Bill</Link>
+            </Button>
+          </div>
+        </div>
+      }
+    >
+      <div className="space-y-4">
+        {onGuestSpecials ? (
+          <button
+            type="button"
+            onClick={onGuestSpecials}
+            className="w-full rounded-xl border border-[#dbe4f0] bg-[#f8fafc] px-4 py-3 text-left hover:border-[#1a56db] hover:bg-[#eff6ff]"
+          >
+            <p className="text-[0.7rem] font-semibold tracking-wide text-[#1a56db] uppercase">
+              Guest asked for
+            </p>
+            {specialBits.length ? (
+              <p className="mt-1 text-sm font-medium text-[#0b1f33]">
+                {specialBits.join(" · ")}
+              </p>
+            ) : (
+              <p className="mt-1 text-sm text-[#5a6b7d]">
+                Tap to add water, cake, or décor
+              </p>
+            )}
+          </button>
+        ) : null}
+
+        {nextBooking ? (
+          <div className="rounded-xl border border-[#fed7aa] bg-[#fff7ed] px-4 py-3">
+            <p className="text-[0.7rem] font-semibold tracking-wide text-[#9a3412] uppercase">
+              Next guest waiting
+            </p>
+            <p className="mt-1 text-sm font-medium text-[#0b1f33]">
+              {nextBooking.guestName} · {bookingWhen(nextBooking.startAt)}
+            </p>
+          </div>
+        ) : null}
+
+        <div>
+          <p className="mb-2 text-[0.7rem] font-semibold tracking-wide text-[#8b9bb0] uppercase">
+            Food on this table
+          </p>
+          {order.items.length ? (
+            <table className="w-full text-left text-sm">
+              <thead className="text-[0.68rem] uppercase tracking-wide text-[#8b9bb0]">
+                <tr>
+                  <th className="pb-2 font-semibold">Item</th>
+                  <th className="pb-2 text-right font-semibold">Qty</th>
+                  <th className="pb-2 text-right font-semibold">Amount</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#eef1f4]">
+                {order.items.map((i) => (
+                  <tr key={i.id}>
+                    <td className="py-2 text-[#0b1f33]">
+                      {i.description || "Item"}
+                    </td>
+                    <td className="py-2 text-right tabular-nums text-[#5a6b7d]">
+                      {i.quantity}
+                    </td>
+                    <td className="py-2 text-right tabular-nums font-medium">
+                      {i.lineTotal}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="rounded-lg bg-[#f8fafc] px-3 py-4 text-sm text-[#5a6b7d]">
+              No food yet. Use Add food, then Send to kitchen.
+            </p>
+          )}
+        </div>
+
+        {more ? (
+          <div className="flex flex-wrap gap-2 border-t border-[#eef1f4] pt-3">
+            {fromTable && onBookNext ? (
               <Button
                 type="button"
-                variant="danger"
-                onClick={() => {
-                  if (confirm("Are you sure you want to delete this table?")) {
-                    deleteTable.mutate(editingTable.id);
-                  }
-                }}
-                disabled={deleteTable.isPending}
+                variant="secondary"
+                size="sm"
+                onClick={() => onBookNext(fromTable.id)}
               >
-                <Trash2 className="mr-2 h-4 w-4" />
-                Delete
+                Book this table for later
               </Button>
-              <div className="flex gap-2">
+            ) : null}
+            {fromTable ? (
+              <>
                 <Button
                   type="button"
                   variant="secondary"
-                  onClick={() => setEditingTable(null)}
+                  size="sm"
+                  onClick={() => onMove(fromTable.id)}
                 >
-                  Cancel
+                  Move to another table
                 </Button>
                 <Button
                   type="button"
-                  onClick={() => updateTable.mutate({
-                    id: editingTable.id,
-                    name: editingTable.name,
-                    capacity: editingTable.capacity,
-                    floorId: editingTable.floorId ?? undefined,
-                  })}
-                  disabled={!editingTable.name.trim() || updateTable.isPending}
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => onMerge(fromTable.id)}
                 >
-                  Save changes
+                  Merge tables
                 </Button>
-              </div>
-            </div>
-          }
-        >
-          <div className="grid gap-4">
-            <div>
-              <Label>Table name</Label>
-              <Input
-                className="mt-1"
-                value={editingTable.name}
-                onChange={(e) =>
-                  setEditingTable({ ...editingTable, name: e.target.value })
-                }
-              />
-            </div>
-            <div>
-              <Label>Capacity (Seats)</Label>
-              <Input
-                className="mt-1"
-                type="number"
-                value={editingTable.capacity}
-                onChange={(e) =>
-                  setEditingTable({ ...editingTable, capacity: Number(e.target.value) })
-                }
-              />
-            </div>
-            <div>
-              <Label>Floor / Zone</Label>
-              <select
-                className={cn(diningSelectClass, "mt-1 w-full")}
-                value={editingTable.floorId ?? ""}
-                onChange={(e) =>
-                  setEditingTable({ ...editingTable, floorId: e.target.value || null })
-                }
-              >
-                <option value="">No floor</option>
-                {(floors.data ?? []).map((f) => (
-                  <option key={f.id} value={f.id}>
-                    {f.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+              </>
+            ) : null}
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              disabled={!order.items.length}
+              onClick={onSplit}
+            >
+              Split bill
+            </Button>
+            <Button type="button" variant="danger" size="sm" onClick={onVoid}>
+              Cancel this bill
+            </Button>
           </div>
-        </ModalFrame>
-      ) : null}
-    </DiningShell>
+        ) : null}
+      </div>
+    </ModalFrame>
+  );
+}
+
+function MoveMergeModal({
+  mode,
+  tables,
+  fromTableId,
+  onClose,
+  onDone,
+}: {
+  mode: "move" | "merge";
+  tables: DiningTable[];
+  fromTableId: string;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [from, setFrom] = useState(fromTableId);
+  const [to, setTo] = useState("");
+  const run = useMutation({
+    mutationFn: () =>
+      mode === "move"
+        ? restaurantApi.moveTable(from, to)
+        : restaurantApi.mergeTables(from, to),
+    onSuccess: () => {
+      toast.success(
+        mode === "move"
+          ? "Order moved"
+          : "Tables merged onto one order",
+      );
+      onDone();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  return (
+    <ModalFrame
+      title={mode === "move" ? "Transfer table" : "Merge tables"}
+      subtitle={
+        mode === "move"
+          ? "Move the running order to another table. Tickets are not cloned."
+          : "Keep one bill. Source table becomes free."
+      }
+      onClose={onClose}
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            disabled={!from || !to || from === to || run.isPending}
+            onClick={() => run.mutate()}
+          >
+            {mode === "move" ? "Move order" : "Merge"}
+          </Button>
+        </div>
+      }
+    >
+      <div className="grid gap-4">
+        <div>
+          <Label>From table</Label>
+          <select
+            className={cn(diningSelectClass, "mt-1 w-full")}
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+          >
+            <option value="">Select</option>
+            {tables.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+                {t.orderNumber ? ` · ${t.orderNumber}` : ""}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <Label>To table</Label>
+          <select
+            className={cn(diningSelectClass, "mt-1 w-full")}
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+          >
+            <option value="">Select</option>
+            {tables.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+                {t.status !== "available" ? ` · ${t.status}` : ""}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+    </ModalFrame>
+  );
+}
+
+function SplitModal({
+  order,
+  tables,
+  onClose,
+  onDone,
+}: {
+  order: Awaited<ReturnType<typeof restaurantApi.getOrder>>;
+  tables: DiningTable[];
+  onClose: () => void;
+  onDone: (keepOrderId: string) => void;
+}) {
+  const [picked, setPicked] = useState<string[]>([]);
+  const [toTableId, setToTableId] = useState("");
+  const split = useMutation({
+    mutationFn: () =>
+      restaurantApi.splitItems(order.id, {
+        orderItemIds: picked,
+        toTableId: toTableId || undefined,
+      }),
+    onSuccess: (data) => {
+      toast.success(`Split to ${data.split.orderNumber}`);
+      onDone(data.original.id);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  return (
+    <ModalFrame
+      title="Split bill"
+      subtitle="Move selected lines onto a new ticket. Keep at least one item here."
+      onClose={onClose}
+      className="max-w-lg"
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Back
+          </Button>
+          <Button
+            type="button"
+            disabled={
+              picked.length === 0 ||
+              picked.length >= order.items.length ||
+              split.isPending
+            }
+            onClick={() => split.mutate()}
+          >
+            Split selected
+          </Button>
+        </div>
+      }
+    >
+      <div className="grid gap-4">
+        <div className="max-h-52 space-y-1 overflow-y-auto rounded-lg border border-[#e2e8f0] p-2">
+          {order.items.map((i) => (
+            <label
+              key={i.id}
+              className="flex items-center gap-2 rounded px-1 py-1.5 text-sm"
+            >
+              <input
+                type="checkbox"
+                checked={picked.includes(i.id)}
+                onChange={(e) =>
+                  setPicked((ids) =>
+                    e.target.checked
+                      ? [...ids, i.id]
+                      : ids.filter((id) => id !== i.id),
+                  )
+                }
+              />
+              <span className="flex-1 text-[#0b1f33]">
+                {i.description || "Item"}
+              </span>
+              <span className="tabular-nums text-[#5a6b7d]">{i.quantity}</span>
+            </label>
+          ))}
+        </div>
+        <div>
+          <Label>Move split ticket to table (optional)</Label>
+          <select
+            className={cn(diningSelectClass, "mt-1 w-full")}
+            value={toTableId}
+            onChange={(e) => setToTableId(e.target.value)}
+          >
+            <option value="">Keep unseated</option>
+            {tables
+              .filter((t) => t.status === "available" && !t.currentOrderId)
+              .map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+          </select>
+        </div>
+      </div>
+    </ModalFrame>
+  );
+}
+
+function ReserveModal({
+  tables,
+  locationId,
+  defaultTableId,
+  onClose,
+  onSaved,
+}: {
+  tables: DiningTable[];
+  locationId: string;
+  defaultTableId?: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [guestName, setGuestName] = useState("");
+  const [covers, setCovers] = useState("2");
+  const [startAt, setStartAt] = useState(() => localDateTimeIn(90));
+  const [tableId, setTableId] = useState(defaultTableId ?? "");
+  const [guestPhone, setGuestPhone] = useState("");
+  const picked = tables.find((t) => t.id === tableId);
+  const save = useMutation({
+    mutationFn: () =>
+      restaurantApi.createReservation({
+        locationId,
+        guestName,
+        guestPhone: guestPhone.trim() || undefined,
+        covers: Number(covers) || 2,
+        startAt: new Date(startAt).toISOString(),
+        tableId: tableId || undefined,
+      }),
+    onSuccess: () => {
+      toast.success("Reservation booked");
+      onSaved();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  return (
+    <ModalFrame
+      title={picked?.status === "occupied" ? "Book next on this table" : "Reserve a table"}
+      subtitle={
+        picked?.status === "occupied"
+          ? `${picked.name} is occupied now. This books a later slot — current guests stay until billed.`
+          : "Booking does not deduct inventory. Seat the guest from the table map when they arrive."
+      }
+      onClose={onClose}
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            disabled={
+              !guestName.trim() || !startAt || save.isPending
+            }
+            onClick={() => save.mutate()}
+          >
+            Book
+          </Button>
+        </div>
+      }
+    >
+      <div className="grid gap-4">
+        <div>
+          <Label>Guest</Label>
+          <Input
+            className="mt-1"
+            value={guestName}
+            onChange={(e) => setGuestName(e.target.value)}
+          />
+        </div>
+        <div>
+          <Label>Phone</Label>
+          <Input
+            className="mt-1"
+            value={guestPhone}
+            onChange={(e) => setGuestPhone(e.target.value)}
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label>Covers</Label>
+            <Input
+              className="mt-1"
+              value={covers}
+              onChange={(e) => setCovers(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label>When</Label>
+            <Input
+              className="mt-1"
+              type="datetime-local"
+              value={startAt}
+              onChange={(e) => setStartAt(e.target.value)}
+            />
+          </div>
+        </div>
+        <div>
+          <Label>Table</Label>
+          <select
+            className={cn(diningSelectClass, "mt-1 w-full")}
+            value={tableId}
+            onChange={(e) => setTableId(e.target.value)}
+          >
+            <option value="">Any</option>
+            {tables.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+                {t.status !== "available" ? ` · ${t.status}` : ""}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+    </ModalFrame>
+  );
+}
+
+function GuestSpecialsModal({
+  orderId,
+  onClose,
+  onSaved,
+}: {
+  orderId: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const order = useQuery({
+    queryKey: ["restaurant-order", orderId],
+    queryFn: () => restaurantApi.getOrder(orderId),
+  });
+  const [occasion, setOccasion] = useState("none");
+  const [requests, setRequests] = useState<string[]>([]);
+  const [note, setNote] = useState("");
+  useEffect(() => {
+    const s = order.data?.restaurant?.guestSpecials;
+    if (!s) return;
+    setOccasion(s.occasion ?? "none");
+    setRequests(s.requests ?? []);
+    setNote(s.note ?? "");
+  }, [order.data]);
+  const save = useMutation({
+    mutationFn: () =>
+      restaurantApi.patchGuestSpecials(orderId, {
+        occasion,
+        requests,
+        note: note.trim() || "",
+      }),
+    onSuccess: () => {
+      toast.success("Kitchen will see this request");
+      onSaved();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  function toggle(code: string) {
+    setRequests((cur) =>
+      cur.includes(code) ? cur.filter((c) => c !== code) : [...cur, code],
+    );
+  }
+
+  const primary = GUEST_REQUEST_OPTS.slice(0, 3);
+  const extra = GUEST_REQUEST_OPTS.slice(3);
+
+  return (
+    <ModalFrame
+      title="What did they ask for?"
+      subtitle="Tap what the guest wants. Kitchen sees this. To charge for water or cake, add it from Add food."
+      onClose={onClose}
+      className="max-w-lg"
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Back
+          </Button>
+          <Button
+            type="button"
+            disabled={save.isPending || order.isLoading}
+            onClick={() => save.mutate()}
+          >
+            Save for kitchen
+          </Button>
+        </div>
+      }
+    >
+      <div className="space-y-5">
+        <div>
+          <p className="text-[0.7rem] font-semibold tracking-wide text-[#8b9bb0] uppercase">
+            Celebration?
+          </p>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            {GUEST_OCCASION_OPTS.map(([id, label]) => {
+              const on = occasion === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setOccasion(id)}
+                  className={cn(
+                    "rounded-xl border px-3 py-2.5 text-left text-sm font-semibold",
+                    on
+                      ? "border-[#1a56db] bg-[#eff6ff] text-[#1a56db]"
+                      : "border-[#e2e8f0] bg-white text-[#0b1f33] hover:border-[#bfdbfe]",
+                  )}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div>
+          <p className="text-[0.7rem] font-semibold tracking-wide text-[#8b9bb0] uppercase">
+            Need at the table
+          </p>
+          <div className="mt-2 grid gap-2 sm:grid-cols-3">
+            {primary.map(([id, label, hint]) => {
+              const on = requests.includes(id);
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => toggle(id)}
+                  className={cn(
+                    "rounded-xl border px-3 py-3 text-left",
+                    on
+                      ? "border-[#1a56db] bg-[#eff6ff]"
+                      : "border-[#e2e8f0] bg-white hover:border-[#bfdbfe]",
+                  )}
+                >
+                  <p
+                    className={cn(
+                      "text-sm font-semibold",
+                      on ? "text-[#1a56db]" : "text-[#0b1f33]",
+                    )}
+                  >
+                    {label}
+                  </p>
+                  <p className="mt-0.5 text-[0.7rem] leading-snug text-[#8b9bb0]">
+                    {hint}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {extra.map(([id, label]) => {
+              const on = requests.includes(id);
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => toggle(id)}
+                  className={cn(
+                    "rounded-full px-3 py-1.5 text-xs font-semibold ring-1",
+                    on
+                      ? "bg-[#1a56db] text-white ring-[#1a56db]"
+                      : "bg-white text-[#5a6b7d] ring-[#e2e8f0]",
+                  )}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div>
+          <Label>Anything else? (name on cake, no ice…)</Label>
+          <textarea
+            className="mt-1.5 min-h-[4rem] w-full rounded-lg border border-[#d9e0ea] px-3 py-2 text-sm text-[#0b1f33] outline-none focus:border-[#1a56db]"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Optional"
+          />
+        </div>
+      </div>
+    </ModalFrame>
+  );
+}
+
+function LayoutModal({
+  floor,
+  tables,
+  floors,
+  onFloorChange,
+  onClose,
+  onSaved,
+}: {
+  floor: DiningFloor;
+  tables: DiningTable[];
+  floors: DiningFloor[];
+  onFloorChange: (id: string) => void;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<Record<string, { x: number; y: number }>>(
+    () => {
+      const next: Record<string, { x: number; y: number }> = {};
+      tables.forEach((t, i) => {
+        const slot = layoutSlot(i);
+        next[t.id] = {
+          x: t.layoutX ?? slot.layoutX,
+          y: t.layoutY ?? slot.layoutY,
+        };
+      });
+      return next;
+    },
+  );
+  const drag = useRef<{ id: string } | null>(null);
+
+  function moveTo(clientX: number, clientY: number) {
+    if (!drag.current || !wrapRef.current) return;
+    const rect = wrapRef.current.getBoundingClientRect();
+    const x = clampPct(((clientX - rect.left) / rect.width) * 100);
+    const y = clampPct(((clientY - rect.top) / rect.height) * 100);
+    const id = drag.current.id;
+    setPos((p) => ({ ...p, [id]: { x, y } }));
+  }
+
+  const save = useMutation({
+    mutationFn: async () => {
+      await Promise.all(
+        tables.map((t) => {
+          const p = pos[t.id];
+          if (!p) return Promise.resolve();
+          return restaurantApi.updateTable(t.id, {
+            layoutX: p.x,
+            layoutY: p.y,
+          });
+        }),
+      );
+    },
+    onSuccess: () => {
+      toast.success("Seating layout saved");
+      onSaved();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  return (
+    <ModalFrame
+      title="Custom seating layout"
+      subtitle="Drag tables on this floor. Save stores positions for the layout view."
+      onClose={onClose}
+      className="max-w-3xl"
+      footer={
+        <div className="flex items-center justify-between gap-2">
+          <select
+            className={cn(diningSelectClass, "w-48")}
+            value={floor.id}
+            onChange={(e) => onFloorChange(e.target.value)}
+          >
+            {floors.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.name}
+              </option>
+            ))}
+          </select>
+          <div className="flex gap-2">
+            <Button type="button" variant="secondary" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={save.isPending || !tables.length}
+              onClick={() => save.mutate()}
+            >
+              Save layout
+            </Button>
+          </div>
+        </div>
+      }
+    >
+      <div
+        ref={wrapRef}
+        className="relative h-[26rem] overflow-hidden rounded-xl border border-[#d9e0ea] bg-[#eef3f9]"
+        onPointerMove={(e) => moveTo(e.clientX, e.clientY)}
+        onPointerUp={() => {
+          drag.current = null;
+        }}
+        onPointerLeave={() => {
+          drag.current = null;
+        }}
+      >
+        {tables.map((t) => {
+          const p = pos[t.id] ?? { x: 8, y: 8 };
+          return (
+            <button
+              key={t.id}
+              type="button"
+              style={{ left: `${p.x}%`, top: `${p.y}%` }}
+              className={cn(
+                "absolute w-[14%] min-w-[4.5rem] cursor-grab rounded-lg border px-2 py-2 text-left shadow-sm active:cursor-grabbing",
+                TILE[t.status] ?? TILE.available,
+              )}
+              onPointerDown={(e) => {
+                e.preventDefault();
+                (e.currentTarget as HTMLButtonElement).setPointerCapture(
+                  e.pointerId,
+                );
+                drag.current = { id: t.id };
+                moveTo(e.clientX, e.clientY);
+              }}
+              onPointerMove={(e) => {
+                if (drag.current?.id === t.id) moveTo(e.clientX, e.clientY);
+              }}
+              onPointerUp={() => {
+                drag.current = null;
+              }}
+            >
+              <p className="truncate text-xs font-semibold text-[#0b1f33]">
+                {t.name}
+              </p>
+              <p className="text-[0.65rem] text-[#5a6b7d]">
+                {t.capacity} seats
+              </p>
+            </button>
+          );
+        })}
+        {!tables.length ? (
+          <p className="absolute inset-0 flex items-center justify-center text-sm text-[#8b9bb0]">
+            No tables on this floor yet.
+          </p>
+        ) : null}
+      </div>
+    </ModalFrame>
+  );
+}
+
+function VoidModal({
+  orderId,
+  onClose,
+  onDone,
+}: {
+  orderId: string;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [reason, setReason] = useState("");
+  const voidBill = useMutation({
+    mutationFn: () => restaurantApi.voidOrder(orderId, reason.trim()),
+    onSuccess: () => {
+      toast.success("Bill cancelled — KOTs recalled");
+      onDone();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  return (
+    <ModalFrame
+      title="Cancel unpaid bill"
+      subtitle="Kitchen tickets on this order will be recalled."
+      onClose={onClose}
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Back
+          </Button>
+          <Button
+            type="button"
+            variant="danger"
+            disabled={reason.trim().length < 3 || voidBill.isPending}
+            onClick={() => voidBill.mutate()}
+          >
+            Cancel bill
+          </Button>
+        </div>
+      }
+    >
+      <Label>Reason</Label>
+      <Input
+        className="mt-1"
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        placeholder="At least 3 characters"
+      />
+    </ModalFrame>
   );
 }

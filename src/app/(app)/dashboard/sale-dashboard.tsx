@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { posApi } from "@/lib/api";
+import { ReceiptModal, type ReceiptData } from "@/components/receipt-modal";
 import { useBootstrap } from "@/lib/bootstrap";
 import { Button } from "@/components/ui/button";
 import { FloorTabs } from "@/components/getting-started";
@@ -29,6 +31,7 @@ export function SaleDashboard({ embed = false }: { embed?: boolean }) {
     id: string;
     orderNumber: string;
   } | null>(null);
+  const [reprint, setReprint] = useState<ReceiptData | null>(null);
 
   const floor = useQuery({
     queryKey: ["pos-sale-floor"],
@@ -143,13 +146,29 @@ export function SaleDashboard({ embed = false }: { embed?: boolean }) {
                 <div>
                   <p className="font-semibold text-[#0b1f33]">{o.orderNumber}</p>
                   <p className="text-[0.75rem] text-[#5a6b7d]">
-                    {money(
-                      (o as { total?: string | number }).total ??
-                        o.balanceDue,
-                    )}
+                    {money(o.total ?? o.subtotal)}
+                    {" · "}
+                    {o.customerName}
                   </p>
                 </div>
-                {allowReturn ? (
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={async () => {
+                      try {
+                        const data = await posApi.receipt(o.id);
+                        setReprint(data as ReceiptData);
+                      } catch (e) {
+                        toast.error(
+                          e instanceof Error ? e.message : "Could not load bill",
+                        );
+                      }
+                    }}
+                  >
+                    Reprint
+                  </Button>
+                  {allowReturn ? (
                   <Button
                     size="sm"
                     variant="secondary"
@@ -163,6 +182,7 @@ export function SaleDashboard({ embed = false }: { embed?: boolean }) {
                     Return
                   </Button>
                 ) : null}
+                </div>
               </li>
             ))}
             {!recent.data?.items?.length ? (
@@ -180,6 +200,9 @@ export function SaleDashboard({ embed = false }: { embed?: boolean }) {
           orderNumber={returnTarget.orderNumber}
           onClose={() => setReturnTarget(null)}
         />
+      ) : null}
+      {reprint ? (
+        <ReceiptModal data={reprint} onClose={() => setReprint(null)} />
       ) : null}
     </div>
   );

@@ -89,7 +89,11 @@ export async function enqueueOfflineEvent(
     status: "pending",
     dependsOn: dependsOn ?? null,
   };
-  await getOfflineDb(tenantId).outbox.add(item);
+  try {
+    await getOfflineDb(tenantId).outbox.add(item);
+  } catch {
+    enqueueOfflineEventLegacy(eventType, locationId, payload);
+  }
   return {
     clientEventId: item.clientEventId,
     eventType: item.eventType,
@@ -137,60 +141,75 @@ export async function pendingOfflineCount(tenantId?: string) {
       return 0;
     }
   }
-  await migrateLegacyQueue(tenantId);
-  return getOfflineDb(tenantId)
-    .outbox.where("status")
-    .anyOf(["pending", "failed", "syncing"])
-    .count();
+  try {
+    await migrateLegacyQueue(tenantId);
+    return await getOfflineDb(tenantId)
+      .outbox.where("status")
+      .anyOf(["pending", "failed", "syncing"])
+      .count();
+  } catch {
+    try {
+      return (
+        JSON.parse(localStorage.getItem(LEGACY_QUEUE_KEY) ?? "[]") as unknown[]
+      ).length;
+    } catch {
+      return 0;
+    }
+  }
 }
 
 export async function flushOfflineQueue(tenantId: string) {
-  await migrateLegacyQueue(tenantId);
-  if (!isServerReachable()) {
+  try {
+    await migrateLegacyQueue(tenantId);
+    if (!isServerReachable()) {
+      const remaining = await pendingOfflineCount(tenantId);
+      return { synced: 0, remaining, failed: 0 };
+    }
+
+    const db = getOfflineDb(tenantId);
+    const pending = await db.outbox
+      .where("status")
+      .anyOf(["pending", "failed"])
+      .sortBy("createdAt");
+
+    const deviceId = getDeviceId();
+    let synced = 0;
+    let failed = 0;
+
+    for (const item of pending) {
+      if (item.dependsOn) {
+        const dep = await db.outbox.get(item.dependsOn);
+        if (dep && dep.status !== "done") continue;
+      }
+      await db.outbox.update(item.id, { status: "syncing" });
+      try {
+        await syncApi.pushEvent({
+          deviceId,
+          storeId: item.locationId,
+          clientEventId: item.clientEventId,
+          eventType: item.eventType,
+          payload: JSON.parse(item.payloadJson) as Record<string, unknown>,
+        });
+        await db.outbox.update(item.id, {
+          status: "done",
+          lastError: null,
+          attempts: item.attempts + 1,
+        });
+        synced += 1;
+      } catch (e) {
+        failed += 1;
+        await db.outbox.update(item.id, {
+          status: "failed",
+          attempts: item.attempts + 1,
+          lastError: e instanceof Error ? e.message : "sync_failed",
+        });
+      }
+    }
+
+    const remaining = await pendingOfflineCount(tenantId);
+    return { synced, remaining, failed };
+  } catch {
     const remaining = await pendingOfflineCount(tenantId);
     return { synced: 0, remaining, failed: 0 };
   }
-
-  const db = getOfflineDb(tenantId);
-  const pending = await db.outbox
-    .where("status")
-    .anyOf(["pending", "failed"])
-    .sortBy("createdAt");
-
-  const deviceId = getDeviceId();
-  let synced = 0;
-  let failed = 0;
-
-  for (const item of pending) {
-    if (item.dependsOn) {
-      const dep = await db.outbox.get(item.dependsOn);
-      if (dep && dep.status !== "done") continue;
-    }
-    await db.outbox.update(item.id, { status: "syncing" });
-    try {
-      await syncApi.pushEvent({
-        deviceId,
-        storeId: item.locationId,
-        clientEventId: item.clientEventId,
-        eventType: item.eventType,
-        payload: JSON.parse(item.payloadJson) as Record<string, unknown>,
-      });
-      await db.outbox.update(item.id, {
-        status: "done",
-        lastError: null,
-        attempts: item.attempts + 1,
-      });
-      synced += 1;
-    } catch (e) {
-      failed += 1;
-      await db.outbox.update(item.id, {
-        status: "failed",
-        attempts: item.attempts + 1,
-        lastError: e instanceof Error ? e.message : "sync_failed",
-      });
-    }
-  }
-
-  const remaining = await pendingOfflineCount(tenantId);
-  return { synced, remaining, failed };
 }

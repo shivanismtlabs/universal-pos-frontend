@@ -41,12 +41,20 @@ export async function pullOfflineSnapshot(opts: {
     report("integrity", 5, "Checking local database…");
     const integrity = await verifyOfflineDbIntegrity(tenantId);
     if (!integrity.ok) {
-      if (integrity.error?.includes("full")) {
+      if (
+        integrity.error?.includes("full") ||
+        integrity.error?.includes("unavailable")
+      ) {
         report("skip", 100, "Local cache unavailable. POS still runs online.");
         return null;
       }
       report("repair", 8, "Local DB corrupt — re-seeding…");
-      await wipeAndRecreateOfflineDb(tenantId);
+      try {
+        await wipeAndRecreateOfflineDb(tenantId);
+      } catch {
+        report("skip", 100, "Local cache unavailable. POS still runs online.");
+        return null;
+      }
     }
 
     const lastSync = opts.full

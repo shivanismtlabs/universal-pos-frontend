@@ -246,6 +246,12 @@ const NAV_GROUPS: NavGroup[] = [
         capability: "TABLE",
       },
       {
+        href: "/restaurant/menu",
+        label: "Menus",
+        icon: BookOpen,
+        capability: "TABLE",
+      },
+      {
         href: "/kitchen",
         label: "Kitchen / KOT",
         icon: ClipboardList,

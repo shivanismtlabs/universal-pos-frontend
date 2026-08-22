@@ -181,8 +181,8 @@ export function getOfflineDb(tenantId: string) {
 }
 
 export async function verifyOfflineDbIntegrity(tenantId: string) {
-  const db = getOfflineDb(tenantId);
   try {
+    const db = getOfflineDb(tenantId);
     await Promise.race([
       db.open(),
       new Promise((_, reject) =>
@@ -205,16 +205,10 @@ export async function verifyOfflineDbIntegrity(tenantId: string) {
       /QuotaExceeded|NO_SPACE|FILE_ERROR_NO_SPACE|disk full|timeout|DatabaseClosed|indexedDB|UnknownError/i.test(
         msg,
       );
-    if (quota) {
-      return {
-        ok: false as const,
-        error: "Local offline storage is unavailable. The shop still works online.",
-      };
-    }
     return {
       ok: false as const,
       error: quota
-        ? "Local storage is full. Free disk space, then refresh."
+        ? "Local offline storage is unavailable (disk full). The shop still works online."
         : msg || "integrity_failed",
     };
   }
@@ -223,18 +217,34 @@ export async function verifyOfflineDbIntegrity(tenantId: string) {
 export async function wipeAndRecreateOfflineDb(tenantId: string) {
   const existing = dbCache.get(tenantId);
   if (existing) {
-    existing.close();
+    try {
+      existing.close();
+    } catch {
+      /* ignore */
+    }
     dbCache.delete(tenantId);
   }
-  await Dexie.delete(`upos-offline-${tenantId}`);
+  try {
+    await Dexie.delete(`upos-offline-${tenantId}`);
+  } catch {
+    /* ignore delete error on disk full / closed store */
+  }
   return getOfflineDb(tenantId);
 }
 
 export async function getMeta(tenantId: string, key: string) {
-  const row = await getOfflineDb(tenantId).meta.get(key);
-  return row?.value ?? null;
+  try {
+    const row = await getOfflineDb(tenantId).meta.get(key);
+    return row?.value ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export async function setMeta(tenantId: string, key: string, value: string) {
-  await getOfflineDb(tenantId).meta.put({ key, value });
+  try {
+    await getOfflineDb(tenantId).meta.put({ key, value });
+  } catch {
+    /* ignore write error on full/closed storage */
+  }
 }

@@ -9,10 +9,17 @@ const TABS: Array<{
   href: string;
   label: string;
   cap?: string;
+  anyCap?: string[];
   exact?: boolean;
 }> = [
   { href: "/restaurant", label: "Dashboard", exact: true },
   { href: "/restaurant/tables", label: "Tables", cap: "TABLE" },
+  {
+    href: "/restaurant/menu",
+    label: "Menus",
+    anyCap: ["TABLE", "KOT", "QR_ORDER", "MODIFIERS"],
+  },
+  { href: "/restaurant/qr", label: "QR menu", cap: "QR_ORDER" },
   { href: "/kitchen", label: "Kitchen", cap: "KOT" },
   { href: "/restaurant/reservations", label: "Reservations", cap: "DINING_RESERVATION" },
   { href: "/restaurant/tokens", label: "Tokens", cap: "TOKEN" },
@@ -66,7 +73,12 @@ export function DiningStatusBadge({
 export function DiningTabs() {
   const pathname = usePathname();
   const { hasCapability } = useBootstrap();
-  const visible = TABS.filter((t) => !t.cap || hasCapability(t.cap));
+  const visible = TABS.filter(
+    (t) =>
+      (!t.cap && !t.anyCap) ||
+      (t.cap ? hasCapability(t.cap) : false) ||
+      (t.anyCap ? t.anyCap.some((c) => hasCapability(c)) : false),
+  );
 
   return (
     <nav

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { restaurantApi } from "@/lib/api";
+import { posApi, restaurantApi } from "@/lib/api";
 import { useBootstrap } from "@/lib/bootstrap";
 import {
   DiningEmpty,
@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import { ModalFrame } from "@/components/modal-frame";
 
 const MODES = [
   { id: "dine_in", label: "Dine-in" },
@@ -38,8 +39,12 @@ export default function RestaurantSetupPage() {
     queryFn: () => restaurantApi.stations(),
     enabled: allowed,
   });
-  const [stationName, setStationName] = useState("Main kitchen");
-  const [stationCode, setStationCode] = useState("main");
+  const categories = useQuery({
+    queryKey: ["pos-sale-categories"],
+    queryFn: () => posApi.listSaleCategories(),
+    enabled: allowed,
+  });
+  const [stationModal, setStationModal] = useState<string | "new" | null>(null);
 
   const save = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
@@ -47,18 +52,6 @@ export default function RestaurantSetupPage() {
     onSuccess: () => {
       toast.success("Dining settings saved");
       void qc.invalidateQueries({ queryKey: ["restaurant-config"] });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-  const addStation = useMutation({
-    mutationFn: () =>
-      restaurantApi.createStation({
-        name: stationName.trim(),
-        code: stationCode.trim(),
-      }),
-    onSuccess: () => {
-      toast.success("Kitchen station saved");
-      void qc.invalidateQueries({ queryKey: ["restaurant-stations"] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -125,6 +118,72 @@ export default function RestaurantSetupPage() {
             </p>
           </DiningPanel>
 
+          <DiningPanel
+            title="Ticket charges"
+            hint="Added on Counter for dining tickets. Retail shops never see these."
+          >
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div>
+                <Label>Service % (dine-in)</Label>
+                <Input
+                  className="mt-1"
+                  inputMode="decimal"
+                  defaultValue={
+                    data.serviceChargePercent != null
+                      ? String(data.serviceChargePercent)
+                      : ""
+                  }
+                  placeholder="e.g. 10"
+                  onBlur={(e) => {
+                    const n = Number(e.target.value);
+                    save.mutate({
+                      serviceChargePercent:
+                        Number.isFinite(n) && n >= 0 ? n : 0,
+                    });
+                  }}
+                />
+              </div>
+              <div>
+                <Label>Packaging (takeaway / delivery)</Label>
+                <Input
+                  className="mt-1"
+                  inputMode="decimal"
+                  defaultValue={
+                    data.packagingCharge != null
+                      ? String(data.packagingCharge)
+                      : ""
+                  }
+                  placeholder="0"
+                  onBlur={(e) => {
+                    const n = Number(e.target.value);
+                    save.mutate({
+                      packagingCharge: Number.isFinite(n) && n >= 0 ? n : 0,
+                    });
+                  }}
+                />
+              </div>
+              <div>
+                <Label>Delivery charge</Label>
+                <Input
+                  className="mt-1"
+                  inputMode="decimal"
+                  defaultValue={
+                    data.deliveryCharge != null
+                      ? String(data.deliveryCharge)
+                      : ""
+                  }
+                  placeholder="0"
+                  onBlur={(e) => {
+                    const n = Number(e.target.value);
+                    save.mutate({
+                      deliveryCharge: Number.isFinite(n) && n >= 0 ? n : 0,
+                    });
+                  }}
+                />
+              </div>
+            </div>
+          </DiningPanel>
+
           <DiningPanel title="Kitchen & ordering">
             <div className="grid gap-2 sm:grid-cols-2">
               <DiningToggle
@@ -141,7 +200,7 @@ export default function RestaurantSetupPage() {
               />
               <DiningToggle
                 label="QR guest order"
-                hint="Parked order — no stock until bill"
+                hint="Guests scan a table QR, order, kitchen sees it. Pay at counter. Print codes from Dining → QR menu."
                 checked={data.qrOrdering}
                 onChange={(v) => save.mutate({ qrOrdering: v })}
               />
@@ -184,35 +243,22 @@ export default function RestaurantSetupPage() {
 
           <DiningPanel
             title="Kitchen stations"
-            hint="Same code can be saved again — it updates the existing station."
-          >
-            <div className="flex flex-wrap gap-2">
-              <Input
-                className="min-w-[10rem] flex-1"
-                value={stationName}
-                onChange={(e) => setStationName(e.target.value)}
-                placeholder="Hot kitchen"
-              />
-              <Input
-                className="w-32"
-                value={stationCode}
-                onChange={(e) => setStationCode(e.target.value)}
-                placeholder="hot"
-              />
-              <Button
-                type="button"
-                disabled={!stationName.trim() || !stationCode.trim()}
-                onClick={() => addStation.mutate()}
-              >
-                Save station
+            hint="Route item categories to a station and name the kitchen printer. Thermal hardware is not wired yet — reprint still uses the browser print dialog."
+            action={
+              <Button type="button" onClick={() => setStationModal("new")}>
+                New station
               </Button>
-            </div>
+            }
+          >
             {(stations.data ?? []).length ? (
-              <table className="mt-4 w-full text-left text-sm">
+              <table className="w-full text-left text-sm">
                 <thead className="text-[0.68rem] uppercase tracking-wide text-[#8b9bb0]">
                   <tr>
                     <th className="pb-2 font-semibold">Name</th>
                     <th className="pb-2 font-semibold">Code</th>
+                    <th className="pb-2 font-semibold">Printer</th>
+                    <th className="pb-2 font-semibold">Menu</th>
+                    <th className="pb-2" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#eef1f4]">
@@ -224,18 +270,186 @@ export default function RestaurantSetupPage() {
                       <td className="py-2 font-mono text-xs text-[#5a6b7d]">
                         {s.code}
                       </td>
+                      <td className="py-2 text-[#5a6b7d]">
+                        {s.printerName ?? "Browser print"}
+                      </td>
+                      <td className="py-2 text-[#5a6b7d]">
+                        {s.categoryIds?.length
+                          ? `${s.categoryIds.length} ${s.categoryIds.length === 1 ? "category" : "categories"}`
+                          : "All items"}
+                      </td>
+                      <td className="py-2 text-right">
+                        <button
+                          type="button"
+                          className="text-xs font-semibold text-[#1a56db]"
+                          onClick={() => setStationModal(s.id)}
+                        >
+                          Edit
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             ) : (
-              <p className="mt-3 text-sm text-[#5a6b7d]">
-                No stations yet. Add Main kitchen to route KOTs.
+              <p className="text-sm text-[#5a6b7d]">
+                No stations yet. Add Hot kitchen / Bar so Send KOT can split tickets.
               </p>
             )}
           </DiningPanel>
         </>
       )}
+
+      {stationModal ? (
+        <StationModal
+          station={
+            stationModal === "new"
+              ? null
+              : (stations.data ?? []).find((s) => s.id === stationModal) ?? null
+          }
+          categories={categories.data ?? []}
+          onClose={() => setStationModal(null)}
+          onSaved={() => {
+            void qc.invalidateQueries({ queryKey: ["restaurant-stations"] });
+            setStationModal(null);
+          }}
+        />
+      ) : null}
     </DiningShell>
+  );
+}
+
+function StationModal({
+  station,
+  categories,
+  onClose,
+  onSaved,
+}: {
+  station: {
+    id: string;
+    name: string;
+    code: string;
+    categoryIds?: string[];
+    printerName?: string | null;
+  } | null;
+  categories: Array<{ id: string; name: string; productCount: number }>;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [name, setName] = useState(station?.name ?? "Hot kitchen");
+  const [code, setCode] = useState(station?.code ?? "hot");
+  const [printerName, setPrinterName] = useState(station?.printerName ?? "");
+  const [categoryIds, setCategoryIds] = useState<string[]>(
+    station?.categoryIds ?? [],
+  );
+  const save = useMutation({
+    mutationFn: async () => {
+      const body = {
+        name: name.trim(),
+        categoryIds,
+        printerName: printerName.trim() || null,
+      };
+      if (station) {
+        await restaurantApi.updateStation(station.id, body);
+        return;
+      }
+      const created = await restaurantApi.createStation({
+        name: name.trim(),
+        code: code.trim(),
+        categoryIds,
+        printerName: printerName.trim() || undefined,
+      });
+      return created;
+    },
+    onSuccess: () => {
+      toast.success(station ? "Station updated" : "Station added");
+      onSaved();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  return (
+    <ModalFrame
+      title={station ? "Edit kitchen station" : "New kitchen station"}
+      subtitle="Items in the selected categories print as a separate KOT for this station."
+      onClose={onClose}
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            disabled={!name.trim() || (!station && !code.trim()) || save.isPending}
+            onClick={() => save.mutate()}
+          >
+            Save
+          </Button>
+        </div>
+      }
+    >
+      <div className="grid gap-4">
+        <div>
+          <Label>Name</Label>
+          <Input
+            className="mt-1"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </div>
+        {!station ? (
+          <div>
+            <Label>Code</Label>
+            <Input
+              className="mt-1"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+            />
+          </div>
+        ) : null}
+        <div>
+          <Label>Kitchen printer</Label>
+          <Input
+            className="mt-1"
+            placeholder="e.g. Grill-1 (label only until hardware pack)"
+            value={printerName}
+            onChange={(e) => setPrinterName(e.target.value)}
+          />
+        </div>
+        <div>
+          <Label>Item categories to cook here</Label>
+          <p className="mt-0.5 text-xs text-[#8b9bb0]">
+            Empty = this station can receive any unrouted items.
+          </p>
+          <div className="mt-2 max-h-40 space-y-1 overflow-y-auto rounded-lg border border-[#e2e8f0] p-2">
+            {categories.length ? (
+              categories.map((c) => (
+                <label
+                  key={c.id}
+                  className="flex items-center gap-2 rounded px-1 py-1 text-sm hover:bg-[#f8fafc]"
+                >
+                  <input
+                    type="checkbox"
+                    checked={categoryIds.includes(c.id)}
+                    onChange={(e) =>
+                      setCategoryIds((ids) =>
+                        e.target.checked
+                          ? [...ids, c.id]
+                          : ids.filter((id) => id !== c.id),
+                      )
+                    }
+                  />
+                  {c.name}
+                </label>
+              ))
+            ) : (
+              <p className="px-1 py-2 text-sm text-[#8b9bb0]">
+                No item categories yet.
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    </ModalFrame>
   );
 }

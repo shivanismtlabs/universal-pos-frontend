@@ -85,7 +85,13 @@ export type ReceiptData = {
     discountTotal?: string | number;
     depositTotal: string | number;
     balanceDue: string | number;
+    feesTotal?: string | number;
   };
+  fees?: Array<{
+    feeCode: string;
+    reason?: string | null;
+    amount: string | number;
+  }>;
   payments?: Array<{
     method: string;
     type: string;
@@ -234,6 +240,11 @@ export function ReceiptModal({
   const subtotal = moneyNumber(data?.totals.subtotal);
   const taxTotal = moneyNumber(data?.totals.taxTotal);
   const discount = moneyNumber(data?.totals.discountTotal);
+  const feeRows = data?.fees ?? [];
+  const feesTotal =
+    moneyNumber(data?.totals.feesTotal) ||
+    feeRows.reduce((s, f) => s + moneyNumber(f.amount), 0);
+  const itemsSub = Math.max(0, subtotal - feesTotal);
   const grand = Math.max(0, subtotal - discount + taxTotal);
   const rounded = Math.round(grand);
   const roundOff = Number((rounded - grand).toFixed(2));
@@ -458,8 +469,19 @@ export function ReceiptModal({
               {dash}
               <div className="flex justify-between">
                 <span>Subtotal</span>
-                <span className="tabular-nums">{pad2(subtotal)}</span>
+                <span className="tabular-nums">{pad2(itemsSub)}</span>
               </div>
+              {feeRows.map((f) => (
+                <div
+                  key={f.feeCode}
+                  className="flex justify-between"
+                >
+                  <span>{f.reason || f.feeCode.replaceAll("_", " ")}</span>
+                  <span className="tabular-nums">
+                    {pad2(moneyNumber(f.amount))}
+                  </span>
+                </div>
+              ))}
               {discount > 0 ? (
                 <div className="flex justify-between">
                   <span>Discount</span>
@@ -473,7 +495,9 @@ export function ReceiptModal({
               )}
               <div className="flex justify-between">
                 <span>Taxable Value</span>
-                <span className="tabular-nums">{pad2(subtotal - discount)}</span>
+                <span className="tabular-nums">
+                  {pad2(Math.max(0, subtotal - discount))}
+                </span>
               </div>
               {slabs.length ? (
                 <div className="mt-1 bg-[#f3f4f6] px-1 py-1 print:bg-[#f3f4f6]">
