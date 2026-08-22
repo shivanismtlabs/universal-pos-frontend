@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useRef } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { restaurantApi } from "@/lib/api";
 import { useAuthStore } from "@/lib/auth-store";
 import { useBootstrap } from "@/lib/bootstrap";
 import { useBranchStore } from "@/lib/branch-store";
@@ -73,6 +75,79 @@ export function DiningStatusBadge({
       {label}
     </span>
   );
+}
+
+const BOOKING_ALERT_MS = 10 * 60 * 1000;
+const SERVE_ALERT_MS = 15 * 60 * 1000;
+
+function alertOnce(key: string) {
+  try {
+    const id = `upos-dining-alert:${key}`;
+    if (sessionStorage.getItem(id)) return false;
+    sessionStorage.setItem(id, "1");
+    return true;
+  } catch {
+    return true;
+  }
+}
+
+function DiningAlerts() {
+  const { hasCapability, data: boot } = useBootstrap();
+  const locationId =
+    useBranchStore((s) => s.currentLocationId) || boot?.locations?.[0]?.id;
+  const seen = useRef(new Set<string>());
+  const canKot =
+    hasCapability("KOT") ||
+    hasCapability("KITCHEN") ||
+    hasCapability("KDS") ||
+    hasCapability("TABLE");
+  const canBook =
+    hasCapability("DINING_RESERVATION") || hasCapability("TABLE");
+
+  const kots = useQuery({
+    queryKey: ["restaurant-kots"],
+    queryFn: () => restaurantApi.kots(),
+    enabled: canKot,
+    refetchInterval: 30_000,
+  });
+  const reservations = useQuery({
+    queryKey: ["dining-reservations", locationId],
+    queryFn: () => restaurantApi.reservations(locationId),
+    enabled: canBook,
+    refetchInterval: 30_000,
+  });
+
+  useEffect(() => {
+    const now = Date.now();
+    for (const k of kots.data ?? []) {
+      if (k.status === "served" || k.status === "cancelled") continue;
+      const start = k.status === "ready" && k.readyAt
+        ? new Date(k.readyAt).getTime()
+        : new Date(k.createdAt).getTime();
+      if (now - start < SERVE_ALERT_MS) continue;
+      const key = `kot-15:${k.id}`;
+      if (seen.current.has(key) || !alertOnce(key)) continue;
+      seen.current.add(key);
+      const where = k.tableName ? ` · ${k.tableName}` : "";
+      toast.warning(
+        k.status === "ready"
+          ? `Not served in 15 min: ${k.kotNumber}${where}`
+          : `Order not served in 15 min: ${k.kotNumber}${where}`,
+      );
+    }
+    for (const r of reservations.data ?? []) {
+      if (r.status !== "booked") continue;
+      const wait = new Date(r.startAt).getTime() - now;
+      if (wait <= 0 || wait > BOOKING_ALERT_MS) continue;
+      const key = `book-10:${r.id}`;
+      if (seen.current.has(key) || !alertOnce(key)) continue;
+      seen.current.add(key);
+      const table = r.table?.name ? ` · ${r.table.name}` : "";
+      toast.warning(`Booking in 10 min: ${r.guestName}${table}`);
+    }
+  }, [kots.data, reservations.data]);
+
+  return null;
 }
 
 export function DiningTabs() {
@@ -156,6 +231,7 @@ export function DiningShell({
         {action ? <div className="shrink-0 pt-0.5">{action}</div> : null}
       </header>
       <DiningTabs />
+      <DiningAlerts />
       {children}
     </div>
   );

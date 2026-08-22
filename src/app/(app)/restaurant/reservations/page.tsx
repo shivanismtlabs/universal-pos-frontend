@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { restaurantApi } from "@/lib/api";
@@ -17,8 +17,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-const ALERT_MS = 10 * 60 * 1000;
-
 export default function ReservationsPage() {
   const qc = useQueryClient();
   const { hasCapability, data: boot } = useBootstrap();
@@ -29,7 +27,6 @@ export default function ReservationsPage() {
   const [covers, setCovers] = useState("2");
   const [startAt, setStartAt] = useState("");
   const [tableId, setTableId] = useState("");
-  const alerted = useRef(new Set<string>());
 
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ["dining-reservations"] });
@@ -72,17 +69,6 @@ export default function ReservationsPage() {
   });
 
   const list = rows.data ?? [];
-  useEffect(() => {
-    const now = Date.now();
-    for (const r of list) {
-      if (r.status !== "booked" || alerted.current.has(r.id)) continue;
-      const wait = new Date(r.startAt).getTime() - now;
-      if (wait <= 0 || wait > ALERT_MS) continue;
-      alerted.current.add(r.id);
-      const table = r.table?.name ? ` · ${r.table.name}` : "";
-      toast.warning(`Booking in 10 min: ${r.guestName}${table}`);
-    }
-  }, [list]);
 
   if (!allowed) {
     return (
