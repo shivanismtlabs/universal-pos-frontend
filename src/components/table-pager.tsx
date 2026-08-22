@@ -8,12 +8,14 @@ export function TablePager({
   total,
   pageSize,
   onPage,
+  extraRight,
 }: {
   page: number;
   totalPages: number;
   total: number;
   pageSize: number;
   onPage: (next: number) => void;
+  extraRight?: React.ReactNode;
 }) {
   if (total <= 0) return null;
   const from = (page - 1) * pageSize + 1;
@@ -23,7 +25,7 @@ export function TablePager({
       <p className="text-[0.75rem] text-[#6b7280]">
         Showing {from}–{to} of {total}
       </p>
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1.5">
         <Button
           type="button"
           size="sm"
@@ -45,7 +47,9 @@ export function TablePager({
         >
           Next
         </Button>
+        {extraRight}
       </div>
     </div>
   );
 }
+

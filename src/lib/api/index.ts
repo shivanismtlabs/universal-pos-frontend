@@ -8085,6 +8085,18 @@ export const catalogApi = {
       token: token(),
     });
   },
+  bulkDeleteProducts(body: { all?: boolean; skus?: string[]; ids?: string[] }) {
+    return apiRequest<{
+      ok: boolean;
+      total: number;
+      deleted: number;
+      archived: number;
+    }>("/catalog/products/bulk-delete", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
   generateSku(body?: { name?: string; kind?: string; prefix?: string }) {
     return apiRequest<{ sku: string; skuCode: string }>("/catalog/sku/generate", {
       method: "POST",

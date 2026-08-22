@@ -44,6 +44,7 @@ import { ItemsImportDialog } from "@/components/items-import-dialog";
 import { EntityRowActions } from "@/components/entity-row-actions";
 import { TablePager } from "@/components/table-pager";
 import { pagerFromMeta } from "@/lib/use-paged-list";
+import { canWriteCatalog } from "@/lib/roles";
 import {
   barcodeValueForProduct,
   copyBarcodeToClipboard,
@@ -186,6 +187,10 @@ function ProductsPanel() {
   } | null>(null);
   const [importOpen, setImportOpen] = useState(false);
 
+  const [confirmDeleteAllOpen, setConfirmDeleteAllOpen] = useState(false);
+  const userRoles = useAuthStore((s) => s.user?.roles);
+  const canWrite = canWriteCatalog(userRoles);
+
   const cats = useQuery({
     queryKey: ["catalog-categories", tenantId],
     queryFn: () => catalogApi.listCategories(),
@@ -270,6 +275,30 @@ function ProductsPanel() {
     },
     onError: (e: Error) =>
       toast.error(e instanceof ApiError ? e.message : "Delete failed"),
+  });
+
+  const bulkDeleteMut = useMutation({
+    mutationFn: () => catalogApi.bulkDeleteProducts({ all: true }),
+    onSuccess: (res) => {
+      void qc.invalidateQueries({ queryKey: ["catalog-products"] });
+      void qc.invalidateQueries({ queryKey: ["catalog-products-home"] });
+      void qc.invalidateQueries({ queryKey: ["inv-levels"] });
+      void qc.invalidateQueries({ queryKey: ["pos-sale-products"] });
+      void qc.invalidateQueries({ queryKey: ["pos-sale-categories"] });
+      void qc.invalidateQueries({ queryKey: ["pos-sale-floor"] });
+      void qc.invalidateQueries({ queryKey: ["pos-sale-catalog"] });
+      toast.success(
+        `Deleted ${res.deleted} product${res.deleted === 1 ? "" : "s"}${
+          res.archived ? ` · ${res.archived} archived (in active orders)` : ""
+        }`,
+      );
+      setConfirmDeleteAllOpen(false);
+      setPage(1);
+    },
+    onError: (e: Error) =>
+      toast.error(
+        e instanceof ApiError ? e.message : "Failed to delete products",
+      ),
   });
 
   const items = list.data?.items ?? [];
@@ -610,6 +639,20 @@ function ProductsPanel() {
       </div>
       <TablePager
         {...pagerFromMeta(meta, page, pageSize, setPage, items.length)}
+        extraRight={
+          canWrite && items.length > 0 ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="danger"
+              className="h-8 px-2.5 text-xs font-semibold"
+              onClick={() => setConfirmDeleteAllOpen(true)}
+              disabled={bulkDeleteMut.isPending}
+            >
+              Delete CSV
+            </Button>
+          ) : null
+        }
       />
       <ImageLightbox
         open={Boolean(lightbox)}
@@ -622,9 +665,51 @@ function ProductsPanel() {
         open={importOpen}
         onClose={() => setImportOpen(false)}
       />
+
+      {confirmDeleteAllOpen ? (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
+          <button
+            type="button"
+            className="absolute inset-0 bg-[#0b1f33]/45"
+            aria-label="Close"
+            onClick={() =>
+              !bulkDeleteMut.isPending && setConfirmDeleteAllOpen(false)
+            }
+          />
+          <div className="relative z-10 w-full max-w-md space-y-4 rounded-xl border border-[#d9e0ea] bg-white p-5 shadow-xl">
+            <div>
+              <h3 className="text-base font-semibold text-[#0b1f33]">
+                Delete all imported CSV products?
+              </h3>
+              <p className="mt-2 text-sm leading-relaxed text-[#5a6b7d]">
+                This will delete all products currently in this store so you can import a new CSV. Unused products will be permanently removed. Any products with existing sales/orders will be safely archived.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={bulkDeleteMut.isPending}
+                onClick={() => setConfirmDeleteAllOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="danger"
+                disabled={bulkDeleteMut.isPending}
+                onClick={() => bulkDeleteMut.mutate()}
+              >
+                {bulkDeleteMut.isPending ? "Deleting…" : "Delete CSV / Items"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
+
 
 function StatusPill({ status }: { status: string }) {
   const styles: Record<string, string> = {

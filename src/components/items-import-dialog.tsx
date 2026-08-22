@@ -308,6 +308,16 @@ export function ItemsImportDialog({
 
   if (!open) return null;
 
+  function handleDeleteCsv() {
+    setPreview(null);
+    setFileName("");
+    setParseError(null);
+    if (fileRef.current) {
+      fileRef.current.value = "";
+    }
+    toast.success("CSV removed");
+  }
+
   async function onFile(file: File | null) {
     if (!file) return;
     setParseError(null);
@@ -381,9 +391,18 @@ export function ItemsImportDialog({
             />
           </div>
           {fileName ? (
-            <p className="text-[0.8rem] text-[#5a6b7d]">
-              Selected: <span className="font-medium text-[#0b1f33]">{fileName}</span>
-            </p>
+            <div className="flex items-center justify-between gap-2 rounded-lg bg-[#f8fafc] px-3 py-2 text-[0.8rem] text-[#5a6b7d] border border-[#e8edf4]">
+              <p className="truncate">
+                Selected: <span className="font-medium text-[#0b1f33]">{fileName}</span>
+              </p>
+              <button
+                type="button"
+                className="shrink-0 text-xs font-semibold text-[#c81e1e] hover:underline"
+                onClick={handleDeleteCsv}
+              >
+                Clear
+              </button>
+            </div>
           ) : null}
           {parseError ? (
             <p className="rounded-lg border border-[#fecaca] bg-[#fff6f6] px-3 py-2 text-[0.8rem] text-[#c81e1e]">
@@ -419,18 +438,29 @@ export function ItemsImportDialog({
           )}
         </div>
 
-        <div className="flex flex-wrap justify-end gap-2 border-t border-[#eef1f4] px-5 py-3">
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-[#eef1f4] px-5 py-3">
           <Button type="button" variant="secondary" onClick={onClose}>
             Cancel
           </Button>
+          {(preview || fileName || parseError) ? (
+            <Button
+              type="button"
+              variant="danger"
+              disabled={importMut.isPending}
+              onClick={handleDeleteCsv}
+            >
+              Delete CSV
+            </Button>
+          ) : null}
           <Button
             type="button"
             disabled={!preview?.length || importMut.isPending}
             onClick={() => preview && importMut.mutate(preview)}
           >
-            {importMut.isPending ? "Importing…" : "Import items"}
+            {importMut.isPending ? "Importing…" : "Next / Import"}
           </Button>
         </div>
+
       </div>
     </div>
   );

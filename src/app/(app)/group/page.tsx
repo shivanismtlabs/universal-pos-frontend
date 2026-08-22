@@ -327,20 +327,212 @@ export default function GroupDashboardPage() {
       )}
 
       {tab === "approvals" && (
-        <div className="rounded-lg border border-[#d9e0ea] bg-white p-3 text-sm">
-          <pre className="whitespace-pre-wrap text-xs text-[#374151]">
-            {JSON.stringify(apprQ.data ?? [], null, 2)}
-          </pre>
+        <div className="space-y-4">
+          <div className="overflow-hidden rounded-xl border border-[#d9e0ea] bg-white shadow-sm">
+            <div className="border-b border-[#eef1f4] px-5 py-3.5">
+              <h4 className="text-sm font-semibold text-[#0b1f33]">
+                Group Approval Requests
+              </h4>
+              <p className="text-xs text-[#5a6b7d]">
+                Pending requests requiring manager or owner authorization across businesses
+              </p>
+            </div>
+            {!(apprQ.data as Array<Record<string, unknown>>)?.length ? (
+              <div className="px-5 py-10 text-center text-sm text-[#5a6b7d]">
+                <p className="font-medium text-[#0b1f33]">No pending approvals</p>
+                <p className="mt-1 text-xs text-[#8a9bb0]">
+                  All group discount, refund, and stock transfer requests are up to date.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="border-b border-[#eef1f4] bg-[#f8fafc] text-xs font-semibold uppercase tracking-wider text-[#5a6b7d]">
+                    <tr>
+                      <th className="px-5 py-3">Type</th>
+                      <th className="px-5 py-3">Details</th>
+                      <th className="px-5 py-3">Status</th>
+                      <th className="px-5 py-3">Requested</th>
+                      <th className="px-5 py-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#eef1f4]">
+                    {(apprQ.data as Array<{
+                      id: string;
+                      type: string;
+                      status: string;
+                      amount?: number;
+                      percent?: number;
+                      reason?: string;
+                      createdAt?: string;
+                    }>).map((req) => (
+                      <tr key={req.id} className="transition-colors hover:bg-[#f8fafc]">
+                        <td className="px-5 py-3.5 font-medium text-[#0b1f33] capitalize">
+                          {req.type}
+                        </td>
+                        <td className="px-5 py-3.5 text-xs text-[#5a6b7d]">
+                          {req.reason || (req.amount ? `Amount: ₹${req.amount}` : "Standard request")}
+                        </td>
+                        <td className="px-5 py-3.5">
+                          <span className="inline-flex rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 capitalize">
+                            {req.status}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3.5 text-xs text-[#8a9bb0]">
+                          {req.createdAt ? new Date(req.createdAt).toLocaleDateString() : "—"}
+                        </td>
+                        <td className="px-5 py-3.5 text-right">
+                          <div className="flex justify-end gap-1.5">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="secondary"
+                              onClick={async () => {
+                                await enterpriseApi.decide(req.id, "rejected");
+                                void apprQ.refetch();
+                              }}
+                            >
+                              Reject
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              onClick={async () => {
+                                await enterpriseApi.decide(req.id, "approved");
+                                void apprQ.refetch();
+                              }}
+                            >
+                              Approve
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
       {tab === "staff" && (
-        <div className="rounded-lg border border-[#d9e0ea] bg-white p-4 text-sm">
-          <pre className="whitespace-pre-wrap text-xs text-[#374151]">
-            {JSON.stringify(staffQ.data ?? {}, null, 2)}
-          </pre>
+        <div className="space-y-4">
+          {/* Identity card */}
+          {staffQ.data?.identity ? (
+            <div className="rounded-xl border border-[#d9e0ea] bg-white p-5 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-center gap-3.5">
+                  <div className="flex size-12 items-center justify-center rounded-full bg-[#1a56db]/10 text-base font-bold text-[#1a56db]">
+                    {staffQ.data.identity.fullName
+                      ? staffQ.data.identity.fullName.slice(0, 2).toUpperCase()
+                      : "US"}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-semibold text-[#0b1f33]">
+                        {staffQ.data.identity.fullName || "Staff Profile"}
+                      </h3>
+                      <span className="inline-flex items-center rounded-md bg-[#e8eefb] px-2 py-0.5 text-xs font-semibold text-[#1341a8] capitalize">
+                        {staffQ.data.identity.groupRole || "Member"}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-xs text-[#5a6b7d]">
+                      {staffQ.data.identity.email}
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs text-[#5a6b7d]">Businesses Managed</p>
+                  <p className="text-lg font-bold text-[#0b1f33]">
+                    {staffQ.data.memberships?.length ?? 0}
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {/* Memberships table */}
+          <div className="overflow-hidden rounded-xl border border-[#d9e0ea] bg-white shadow-sm">
+            <div className="border-b border-[#eef1f4] px-5 py-3.5">
+              <h4 className="text-sm font-semibold text-[#0b1f33]">
+                Business Roles & Store Access
+              </h4>
+              <p className="text-xs text-[#5a6b7d]">
+                Active staff roles and tenant memberships across your business group
+              </p>
+            </div>
+            {!staffQ.data?.memberships?.length ? (
+              <div className="px-5 py-8 text-center text-sm text-[#5a6b7d]">
+                No business memberships found.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="border-b border-[#eef1f4] bg-[#f8fafc] text-xs font-semibold uppercase tracking-wider text-[#5a6b7d]">
+                    <tr>
+                      <th className="px-5 py-3">Business Name</th>
+                      <th className="px-5 py-3">Assigned Roles</th>
+                      <th className="px-5 py-3">Group Status</th>
+                      <th className="px-5 py-3 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#eef1f4]">
+                    {staffQ.data.memberships.map((m) => (
+                      <tr
+                        key={m.tenantId}
+                        className="transition-colors hover:bg-[#f8fafc]"
+                      >
+                        <td className="px-5 py-3.5">
+                          <div className="font-medium text-[#0b1f33]">
+                            {m.name}
+                          </div>
+                          <div className="text-xs text-[#8a9bb0]">
+                            {m.slug}
+                          </div>
+                        </td>
+                        <td className="px-5 py-3.5">
+                          <div className="flex flex-wrap gap-1">
+                            {m.roles?.map((r) => (
+                              <span
+                                key={r}
+                                className="inline-flex rounded bg-[#eef3fb] px-2 py-0.5 text-xs font-medium text-[#1a56db] capitalize"
+                              >
+                                {r}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="px-5 py-3.5">
+                          <span
+                            className={cn(
+                              "inline-flex rounded-full px-2 py-0.5 text-xs font-medium",
+                              m.inGroup
+                                ? "bg-emerald-50 text-emerald-700"
+                                : "bg-slate-100 text-slate-600",
+                            )}
+                          >
+                            {m.inGroup ? "In Group" : "Independent"}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3.5 text-right">
+                          <Link
+                            href={`/staff?tenantHint=${m.tenantId}`}
+                            className="inline-flex items-center gap-1 text-xs font-semibold text-[#1a56db] hover:underline"
+                          >
+                            Manage Staff
+                          </Link>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
+
     </div>
   );
 }

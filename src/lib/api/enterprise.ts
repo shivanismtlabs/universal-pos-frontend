@@ -152,7 +152,22 @@ export const enterpriseApi = {
   },
 
   staff() {
-    return apiRequest("/enterprise/staff", { token: enterpriseToken() });
+    return apiRequest<{
+      identity: {
+        id: string;
+        email: string;
+        fullName: string;
+        groupRole: string;
+      };
+      memberships: Array<{
+        tenantId: string;
+        name: string;
+        slug: string;
+        userId: string;
+        roles: string[];
+        inGroup: boolean;
+      }>;
+    }>("/enterprise/staff", { token: enterpriseToken() });
   },
 
   suppliers(q?: string) {
