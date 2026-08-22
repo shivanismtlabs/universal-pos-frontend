@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { customersApi, loyaltyApi, paymentsApi, posApi, resourcesApi, restaurantApi, tenantsApi } from "@/lib/api";
+import { customersApi, loyaltyApi, ordersApi, paymentsApi, posApi, resourcesApi, restaurantApi, tenantsApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useBootstrap } from "@/lib/bootstrap";
 import { useBranchStore } from "@/lib/branch-store";
@@ -41,6 +41,7 @@ import {
 } from "@/lib/sell-units";
 import { productKindLabel, productStockHint } from "@/lib/product-kind";
 import type { SplitBillMode, SplitBillPart } from "@/lib/split-bill";
+import { scalePartsToTotal } from "@/lib/split-bill";
 import { diningFeesFromConfig } from "@/lib/dining-fees";
 import { sellingMenuCategoryFilter } from "@/lib/selling-menus";
 
@@ -244,6 +245,10 @@ export default function RetailPosWorkstation({
     row: Parameters<typeof upsertLine>[0];
     groups: NonNullable<Parameters<typeof upsertLine>[0]["modifierGroups"]>;
     selected: string[];
+  } | null>(null);
+  const [serialPick, setSerialPick] = useState<{
+    row: Parameters<typeof upsertLine>[0];
+    value: string;
   } | null>(null);
   const [resourceId, setResourceId] = useState("");
   const [guestCount, setGuestCount] = useState("1");
@@ -593,6 +598,22 @@ export default function RetailPosWorkstation({
   }, []);
 
   useEffect(() => {
+    if (!splitSession || splitSession.orderId) return;
+    const sum = splitSession.parts.reduce((s, p) => s + p.amount, 0);
+    if (Math.abs(sum - totalDue) <= 0.05) return;
+    if (totalDue <= 0) {
+      setSplitSession(null);
+      toast.message("Split cancelled — ticket total is 0");
+      return;
+    }
+    setSplitSession((cur) =>
+      cur && !cur.orderId
+        ? { ...cur, parts: scalePartsToTotal(cur.parts, totalDue) }
+        : cur,
+    );
+  }, [totalDue, splitSession]);
+
+  useEffect(() => {
     const sync = () => {
       setOnline(isOnline());
       setOfflinePending(pendingOfflineCount());
@@ -659,6 +680,7 @@ export default function RetailPosWorkstation({
     }>;
     modifiers?: string[];
     skipModifierPrompt?: boolean;
+    serialNumber?: string;
   }) {
     const image =
       row.image ?? row.photoUrl ?? row.images?.[0] ?? null;
@@ -681,6 +703,13 @@ export default function RetailPosWorkstation({
     if (groups.length && !row.skipModifierPrompt && !row.modifiers?.length) {
       setModPick({ row, groups, selected: [] });
       return;
+    }
+    if (row.requiresSerial === true && !row.serialNumber?.trim()) {
+      const alreadyOnTicket = cart.some((l) => l.stockLevelId === row.id);
+      if (!alreadyOnTicket) {
+        setSerialPick({ row, value: "" });
+        return;
+      }
     }
     const channelKey =
       orderType === "dine_in" ||
@@ -759,6 +788,7 @@ export default function RetailPosWorkstation({
           requiresBatch: row.requiresBatch === true,
           batchOptions: row.batchOptions ?? [],
           requiresSerial: row.requiresSerial === true,
+          serialNumber: row.serialNumber?.trim() || undefined,
           variantId:
             row.requiresVariant && row.variantOptions?.length === 1
               ? row.variantOptions[0].id
@@ -856,8 +886,28 @@ export default function RetailPosWorkstation({
     chargeLock.current = true;
     setBusy(true);
     try {
+      const live = await ordersApi.get(splitSession.orderId);
+      const due = moneyNumber(live.balanceDue);
+      const alreadyPaid =
+        due <= 0.009 ||
+        live.status === "closed" ||
+        live.status === "cancelled";
+      if (alreadyPaid) {
+        const receiptData = await posApi.receipt(splitSession.orderId);
+        resetAfterFullSale();
+        setReceipt({
+          data: receiptData as ReceiptData,
+          change: 0,
+          cashTendered: null,
+        });
+        toast.success(
+          `Sale ${splitSession.orderNumber} is already fully paid`,
+        );
+        return;
+      }
+      const payAmt = Math.min(chargeAmount, due);
       const key = stablePaymentAttemptKey(
-        `${splitSession.orderId}:${splitSession.index}:${payMethod}:${chargeAmount}`,
+        `${splitSession.orderId}:${splitSession.index}:${payMethod}:${payAmt}`,
         "sale-split-part",
       );
       if (payMethod === "card" || payMethod === "upi") {
@@ -867,7 +917,7 @@ export default function RetailPosWorkstation({
         }
         const session = await paymentsApi.createStripeIntent({
           orderId: splitSession.orderId,
-          amount: chargeAmount,
+          amount: payAmt,
           method: payMethod,
           type: "payment",
           idempotencyKey: key,
@@ -878,7 +928,7 @@ export default function RetailPosWorkstation({
           publishableKey: session.publishableKey,
           clientSecret: session.clientSecret,
           paymentIntentId: session.paymentIntentId,
-          amount: chargeAmount,
+          amount: payAmt,
           description: session.description,
           method: payMethod,
           keepOrder: true,
@@ -889,7 +939,7 @@ export default function RetailPosWorkstation({
       }
       await paymentsApi.create({
         orderId: splitSession.orderId,
-        amount: chargeAmount,
+        amount: payAmt,
         method: settleMethod(),
         type: "payment",
         idempotencyKey: key,
@@ -898,7 +948,7 @@ export default function RetailPosWorkstation({
           : {}),
       });
       const next = splitSession.index + 1;
-      const last = next >= splitSession.parts.length;
+      const last = next >= splitSession.parts.length || due - payAmt <= 0.009;
       setCashTendered("");
       if (last) {
         const receiptData = await posApi.receipt(splitSession.orderId);
@@ -912,16 +962,41 @@ export default function RetailPosWorkstation({
           `Sale ${splitSession.orderNumber} · all parts collected`,
         );
       } else {
-        setSplitSession({ ...splitSession, index: next });
+        const leftover = scalePartsToTotal(
+          splitSession.parts.slice(next),
+          Math.max(0, due - payAmt),
+        );
+        setSplitSession({
+          ...splitSession,
+          index: next,
+          parts: [...splitSession.parts.slice(0, next), ...leftover],
+        });
         toast.success(
           `Part ${next} of ${splitSession.parts.length} collected`,
         );
       }
       clearPaymentAttemptKey();
     } catch (e) {
-      toast.error(
-        e instanceof ApiError ? e.messages.join(", ") : "Could not collect this part",
-      );
+      const msg =
+        e instanceof ApiError ? e.messages.join(", ") : "Could not collect this part";
+      if (/already fully paid|closed order/i.test(msg)) {
+        try {
+          const receiptData = await posApi.receipt(splitSession.orderId);
+          resetAfterFullSale();
+          setReceipt({
+            data: receiptData as ReceiptData,
+            change: 0,
+            cashTendered: null,
+          });
+          toast.success(
+            `Sale ${splitSession.orderNumber} is already fully paid`,
+          );
+          return;
+        } catch {
+          /* fall through */
+        }
+      }
+      toast.error(msg);
     } finally {
       chargeLock.current = false;
       setBusy(false);
@@ -1130,10 +1205,10 @@ export default function RetailPosWorkstation({
         ...(loyaltyQuote && loyaltyQuote.points > 0
           ? { loyaltyPointsToRedeem: loyaltyQuote.points }
           : {}),
-        ...((allowPartial && chargeAmount < totalDue - 0.001) ||
-        (splitSession && splitRemaining > 1)
+        ...(allowPartial && chargeAmount < totalDue - 0.001
           ? { allowPartial: true }
           : {}),
+        ...(splitSession ? { allowPartial: true } : {}),
         ...(sendReceipt && customerId
           ? {
               sendReceipt: true,
@@ -1297,16 +1372,37 @@ export default function RetailPosWorkstation({
       const nextSplit =
         splitSession && splitSession.index + 1 < splitSession.parts.length;
       if (nextSplit && splitSession) {
+        const remaining = moneyNumber(
+          result.balanceDue ?? result.order.balanceDue,
+        );
+        if (remaining <= 0.009) {
+          resetAfterFullSale();
+          setReceipt({
+            data: result.receipt as ReceiptData,
+            change: result.change,
+            cashTendered: result.cashTendered,
+          });
+          toast.success(`Sale ${result.order.orderNumber} complete`);
+          clearPaymentAttemptKey();
+          void qc.invalidateQueries({ queryKey: ["pos-sale-catalog"] });
+          return;
+        }
+        const nextIndex = splitSession.index + 1;
+        const leftover = scalePartsToTotal(
+          splitSession.parts.slice(nextIndex),
+          remaining,
+        );
         setSplitSession({
           ...splitSession,
-          index: splitSession.index + 1,
+          index: nextIndex,
           orderId: result.order.id,
           orderNumber: result.order.orderNumber,
+          parts: [...splitSession.parts.slice(0, nextIndex), ...leftover],
         });
         setCart([]);
         setCashTendered("");
         toast.success(
-          `Part ${splitSession.index + 1} of ${splitSession.parts.length} collected · next ${money(splitSession.parts[splitSession.index + 1]?.amount ?? 0)}`,
+          `Part ${splitSession.index + 1} of ${splitSession.parts.length} collected · next ${money(leftover[0]?.amount ?? remaining)}`,
         );
         clearPaymentAttemptKey();
         void qc.invalidateQueries({ queryKey: ["pos-sale-catalog"] });
@@ -2918,6 +3014,58 @@ export default function RetailPosWorkstation({
                     modifiers: modPick.selected,
                     skipModifierPrompt: true,
                   });
+                }}
+              >
+                Add
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {serialPick ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-[#0b1f33]/40 p-4">
+          <div className="w-full max-w-sm rounded-xl border border-[#e2e8f0] bg-white p-4 shadow-lg">
+            <h3 className="text-sm font-semibold text-[#0b1f33]">
+              Serial number · {serialPick.row.name}
+            </h3>
+            <p className="mt-1 text-xs text-[#5a6b7d]">
+              This item is serial-tracked. Enter the serial / IMEI / barcode
+              before adding it to the ticket.
+            </p>
+            <Input
+              className="mt-3"
+              autoFocus
+              placeholder="Serial / barcode"
+              value={serialPick.value}
+              onChange={(e) =>
+                setSerialPick((cur) =>
+                  cur ? { ...cur, value: e.target.value } : cur,
+                )
+              }
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  const value = serialPick.value.trim();
+                  if (!value) return;
+                  const row = serialPick.row;
+                  setSerialPick(null);
+                  upsertLine({ ...row, serialNumber: value });
+                }
+              }}
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setSerialPick(null)}>
+                Cancel
+              </Button>
+              <Button
+                disabled={!serialPick.value.trim()}
+                onClick={() => {
+                  const value = serialPick.value.trim();
+                  if (!value) return;
+                  const row = serialPick.row;
+                  setSerialPick(null);
+                  upsertLine({ ...row, serialNumber: value });
                 }}
               >
                 Add

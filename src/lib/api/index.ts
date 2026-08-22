@@ -1259,6 +1259,7 @@ export const inventoryApi = {
     locationId?: string;
     productId?: string;
     type?: string;
+    q?: string;
     limit?: number;
     page?: number;
   }) {
@@ -1266,6 +1267,7 @@ export const inventoryApi = {
     if (params?.locationId) qs.set("locationId", params.locationId);
     if (params?.productId) qs.set("productId", params.productId);
     if (params?.type) qs.set("type", params.type);
+    if (params?.q) qs.set("q", params.q);
     if (params?.limit) qs.set("limit", String(params.limit));
     if (params?.page) qs.set("page", String(params.page));
     const q = qs.toString();
@@ -1273,11 +1275,14 @@ export const inventoryApi = {
       items: Array<{
         id: string;
         type: string;
+        qtyBefore: number;
         qtyDelta: number;
         qtyAfter: number;
         damageDelta: number;
         reason?: string | null;
         createdAt: string;
+        sku?: string | null;
+        sellUnit?: string | null;
         product?: { name: string; skuCode: string };
         location?: { name: string };
         actor?: { fullName: string } | null;
@@ -2868,6 +2873,8 @@ export const posApi = {
         createdAt: string;
         customerName: string;
         itemCount: number;
+        productNames?: string[];
+        productSummary?: string;
       }>;
     }>(`/pos/sale/recent${qs}`, { token: token() });
   },

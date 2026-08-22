@@ -1,8 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { useAuthStore } from "@/lib/auth-store";
 import { useBootstrap } from "@/lib/bootstrap";
+import { useBranchStore } from "@/lib/branch-store";
 import { cn } from "@/lib/utils";
 
 const TABS: Array<{
@@ -40,6 +44,7 @@ const STATUS_STYLE: Record<string, string> = {
   blocked: "bg-[#f8fafc] text-[#475569] ring-1 ring-[#e2e8f0]",
   booked: "bg-[#eff6ff] text-[#1e40af] ring-1 ring-[#bfdbfe]",
   seated: "bg-[#ecfdf3] text-[#166534] ring-1 ring-[#bbf7d0]",
+  completed: "bg-[#f8fafc] text-[#475569] ring-1 ring-[#e2e8f0]",
   cancelled: "bg-[#f8fafc] text-[#64748b] ring-1 ring-[#e2e8f0]",
   no_show: "bg-[#fef2f2] text-[#991b1b] ring-1 ring-[#fecaca]",
   new: "bg-[#eff6ff] text-[#1e40af] ring-1 ring-[#bfdbfe]",
@@ -72,6 +77,9 @@ export function DiningStatusBadge({
 
 export function DiningTabs() {
   const pathname = usePathname();
+  const router = useRouter();
+  const qc = useQueryClient();
+  const identityToken = useAuthStore((s) => s.identityToken);
   const { hasCapability } = useBootstrap();
   const visible = TABS.filter(
     (t) =>
@@ -81,30 +89,48 @@ export function DiningTabs() {
   );
 
   return (
-    <nav
-      aria-label="Dining"
-      className="flex flex-wrap gap-1 border-b border-[#eef1f4]"
-    >
-      {visible.map((t) => {
-        const active = t.exact
-          ? pathname === t.href
-          : pathname === t.href || pathname.startsWith(`${t.href}/`);
-        return (
-          <Link
-            key={t.href}
-            href={t.href}
-            className={cn(
-              "-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors",
-              active
-                ? "border-[#1a56db] text-[#1a56db]"
-                : "border-transparent text-[#5a6b7d] hover:text-[#0b1f33]",
-            )}
-          >
-            {t.label}
-          </Link>
-        );
-      })}
-    </nav>
+    <div className="flex items-center justify-between gap-3 border-b border-[#eef1f4]">
+      <nav
+        aria-label="Dining"
+        className="flex min-w-0 flex-wrap gap-1"
+      >
+        {visible.map((t) => {
+          const active = t.exact
+            ? pathname === t.href
+            : pathname === t.href || pathname.startsWith(`${t.href}/`);
+          return (
+            <Link
+              key={t.href}
+              href={t.href}
+              className={cn(
+                "-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors",
+                active
+                  ? "border-[#1a56db] text-[#1a56db]"
+                  : "border-transparent text-[#5a6b7d] hover:text-[#0b1f33]",
+              )}
+            >
+              {t.label}
+            </Link>
+          );
+        })}
+      </nav>
+      <button
+        type="button"
+        className="mb-px shrink-0 rounded-md border border-[#d9e0ea] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#334155] hover:bg-[#f8fafc]"
+        onClick={() => {
+          qc.clear();
+          useBranchStore.getState().bindTenant(null);
+          if (!identityToken) {
+            toast.message("Sign in again to pick another shop");
+            return;
+          }
+          useAuthStore.getState().clearTenantSession();
+          router.replace("/organizations");
+        }}
+      >
+        Switch organization
+      </button>
+    </div>
   );
 }
 

@@ -256,10 +256,12 @@ export function ItemsImportDialog({
   open,
   onClose,
   onImported,
+  locationId,
 }: {
   open: boolean;
   onClose: () => void;
   onImported?: () => void;
+  locationId?: string;
 }) {
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -272,11 +274,13 @@ export function ItemsImportDialog({
       posApi.importSaleProducts({
         items,
         createCategories: true,
+        ...(locationId ? { locationId } : {}),
       }),
     onSuccess: (res) => {
       void qc.invalidateQueries({ queryKey: ["catalog-products"] });
       void qc.invalidateQueries({ queryKey: ["catalog-products-home"] });
       void qc.invalidateQueries({ queryKey: ["inv-levels"] });
+      void qc.invalidateQueries({ queryKey: ["inv-ledger"] });
       void qc.invalidateQueries({ queryKey: ["pos-sale-products"] });
       void qc.invalidateQueries({ queryKey: ["pos-sale-categories"] });
       void qc.invalidateQueries({ queryKey: ["pos-sale-floor"] });

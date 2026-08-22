@@ -16,7 +16,7 @@ export type SplitBillPart = {
   lineIds: string[];
 };
 
-function roundMoney(n: number) {
+export function roundMoney(n: number) {
   return Math.round(n * 100) / 100;
 }
 
@@ -35,6 +35,40 @@ export function allocatePercents(total: number, percents: number[]): number[] {
   const out = clean.map((p) => roundMoney((total * p) / 100));
   const drift = roundMoney(total - out.reduce((s, n) => s + n, 0));
   out[out.length - 1] = roundMoney(out[out.length - 1] + drift);
+  return out;
+}
+
+/** Rebalance parts so they still sum to `total` (discount / remaining due). */
+export function scalePartsToTotal(
+  parts: SplitBillPart[],
+  total: number,
+): SplitBillPart[] {
+  if (!parts.length) return parts;
+  const sum = parts.reduce((s, p) => s + p.amount, 0);
+  const target = roundMoney(Math.max(0, total));
+  if (parts.length === 1) {
+    return [{ ...parts[0]!, amount: target }];
+  }
+  if (sum <= 0) {
+    const base = roundMoney(target / parts.length);
+    return parts.map((p, i) => ({
+      ...p,
+      amount:
+        i === parts.length - 1
+          ? roundMoney(target - base * (parts.length - 1))
+          : base,
+    }));
+  }
+  const out = parts.map((p, i) =>
+    i === parts.length - 1
+      ? p
+      : { ...p, amount: roundMoney((p.amount / sum) * target) },
+  );
+  const used = out.slice(0, -1).reduce((s, p) => s + p.amount, 0);
+  out[out.length - 1] = {
+    ...out[out.length - 1]!,
+    amount: roundMoney(target - used),
+  };
   return out;
 }
 

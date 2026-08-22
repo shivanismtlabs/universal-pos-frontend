@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { restaurantApi } from "@/lib/api";
@@ -17,6 +17,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
+const ALERT_MS = 10 * 60 * 1000;
+
 export default function ReservationsPage() {
   const qc = useQueryClient();
   const { hasCapability, data: boot } = useBootstrap();
@@ -27,16 +29,24 @@ export default function ReservationsPage() {
   const [covers, setCovers] = useState("2");
   const [startAt, setStartAt] = useState("");
   const [tableId, setTableId] = useState("");
+  const alerted = useRef(new Set<string>());
+
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ["dining-reservations"] });
+    void qc.invalidateQueries({ queryKey: ["restaurant-tables"] });
+  };
 
   const rows = useQuery({
     queryKey: ["dining-reservations", locationId],
     queryFn: () => restaurantApi.reservations(locationId),
     enabled: allowed,
+    refetchInterval: 30_000,
   });
   const tables = useQuery({
     queryKey: ["restaurant-tables", locationId],
     queryFn: () => restaurantApi.tables(locationId),
     enabled: allowed,
+    refetchInterval: 30_000,
   });
   const create = useMutation({
     mutationFn: () =>
@@ -49,7 +59,7 @@ export default function ReservationsPage() {
       }),
     onSuccess: () => {
       setGuestName("");
-      void qc.invalidateQueries({ queryKey: ["dining-reservations"] });
+      refresh();
       toast.success("Reservation booked");
     },
     onError: (e: Error) => toast.error(e.message),
@@ -57,10 +67,22 @@ export default function ReservationsPage() {
   const patch = useMutation({
     mutationFn: (opts: { id: string; status: string }) =>
       restaurantApi.updateReservation(opts.id, { status: opts.status }),
-    onSuccess: () =>
-      void qc.invalidateQueries({ queryKey: ["dining-reservations"] }),
+    onSuccess: () => refresh(),
     onError: (e: Error) => toast.error(e.message),
   });
+
+  const list = rows.data ?? [];
+  useEffect(() => {
+    const now = Date.now();
+    for (const r of list) {
+      if (r.status !== "booked" || alerted.current.has(r.id)) continue;
+      const wait = new Date(r.startAt).getTime() - now;
+      if (wait <= 0 || wait > ALERT_MS) continue;
+      alerted.current.add(r.id);
+      const table = r.table?.name ? ` · ${r.table.name}` : "";
+      toast.warning(`Booking in 10 min: ${r.guestName}${table}`);
+    }
+  }, [list]);
 
   if (!allowed) {
     return (
@@ -72,8 +94,6 @@ export default function ReservationsPage() {
       </DiningShell>
     );
   }
-
-  const list = rows.data ?? [];
 
   return (
     <DiningShell
@@ -189,6 +209,16 @@ export default function ReservationsPage() {
                             Cancel
                           </Button>
                         </span>
+                      ) : null}
+                      {r.status === "seated" ? (
+                        <Button
+                          variant="secondary"
+                          onClick={() =>
+                            patch.mutate({ id: r.id, status: "completed" })
+                          }
+                        >
+                          Free table
+                        </Button>
                       ) : null}
                     </td>
                   </tr>

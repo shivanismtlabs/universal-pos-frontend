@@ -385,13 +385,7 @@ function SaleReturnsDesk() {
 
   const recent = useQuery({
     queryKey: ["sale-returns-recent", q],
-    queryFn: () =>
-      ordersApi.list({
-        kind: "sale",
-        status: "closed",
-        limit: 40,
-        q: q.trim() || undefined,
-      }),
+    queryFn: () => posApi.listRecentSales(40),
     enabled: deskTab === "new",
   });
 
@@ -433,7 +427,15 @@ function SaleReturnsDesk() {
       toast.error(e instanceof ApiError ? e.messages.join(", ") : "Failed"),
   });
 
-  const items = recent.data?.items ?? [];
+  const items = (recent.data?.items ?? []).filter((o) => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return true;
+    return (
+      o.orderNumber.toLowerCase().includes(needle) ||
+      (o.customerName ?? "").toLowerCase().includes(needle) ||
+      (o.productSummary ?? "").toLowerCase().includes(needle)
+    );
+  });
   const pendingItems = pending.data?.items ?? [];
   const historyItems = (history.data?.items ?? []).filter(
     (r) => r.status !== "pending" && r.status !== "requested",
@@ -487,16 +489,23 @@ function SaleReturnsDesk() {
             {items.map((o) => (
               <li
                 key={o.id}
-                className="flex flex-wrap items-center justify-between gap-2 py-3"
+                className="flex items-center justify-between gap-3 py-3"
               >
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <p className="font-semibold text-[#111827]">{o.orderNumber}</p>
                   <p className="truncate text-xs text-[#6b7280]">
-                    {o.customer?.fullName ?? "Walk-in"}
-                    {o.subtotal != null ? ` · ${money(o.subtotal)}` : ""}
+                    {o.customerName || "Walk-in"}
+                    {o.total != null || o.subtotal != null
+                      ? ` · ${money(o.total ?? o.subtotal)}`
+                      : ""}
                   </p>
+                  {o.productSummary ? (
+                    <p className="mt-0.5 truncate text-xs text-[#334155]">
+                      {o.productSummary}
+                    </p>
+                  ) : null}
                 </div>
-                <div className="flex gap-2">
+                <div className="flex shrink-0 gap-2">
                   <Button
                     type="button"
                     size="sm"
@@ -509,7 +518,7 @@ function SaleReturnsDesk() {
                       })
                     }
                   >
-                    Return…
+                    Return
                   </Button>
                   {canApprove ? (
                     <Button
@@ -523,7 +532,7 @@ function SaleReturnsDesk() {
                         })
                       }
                     >
-                      Exchange…
+                      Exchange
                     </Button>
                   ) : null}
                 </div>
@@ -558,6 +567,20 @@ function SaleReturnsDesk() {
                     · Reason: {r.reasonCode ?? "—"} · Staff:{" "}
                     {r.receivedBy ?? "—"}
                   </p>
+                  {Array.isArray(r.items) && r.items.length ? (
+                    <ul className="mt-1 list-disc pl-4 text-xs text-[#334155]">
+                      {(r.items as Array<Record<string, unknown>>).map(
+                        (it, i) => (
+                          <li key={i}>
+                            {String(it.name ?? it.sku ?? "Item")}
+                            {it.quantity != null
+                              ? ` × ${String(it.quantity)}`
+                              : ""}
+                          </li>
+                        ),
+                      )}
+                    </ul>
+                  ) : null}
                   {r.notes ? (
                     <p className="mt-0.5 text-xs text-[#5a6b7d]">{r.notes}</p>
                   ) : null}
@@ -669,6 +692,7 @@ function SaleReturnsDesk() {
           orderNumber={active.orderNumber}
           defaultMode={active.mode ?? "return"}
           onClose={() => setActive(null)}
+          onRequested={() => setDeskTab("pending")}
         />
       ) : null}
     </div>

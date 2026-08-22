@@ -33,6 +33,7 @@ import {
   zodFieldErrors,
   zodMessages,
 } from "@/lib/validations";
+import { formatQtyWithUnit } from "@/lib/sell-units";
 
 type Tab =
   | "levels"
@@ -124,13 +125,9 @@ function InventoryPageInner() {
         eyebrow="Stock"
         title="Inventory"
         subtitle="How much stock you have in this shop. Import an Excel file to add items and opening qty."
+        className="[&>div:last-child]:w-full"
         action={
-          <div className="flex flex-wrap gap-2">
-            {canWrite ? (
-              <Button type="button" onClick={() => setImportOpen(true)}>
-                Import Excel / CSV
-              </Button>
-            ) : null}
+          <div className="flex w-full flex-wrap items-center gap-2">
             <Button variant="ghost" asChild>
               <Link href="/transfers">Stock transfer</Link>
             </Button>
@@ -140,6 +137,15 @@ function InventoryPageInner() {
             <Button variant="ghost" asChild>
               <Link href="/adjustments">Adjustments history</Link>
             </Button>
+            {canWrite ? (
+              <Button
+                type="button"
+                className="ml-auto"
+                onClick={() => setImportOpen(true)}
+              >
+                Import Excel / CSV
+              </Button>
+            ) : null}
           </div>
         }
       />
@@ -213,6 +219,7 @@ function InventoryPageInner() {
       <ItemsImportDialog
         open={importOpen}
         onClose={() => setImportOpen(false)}
+        locationId={activeLoc || undefined}
       />
     </div>
   );
@@ -1118,16 +1125,49 @@ function AuditTab({
   );
 }
 
+const LEDGER_TYPE_LABELS: Record<string, string> = {
+  opening: "Opening stock",
+  stock_in: "Stock in",
+  stock_out: "Stock out",
+  sale: "Sale",
+  customer_return: "Customer return",
+  adjustment: "Adjustment",
+  transfer_in: "Transfer in",
+  transfer_out: "Transfer out",
+  purchase_receive: "Purchase receive",
+  purchase_return: "Purchase return",
+  damage: "Damaged",
+  damage_restore: "Damage restore",
+  audit: "Physical audit",
+  consumption: "Recipe use",
+  production_in: "Production in",
+  production_out: "Production out",
+  expiry: "Expiry",
+  reservation: "Reserved",
+  reservation_release: "Reserve released",
+  rental_out: "Rental out",
+  rental_return: "Rental return",
+};
+
+function formatLedgerQty(qty: number, unit?: string | null) {
+  if (!Number.isFinite(qty)) return "—";
+  if (unit) return formatQtyWithUnit(qty, unit);
+  const n = Math.round(qty * 1000) / 1000;
+  return String(n);
+}
+
 function LedgerTab({ locationId }: { locationId: string }) {
   const [type, setType] = useState("");
+  const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
   const pageSize = 25;
   const ledger = useQuery({
-    queryKey: ["inv-ledger", locationId, type, page],
+    queryKey: ["inv-ledger", locationId, type, q, page],
     queryFn: () =>
       inventoryApi.listLedger({
         locationId: locationId || undefined,
         type: type || undefined,
+        q: q.trim() || undefined,
         page,
         limit: pageSize,
       }),
@@ -1138,66 +1178,108 @@ function LedgerTab({ locationId }: { locationId: string }) {
 
   useEffect(() => {
     setPage(1);
-  }, [type, locationId]);
+  }, [type, locationId, q]);
 
   return (
     <div className="space-y-5">
-      <div>
-        <Label>Movement type</Label>
-        <select
-          className={fieldSelect}
-          value={type}
-          onChange={(e) => setType(e.target.value)}
-        >
-          <option value="">All types</option>
-          {[
-            "stock_in",
-            "stock_out",
-            "adjustment",
-            "transfer_in",
-            "transfer_out",
-            "purchase_receive",
-            "purchase_return",
-            "damage",
-            "audit",
-          ].map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
-          ))}
-        </select>
+      <p className="text-[0.8rem] text-[#6b7280]">
+        Each row is one item at this location. After is that item’s stock after
+        the movement — not a shop-wide running total.
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <Label>Item or SKU</Label>
+          <Input
+            className="mt-1"
+            placeholder="Filter by name or SKU"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+        </div>
+        <div>
+          <Label>Movement type</Label>
+          <select
+            className={fieldSelect}
+            value={type}
+            onChange={(e) => setType(e.target.value)}
+          >
+            <option value="">All types</option>
+            {Object.entries(LEDGER_TYPE_LABELS).map(([id, label]) => (
+              <option key={id} value={id}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
       <div className="overflow-x-auto rounded-lg border border-[#e5e7eb]">
-        <table className="w-full min-w-[640px] text-sm">
+        <table className="w-full min-w-[760px] text-sm">
           <thead className="bg-[#f7f9fb] text-left text-[0.7rem] uppercase text-[#5a6b7d]">
             <tr>
               <th className="px-3 py-2">When</th>
               <th className="px-3 py-2">Type</th>
               <th className="px-3 py-2">Item</th>
-              <th className="px-3 py-2 text-right">Δ</th>
+              <th className="px-3 py-2 text-right">Before</th>
+              <th className="px-3 py-2 text-right">In</th>
+              <th className="px-3 py-2 text-right">Out</th>
               <th className="px-3 py-2 text-right">After</th>
               <th className="px-3 py-2">Reason</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
-              <tr key={r.id} className="border-t">
-                <td className="px-3 py-2 text-xs text-[#5a6b7d]">
-                  {new Date(r.createdAt).toLocaleString()}
-                </td>
-                <td className="px-3 py-2 font-mono text-xs">{r.type}</td>
-                <td className="px-3 py-2">{r.product?.name}</td>
-                <td className="px-3 py-2 text-right tabular-nums">
-                  {r.qtyDelta > 0 ? `+${r.qtyDelta}` : r.qtyDelta}
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums">
-                  {r.qtyAfter}
-                </td>
-                <td className="px-3 py-2 text-[#5a6b7d]">
-                  {r.reason || "—"}
+            {rows.map((r) => {
+              const unit = r.sellUnit;
+              const delta = Number(r.qtyDelta);
+              const before =
+                r.qtyBefore != null
+                  ? Number(r.qtyBefore)
+                  : Number(r.qtyAfter) - delta;
+              return (
+                <tr key={r.id} className="border-t border-[#f0f3f7]">
+                  <td className="px-3 py-2 text-xs text-[#5a6b7d] whitespace-nowrap">
+                    {new Date(r.createdAt).toLocaleString()}
+                  </td>
+                  <td className="px-3 py-2">
+                    {LEDGER_TYPE_LABELS[r.type] ?? r.type}
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="font-medium text-[#0b1f33]">
+                      {r.product?.name ?? "—"}
+                    </div>
+                    <div className="font-mono text-[0.7rem] text-[#8a9bb0]">
+                      {r.sku ?? r.product?.skuCode ?? ""}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-[#5a6b7d]">
+                    {formatLedgerQty(before, unit)}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-emerald-700">
+                    {delta > 0 ? formatLedgerQty(delta, unit) : "—"}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-rose-700">
+                    {delta < 0 ? formatLedgerQty(Math.abs(delta), unit) : "—"}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums font-medium">
+                    {formatLedgerQty(Number(r.qtyAfter), unit)}
+                  </td>
+                  <td className="px-3 py-2 text-[#5a6b7d]">
+                    {r.reason || "—"}
+                  </td>
+                </tr>
+              );
+            })}
+            {!rows.length && !ledger.isLoading ? (
+              <tr>
+                <td
+                  colSpan={8}
+                  className="px-3 py-8 text-center text-[#5a6b7d]"
+                >
+                  No stock movements
+                  {locationId ? " at this location" : ""}
+                  {type || q.trim() ? " for this filter" : ""}.
                 </td>
               </tr>
-            ))}
+            ) : null}
           </tbody>
         </table>
       </div>
