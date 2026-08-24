@@ -41,40 +41,73 @@ function buildQueries(name: string, hint?: string): string[] {
   return [...new Set(out.map((q) => q.trim()).filter((q) => q.length >= 2))];
 }
 
-async function searchOpenverse(query: string): Promise<OpenverseHit | null> {
-  const url =
-    "https://api.openverse.org/v1/images/?" +
-    new URLSearchParams({
-      q: query,
-      page_size: "8",
-      format: "json",
-    }).toString();
-
-  const res = await fetch(url, {
-    headers: {
-      Accept: "application/json",
-      "User-Agent": "UniversalPOS/1.0",
-    },
-    signal: AbortSignal.timeout(25_000),
-    cache: "no-store",
-  });
-  if (!res.ok) return null;
-  const json = (await res.json()) as { results?: OpenverseHit[] };
-  const results = json.results ?? [];
-  const preferred =
-    results.find((r) => r.url && /\.(jpe?g|png|webp)(\?|$)/i.test(r.url)) ||
-    results.find((r) => r.url);
-  return preferred ?? null;
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit = {},
+  ms = 25000,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
-/**
- * Find a real Creative Commons photo by product name (Openverse).
- * Runs on the Next.js server so Nest AI routes are not required.
- */
-export async function POST(req: NextRequest) {
+async function searchOpenverse(query: string): Promise<OpenverseHit | null> {
   try {
-    const body = (await req.json()) as { name?: string; hint?: string };
-    const name = (body.name ?? "").trim();
+    const url =
+      "https://api.openverse.org/v1/images/?" +
+      new URLSearchParams({
+        q: query,
+        page_size: "8",
+        format: "json",
+      }).toString();
+
+    const res = await fetchWithTimeout(
+      url,
+      {
+        headers: {
+          Accept: "application/json",
+          "User-Agent": "UniversalPOS/1.0",
+        },
+        cache: "no-store",
+      },
+      15000,
+    );
+    if (!res.ok) return null;
+    const json = (await res.json()) as { results?: OpenverseHit[] };
+    const results = json.results ?? [];
+    const preferred =
+      results.find((r) => r.url && /\.(jpe?g|png|webp)(\?|$)/i.test(r.url)) ||
+      results.find((r) => r.url);
+    return preferred ?? null;
+  } catch (err) {
+    console.error("[find-photo] searchOpenverse error:", err);
+    return null;
+  }
+}
+
+export async function GET() {
+  return NextResponse.json({ ok: true, route: "find-photo" });
+}
+
+export async function POST(req: Request) {
+  try {
+    let name = "";
+    let hint = "";
+    try {
+      const body = (await req.json()) as { name?: string; hint?: string };
+      name = (body?.name ?? "").trim();
+      hint = (body?.hint ?? "").trim();
+    } catch {
+      // Body parse error
+    }
+
     if (name.length < 2) {
       return NextResponse.json(
         { message: "Product name is required" },
@@ -82,7 +115,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const queries = buildQueries(name, body.hint?.trim());
+    const queries = buildQueries(name, hint);
     let hit: OpenverseHit | null = null;
     let usedQuery = queries[0];
     for (const q of queries) {
@@ -103,11 +136,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const imgRes = await fetch(hit.url, {
-      headers: { Accept: "image/*,*/*", "User-Agent": "UniversalPOS/1.0" },
-      signal: AbortSignal.timeout(45_000),
-      cache: "no-store",
-    });
+    const imgRes = await fetchWithTimeout(
+      hit.url,
+      {
+        headers: { Accept: "image/*,*/*", "User-Agent": "UniversalPOS/1.0" },
+        cache: "no-store",
+      },
+      45000,
+    );
     if (!imgRes.ok) {
       return NextResponse.json(
         { message: "Found a photo but could not download it. Try again." },

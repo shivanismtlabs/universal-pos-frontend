@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { catalogApi, customFieldsApi, posApi, tenantsApi } from "@/lib/api";
@@ -1882,21 +1883,91 @@ export function SaleStockPanel({
                           }
                         />
                       </div>
-                      <div className="flex gap-2 sm:col-span-2">
-                        <Button
-                          disabled={updateProduct.isPending}
-                          onClick={() => updateProduct.mutate()}
-                        >
-                          Save
-                        </Button>
-                        <Button
-                          variant="secondary"
-                          onClick={() => {
-                            setEditingId(null);
-                            setDraft(null);
-                          }}
-                        >
-                          Cancel
+                      <div className="field-shell sm:col-span-2">
+                        <Label>Photos ({images.length}/{MAX_IMAGES})</Label>
+                        <div className="mt-1 flex max-w-full items-center gap-2 overflow-x-auto rounded-lg border border-[#e2e8f0] bg-white p-2">
+                          {images.map((src, idx) => (
+                            <div key={`${item.id}-edit-ph-${idx}`} className="relative shrink-0">
+                              <ProductThumb
+                                src={src}
+                                label={item.title}
+                                size="md"
+                                onClick={() =>
+                                  setLightbox({
+                                    images,
+                                    index: idx,
+                                    label: item.title,
+                                  })
+                                }
+                              />
+                              {idx === 0 ? (
+                                <span className="absolute bottom-0.5 left-0.5 rounded bg-[#1a56db] px-1 text-[0.5rem] font-bold text-white">
+                                  cover
+                                </span>
+                              ) : null}
+                              {canWrite ? (
+                                <button
+                                  type="button"
+                                  className="absolute -right-1 -top-1 grid h-5 w-5 place-items-center rounded-full bg-[#c81e1e] text-white shadow"
+                                  title="Remove image"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    removeImage.mutate({
+                                      id: item.id,
+                                      imageUrl: src,
+                                    });
+                                  }}
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              ) : null}
+                            </div>
+                          ))}
+                          {canWrite && images.length < MAX_IMAGES ? (
+                            <label className="inline-flex h-10 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-dashed border-[#cfd8e6] bg-[#f8fafc] px-3 text-[0.7rem] font-semibold text-[#1a56db] hover:bg-[#e8eefb]">
+                              + Add Photo
+                              <input
+                                type="file"
+                                accept="image/jpeg,image/png,image/webp,image/gif"
+                                multiple
+                                className="sr-only"
+                                onChange={(e) => {
+                                  const remaining = MAX_IMAGES - images.length;
+                                  void pickFiles(e.target.files, (urls) =>
+                                    uploadImage.mutate({
+                                      id: item.id,
+                                      dataUrls: urls.slice(0, remaining),
+                                    }),
+                                  );
+                                  e.target.value = "";
+                                }}
+                              />
+                            </label>
+                          ) : null}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-2 sm:col-span-2 pt-1">
+                        <div className="flex gap-2">
+                          <Button
+                            disabled={updateProduct.isPending}
+                            onClick={() => updateProduct.mutate()}
+                          >
+                            Save
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            onClick={() => {
+                              setEditingId(null);
+                              setDraft(null);
+                            }}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                        <Button variant="ghost" size="sm" asChild className="text-[#1a56db]">
+                          <Link href={`/catalog/edit?id=${item.id}`}>
+                            Advanced edit (SKU, Tax, Barcode) →
+                          </Link>
                         </Button>
                       </div>
                     </div>

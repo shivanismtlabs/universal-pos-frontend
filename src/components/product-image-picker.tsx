@@ -192,12 +192,17 @@ export const ProductImagePicker = forwardRef<
           hint: productHint?.trim() || undefined,
         }),
       });
-      const data = (await res.json()) as {
-        message?: string;
-        imageBase64?: string;
-      };
+      const text = await res.text();
+      let data: { message?: string; imageBase64?: string } = {};
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error("Photo search service unavailable. Please upload a photo manually.");
+      }
       if (!res.ok || !data.imageBase64) {
-        throw new Error(data.message || "No real photo found");
+        throw new Error(
+          data.message || "No real photo found. Upload a photo manually.",
+        );
       }
       await applyImageDataUrl(
         data.imageBase64,

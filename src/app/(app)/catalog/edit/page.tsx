@@ -103,6 +103,7 @@ function EditCatalogProductPage() {
 
   /** Values for Settings → Custom fields (Product). */
   const [extraFields, setExtraFields] = useState<Record<string, string>>({});
+  const [existingPhotos, setExistingPhotos] = useState<string[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 
@@ -137,6 +138,7 @@ function EditCatalogProductPage() {
   useEffect(() => {
     setHydrated(false);
     setExtraFields({});
+    setExistingPhotos([]);
     imagePickerRef.current?.clear();
   }, [id]);
 
@@ -148,6 +150,12 @@ function EditCatalogProductPage() {
       meta && typeof meta.taxRatePercent === "number"
         ? String(meta.taxRatePercent)
         : p.taxCode?.match(/(\d+(?:\.\d+)?)/)?.[1] || "5";
+    const initialPhotos = p.images?.length
+      ? p.images
+      : p.photoUrl
+        ? [p.photoUrl]
+        : [];
+    setExistingPhotos(initialPhotos.filter(Boolean));
     setForm({
       name: p.name ?? "",
       shortName: p.shortName ?? "",
@@ -301,11 +309,6 @@ function EditCatalogProductPage() {
       }
       setFieldErrors({});
       const uploaded = imagePickerRef.current?.getUploadDataUrls() ?? [];
-      const existingPhotos = product.data?.images?.length
-        ? product.data.images
-        : form.photoUrl.trim()
-          ? [form.photoUrl.trim()]
-          : [];
       const photos = [
         ...uploaded,
         ...existingPhotos.filter(Boolean),
@@ -509,26 +512,32 @@ function EditCatalogProductPage() {
             </div>
         </div>
 
-        {(product.data.images?.length || form.photoUrl) ? (
+        {existingPhotos.length ? (
           <div>
-            <Label>Current images</Label>
-            <div className="mt-1 flex flex-wrap gap-2">
-              {(product.data.images?.length
-                ? product.data.images
-                : [form.photoUrl]
-              )
-                .filter(Boolean)
-                .slice(0, 8)
-                .map((src, i, arr) => (
+            <Label>Current images ({existingPhotos.length})</Label>
+            <div className="mt-1.5 flex flex-wrap gap-2">
+              {existingPhotos.slice(0, 8).map((src, i) => (
+                <div key={`${src}-${i}`} className="relative group shrink-0">
                   <ProductThumb
-                    key={src}
                     src={src}
                     label={form.name}
                     className="rounded-lg border border-[#e5e7eb]"
-                    count={i === 0 ? arr.length : undefined}
+                    count={i === 0 ? existingPhotos.length : undefined}
                     onClick={() => setLightboxIndex(i)}
                   />
-                ))}
+                  <button
+                    type="button"
+                    className="absolute -top-1.5 -right-1.5 grid h-5 w-5 place-items-center rounded-full bg-[#c81e1e] text-[0.65rem] font-bold text-white shadow-sm hover:scale-110 transition-transform"
+                    title="Remove image"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setExistingPhotos((prev) => prev.filter((_, idx) => idx !== i));
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
             </div>
           </div>
         ) : null}
