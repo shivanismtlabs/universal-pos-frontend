@@ -14,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { ModalFrame } from "@/components/modal-frame";
 import { cn } from "@/lib/utils";
 
@@ -273,7 +274,7 @@ function RecipeModal({
       <div className="grid gap-4">
         <div>
           <Label>Finished item</Label>
-          <select
+          <Select
             className={cn(diningSelectClass, "mt-1 w-full")}
             value={productId}
             disabled={Boolean(recipe)}
@@ -285,7 +286,7 @@ function RecipeModal({
                 {p.name} ({p.skuCode})
               </option>
             ))}
-          </select>
+          </Select>
         </div>
 
         {productId ? (
@@ -322,7 +323,7 @@ function RecipeModal({
         <div className="grid gap-2 sm:grid-cols-2">
           <div className="sm:col-span-2">
             <Label>Ingredient / raw / sub-recipe</Label>
-            <select
+            <Select
               className={cn(diningSelectClass, "mt-1 w-full")}
               value={compId}
               onChange={(e) => setCompId(e.target.value)}
@@ -336,7 +337,7 @@ function RecipeModal({
                     {recipeIds.has(p.id) ? " · sub-recipe" : ""}
                   </option>
                 ))}
-            </select>
+            </Select>
           </div>
           <div>
             <Label>Qty</Label>
@@ -366,7 +367,7 @@ function RecipeModal({
           {stages.length ? (
             <div>
               <Label>Stage</Label>
-              <select
+              <Select
                 className={cn(diningSelectClass, "mt-1 w-full")}
                 value={stageId}
                 onChange={(e) => setStageId(e.target.value)}
@@ -377,7 +378,7 @@ function RecipeModal({
                     {s.name}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
           ) : null}
           <div className="flex items-end">
@@ -476,7 +477,7 @@ function ProduceModal({
       <div className="grid gap-4">
         <div>
           <Label>Stage</Label>
-          <select
+          <Select
             className={cn(diningSelectClass, "mt-1 w-full")}
             value={stageId}
             onChange={(e) => setStageId(e.target.value)}
@@ -486,7 +487,7 @@ function ProduceModal({
                 {s.name}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
         <div>
           <Label>Batches / qty</Label>

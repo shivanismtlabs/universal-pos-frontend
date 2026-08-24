@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FieldError } from "@/components/ui/form";
+import { Select } from "@/components/ui/select";
 import { formatDate, newIdempotencyKey, cn } from "@/lib/utils";
 import { useBootstrap } from "@/lib/bootstrap";
 import { TablePager } from "@/components/table-pager";
@@ -261,7 +262,7 @@ function RentalReturnsDesk() {
           <div className="mt-5 space-y-4">
             <div>
               <Label>Order (units out)</Label>
-              <select
+              <Select
                 className="mt-1.5 select-field"
                 {...form.register("orderId", {
                   onChange: () => form.setValue("inventoryUnitId", ""),
@@ -273,12 +274,12 @@ function RentalReturnsDesk() {
                     {o.orderNumber} · {o.customerName} ({o.unitsOut.length} out)
                   </option>
                 ))}
-              </select>
+              </Select>
               <FieldError message={form.formState.errors.orderId?.message} />
             </div>
             <div>
               <Label>Unit</Label>
-              <select
+              <Select
                 className="mt-1.5 select-field"
                 disabled={!orderId}
                 {...form.register("inventoryUnitId")}
@@ -291,7 +292,7 @@ function RentalReturnsDesk() {
                     {u.label}
                   </option>
                 ))}
-              </select>
+              </Select>
               <FieldError
                 message={form.formState.errors.inventoryUnitId?.message}
               />
@@ -323,7 +324,7 @@ function RentalReturnsDesk() {
           <div className="mt-4 space-y-3">
             <div>
               <Label>Order</Label>
-              <select
+              <Select
                 className="mt-1.5 select-field"
                 value={settleOrderId}
                 onChange={(e) => setSettleOrderId(e.target.value)}
@@ -334,7 +335,7 @@ function RentalReturnsDesk() {
                     {o.orderNumber} · {o.customerName}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div>
               <Label>Refund amount (0 = forfeit all)</Label>
@@ -825,7 +826,7 @@ function ServiceRefundDesk() {
             <label className="block text-xs font-semibold text-[#5a6b7d] uppercase tracking-wide mb-1">
               Select service order
             </label>
-            <select
+            <Select
               className="h-10 w-full rounded-lg border border-[#e5e7eb] bg-white px-3 text-sm"
               value={selectedId}
               onChange={(e) => setSelectedId(e.target.value)}
@@ -837,7 +838,7 @@ function ServiceRefundDesk() {
                   {money(Number(o.subtotal))}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
           <div>
             <label className="block text-xs font-semibold text-[#5a6b7d] uppercase tracking-wide mb-1">

@@ -14,6 +14,7 @@ import { moneyNumber, stablePaymentAttemptKey, clearPaymentAttemptKey, cn } from
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { ReceiptModal, type ReceiptData } from "@/components/receipt-modal";
 import { StripeCheckoutModal } from "@/components/stripe-checkout-modal";
 import { ProductThumb } from "@/components/product-thumb";
@@ -362,11 +363,6 @@ export default function RetailPosWorkstation({
     if (!area) return sellingMenuFilter.categoryIds;
     return area.filter((id) => sellingMenuFilter.categoryIds.includes(id));
   })();
-  const recentSales = useQuery({
-    queryKey: ["pos-sale-recent"],
-    queryFn: () => posApi.listRecentSales(8),
-  });
-
   useEffect(() => {
     if (!pinSwitchEnabled || !stationToken || pinLocked) return;
     let timer: number | undefined;
@@ -1014,10 +1010,6 @@ export default function RetailPosWorkstation({
         toast.error("Card/UPI needs internet — use cash or wait to reconnect");
         return;
       }
-    }
-    if (!registerSession) {
-      toast.error("Open the register before charging");
-      return;
     }
     if (splitFollowUp) {
       await collectFollowUpSplitPart();
@@ -1674,22 +1666,12 @@ export default function RetailPosWorkstation({
               <p className="text-[0.75rem] font-medium text-[#5a6b7d]">
                 Counter
               </p>
-              {registerSession ? (
-                <span className="rounded-md bg-[#ecfdf5] px-2 py-0.5 text-[0.62rem] font-bold text-[#166534] uppercase">
-                  Register open
-                </span>
-              ) : (
-                <span className="rounded-md bg-[#fff7ed] px-2 py-0.5 text-[0.62rem] font-bold text-[#9a3412] uppercase">
-                  Register closed
-                </span>
-              )}
             </div>
             <h1 className="mt-1 text-xl font-bold tracking-tight text-[#0b1f33] sm:text-2xl">
               {productName}
             </h1>
             <p className="mt-1 text-sm text-[#5a6b7d]">
-              Tap a product, then charge. Open the register at shift start; close
-              it when you count the drawer.
+              Tap a product, then charge.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -1715,61 +1697,6 @@ export default function RetailPosWorkstation({
                 Switch user
               </Button>
             ) : null}
-            {!registerSession ? (
-              <>
-                <Input
-                  className="h-9 w-24"
-                  inputMode="decimal"
-                  value={openingFloat}
-                  onChange={(e) => setOpeningFloat(e.target.value)}
-                  placeholder="Float"
-                  title="Cash in drawer at start of shift"
-                />
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={!locationId || openRegister.isPending}
-                  onClick={() => openRegister.mutate()}
-                >
-                  Open register
-                </Button>
-              </>
-            ) : showCloseRegister ? (
-              <>
-                <Input
-                  className="h-9 w-28"
-                  inputMode="decimal"
-                  value={closingCash}
-                  onChange={(e) => setClosingCash(e.target.value)}
-                  placeholder="Cash count"
-                />
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={closeRegister.isPending}
-                  onClick={() => closeRegister.mutate()}
-                >
-                  Confirm close
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => setShowCloseRegister(false)}
-                >
-                  Cancel
-                </Button>
-              </>
-            ) : (
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                onClick={() => setShowCloseRegister(true)}
-              >
-                Close register
-              </Button>
-            )}
           </div>
         </header>
       ) : null}
@@ -1796,15 +1723,6 @@ export default function RetailPosWorkstation({
           >
             Sync now
           </Button>
-        </div>
-      ) : null}
-
-      {!compact && !registerSession ? (
-        <div className="mb-3 rounded-xl border border-[#fdba74] bg-[#fff7ed] px-3 py-2 text-sm text-[#9a3412]">
-          <strong className="font-semibold">Open register</strong> starts your
-          shift with a cash float. Charging stays locked until the drawer is
-          open. <strong className="font-semibold">Close register</strong> ends
-          the shift and compares counted cash to expected sales.
         </div>
       ) : null}
 
@@ -2067,62 +1985,6 @@ export default function RetailPosWorkstation({
         </section>
 
         <aside className="flex min-h-0 flex-col self-start overflow-hidden rounded-[16px] border border-[#d9e0ea] bg-white shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
-          {compact ? (
-            <div className="flex flex-wrap items-center gap-2 border-b border-[#e8edf4] bg-[#f8fafc] px-3 py-2">
-              {registerSession ? (
-                <>
-                  <span className="text-[0.65rem] font-bold text-[#166534] uppercase">
-                    Register open
-                  </span>
-                  {!showCloseRegister ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="secondary"
-                      className="h-7"
-                      onClick={() => setShowCloseRegister(true)}
-                    >
-                      Close
-                    </Button>
-                  ) : (
-                    <>
-                      <Input
-                        className="h-7 w-24"
-                        value={closingCash}
-                        onChange={(e) => setClosingCash(e.target.value)}
-                        placeholder="Cash"
-                      />
-                      <Button
-                        type="button"
-                        size="sm"
-                        className="h-7"
-                        onClick={() => closeRegister.mutate()}
-                      >
-                        OK
-                      </Button>
-                    </>
-                  )}
-                </>
-              ) : (
-                <>
-                  <Input
-                    className="h-7 w-20"
-                    value={openingFloat}
-                    onChange={(e) => setOpeningFloat(e.target.value)}
-                    placeholder="Float"
-                  />
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="h-7"
-                    onClick={() => openRegister.mutate()}
-                  >
-                    Open register
-                  </Button>
-                </>
-              )}
-            </div>
-          ) : null}
           <div className="flex items-center justify-between gap-2 border-b border-[#e8edf4] px-4 py-3.5">
             <div>
               <p className="eyebrow">Ticket</p>
@@ -2146,34 +2008,6 @@ export default function RetailPosWorkstation({
               </Button>
             ) : null}
           </div>
-          {(recentSales.data?.items ?? []).length ? (
-            <div className="flex gap-1.5 overflow-x-auto border-b border-[#e8edf4] px-4 py-2">
-              {(recentSales.data?.items ?? []).slice(0, 6).map((o) => (
-                <button
-                  key={o.id}
-                  type="button"
-                  className="shrink-0 rounded-full border border-[#e2e8f0] bg-white px-2.5 py-1 text-[0.65rem] font-semibold text-[#5a6b7d] hover:border-[#1a56db] hover:text-[#1a56db]"
-                  onClick={async () => {
-                    try {
-                      const data = await posApi.receipt(o.id);
-                      setReceipt({
-                        data: data as ReceiptData,
-                        change: 0,
-                        cashTendered: null,
-                      });
-                    } catch (e) {
-                      toast.error(
-                        e instanceof Error ? e.message : "Could not load bill",
-                      );
-                    }
-                  }}
-                >
-                  Reprint {o.orderNumber}
-                </button>
-              ))}
-            </div>
-          ) : null}
-
           <div className="space-y-1.5 border-b border-[#e8edf4] px-4 py-3">
             <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
               Customer
@@ -2208,7 +2042,7 @@ export default function RetailPosWorkstation({
                   <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
                     Order type
                   </Label>
-                  <select
+                  <Select
                     className="mt-1 flex h-10 w-full rounded-md border border-[#d9e0ea] bg-white px-3 text-sm text-[#0b1f33]"
                     value={orderType}
                     onChange={(e) => setOrderType(e.target.value)}
@@ -2223,7 +2057,7 @@ export default function RetailPosWorkstation({
                         {m.replaceAll("_", " ")}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </div>
               ) : null}
               {hasCapability("TABLE") ? (
@@ -2232,7 +2066,7 @@ export default function RetailPosWorkstation({
                     <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
                       Area / floor
                     </Label>
-                    <select
+                    <Select
                       className="mt-1 flex h-10 w-full rounded-md border border-[#d9e0ea] bg-white px-3 text-sm text-[#0b1f33]"
                       value={floorFilter}
                       onChange={(e) => setFloorFilter(e.target.value)}
@@ -2243,13 +2077,13 @@ export default function RetailPosWorkstation({
                           {f.name}
                         </option>
                       ))}
-                    </select>
+                    </Select>
                   </div>
                   <div className="field-shell">
                     <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
                       Table
                     </Label>
-                    <select
+                    <Select
                       className="mt-1 flex h-10 w-full rounded-md border border-[#d9e0ea] bg-white px-3 text-sm text-[#0b1f33]"
                       value={resourceId}
                       onChange={(e) => setResourceId(e.target.value)}
@@ -2267,7 +2101,7 @@ export default function RetailPosWorkstation({
                             {t.status !== "available" ? ` · ${t.status}` : ""}
                           </option>
                         ))}
-                    </select>
+                    </Select>
                     {areaCategoryIds.length ||
                     selectedDiningFloor?.taxRatePercent != null ||
                     selectedDiningFloor?.serviceChargePercent != null ? (
@@ -2291,7 +2125,7 @@ export default function RetailPosWorkstation({
                   <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
                     Resource
                   </Label>
-                  <select
+                  <Select
                     className="mt-1 flex h-10 w-full rounded-md border border-[#d9e0ea] bg-white px-3 text-sm text-[#0b1f33]"
                     value={resourceId}
                     onChange={(e) => setResourceId(e.target.value)}
@@ -2302,7 +2136,7 @@ export default function RetailPosWorkstation({
                         {r.name} · {r.status}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </div>
               ) : null}
               {foodFulfillment && hasCapability("TABLE") ? (
@@ -2507,7 +2341,7 @@ export default function RetailPosWorkstation({
                   {(l.requiresVariant || l.requiresBatch || l.requiresSerial) && (
                     <div className="mt-2 grid gap-1">
                       {l.requiresVariant && (
-                        <select
+                        <Select
                           className="h-8 rounded-md border border-[#d6deea] bg-white px-2 text-xs text-[#0b1f33]"
                           value={l.variantId ?? ""}
                           onChange={(e) =>
@@ -2526,10 +2360,10 @@ export default function RetailPosWorkstation({
                               {v.label || v.skuCode}
                             </option>
                           ))}
-                        </select>
+                        </Select>
                       )}
                       {l.requiresBatch && (
-                        <select
+                        <Select
                           className="h-8 rounded-md border border-[#d6deea] bg-white px-2 text-xs text-[#0b1f33]"
                           value={l.batchId ?? ""}
                           onChange={(e) =>
@@ -2548,7 +2382,7 @@ export default function RetailPosWorkstation({
                               {b.batchCode} ({formatQtyWithUnit(b.qtyOnHand, l.sellUnit)})
                             </option>
                           ))}
-                        </select>
+                        </Select>
                       )}
                       {l.requiresSerial && (
                         <Input
@@ -2913,7 +2747,6 @@ export default function RetailPosWorkstation({
                 busy ||
                 stripeBusy ||
                 (!cart.length && !splitFollowUp) ||
-                !registerSession ||
                 (!online &&
                   payMethod !== "cash" &&
                   payMethod !== "qr" &&
@@ -2929,13 +2762,11 @@ export default function RetailPosWorkstation({
                 ? payMethod === "card" || payMethod === "upi"
                   ? "Opening Stripe…"
                   : "Processing…"
-                : !registerSession
-                  ? "Open register to charge"
-                  : splitPart
-                    ? `Collect ${splitPart.label} · ${money(chargeAmount)}`
-                    : allowPartial && chargeAmount < totalDue - 0.001
-                    ? `Collect ${money(chargeAmount)}`
-                    : `Charge ${money(chargeAmount)}`}
+                : splitPart
+                  ? `Collect ${splitPart.label} · ${money(chargeAmount)}`
+                  : allowPartial && chargeAmount < totalDue - 0.001
+                  ? `Collect ${money(chargeAmount)}`
+                  : `Charge ${money(chargeAmount)}`}
             </Button>
           </div>
         </aside>

@@ -7,6 +7,7 @@ import { customersApi, jobsApi } from "@/lib/api";
 import { useBootstrap } from "@/lib/bootstrap";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { TablePager } from "@/components/table-pager";
 import { pagerFromMeta } from "@/lib/use-paged-list";
 
@@ -100,7 +101,7 @@ export default function JobsPage() {
       >
         <label className="space-y-1 text-sm md:col-span-2">
           <span className="text-slate-600">Customer</span>
-          <select
+          <Select
             className="h-9 w-full rounded-md border border-slate-200 px-2 text-sm"
             value={customerId}
             onChange={(e) => setCustomerId(e.target.value)}
@@ -112,7 +113,7 @@ export default function JobsPage() {
                 {c.phone ? ` · ${c.phone}` : ""}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <label className="space-y-1 text-sm">
           <span className="text-slate-600">Asset name</span>

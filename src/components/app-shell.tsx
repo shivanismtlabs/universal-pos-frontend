@@ -55,6 +55,7 @@ import {
   Percent,
   Repeat,
   CalendarClock,
+  Clock,
   type LucideIcon,
 } from "lucide-react";
 import { cn, mediaUrl } from "@/lib/utils";
@@ -152,35 +153,9 @@ const NAV_GROUPS: NavGroup[] = [
         module: "catalog",
       },
       {
-        href: "/catalog?tab=categories",
-        label: "Categories",
-        icon: Folder,
-        module: "catalog",
-      },
-      {
-        href: "/catalog?tab=brands",
-        label: "Brands",
-        icon: Tag,
-        module: "catalog",
-      },
-      {
         href: "/inventory",
         label: "Stock levels",
         icon: Package,
-        module: "inventory",
-        commerce: "sale",
-      },
-      {
-        href: "/inventory?tab=alerts",
-        label: "Low stock",
-        icon: Bell,
-        module: "inventory",
-        commerce: "sale",
-      },
-      {
-        href: "/inventory?tab=damage",
-        label: "Damaged stock",
-        icon: PackageCheck,
         module: "inventory",
         commerce: "sale",
       },
@@ -1229,6 +1204,60 @@ function SidebarBody({
   );
 }
 
+function HeaderClock({
+  locale = "en-IN",
+  timeZone,
+  compact = false,
+}: {
+  locale?: string;
+  timeZone?: string;
+  compact?: boolean;
+}) {
+  const [now, setNow] = useState<Date | null>(null);
+
+  useEffect(() => {
+    setNow(new Date());
+    const id = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const opts: Intl.DateTimeFormatOptions = timeZone ? { timeZone } : {};
+  const time = now
+    ? now.toLocaleTimeString(locale, {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: compact ? undefined : "2-digit",
+        hour12: true,
+        ...opts,
+      })
+    : compact
+      ? "--:--"
+      : "--:--:--";
+  const date = now
+    ? now.toLocaleDateString(locale, {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+        ...opts,
+      })
+    : "";
+
+  return (
+    <div
+      className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-[#d9e0ea] bg-white px-2 py-1 tabular-nums text-[#0b1f33]"
+      title={date ? (timeZone ? `${date} · ${time} · ${timeZone}` : `${date} · ${time}`) : time}
+    >
+      <Clock className="size-3.5 shrink-0 text-[#1a56db]" aria-hidden />
+      <div className="leading-tight">
+        <p className="text-[0.75rem] font-semibold">{time}</p>
+        {!compact && date ? (
+          <p className="text-[0.6rem] text-[#5a6b7d]">{date}</p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -1242,6 +1271,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const {
     productName,
     tagline,
+    locale,
     hasModule,
     hasMode,
     hasCapability,
@@ -1526,7 +1556,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <HeaderClock
+              compact
+              locale={locale}
+              timeZone={boot?.tenant?.timezone}
+            />
             <BranchSelector className="hidden xs:inline-flex sm:inline-flex" />
+            <button
+              type="button"
+              className="rounded-md border border-[#d9e0ea] bg-white px-2 py-1 text-[0.7rem] font-semibold text-[#334155] hover:bg-[#f8fafc]"
+              onClick={switchOrganization}
+            >
+              Switch organization
+            </button>
             <button
               type="button"
               className="rounded-lg border border-[#d9e0ea] p-2 text-[#2c3e50]"
@@ -1542,7 +1584,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <p className="text-[0.75rem] text-[#5a6b7d]">
             Operating branch — sales, stock, and expenses use this location
           </p>
-          <BranchSelector />
+          <div className="flex items-center gap-2">
+            <HeaderClock
+              locale={locale}
+              timeZone={boot?.tenant?.timezone}
+            />
+            <BranchSelector />
+            <button
+              type="button"
+              className="rounded-md border border-[#d9e0ea] bg-white px-2.5 py-1 text-[0.75rem] font-semibold text-[#334155] hover:bg-[#f8fafc]"
+              onClick={switchOrganization}
+            >
+              Switch organization
+            </button>
+          </div>
         </div>
 
         <AnimatePresence>

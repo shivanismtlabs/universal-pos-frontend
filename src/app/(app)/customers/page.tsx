@@ -8,7 +8,10 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 import { Search } from "lucide-react";
 import { customersApi, customFieldsApi } from "@/lib/api";
-import { customFieldDefsToMeta } from "@/lib/product-form-fields";
+import {
+  CUSTOM_FIELD_QUERY,
+  customFieldDefsToMeta,
+} from "@/lib/product-form-fields";
 import { CustomFieldsSection } from "@/components/custom-field-inputs";
 import { ApiError } from "@/lib/api/client";
 import {
@@ -125,6 +128,7 @@ export default function CustomersPage() {
   const customerFieldsQ = useQuery({
     queryKey: ["custom-fields", "customer"],
     queryFn: () => customFieldsApi.listDefinitions("customer"),
+    ...CUSTOM_FIELD_QUERY,
   });
   const customerFormFields = useMemo(
     () => customFieldDefsToMeta(customerFieldsQ.data),

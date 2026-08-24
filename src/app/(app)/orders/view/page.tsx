@@ -33,6 +33,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FieldError } from "@/components/ui/form";
+import { Select } from "@/components/ui/select";
 import {
   formatDate,
   formatInr,
@@ -696,13 +697,13 @@ function OrderDetailInner() {
               noValidate
             >
               <h3 className="text-sm font-bold text-[#0b1f33]">Add item</h3>
-              <select className="select-field" {...form.register("itemType")}>
+              <Select className="select-field" {...form.register("itemType")}>
                 <option value="rental_unit">Rental unit</option>
                 <option value="retail">Retail</option>
                 <option value="special">Special</option>
-              </select>
+              </Select>
               {itemType === "rental_unit" ? (
-                <select
+                <Select
                   className="select-field"
                   {...form.register("inventoryUnitId")}
                 >
@@ -712,17 +713,17 @@ function OrderDetailInner() {
                       {u.barcodeSku} · {u.size} · {formatInr(u.rentalPrice)}
                     </option>
                   ))}
-                </select>
+                </Select>
               ) : null}
               {itemType === "retail" ? (
-                <select className="select-field" {...form.register("retailSkuId")}>
+                <Select className="select-field" {...form.register("retailSkuId")}>
                   <option value="">Select retail SKU</option>
                   {(retail.data?.items ?? []).map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.sku} · qty {s.qtyOnHand} · {formatInr(s.sellPrice)}
                     </option>
                   ))}
-                </select>
+                </Select>
               ) : null}
               <Input
                 type="number"
@@ -895,7 +896,7 @@ function OrderDetailInner() {
               </Button>
             </div>
             <div className="mt-2 flex flex-wrap gap-1.5">
-              <select
+              <Select
                 className="select-field h-8 w-28 text-xs"
                 value={feeType}
                 onChange={(e) =>
@@ -905,7 +906,7 @@ function OrderDetailInner() {
                 <option value="late">Late</option>
                 <option value="damage">Damage</option>
                 <option value="other">Other</option>
-              </select>
+              </Select>
               <Input
                 className="h-8 w-24"
                 type="number"

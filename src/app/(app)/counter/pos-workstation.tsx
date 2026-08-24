@@ -32,6 +32,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { ProductThumb } from "@/components/product-thumb";
 import { BarcodeScanInput } from "@/components/barcode-scan-input";
 import {
@@ -697,7 +698,7 @@ export default function PosWorkstation() {
             </div>
             <div>
               <Label>Location</Label>
-              <select
+              <Select
                 className="select-field mt-1.5"
                 value={locationId}
                 onChange={(e) => setLocationId(e.target.value)}
@@ -707,7 +708,7 @@ export default function PosWorkstation() {
                     {l.name}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div>
               <Label>Pickup date</Label>

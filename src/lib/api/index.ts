@@ -2709,7 +2709,10 @@ export const posApi = {
         price: string | number;
         qty: number;
         sellUnit?: string;
+        requiresSerial?: boolean;
+        trackSerial?: boolean;
         isActive: boolean;
+        status?: string;
         category?: { id: string; name: string } | null;
       }>;
     }>(`/pos/sale/products${q ? `?${q}` : ""}`, { token: token() });
@@ -2803,7 +2806,7 @@ export const posApi = {
       token: token(),
     });
   },
-  adjustSaleStock(id: string, body: { delta: number; reason?: string }) {
+  adjustSaleStock(id: string, body: { delta: number; reason?: string; serialNumber?: string }) {
     return apiRequest<{
       id: string;
       sku: string;
@@ -2962,6 +2965,7 @@ export const posApi = {
           }>;
         }>;
         location?: { id: string; name: string; code?: string | null };
+        foodType?: "veg" | "non_veg" | "egg" | null;
       }>;
     }>(`/pos/sale/catalog${q ? `?${q}` : ""}`, { token: token() });
   },
@@ -4234,6 +4238,28 @@ export const customFieldsApi = {
         sortOrder?: number | null;
       }>
     >(`/custom-fields/definitions${q}`, { token: token() });
+  },
+  async listProductDefinitions() {
+    const unwrap = (raw: unknown): Array<{ entity?: string }> => {
+      if (Array.isArray(raw)) return raw;
+      if (raw && typeof raw === "object") {
+        const rec = raw as Record<string, unknown>;
+        for (const k of ["data", "items", "rows", "definitions"]) {
+          if (Array.isArray(rec[k]) && rec[k].length) {
+            return rec[k] as Array<{ entity?: string }>;
+          }
+        }
+      }
+      return [];
+    };
+    const isProduct = (entity: unknown) =>
+      String(entity ?? "").toLowerCase() === "product";
+    const scoped = unwrap(await customFieldsApi.listDefinitions("product"));
+    const product = scoped.filter((r) => !r.entity || isProduct(r.entity));
+    if (product.length) return product;
+    return unwrap(await customFieldsApi.listDefinitions()).filter((r) =>
+      isProduct(r.entity),
+    );
   },
   createDefinition(body: {
     entity: CustomFieldEntityKey;
@@ -7958,6 +7984,7 @@ export type CatalogProductListItem = {
   category?: { id: string; name: string; parentId?: string | null } | null;
   brand?: { id: string; name: string } | null;
   counts?: { variants: number; batches: number; bundleLines: number };
+  foodType?: "veg" | "non_veg" | "egg" | null;
 };
 
 export const catalogApi = {

@@ -11,6 +11,7 @@ import { cn, formatDate, moneyNumber } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { BarcodeScanInput } from "@/components/barcode-scan-input";
 import { StripeCheckoutModal } from "@/components/stripe-checkout-modal";
 import { FloorTabs } from "@/components/getting-started";
@@ -594,7 +595,7 @@ export function RentalDashboard() {
               />
               <div>
                 <Label>Order</Label>
-                <select
+                <Select
                   className="mt-1 w-full rounded-xl border border-[#e5e7eb] px-3 py-2.5 text-sm"
                   value={returnOrderId}
                   onChange={(e) => {
@@ -609,11 +610,11 @@ export function RentalDashboard() {
                       {o.unitsOut.length} out)
                     </option>
                   ))}
-                </select>
+                </Select>
               </div>
               <div>
                 <Label>Unit</Label>
-                <select
+                <Select
                   className="mt-1 w-full rounded-xl border border-[#e5e7eb] px-3 py-2.5 text-sm"
                   value={returnUnitId}
                   onChange={(e) => setReturnUnitId(e.target.value)}
@@ -627,7 +628,7 @@ export function RentalDashboard() {
                       {u.title ? ` · ${u.title}` : ""}
                     </option>
                   ))}
-                </select>
+                </Select>
               </div>
               <label className="flex items-center gap-2 text-sm">
                 <input
@@ -775,7 +776,7 @@ export function RentalDashboard() {
             </div>
             <div>
               <Label>Order</Label>
-              <select
+              <Select
                 className="mt-1 w-full rounded-xl border border-[#e5e7eb] px-3 py-2.5 text-sm"
                 value={exOrderId}
                 onChange={(e) => {
@@ -789,11 +790,11 @@ export function RentalDashboard() {
                     {o.orderNumber} · {o.customerName}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div>
               <Label>Outgoing unit</Label>
-              <select
+              <Select
                 className="mt-1 w-full rounded-xl border border-[#e5e7eb] px-3 py-2.5 text-sm"
                 value={exFromId}
                 onChange={(e) => setExFromId(e.target.value)}
@@ -806,7 +807,7 @@ export function RentalDashboard() {
                     {u.variant ? ` · ${u.variant}` : ""} · {u.title}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div>
               <Label>Scan replacement</Label>
@@ -834,7 +835,7 @@ export function RentalDashboard() {
             </div>
             <div>
               <Label>Replacement (available)</Label>
-              <select
+              <Select
                 className="mt-1 w-full rounded-xl border border-[#e5e7eb] px-3 py-2.5 text-sm"
                 value={exToId}
                 onChange={(e) => setExToId(e.target.value)}
@@ -846,7 +847,7 @@ export function RentalDashboard() {
                     {u.variant ? ` · ${u.variant}` : ""} · {u.title}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div>
               <Label>Reason (optional)</Label>

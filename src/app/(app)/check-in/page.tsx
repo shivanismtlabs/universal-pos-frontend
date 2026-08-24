@@ -9,6 +9,7 @@ import { useBootstrap } from "@/lib/bootstrap";
 import { subscriptionsApi } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
 
 export default function CheckInPage() {
   const qc = useQueryClient();
@@ -103,7 +104,7 @@ export default function CheckInPage() {
             <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.12em] text-[#8b9bb0]">
               Active membership
             </label>
-            <select
+            <Select
               className="flex h-10 w-full rounded-md border border-[#d9e0ea] bg-white px-3 text-sm text-[#0b1f33]"
               value={selectedId}
               onChange={(e) => setSelectedId(e.target.value)}
@@ -114,7 +115,7 @@ export default function CheckInPage() {
                   {r.plan.title} · ends {new Date(r.currentPeriodEnd).toLocaleDateString()}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
 
           <div>

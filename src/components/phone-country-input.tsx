@@ -2,6 +2,7 @@
 
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { GEO_COUNTRIES, geoDial, joinE164, splitE164 } from "@/lib/geo";
 
 type Props = {
@@ -29,8 +30,9 @@ export function PhoneCountryInput({
         {required ? " *" : ""}
       </Label>
       <div className="mt-1.5 flex gap-2">
-        <select
-          className="h-9 w-[7.25rem] shrink-0 rounded-md border border-[#d9e0ea] bg-white px-2 text-[0.8125rem] text-[#0b1f33] outline-none focus:border-[#1a56db]"
+        <Select
+          wrapperClassName="w-[7.25rem] shrink-0"
+          className="h-9 px-2 text-[0.8125rem]"
           value={dial}
           onChange={(e) => onChange(joinE164(e.target.value, parts.local))}
           aria-label="Country code"
@@ -40,7 +42,7 @@ export function PhoneCountryInput({
               {c.dial} {c.code}
             </option>
           ))}
-        </select>
+        </Select>
         <Input
           className="flex-1"
           inputMode="tel"

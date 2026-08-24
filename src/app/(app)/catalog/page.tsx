@@ -32,6 +32,7 @@ import { ProductThumb } from "@/components/product-thumb";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { catalogStockOnHandLabel, productKindLabel } from "@/lib/product-kind";
 import { FieldError } from "@/components/ui/form";
+import { Select } from "@/components/ui/select";
 import { useAuthStore } from "@/lib/auth-store";
 import { useBranchStore } from "@/lib/branch-store";
 import {
@@ -96,7 +97,7 @@ function CatalogPageInner() {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4 px-3 sm:px-4">
       <header className="flex flex-wrap items-end justify-between gap-3 border-b border-[#eef1f4] pb-3">
         <div className="min-w-0">
           <p className="eyebrow">Inventory</p>
@@ -258,6 +259,16 @@ function ProductsPanel() {
       toast.error(e instanceof ApiError ? e.message : "Archive failed"),
   });
 
+  const unarchive = useMutation({
+    mutationFn: (id: string) => catalogApi.setStatus(id, "active"),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["catalog-products"] });
+      toast.success("Product unarchived (active)");
+    },
+    onError: (e: Error) =>
+      toast.error(e instanceof ApiError ? e.message : "Unarchive failed"),
+  });
+
   const remove = useMutation({
     mutationFn: (id: string) => catalogApi.remove(id),
     onSuccess: (res) => {
@@ -301,6 +312,19 @@ function ProductsPanel() {
             onChange={(e) => setQ(e.target.value)}
           />
         </div>
+        <Select
+          wrapperClassName="w-44 sm:w-52"
+          className="h-9 rounded-md border border-[#dce3ec] bg-white px-2 text-sm"
+          value={categoryId}
+          onChange={(e) => setCategoryId(e.target.value)}
+        >
+          <option value="">All Categories</option>
+          {categoryChips.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </Select>
         <div
           role="tablist"
           aria-label="Status filter"
@@ -315,10 +339,10 @@ function ProductsPanel() {
             ] as const
           ).map((t) => {
             const on = statusFilter === t.id;
-                    return (
-                      <button
+            return (
+              <button
                 key={t.label}
-                        type="button"
+                type="button"
                 role="tab"
                 aria-selected={on}
                 onClick={() => setStatusFilter(t.id)}
@@ -329,11 +353,12 @@ function ProductsPanel() {
                 }
               >
                 {t.label}
-                      </button>
-                    );
-                  })}
-                </div>
-        <select
+              </button>
+            );
+          })}
+        </div>
+        <Select
+          wrapperClassName="w-36"
           className="h-9 rounded-md border border-[#dce3ec] bg-white px-2 text-sm"
           value={brandId}
           onChange={(e) => setBrandId(e.target.value)}
@@ -344,8 +369,9 @@ function ProductsPanel() {
               {b.name}
             </option>
           ))}
-        </select>
-        <select
+        </Select>
+        <Select
+          wrapperClassName="w-36"
           className="h-9 rounded-md border border-[#dce3ec] bg-white px-2 text-sm"
           value={kind}
           onChange={(e) => setKind(e.target.value as CatalogProductKind | "")}
@@ -355,7 +381,7 @@ function ProductsPanel() {
               {k.label}
             </option>
           ))}
-        </select>
+        </Select>
         <Button
           type="button"
           variant="secondary"
@@ -368,40 +394,8 @@ function ProductsPanel() {
             <Plus className="mr-1 size-4" />
             Add Product
           </Link>
-              </Button>
+        </Button>
       </div>
-
-      {categoryChips.length ? (
-        <div className="flex min-w-0 gap-1 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          <button
-            type="button"
-            onClick={() => setCategoryId("")}
-            className={cn(
-              "shrink-0 rounded-lg px-3 py-2 text-xs font-semibold transition",
-              !categoryId
-                ? "bg-[#1a56db] text-white shadow-sm"
-                : "bg-white text-[#5a6b7d] ring-1 ring-[#d9e0ea] hover:text-[#0b1f33]",
-            )}
-          >
-            All
-          </button>
-          {categoryChips.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              onClick={() => setCategoryId(c.id)}
-              className={cn(
-                "max-w-[12rem] shrink-0 truncate rounded-lg px-3 py-2 text-xs font-semibold transition",
-                categoryId === c.id
-                  ? "bg-[#1a56db] text-white shadow-sm"
-                  : "bg-white text-[#5a6b7d] ring-1 ring-[#d9e0ea] hover:text-[#0b1f33]",
-              )}
-            >
-              {c.name}
-            </button>
-          ))}
-        </div>
-      ) : null}
 
       <div className="overflow-x-auto rounded-md border border-[#e4e9f0] bg-white">
         <table className="w-full min-w-[820px] text-left text-sm">
@@ -532,6 +526,20 @@ function ProductsPanel() {
                             : undefined
                         }
                         softDeleteTitle="Archive (soft delete)"
+                        onUnarchive={
+                          p.status === "archived"
+                            ? () => {
+                                if (
+                                  confirm(
+                                    `Unarchive “${p.name}”? It will be restored to active.`,
+                                  )
+                                ) {
+                                  unarchive.mutate(p.id);
+                                }
+                              }
+                            : undefined
+                        }
+                        unarchiveTitle="Unarchive (restore to active)"
                         onDelete={() => {
                           if (
                             confirm(
@@ -543,7 +551,7 @@ function ProductsPanel() {
                         }}
                         deleteTitle="Delete"
                         disabled={
-                          archive.isPending || remove.isPending || dup.isPending
+                          archive.isPending || unarchive.isPending || remove.isPending || dup.isPending
                         }
                       />
                       <Button
@@ -948,7 +956,7 @@ function CategoriesPanel() {
         />
         <FieldError message={fieldErrors.name} />
         <Label>Parent (optional)</Label>
-                  <select
+                  <Select
           className="h-9 w-full rounded-md border border-[#dce3ec] px-2 text-sm"
           value={parentId}
           onChange={(e) => setParentId(e.target.value)}
@@ -959,7 +967,7 @@ function CategoriesPanel() {
                         {c.name}
                       </option>
                     ))}
-                  </select>
+                  </Select>
         <Button
           disabled={create.isPending}
           onClick={() => create.mutate()}

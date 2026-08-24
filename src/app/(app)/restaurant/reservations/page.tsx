@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 
 export default function ReservationsPage() {
   const qc = useQueryClient();
@@ -115,7 +116,7 @@ export default function ReservationsPage() {
           </div>
           <div>
             <Label>Table</Label>
-            <select
+            <Select
               className={`${diningSelectClass} mt-1`}
               value={tableId}
               onChange={(e) => setTableId(e.target.value)}
@@ -126,7 +127,7 @@ export default function ReservationsPage() {
                   {t.name}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
           <div className="flex items-end">
             <Button

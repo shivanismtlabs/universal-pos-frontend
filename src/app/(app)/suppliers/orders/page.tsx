@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
-import { X } from "lucide-react";
+import { ChevronDown, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
 import { loyaltyApi, posApi, suppliersApi } from "@/lib/api";
@@ -13,16 +13,41 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import { formatDate, moneyNumber, newIdempotencyKey } from "@/lib/utils";
+import { cn, formatDate, moneyNumber, newIdempotencyKey } from "@/lib/utils";
 import { TablePager } from "@/components/table-pager";
+import { PageHeader, EmptyState } from "@/components/page-header";
+import { ModalFrame } from "@/components/modal-frame";
+
+const PO_STATUS: Record<string, string> = {
+  draft: "bg-[#f8fafc] text-[#475569] ring-[#e2e8f0]",
+  ordered: "bg-[#eff6ff] text-[#1e40af] ring-[#bfdbfe]",
+  partial: "bg-[#fff7ed] text-[#9a3412] ring-[#fed7aa]",
+  received: "bg-[#ecfdf3] text-[#166534] ring-[#bbf7d0]",
+  cancelled: "bg-[#f8fafc] text-[#64748b] ring-[#e2e8f0]",
+};
+
+function StatusBadge({ value }: { value: string }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full px-2 py-0.5 text-[0.68rem] font-semibold capitalize ring-1",
+        PO_STATUS[value] ?? PO_STATUS.draft,
+      )}
+    >
+      {value.replaceAll("_", " ")}
+    </span>
+  );
+}
 
 export default function SupplierPurchaseOrdersPage() {
   const qc = useQueryClient();
   const { hasSale, money, data: boot } = useBootstrap();
   const isRentalOnly = false;
+  const [createOpen, setCreateOpen] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [poLines, setPoLines] = useState<
     Array<{ skuId: string; qty: string; cost: string }>
-  >([{ skuId: "", qty: "10", cost: "" }]);
+  >([{ skuId: "", qty: "1", cost: "" }]);
   const [lineTaxPercent, setLineTaxPercent] = useState("");
   const [discountAmount, setDiscountAmount] = useState("");
   const [couponCode, setCouponCode] = useState("");
@@ -97,6 +122,30 @@ export default function SupplierPurchaseOrdersPage() {
     setDiscountAmount("");
   }
 
+  const poForm = useForm({
+    defaultValues: {
+      supplierId: "",
+      poType: "purchase",
+      expectedDelivery: "",
+    },
+  });
+
+  function resetCreateForm() {
+    poForm.reset({
+      supplierId: "",
+      poType: "purchase",
+      expectedDelivery: "",
+    });
+    setPoLines([{ skuId: "", qty: "1", cost: "" }]);
+    setLineTaxPercent(String(defaultTaxPercent));
+    clearCouponAndDiscount();
+  }
+
+  function openCreate() {
+    resetCreateForm();
+    setCreateOpen(true);
+  }
+
   function applyLineProduct(index: number, id: string) {
     setPoLines((rows) => {
       const next = [...rows];
@@ -126,13 +175,6 @@ export default function SupplierPurchaseOrdersPage() {
     clearCouponAndDiscount();
   }
 
-  const poForm = useForm({
-    defaultValues: {
-      supplierId: "",
-      poType: "purchase",
-      expectedDelivery: "",
-    },
-  });
   const poSuppliers = useMemo(
     () =>
       (suppliers.data ?? []).filter(
@@ -185,15 +227,9 @@ export default function SupplierPurchaseOrdersPage() {
       });
     },
     onSuccess: () => {
-      toast.success("PO created");
-      poForm.reset({
-        supplierId: "",
-        poType: "purchase",
-        expectedDelivery: "",
-      });
-      setPoLines([{ skuId: "", qty: "10", cost: "" }]);
-      setLineTaxPercent("");
-      clearCouponAndDiscount();
+      toast.success("Purchase order created");
+      resetCreateForm();
+      setCreateOpen(false);
       void qc.invalidateQueries({ queryKey: ["purchase-orders"] });
     },
     onError: (e) => {
@@ -271,150 +307,567 @@ export default function SupplierPurchaseOrdersPage() {
       ),
   });
 
-  return (
-    <div className="mx-auto max-w-5xl space-y-5">
-      <header>
-        <p className="eyebrow">Purchases</p>
-        <h1 className="display mt-1 text-[1.75rem] sm:text-3xl text-[#0b1f33]">
-          Purchase orders
-        </h1>
-        <p className="mt-1 text-sm text-[#475569]">
-          Create POs, receive to shelf, and return to vendor.{" "}
-          <Link
-            href="/suppliers"
-            className="font-semibold text-[#1a56db] hover:underline"
-          >
-            Supplier directory
-          </Link>
-          {" · "}
-          <Link
-            href="/purchases"
-            className="font-semibold text-[#1a56db] hover:underline"
-          >
-            GRN &amp; invoices
-          </Link>
-        </p>
-      </header>
+  const list = pos.data ?? [];
+  const pageRows = list.slice((poPage - 1) * PO_PAGE, poPage * PO_PAGE);
 
-      <div className="grid gap-5 lg:grid-cols-2">
-        <section className="rounded-2xl border border-[#d9e0ea] bg-white p-4">
-          <h2 className="text-sm font-semibold">New purchase order</h2>
-          <form
-            className="mt-3 space-y-2"
-            onSubmit={poForm.handleSubmit((v) => createPo.mutate(v))}
-          >
-            <div className="field-shell">
-              <Label>Supplier</Label>
-              <Select
-                {...poForm.register("supplierId", { required: true })}
-              >
-                <option value="">Select</option>
-                {poSuppliers.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.code ? `${s.code} · ` : ""}
-                    {s.name}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div className="field-shell">
-              <Label>Type</Label>
-              <Select {...poForm.register("poType")}>
-                <option value="purchase">Purchase</option>
-                {isRentalOnly ? (
-                  <option value="sub_rental">Sub-rental</option>
-                ) : null}
-                <option value="special">Special</option>
-              </Select>
-            </div>
-            {hasSale ? (
-              <>
-                {poLines.map((line, idx) => (
-                  <div
-                    key={idx}
-                    className="space-y-2 rounded-xl border border-[#eef2f8] p-2"
-                  >
-                    <div className="field-shell">
-                      <Label>Line {idx + 1} · Item</Label>
-                      <Select
-                        value={line.skuId}
-                        onChange={(e) => applyLineProduct(idx, e.target.value)}
-                      >
-                        <option value="">Optional — pick later on receive</option>
-                        {skuOptions.map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {s.name} · {s.sku} (on hand {s.qtyOnHand})
-                          </option>
-                        ))}
-                      </Select>
-                    </div>
-                    {line.skuId ? (
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="field-shell">
-                          <Label>Qty</Label>
-                          <Input
-                            type="number"
-                            min={1}
-                            value={line.qty}
-                            onChange={(e) =>
-                              setPoLines((rows) =>
-                                rows.map((r, i) =>
-                                  i === idx ? { ...r, qty: e.target.value } : r,
-                                ),
-                              )
-                            }
-                          />
-                        </div>
-                        <div className="field-shell">
-                          <Label>Unit cost</Label>
-                          <Input
-                            type="number"
-                            min={0}
-                            step="0.01"
-                            value={line.cost}
-                            onChange={(e) =>
-                              setPoLines((rows) =>
-                                rows.map((r, i) =>
-                                  i === idx ? { ...r, cost: e.target.value } : r,
-                                ),
-                              )
-                            }
-                          />
-                        </div>
-                      </div>
-                    ) : null}
-                    {poLines.length > 1 ? (
-                      <button
-                        type="button"
-                        className="text-xs text-[#b91c1c]"
-                        onClick={() =>
-                          setPoLines((rows) => rows.filter((_, i) => i !== idx))
-                        }
-                      >
-                        Remove line
-                      </button>
-                    ) : null}
-                  </div>
-                ))}
+  return (
+    <div className="mx-auto max-w-6xl space-y-5">
+      <PageHeader
+        eyebrow="Purchases"
+        title="Purchase orders"
+        subtitle="Create a PO, receive to shelf, then return to vendor if needed."
+        action={
+          <Button type="button" onClick={openCreate}>
+            <Plus className="h-4 w-4" />
+            New purchase order
+          </Button>
+        }
+      />
+      <p className="-mt-2 text-sm text-[#5a6b7d]">
+        <Link
+          href="/suppliers"
+          className="font-semibold text-[#1a56db] hover:underline"
+        >
+          Supplier directory
+        </Link>
+        {" · "}
+        <Link
+          href="/purchases"
+          className="font-semibold text-[#1a56db] hover:underline"
+        >
+          GRN &amp; invoices
+        </Link>
+      </p>
+
+      {!list.length ? (
+        <EmptyState
+          title="No purchase orders"
+          detail="Create a PO for a supplier, then receive goods to update stock."
+          action={
+            <Button type="button" onClick={openCreate}>
+              <Plus className="h-4 w-4" />
+              New purchase order
+            </Button>
+          }
+        />
+      ) : (
+        <section className="overflow-hidden rounded-xl border border-[#d9e0ea] bg-white">
+          <div className="flex items-center justify-between border-b border-[#eef1f4] px-4 py-2.5">
+            <p className="text-xs text-[#5a6b7d]">
+              Receive adds stock. Status change alone does not.
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-left text-sm">
+              <thead className="border-b border-[#eef1f4] bg-[#f7f9fc] text-[0.7rem] font-semibold uppercase tracking-wide text-[#5a6b7d]">
+                <tr>
+                  <th className="px-4 py-2.5">Supplier</th>
+                  <th className="px-3 py-2.5">Type</th>
+                  <th className="px-3 py-2.5">Status</th>
+                  <th className="px-3 py-2.5">Due</th>
+                  <th className="px-3 py-2.5">Items</th>
+                  <th className="px-4 py-2.5 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pageRows.map((po) => {
+                  const openLines =
+                    po.lines?.filter((l) => l.qtyReceived < l.qtyOrdered) ??
+                    po.lines ??
+                    [];
+                  const canReceive =
+                    po.status !== "cancelled" && po.status !== "received";
+                  const open = expandedId === po.id;
+                  const itemCount = po.lines?.length ?? 0;
+                  return (
+                    <Fragment key={po.id}>
+                      <tr className="border-b border-[#eef1f4] last:border-0">
+                        <td className="px-4 py-3">
+                          <p className="font-medium text-[#0b1f33]">
+                            {po.supplier?.name ?? "—"}
+                          </p>
+                          {itemCount ? (
+                            <p className="mt-0.5 max-w-xs truncate text-xs text-[#8b9bb0]">
+                              {po.lines!
+                                .map(
+                                  (l) =>
+                                    l.stockLevel?.product?.name ??
+                                    l.stockLevel?.sku ??
+                                    "SKU",
+                                )
+                                .join(", ")}
+                            </p>
+                          ) : (
+                            <p className="mt-0.5 text-xs text-[#8b9bb0]">
+                              Lines can be added on receive
+                            </p>
+                          )}
+                        </td>
+                        <td className="px-3 py-3 capitalize text-[#5a6b7d]">
+                          {po.poType.replaceAll("_", " ")}
+                        </td>
+                        <td className="px-3 py-3">
+                          <StatusBadge value={po.status} />
+                        </td>
+                        <td className="px-3 py-3 text-[#5a6b7d]">
+                          {po.expectedDelivery
+                            ? formatDate(po.expectedDelivery)
+                            : "—"}
+                        </td>
+                        <td className="px-3 py-3 tabular-nums text-[#5a6b7d]">
+                          {itemCount}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap items-center justify-end gap-1">
+                            {po.status !== "ordered" &&
+                            po.status !== "cancelled" ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="secondary"
+                                disabled={updatePo.isPending}
+                                onClick={() =>
+                                  updatePo.mutate({ id: po.id, status: "ordered" })
+                                }
+                              >
+                                Mark ordered
+                              </Button>
+                            ) : null}
+                            {po.status !== "cancelled" ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                disabled={updatePo.isPending}
+                                onClick={() =>
+                                  updatePo.mutate({
+                                    id: po.id,
+                                    status: "cancelled",
+                                  })
+                                }
+                              >
+                                Cancel
+                              </Button>
+                            ) : null}
+                            {canReceive ||
+                            (po.lines ?? []).some((l) => l.qtyReceived > 0) ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="secondary"
+                                onClick={() =>
+                                  setExpandedId(open ? null : po.id)
+                                }
+                              >
+                                {open ? "Hide" : "Receive / return"}
+                                <ChevronDown
+                                  className={cn(
+                                    "h-3.5 w-3.5 transition",
+                                    open && "rotate-180",
+                                  )}
+                                />
+                              </Button>
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
+                      {open ? (
+                        <tr key={`${po.id}-detail`} className="border-b border-[#eef1f4] bg-[#f8fafc]">
+                          <td colSpan={6} className="px-4 py-4">
+                            <div className="grid gap-3 lg:grid-cols-2">
+                              {canReceive && hasSale ? (
+                                <div className="rounded-lg border border-[#d9e0ea] bg-white p-3">
+                                  <p className="text-xs font-semibold text-[#0b1f33]">
+                                    Receive to shelf
+                                  </p>
+                                  {(openLines.length
+                                    ? openLines
+                                    : [
+                                        {
+                                          stockLevelId: "",
+                                          id: "new",
+                                        } as const,
+                                      ]
+                                  ).map((l) => {
+                                    const sid =
+                                      "stockLevelId" in l && l.stockLevelId
+                                        ? l.stockLevelId
+                                        : "";
+                                    const key = `${po.id}:${sid || "pick"}`;
+                                    return (
+                                      <div
+                                        key={key}
+                                        className="mt-2 flex flex-wrap items-end gap-2"
+                                      >
+                                        {"stockLevel" in l && l.stockLevel ? (
+                                          <p className="min-w-[10rem] flex-1 text-xs text-[#334155]">
+                                            {l.stockLevel.product?.name} ·{" "}
+                                            {l.stockLevel.sku}
+                                            <span className="ml-1 text-[#8b9bb0]">
+                                              ({l.qtyReceived}/{l.qtyOrdered})
+                                            </span>
+                                          </p>
+                                        ) : (
+                                          <div className="min-w-[12rem] flex-1">
+                                            <Select
+                                              value={receiveQty[`${key}:sku`] ?? ""}
+                                              onChange={(e) =>
+                                                setReceiveQty((m) => ({
+                                                  ...m,
+                                                  [`${key}:sku`]: e.target.value,
+                                                }))
+                                              }
+                                            >
+                                              <option value="">Select item</option>
+                                              {skuOptions.map((s) => (
+                                                <option key={s.id} value={s.id}>
+                                                  {s.name} · {s.sku}
+                                                </option>
+                                              ))}
+                                            </Select>
+                                          </div>
+                                        )}
+                                        <Input
+                                          className="w-24"
+                                          type="number"
+                                          min={1}
+                                          placeholder="Qty"
+                                          value={receiveQty[key] ?? ""}
+                                          onChange={(e) =>
+                                            setReceiveQty((m) => ({
+                                              ...m,
+                                              [key]: e.target.value,
+                                            }))
+                                          }
+                                        />
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          disabled={receivePo.isPending}
+                                          onClick={() => {
+                                            const stockLevelId =
+                                              sid || receiveQty[`${key}:sku`] || "";
+                                            const qty = Math.max(
+                                              1,
+                                              Number(receiveQty[key]) || 0,
+                                            );
+                                            if (!stockLevelId || !qty) {
+                                              toast.error("Pick item and qty");
+                                              return;
+                                            }
+                                            receivePo.mutate({
+                                              id: po.id,
+                                              lines: [{ stockLevelId, qty }],
+                                            });
+                                          }}
+                                        >
+                                          Receive
+                                        </Button>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              ) : null}
+
+                              {(po.lines ?? []).some((l) => l.qtyReceived > 0) &&
+                              hasSale ? (
+                                <div className="rounded-lg border border-[#fde68a] bg-[#fffbeb] p-3">
+                                  <p className="text-xs font-semibold text-[#0b1f33]">
+                                    Return to vendor
+                                  </p>
+                                  {(po.lines ?? [])
+                                    .filter((l) => l.qtyReceived > 0)
+                                    .map((l) => {
+                                      const key = `ret:${po.id}:${l.stockLevelId}`;
+                                      return (
+                                        <div
+                                          key={key}
+                                          className="mt-2 flex flex-wrap items-end gap-2"
+                                        >
+                                          <p className="min-w-[10rem] flex-1 text-xs text-[#334155]">
+                                            {l.stockLevel?.product?.name ?? "SKU"}{" "}
+                                            · {l.stockLevel?.sku}
+                                            <span className="ml-1 text-[#8b9bb0]">
+                                              (recv {l.qtyReceived})
+                                            </span>
+                                          </p>
+                                          <Input
+                                            className="w-24"
+                                            type="number"
+                                            min={1}
+                                            max={l.qtyReceived}
+                                            placeholder="Qty"
+                                            value={returnQty[key] ?? ""}
+                                            onChange={(e) =>
+                                              setReturnQty((m) => ({
+                                                ...m,
+                                                [key]: e.target.value,
+                                              }))
+                                            }
+                                          />
+                                          <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="secondary"
+                                            disabled={returnPo.isPending}
+                                            onClick={() => {
+                                              const qty = Math.max(
+                                                1,
+                                                Number(returnQty[key]) || 0,
+                                              );
+                                              if (!l.stockLevelId || !qty) {
+                                                toast.error("Enter qty to return");
+                                                return;
+                                              }
+                                              returnPo.mutate({
+                                                id: po.id,
+                                                lines: [
+                                                  {
+                                                    stockLevelId: l.stockLevelId,
+                                                    qty,
+                                                  },
+                                                ],
+                                                reason: "Supplier return",
+                                              });
+                                            }}
+                                          >
+                                            Return
+                                          </Button>
+                                        </div>
+                                      );
+                                    })}
+                                </div>
+                              ) : null}
+                            </div>
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <TablePager
+            page={poPage}
+            totalPages={Math.max(1, Math.ceil(list.length / PO_PAGE))}
+            total={list.length}
+            pageSize={PO_PAGE}
+            onPage={setPoPage}
+          />
+        </section>
+      )}
+
+      {createOpen ? (
+        <ModalFrame
+          title="New purchase order"
+          subtitle="Supplier, delivery date, and line items. Stock updates only when you receive."
+          labelledBy="create-po-title"
+          className="max-w-3xl"
+          onClose={() => setCreateOpen(false)}
+          footer={
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="text-sm text-[#5a6b7d]">
+                {poLines.some((l) => l.skuId) ? (
+                  <span>
+                    Total{" "}
+                    <span className="font-semibold tabular-nums text-[#0b1f33]">
+                      {money(poTotals.grand)}
+                    </span>
+                  </span>
+                ) : (
+                  <span>Items optional — you can add them on receive.</span>
+                )}
+              </div>
+              <div className="flex gap-2">
                 <Button
                   type="button"
-                  size="sm"
                   variant="secondary"
-                  onClick={() =>
-                    setPoLines((rows) => [
-                      ...rows,
-                      { skuId: "", qty: "1", cost: "" },
-                    ])
-                  }
+                  onClick={() => setCreateOpen(false)}
                 >
-                  Add line
+                  Cancel
                 </Button>
+                <Button
+                  type="submit"
+                  form="create-po-form"
+                  disabled={createPo.isPending}
+                >
+                  {createPo.isPending ? "Saving…" : "Create PO"}
+                </Button>
+              </div>
+            </div>
+          }
+        >
+          <form
+            id="create-po-form"
+            className="space-y-5"
+            onSubmit={poForm.handleSubmit((v) => createPo.mutate(v))}
+          >
+            <section>
+              <p className="text-[0.7rem] font-semibold uppercase tracking-wide text-[#8b9bb0]">
+                Order details
+              </p>
+              <div className="mt-2 grid gap-3 sm:grid-cols-3">
+                <div className="sm:col-span-1">
+                  <Label>Supplier</Label>
+                  <Select
+                    className="mt-1"
+                    {...poForm.register("supplierId", { required: true })}
+                  >
+                    <option value="">Select supplier</option>
+                    {poSuppliers.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.code ? `${s.code} · ` : ""}
+                        {s.name}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <div>
+                  <Label>Type</Label>
+                  <Select className="mt-1" {...poForm.register("poType")}>
+                    <option value="purchase">Purchase</option>
+                    {isRentalOnly ? (
+                      <option value="sub_rental">Sub-rental</option>
+                    ) : null}
+                    <option value="special">Special</option>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Expected delivery</Label>
+                  <Input
+                    className="mt-1"
+                    type="date"
+                    {...poForm.register("expectedDelivery")}
+                  />
+                </div>
+              </div>
+            </section>
+
+            {hasSale ? (
+              <section>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[0.7rem] font-semibold uppercase tracking-wide text-[#8b9bb0]">
+                    Line items
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    onClick={() =>
+                      setPoLines((rows) => [
+                        ...rows,
+                        { skuId: "", qty: "1", cost: "" },
+                      ])
+                    }
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Add line
+                  </Button>
+                </div>
+                <div className="mt-2 overflow-hidden rounded-lg border border-[#e2e8f0]">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-[#f7f9fc] text-[0.68rem] font-semibold uppercase tracking-wide text-[#5a6b7d]">
+                      <tr>
+                        <th className="px-3 py-2">Item</th>
+                        <th className="w-24 px-2 py-2">Qty</th>
+                        <th className="w-32 px-2 py-2">Unit cost</th>
+                        <th className="w-28 px-2 py-2 text-right">Amount</th>
+                        <th className="w-10 px-2 py-2" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#eef1f4]">
+                      {poLines.map((line, idx) => {
+                        const qty = Math.max(0, Number(line.qty) || 0);
+                        const unit = Math.max(0, moneyNumber(line.cost || 0));
+                        const amount = line.skuId
+                          ? Math.round(qty * unit * 100) / 100
+                          : 0;
+                        return (
+                          <tr key={idx}>
+                            <td className="px-3 py-2">
+                              <Select
+                                value={line.skuId}
+                                onChange={(e) =>
+                                  applyLineProduct(idx, e.target.value)
+                                }
+                              >
+                                <option value="">Select item</option>
+                                {skuOptions.map((s) => (
+                                  <option key={s.id} value={s.id}>
+                                    {s.name} · {s.sku} (SOH {s.qtyOnHand})
+                                  </option>
+                                ))}
+                              </Select>
+                            </td>
+                            <td className="px-2 py-2">
+                              <Input
+                                type="number"
+                                min={1}
+                                value={line.qty}
+                                disabled={!line.skuId}
+                                onChange={(e) =>
+                                  setPoLines((rows) =>
+                                    rows.map((r, i) =>
+                                      i === idx
+                                        ? { ...r, qty: e.target.value }
+                                        : r,
+                                    ),
+                                  )
+                                }
+                              />
+                            </td>
+                            <td className="px-2 py-2">
+                              <Input
+                                type="number"
+                                min={0}
+                                step="0.01"
+                                value={line.cost}
+                                disabled={!line.skuId}
+                                onChange={(e) =>
+                                  setPoLines((rows) =>
+                                    rows.map((r, i) =>
+                                      i === idx
+                                        ? { ...r, cost: e.target.value }
+                                        : r,
+                                    ),
+                                  )
+                                }
+                              />
+                            </td>
+                            <td className="px-2 py-2 text-right tabular-nums text-[#0b1f33]">
+                              {line.skuId ? money(amount) : "—"}
+                            </td>
+                            <td className="px-2 py-2 text-right">
+                              {poLines.length > 1 ? (
+                                <button
+                                  type="button"
+                                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#94a3b8] hover:bg-[#fef2f2] hover:text-[#b91c1c]"
+                                  title="Remove line"
+                                  onClick={() =>
+                                    setPoLines((rows) =>
+                                      rows.filter((_, i) => i !== idx),
+                                    )
+                                  }
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              ) : null}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
                 {poLines.some((l) => l.skuId) ? (
-                  <>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="field-shell">
+                  <div className="mt-3 grid gap-4 sm:grid-cols-[1fr_16rem]">
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <div>
                         <Label>Tax %</Label>
                         <Input
+                          className="mt-1"
                           type="number"
                           min={0}
                           max={40}
@@ -426,13 +879,14 @@ export default function SupplierPurchaseOrdersPage() {
                           Shop default {defaultTaxPercent}%
                         </p>
                       </div>
-                      <div className="field-shell">
-                        <div className="mb-1 flex items-center justify-between gap-2">
+                      <div>
+                        <div className="mb-1 flex items-center justify-between">
                           <Label>Discount</Label>
-                          {couponApplied || moneyNumber(discountAmount || 0) > 0 ? (
+                          {couponApplied ||
+                          moneyNumber(discountAmount || 0) > 0 ? (
                             <button
                               type="button"
-                              className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-[#d9e0ea] text-[#5a6b7d] hover:bg-[#f4f6fa] hover:text-[#0b1f33]"
+                              className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-[#d9e0ea] text-[#5a6b7d] hover:bg-[#f4f6fa]"
                               title="Clear discount & coupon"
                               onClick={clearCouponAndDiscount}
                             >
@@ -452,308 +906,86 @@ export default function SupplierPurchaseOrdersPage() {
                           placeholder="0.00"
                         />
                       </div>
-                    </div>
-                    <div className="field-shell">
-                      <Label>Coupon code</Label>
-                      <div className="flex gap-1">
-                        <Input
-                          className="uppercase"
-                          placeholder="CODE"
-                          value={couponCode}
-                          onChange={(e) => {
-                            setCouponCode(e.target.value);
-                            setCouponApplied(null);
-                          }}
-                        />
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="secondary"
-                          className="shrink-0"
-                          disabled={!couponCode.trim() || poTotals.subtotal <= 0}
-                          onClick={async () => {
-                            try {
-                              const v = await loyaltyApi.validateCoupon(
-                                couponCode.trim(),
-                                poTotals.subtotal,
-                              );
-                              setDiscountAmount(String(v.amountOff));
-                              setCouponApplied(v.code);
-                              toast.success(
-                                `Coupon ${v.code}: −${money(v.amountOff)}`,
-                              );
-                            } catch (e) {
-                              toast.error(
-                                e instanceof ApiError
-                                  ? e.messages.join(", ")
-                                  : "Invalid coupon",
-                              );
+                      <div>
+                        <Label>Coupon</Label>
+                        <div className="mt-1 flex gap-1">
+                          <Input
+                            className="uppercase"
+                            placeholder="CODE"
+                            value={couponCode}
+                            onChange={(e) => {
+                              setCouponCode(e.target.value);
+                              setCouponApplied(null);
+                            }}
+                          />
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            className="shrink-0"
+                            disabled={
+                              !couponCode.trim() || poTotals.subtotal <= 0
                             }
-                          }}
-                        >
-                          Apply
-                        </Button>
+                            onClick={async () => {
+                              try {
+                                const v = await loyaltyApi.validateCoupon(
+                                  couponCode.trim(),
+                                  poTotals.subtotal,
+                                );
+                                setDiscountAmount(String(v.amountOff));
+                                setCouponApplied(v.code);
+                                toast.success(
+                                  `Coupon ${v.code}: −${money(v.amountOff)}`,
+                                );
+                              } catch (e) {
+                                toast.error(
+                                  e instanceof ApiError
+                                    ? e.messages.join(", ")
+                                    : "Invalid coupon",
+                                );
+                              }
+                            }}
+                          >
+                            Apply
+                          </Button>
+                        </div>
                       </div>
                     </div>
-                    <div className="rounded-xl border border-[#e8edf4] bg-[#f8fafc] px-3 py-2 text-xs text-[#0b1f33]">
-                      <div className="flex justify-between gap-2">
-                        <span className="text-[#5a6b7d]">Subtotal</span>
-                        <span className="tabular-nums">{money(poTotals.subtotal)}</span>
+                    <div className="rounded-lg border border-[#e8edf4] bg-[#f8fafc] px-3 py-2.5 text-sm text-[#0b1f33]">
+                      <div className="flex justify-between gap-2 text-[#5a6b7d]">
+                        <span>Subtotal</span>
+                        <span className="tabular-nums text-[#0b1f33]">
+                          {money(poTotals.subtotal)}
+                        </span>
                       </div>
                       {poTotals.discount > 0 ? (
-                        <div className="mt-1 flex justify-between gap-2">
-                          <span className="text-[#5a6b7d]">Discount</span>
-                          <span className="tabular-nums">−{money(poTotals.discount)}</span>
+                        <div className="mt-1 flex justify-between gap-2 text-[#5a6b7d]">
+                          <span>Discount</span>
+                          <span className="tabular-nums text-[#0b1f33]">
+                            −{money(poTotals.discount)}
+                          </span>
                         </div>
                       ) : null}
-                      <div className="mt-1 flex justify-between gap-2">
-                        <span className="text-[#5a6b7d]">Tax ({poTotals.taxPct}%)</span>
-                        <span className="tabular-nums">{money(poTotals.tax)}</span>
+                      <div className="mt-1 flex justify-between gap-2 text-[#5a6b7d]">
+                        <span>Tax ({poTotals.taxPct}%)</span>
+                        <span className="tabular-nums text-[#0b1f33]">
+                          {money(poTotals.tax)}
+                        </span>
                       </div>
-                      <div className="mt-1 flex justify-between gap-2 border-t border-[#e8edf4] pt-1 font-semibold">
+                      <div className="mt-2 flex justify-between gap-2 border-t border-[#e8edf4] pt-2 font-semibold">
                         <span>Order total</span>
-                        <span className="tabular-nums">{money(poTotals.grand)}</span>
+                        <span className="tabular-nums">
+                          {money(poTotals.grand)}
+                        </span>
                       </div>
                     </div>
-                  </>
+                  </div>
                 ) : null}
-              </>
+              </section>
             ) : null}
-            <div className="field-shell">
-              <Label>Expected delivery</Label>
-              <Input type="date" {...poForm.register("expectedDelivery")} />
-            </div>
-            <Button type="submit" size="sm" disabled={createPo.isPending}>
-              Create PO
-            </Button>
           </form>
-        </section>
-      </div>
-
-      <section className="overflow-hidden rounded-2xl border border-[#d9e0ea] bg-white">
-        <div className="border-b border-[#d9e0ea] px-4 py-3">
-          <h2 className="text-sm font-semibold">Purchase orders</h2>
-          <p className="text-xs text-[#5a6b7d]">
-            Use <strong>Receive to shelf</strong> — status alone does not add stock.
-          </p>
-        </div>
-        <ul className="divide-y divide-[#eef2f8]">
-          {(pos.data ?? [])
-            .slice((poPage - 1) * PO_PAGE, poPage * PO_PAGE)
-            .map((po) => {
-            const openLines =
-              po.lines?.filter((l) => l.qtyReceived < l.qtyOrdered) ??
-              po.lines ??
-              [];
-            const canReceive =
-              po.status !== "cancelled" && po.status !== "received";
-            return (
-              <li key={po.id} className="space-y-3 px-4 py-3 text-sm">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="font-medium">
-                      {po.supplier?.name ?? "—"} ·{" "}
-                      {po.poType.replaceAll("_", " ")}
-                    </p>
-                    <p className="text-xs text-[#5a6b7d]">
-                      {po.status}
-                      {po.expectedDelivery
-                        ? ` · due ${formatDate(po.expectedDelivery)}`
-                        : ""}
-                    </p>
-                    {(po.lines ?? []).length ? (
-                      <ul className="mt-1 space-y-0.5 text-xs text-[#5a6b7d]">
-                        {po.lines!.map((l) => (
-                          <li key={l.id}>
-                            {l.stockLevel?.product?.name ?? "SKU"} ·{" "}
-                            {l.stockLevel?.sku} — ordered {l.qtyOrdered}, received{" "}
-                            {l.qtyReceived}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="mt-1 text-xs text-[#8b9bb0]">
-                        No lines yet — receive any SKU below
-                      </p>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {["ordered", "cancelled"].map((s) => (
-                      <Button
-                        key={s}
-                        type="button"
-                        size="sm"
-                        variant="secondary"
-                        disabled={updatePo.isPending || po.status === s}
-                        onClick={() => updatePo.mutate({ id: po.id, status: s })}
-                      >
-                        {s}
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-
-                {canReceive && hasSale ? (
-                  <div className="rounded-xl border border-[#e8edf4] bg-[#f8fafc] p-3">
-                    <p className="text-xs font-semibold text-[#0b1f33]">
-                      Receive to shelf
-                    </p>
-                    {(openLines.length ? openLines : [{ stockLevelId: "", id: "new" } as const]).map(
-                      (l) => {
-                        const sid =
-                          "stockLevelId" in l && l.stockLevelId
-                            ? l.stockLevelId
-                            : "";
-                        const key = `${po.id}:${sid || "pick"}`;
-                        return (
-                          <div
-                            key={key}
-                            className="mt-2 flex flex-wrap items-end gap-2"
-                          >
-                            {"stockLevel" in l && l.stockLevel ? (
-                              <p className="min-w-[10rem] flex-1 text-xs">
-                                {l.stockLevel.product?.name} · {l.stockLevel.sku}
-                              </p>
-                            ) : (
-                              <div className="min-w-[12rem] flex-1">
-                                <Select
-                                  value={receiveQty[`${key}:sku`] ?? ""}
-                                  onChange={(e) =>
-                                    setReceiveQty((m) => ({
-                                      ...m,
-                                      [`${key}:sku`]: e.target.value,
-                                    }))
-                                  }
-                                >
-                                  <option value="">Select SKU</option>
-                                  {skuOptions.map((s) => (
-                                    <option key={s.id} value={s.id}>
-                                      {s.name} · {s.sku}
-                                    </option>
-                                  ))}
-                                </Select>
-                              </div>
-                            )}
-                            <Input
-                              className="w-24"
-                              type="number"
-                              min={1}
-                              placeholder="Qty"
-                              value={receiveQty[key] ?? ""}
-                              onChange={(e) =>
-                                setReceiveQty((m) => ({
-                                  ...m,
-                                  [key]: e.target.value,
-                                }))
-                              }
-                            />
-                            <Button
-                              type="button"
-                              size="sm"
-                              disabled={receivePo.isPending}
-                              onClick={() => {
-                                const stockLevelId =
-                                  sid || receiveQty[`${key}:sku`] || "";
-                                const qty = Math.max(
-                                  1,
-                                  Number(receiveQty[key]) || 0,
-                                );
-                                if (!stockLevelId || !qty) {
-                                  toast.error("Pick SKU and qty");
-                                  return;
-                                }
-                                receivePo.mutate({
-                                  id: po.id,
-                                  lines: [{ stockLevelId, qty }],
-                                });
-                              }}
-                            >
-                              Receive
-                            </Button>
-                          </div>
-                        );
-                      },
-                    )}
-                  </div>
-                ) : null}
-
-                {(po.lines ?? []).some((l) => l.qtyReceived > 0) && hasSale ? (
-                  <div className="rounded-xl border border-[#fde68a] bg-[#fffbeb] p-3">
-                    <p className="text-xs font-semibold text-[#0b1f33]">
-                      Purchase return (RTV)
-                    </p>
-                    {(po.lines ?? [])
-                      .filter((l) => l.qtyReceived > 0)
-                      .map((l) => {
-                        const key = `ret:${po.id}:${l.stockLevelId}`;
-                        return (
-                          <div
-                            key={key}
-                            className="mt-2 flex flex-wrap items-end gap-2"
-                          >
-                            <p className="min-w-[10rem] flex-1 text-xs">
-                              {l.stockLevel?.product?.name ?? "SKU"} ·{" "}
-                              {l.stockLevel?.sku} (recv {l.qtyReceived})
-                            </p>
-                            <Input
-                              className="w-24"
-                              type="number"
-                              min={1}
-                              max={l.qtyReceived}
-                              placeholder="Qty"
-                              value={returnQty[key] ?? ""}
-                              onChange={(e) =>
-                                setReturnQty((m) => ({
-                                  ...m,
-                                  [key]: e.target.value,
-                                }))
-                              }
-                            />
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="secondary"
-                              disabled={returnPo.isPending}
-                              onClick={() => {
-                                const qty = Math.max(
-                                  1,
-                                  Number(returnQty[key]) || 0,
-                                );
-                                if (!l.stockLevelId || !qty) {
-                                  toast.error("Enter qty to return");
-                                  return;
-                                }
-                                returnPo.mutate({
-                                  id: po.id,
-                                  lines: [
-                                    { stockLevelId: l.stockLevelId, qty },
-                                  ],
-                                  reason: "Supplier return",
-                                });
-                              }}
-                            >
-                              Return
-                            </Button>
-                          </div>
-                        );
-                      })}
-                  </div>
-                ) : null}
-              </li>
-            );
-          })}
-          {!pos.data?.length ? (
-            <li className="px-4 py-8 text-sm text-[#5a6b7d]">No POs yet</li>
-          ) : null}
-        </ul>
-        <TablePager
-          page={poPage}
-          totalPages={Math.max(1, Math.ceil((pos.data?.length ?? 0) / PO_PAGE))}
-          total={pos.data?.length ?? 0}
-          pageSize={PO_PAGE}
-          onPage={setPoPage}
-        />
-      </section>
+        </ModalFrame>
+      ) : null}
     </div>
   );
 }

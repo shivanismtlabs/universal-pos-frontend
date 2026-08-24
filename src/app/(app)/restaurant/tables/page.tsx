@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { LayoutGrid, Map as MapIcon, Pencil } from "lucide-react";
 import { ModalFrame } from "@/components/modal-frame";
@@ -967,7 +968,7 @@ function TableModal({
           </div>
           <div>
             <Label>Status</Label>
-            <select
+            <Select
               className={cn(diningSelectClass, "mt-1 w-full")}
               value={status}
               onChange={(e) => setStatus(e.target.value)}
@@ -978,12 +979,12 @@ function TableModal({
                   {s}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
         </div>
         <div>
           <Label>Floor / dining area</Label>
-          <select
+          <Select
             className={cn(diningSelectClass, "mt-1 w-full")}
             value={floorId}
             onChange={(e) => setFloorId(e.target.value)}
@@ -994,7 +995,7 @@ function TableModal({
                 {f.name}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
       </div>
     </ModalFrame>
@@ -1352,7 +1353,7 @@ function MoveMergeModal({
       <div className="grid gap-4">
         <div>
           <Label>From table</Label>
-          <select
+          <Select
             className={cn(diningSelectClass, "mt-1 w-full")}
             value={from}
             onChange={(e) => setFrom(e.target.value)}
@@ -1364,11 +1365,11 @@ function MoveMergeModal({
                 {t.orderNumber ? ` · ${t.orderNumber}` : ""}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
         <div>
           <Label>To table</Label>
-          <select
+          <Select
             className={cn(diningSelectClass, "mt-1 w-full")}
             value={to}
             onChange={(e) => setTo(e.target.value)}
@@ -1380,7 +1381,7 @@ function MoveMergeModal({
                 {t.status !== "available" ? ` · ${t.status}` : ""}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
       </div>
     </ModalFrame>
@@ -1465,7 +1466,7 @@ function SplitModal({
         </div>
         <div>
           <Label>Move split ticket to table (optional)</Label>
-          <select
+          <Select
             className={cn(diningSelectClass, "mt-1 w-full")}
             value={toTableId}
             onChange={(e) => setToTableId(e.target.value)}
@@ -1478,7 +1479,7 @@ function SplitModal({
                   {t.name}
                 </option>
               ))}
-          </select>
+          </Select>
         </div>
       </div>
     </ModalFrame>
@@ -1585,7 +1586,7 @@ function ReserveModal({
         </div>
         <div>
           <Label>Table</Label>
-          <select
+          <Select
             className={cn(diningSelectClass, "mt-1 w-full")}
             value={tableId}
             onChange={(e) => setTableId(e.target.value)}
@@ -1597,7 +1598,7 @@ function ReserveModal({
                 {t.status !== "available" ? ` · ${t.status}` : ""}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
       </div>
     </ModalFrame>
@@ -1834,7 +1835,7 @@ function LayoutModal({
       className="max-w-3xl"
       footer={
         <div className="flex items-center justify-between gap-2">
-          <select
+          <Select
             className={cn(diningSelectClass, "w-48")}
             value={floor.id}
             onChange={(e) => onFloorChange(e.target.value)}
@@ -1844,7 +1845,7 @@ function LayoutModal({
                 {f.name}
               </option>
             ))}
-          </select>
+          </Select>
           <div className="flex gap-2">
             <Button type="button" variant="secondary" onClick={onClose}>
               Cancel

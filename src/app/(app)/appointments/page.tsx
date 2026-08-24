@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FieldError } from "@/components/ui/form";
+import { Select } from "@/components/ui/select";
 import { useAuthStore } from "@/lib/auth-store";
 import { formatDate } from "@/lib/utils";
 import { RequireCommerceMode } from "@/components/require-commerce-mode";
@@ -263,19 +264,19 @@ function AppointmentsDesk() {
           <h2 className="display text-2xl">{formTitle}</h2>
           <div>
             <Label>Store</Label>
-            <select className="mt-2 select-field" {...form.register("storeId")}>
+            <Select className="mt-2 select-field" {...form.register("storeId")}>
               <option value="">Select</option>
               {(stores.data ?? []).map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
                 </option>
               ))}
-            </select>
+            </Select>
             <FieldError message={form.formState.errors.storeId?.message} />
           </div>
           <div>
             <Label>Customer</Label>
-            <select
+            <Select
               className="mt-2 select-field"
               {...form.register("customerId")}
             >
@@ -285,24 +286,24 @@ function AppointmentsDesk() {
                   {c.fullName} ({c.phone})
                 </option>
               ))}
-            </select>
+            </Select>
             <FieldError message={form.formState.errors.customerId?.message} />
           </div>
           <div>
             <Label>Type</Label>
-            <select className="mt-2 select-field" {...form.register("aptType")}>
+            <Select className="mt-2 select-field" {...form.register("aptType")}>
               {typeOptions.map((opt) => (
                 <option key={opt.value} value={opt.value}>
                   {opt.label}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
           {isServiceBooking ? (
             <>
               <div>
                 <Label>Service</Label>
-                <select
+                <Select
                   className="mt-2 select-field"
                   {...form.register("serviceName")}
                 >
@@ -312,7 +313,7 @@ function AppointmentsDesk() {
                       {item.name}
                     </option>
                   ))}
-                </select>
+                </Select>
                 {!serviceItems.length && !services.isLoading ? (
                   <p className="mt-1.5 text-xs text-[#6b7280]">
                     Add services under Catalog first (item type: Service).
@@ -321,7 +322,7 @@ function AppointmentsDesk() {
               </div>
               <div>
                 <Label>Chair / room</Label>
-                <select
+                <Select
                   className="mt-2 select-field"
                   {...form.register("resourceId")}
                 >
@@ -332,7 +333,7 @@ function AppointmentsDesk() {
                       {r.type ? ` · ${r.type}` : ""}
                     </option>
                   ))}
-                </select>
+                </Select>
               </div>
             </>
           ) : null}

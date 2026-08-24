@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { catalogApi, customFieldsApi, posApi, tenantsApi } from "@/lib/api";
@@ -28,8 +28,11 @@ import {
   type StockAdjustTarget,
 } from "@/components/stock-adjust-dialog";
 import { useBootstrap } from "@/lib/bootstrap";
-import type { MetaFieldDef } from "@/lib/business-config";
-import { customFieldDefsToMeta } from "@/lib/product-form-fields";
+import {
+  CUSTOM_FIELD_QUERY,
+  mergeProductFormFields,
+} from "@/lib/product-form-fields";
+import { CustomFieldsSection } from "@/components/custom-field-inputs";
 import { ItemsImportDialog } from "@/components/items-import-dialog";
 import { AddCategoryModal } from "@/components/add-category-modal";
 import {
@@ -128,80 +131,6 @@ function invalidateSale(qc: ReturnType<typeof useQueryClient>) {
   void qc.invalidateQueries({ queryKey: ["catalog-products-home"] });
 }
 
-/** Renders one BusinessConfig item meta field in Zoho label|control rows */
-function ItemMetaFieldRow({
-  field,
-  value,
-  onChange,
-}: {
-  field: MetaFieldDef;
-  value: string;
-  onChange: (v: string) => void;
-}) {
-  const label = (
-    <Label className="sm:pt-2.5">
-      {field.label}
-      {field.required ? " *" : ""}
-    </Label>
-  );
-  let control: ReactNode;
-  if (field.type === "boolean") {
-    control = (
-      <label className="flex items-center gap-2 pt-2 text-sm text-[#21263c]">
-        <input
-          type="checkbox"
-          className="h-4 w-4 accent-[#1a56db]"
-          checked={value === "true" || value === "1"}
-          onChange={(e) => onChange(e.target.checked ? "true" : "false")}
-        />
-        {field.hint ?? "Yes"}
-      </label>
-    );
-  } else if (field.type === "select" && field.options?.length) {
-    control = (
-      <Select value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value="">Select</option>
-        {field.options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </Select>
-    );
-  } else if (field.type === "text") {
-    control = (
-      <textarea
-        className={textareaClass}
-        rows={2}
-        placeholder={field.hint}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      />
-    );
-  } else {
-    control = (
-      <Input
-        inputMode={field.type === "number" ? "decimal" : undefined}
-        type={field.type === "datetime" ? "datetime-local" : "text"}
-        placeholder={field.hint}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      />
-    );
-  }
-  return (
-    <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
-      {label}
-      <div>
-        {control}
-        {field.hint && field.type !== "boolean" && field.type !== "text" ? (
-          <p className="mt-1 text-[0.65rem] text-[#8b9bb0]">{field.hint}</p>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
 /**
  * Universal product manager — any user-named category,
  * fixed keys: title · description · category · sku · price · qty · image
@@ -216,14 +145,15 @@ export function SaleStockPanel({
   const qc = useQueryClient();
   const roles = useAuthStore((s) => s.user?.roles);
   const canWrite = canWriteCatalog(roles);
-  const { businessConfig, businessType } = useBootstrap();
+  const { businessConfig, businessType, itemMetaFields } = useBootstrap();
   const customFieldsQ = useQuery({
     queryKey: ["custom-fields", "product"],
-    queryFn: () => customFieldsApi.listDefinitions("product"),
+    queryFn: () => customFieldsApi.listProductDefinitions(),
+    ...CUSTOM_FIELD_QUERY,
   });
   const productFormFields = useMemo(
-    () => customFieldDefsToMeta(customFieldsQ.data),
-    [customFieldsQ.data],
+    () => mergeProductFormFields(customFieldsQ.data, itemMetaFields),
+    [customFieldsQ.data, itemMetaFields],
   );
 
   const [panel, setPanel] = useState<"add" | "products" | "categories">(
@@ -573,7 +503,9 @@ export function SaleStockPanel({
     if (statusFilter === "active") {
       list = list.filter((i) => i.isActive);
     } else if (statusFilter === "inactive") {
-      list = list.filter((i) => !i.isActive);
+      list = list.filter(
+        (i) => !i.isActive || i.status === "inactive" || i.status === "archived",
+      );
     } else if (statusFilter === "low") {
       list = list.filter((i) => i.isActive && Number(i.qty) <= 5);
     }
@@ -1445,43 +1377,17 @@ export function SaleStockPanel({
                 />
               </section>
 
-              {/* —— 7. BusinessConfig + extra —— */}
-              {productFormFields.length || customFieldsQ.isFetching ? (
-                <section className="py-7">
-                  <h3 className="text-[0.78rem] font-bold tracking-[0.04em] text-[#21263c] uppercase">
-                    Extra fields
-                  </h3>
-                  <p className="mt-1 text-[0.8rem] text-[#5a6b7d]">
-                    These boxes come from Settings → Custom fields. Fill them
-                    when you add an item.
-                  </p>
-                  <div className="mt-4 space-y-3.5">
-                    {productFormFields.map((field) => (
-                      <ItemMetaFieldRow
-                        key={field.key}
-                        field={field}
-                        value={extraFields[field.key] ?? ""}
-                        onChange={(v) =>
-                          setExtraFields((prev) => ({
-                            ...prev,
-                            [field.key]: v,
-                          }))
-                        }
-                      />
-                    ))}
-                  </div>
-                </section>
-              ) : (
-                <section className="py-7">
-                  <h3 className="text-[0.78rem] font-bold tracking-[0.04em] text-[#21263c] uppercase">
-                    Extra fields
-                  </h3>
-                  <p className="mt-1 text-[0.8rem] text-[#5a6b7d]">
-                    None yet. Add them in Settings → Custom fields (Product),
-                    then open this form again.
-                  </p>
-                </section>
-              )}
+              <section className="py-7">
+                <CustomFieldsSection
+                  hint="These boxes come from Settings → Custom fields (choose Product). They save with the item."
+                  fields={productFormFields}
+                  loading={customFieldsQ.isLoading}
+                  values={extraFields}
+                  onChange={(key, value) =>
+                    setExtraFields((prev) => ({ ...prev, [key]: value }))
+                  }
+                />
+              </section>
 
               <div className="flex flex-wrap gap-2 pt-6">
               <Button

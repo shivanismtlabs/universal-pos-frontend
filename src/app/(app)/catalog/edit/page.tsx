@@ -20,10 +20,12 @@ import {
 } from "@/lib/api";
 import { PageHeader } from "@/components/page-header";
 import { ApiError } from "@/lib/api/client";
+import { useBootstrap } from "@/lib/bootstrap";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FieldError } from "@/components/ui/form";
+import { Select } from "@/components/ui/select";
 import { BarcodeScanInput } from "@/components/barcode-scan-input";
 import { ProductBarcodePreview } from "@/components/product-barcode-preview";
 import {
@@ -39,7 +41,10 @@ import {
 } from "@/lib/validations";
 
 import { activeUnitOptions } from "@/lib/measure-units";
-import { customFieldDefsToMeta } from "@/lib/product-form-fields";
+import {
+  CUSTOM_FIELD_QUERY,
+  mergeProductFormFields,
+} from "@/lib/product-form-fields";
 import { CustomFieldsSection } from "@/components/custom-field-inputs";
 
 const KINDS: { id: CatalogProductKind; label: string }[] = [
@@ -71,13 +76,15 @@ function EditCatalogProductPage() {
   const search = useSearchParams();
   const id = search.get("id")?.trim() || "";
   const imagePickerRef = useRef<ProductImagePickerHandle>(null);
+  const { itemMetaFields } = useBootstrap();
   const customFieldsQ = useQuery({
     queryKey: ["custom-fields", "product"],
-    queryFn: () => customFieldsApi.listDefinitions("product"),
+    queryFn: () => customFieldsApi.listProductDefinitions(),
+    ...CUSTOM_FIELD_QUERY,
   });
   const productFormFields = useMemo(
-    () => customFieldDefsToMeta(customFieldsQ.data),
-    [customFieldsQ.data],
+    () => mergeProductFormFields(customFieldsQ.data, itemMetaFields),
+    [customFieldsQ.data, itemMetaFields],
   );
   const cats = useQuery({
     queryKey: ["catalog-categories"],
@@ -180,10 +187,15 @@ function EditCatalogProductPage() {
 
   useEffect(() => {
     const meta = product.data?.meta;
-    if (!meta || !productFormFields.length) return;
+    const bag: Record<string, unknown> = {
+      ...(typeof meta === "object" && meta && !Array.isArray(meta)
+        ? (meta as Record<string, unknown>)
+        : {}),
+    };
+    if (!productFormFields.length) return;
     const extras: Record<string, string> = {};
     for (const f of productFormFields) {
-      const v = meta[f.key];
+      const v = bag[f.key];
       if (v != null && f.key !== "taxRatePercent") extras[f.key] = String(v);
     }
     setExtraFields(extras);
@@ -431,7 +443,7 @@ function EditCatalogProductPage() {
             </div>
             <div>
               <Label>Type *</Label>
-              <select
+              <Select
                 className={fieldSelect}
                 value={form.kind}
                 onChange={(e) =>
@@ -443,11 +455,11 @@ function EditCatalogProductPage() {
                     {k.label}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div>
               <Label>Category</Label>
-              <select
+              <Select
                 className={fieldSelect}
                 value={form.categoryId}
                 onChange={(e) =>
@@ -461,11 +473,11 @@ function EditCatalogProductPage() {
                     {c.name}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div>
               <Label>Brand</Label>
-              <select
+              <Select
                 className={fieldSelect}
                 value={form.brandId}
                 onChange={(e) =>
@@ -478,7 +490,7 @@ function EditCatalogProductPage() {
                     {b.name}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div>
               <Label>Short name</Label>
@@ -492,7 +504,7 @@ function EditCatalogProductPage() {
             </div>
             <div>
               <Label>Status</Label>
-              <select
+              <Select
                 className={fieldSelect}
                 value={form.status}
                 onChange={(e) =>
@@ -505,7 +517,7 @@ function EditCatalogProductPage() {
                 <option value="active">Active</option>
                 <option value="draft">Draft</option>
                 <option value="inactive">Inactive</option>
-              </select>
+              </Select>
             </div>
         </div>
 
@@ -564,7 +576,7 @@ function EditCatalogProductPage() {
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <Label>Unit *</Label>
-            <select
+            <Select
               className={fieldSelect}
               value={form.unitOfMeasure}
               onChange={(e) =>
@@ -579,7 +591,7 @@ function EditCatalogProductPage() {
                   {u.name} ({u.code})
                 </option>
               ))}
-            </select>
+            </Select>
             <p className="mt-1 text-xs text-[#6b7280]">
               Change the list in{" "}
               <Link href="/settings/units" className="text-[#1a56db]">

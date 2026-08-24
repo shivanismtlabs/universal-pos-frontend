@@ -11,6 +11,7 @@ import { useAuthStore } from "@/lib/auth-store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { ModalFrame } from "@/components/modal-frame";
 import { cn, formatDate } from "@/lib/utils";
 
@@ -686,7 +687,7 @@ export function CustomerCrmPanel({ customerId }: { customerId: string }) {
           <div className="space-y-3">
             <div>
               <Label>Channel</Label>
-              <select
+              <Select
                 className="mt-1.5 h-10 w-full rounded-lg border border-[#d9e0ea] bg-white px-3 text-sm text-[#0b1f33]"
                 value={msgChannel}
                 onChange={(e) =>
@@ -696,7 +697,7 @@ export function CustomerCrmPanel({ customerId }: { customerId: string }) {
                 <option value="sms">SMS</option>
                 <option value="email">Email</option>
                 <option value="whatsapp">WhatsApp</option>
-              </select>
+              </Select>
             </div>
             <div>
               <Label>Message</Label>

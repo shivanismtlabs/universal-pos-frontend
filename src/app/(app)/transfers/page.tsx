@@ -16,6 +16,7 @@ import { EmptyState, PageSkeleton } from "@/components/page-header";
 import { TablePager } from "@/components/table-pager";
 import { pagerFromMeta } from "@/lib/use-paged-list";
 import { FieldError } from "@/components/ui/form";
+import { Select } from "@/components/ui/select";
 import {
   stockTransferSchema,
   zodFieldErrors,
@@ -359,7 +360,7 @@ function TransferComposer({
           <div className="grid gap-4 sm:grid-cols-[1fr_auto_1fr]">
             <div>
               <Label>From location</Label>
-              <select
+              <Select
                 className="mt-1.5 h-10 w-full rounded-lg border border-[#e4e9f0] bg-white px-2 text-sm"
                 value={fromId}
                 onChange={(e) => {
@@ -379,7 +380,7 @@ function TransferComposer({
                     {l.code ? ` (${l.code})` : ""}
                   </option>
                 ))}
-              </select>
+              </Select>
               <FieldError message={fieldErrors.fromLocationId} />
             </div>
             <div className="flex items-end justify-center pb-2">
@@ -389,7 +390,7 @@ function TransferComposer({
             </div>
             <div>
               <Label>To location</Label>
-              <select
+              <Select
                 className="mt-1.5 h-10 w-full rounded-lg border border-[#e4e9f0] bg-white px-2 text-sm"
                 value={toId}
                 onChange={(e) => {
@@ -404,7 +405,7 @@ function TransferComposer({
                     {l.code ? ` (${l.code})` : ""}
                   </option>
                 ))}
-              </select>
+              </Select>
               <FieldError message={fieldErrors.toLocationId} />
             </div>
           </div>

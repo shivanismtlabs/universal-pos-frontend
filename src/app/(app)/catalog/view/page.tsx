@@ -10,6 +10,7 @@ import { ApiError } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { ProductThumb } from "@/components/product-thumb";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { ProductBarcodePreview } from "@/components/product-barcode-preview";
@@ -342,14 +343,14 @@ function CatalogProductDetailPage() {
             >
               Deactivate
             </Button>
-          ) : p.status !== "archived" ? (
+          ) : (
             <Button
               variant="secondary"
               onClick={() => setStatus.mutate("active")}
             >
-              Activate
+              {p.status === "archived" ? "Unarchive" : "Activate"}
             </Button>
-          ) : null}
+          )}
           <EntityRowActions
             onSoftDelete={
               p.status !== "archived"
@@ -361,6 +362,16 @@ function CatalogProductDetailPage() {
                 : undefined
             }
             softDeleteTitle="Archive (soft delete)"
+            onUnarchive={
+              p.status === "archived"
+                ? () => {
+                    if (confirm(`Unarchive “${p.name}”?`)) {
+                      setStatus.mutate("active");
+                    }
+                  }
+                : undefined
+            }
+            unarchiveTitle="Unarchive"
             onDelete={() => {
               if (
                 confirm(
@@ -611,7 +622,7 @@ function CatalogProductDetailPage() {
               <div className="flex flex-wrap gap-2 items-end">
                 <div className="min-w-[200px] flex-1">
                   <Label>Component product</Label>
-                  <select
+                  <Select
                     className="h-9 w-full rounded-md border border-[#d9e0ea] px-2 text-sm"
                     value={compId}
                     onChange={(e) => setCompId(e.target.value)}
@@ -624,7 +635,7 @@ function CatalogProductDetailPage() {
                           {x.name} ({x.skuCode})
                         </option>
                       ))}
-                  </select>
+                  </Select>
                 </div>
                 <div className="w-24">
                   <Label>Qty</Label>
@@ -660,7 +671,7 @@ function CatalogProductDetailPage() {
             </div>
             <div>
               <Label>Location</Label>
-              <select
+              <Select
                 className="h-9 w-full rounded-md border border-[#d9e0ea] px-2 text-sm"
                 value={batchLoc}
                 onChange={(e) => setBatchLoc(e.target.value)}
@@ -671,7 +682,7 @@ function CatalogProductDetailPage() {
                     {l.name}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div>
               <Label>Expiry</Label>

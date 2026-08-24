@@ -7,6 +7,7 @@ import { tenantsApi } from "@/lib/api";
 import { useBranchStore } from "@/lib/branch-store";
 import { useAuthStore } from "@/lib/auth-store";
 import { cn } from "@/lib/utils";
+import { Select } from "@/components/ui/select";
 
 /**
  * Shell current-branch selector. All ops should use this locationId.
@@ -72,8 +73,9 @@ export function BranchSelector({ className }: { className?: string }) {
       )}
     >
       <MapPin className="size-3.5 shrink-0 text-[#1a56db]" />
-      <select
-        className="max-w-[13rem] truncate border-0 bg-transparent text-[0.75rem] font-medium text-[#0b1f33] outline-none"
+      <Select
+        wrapperClassName="w-auto min-w-[8rem] max-w-[13rem] flex-1"
+        className="h-7 max-w-[13rem] truncate border-0 bg-transparent px-1 pr-6 text-[0.75rem] font-medium text-[#0b1f33] shadow-none outline-none focus:shadow-none"
         value={currentLocationId ?? ""}
         onChange={(e) => setCurrentLocationId(e.target.value || null)}
         aria-label="Current shop / branch"
@@ -84,7 +86,7 @@ export function BranchSelector({ className }: { className?: string }) {
             {l.code ? ` (${l.code})` : ""}
           </option>
         ))}
-      </select>
+      </Select>
     </label>
   );
 }
