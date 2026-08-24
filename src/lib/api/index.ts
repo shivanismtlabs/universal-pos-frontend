@@ -8299,11 +8299,14 @@ export const catalogApi = {
     parentId?: string;
     sortOrder?: number;
   }) {
-    return apiRequest("/catalog/categories", {
-      method: "POST",
-      body,
-      token: token(),
-    });
+    return apiRequest<{ id: string; name: string; parentId?: string | null }>(
+      "/catalog/categories",
+      {
+        method: "POST",
+        body,
+        token: token(),
+      },
+    );
   },
   updateCategory(
     id: string,

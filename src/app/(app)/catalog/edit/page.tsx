@@ -26,6 +26,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FieldError } from "@/components/ui/form";
 import { Select } from "@/components/ui/select";
+import { CategorySelectCombobox } from "@/components/category-select-combobox";
 import { BarcodeScanInput } from "@/components/barcode-scan-input";
 import { ProductBarcodePreview } from "@/components/product-barcode-preview";
 import {
@@ -459,21 +460,11 @@ function EditCatalogProductPage() {
             </div>
             <div>
               <Label>Category</Label>
-              <Select
-                className={fieldSelect}
+              <CategorySelectCombobox
                 value={form.categoryId}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, categoryId: e.target.value }))
-                }
-              >
-                <option value="">Select a category</option>
-                {(cats.data ?? []).map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.parent ? `${c.parent.name} › ` : ""}
-                    {c.name}
-                  </option>
-                ))}
-              </Select>
+                onChange={(val) => setForm((f) => ({ ...f, categoryId: val }))}
+                categories={cats.data ?? []}
+              />
             </div>
             <div>
               <Label>Brand</Label>
