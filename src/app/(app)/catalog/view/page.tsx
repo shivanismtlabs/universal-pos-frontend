@@ -354,7 +354,7 @@ function CatalogProductDetailPage() {
             }
             softDeleteTitle="Archive (soft delete)"
             onUnarchive={
-              p.status === "archived" || p.status === "inactive"
+              p.status === "archived"
                 ? () => {
                     if (confirm(`Unarchive “${p.name}”?`)) {
                       setStatus.mutate("active");
