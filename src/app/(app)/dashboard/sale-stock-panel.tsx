@@ -573,7 +573,7 @@ export function SaleStockPanel({
     if (statusFilter === "active") {
       list = list.filter((i) => i.isActive);
     } else if (statusFilter === "inactive") {
-      list = list.filter((i) => !i.isActive);
+      list = list.filter((i) => !i.isActive || (i as { status?: string }).status === "inactive" || (i as { status?: string }).status === "archived");
     } else if (statusFilter === "low") {
       list = list.filter((i) => i.isActive && Number(i.qty) <= 5);
     }

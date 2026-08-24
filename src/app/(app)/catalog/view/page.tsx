@@ -334,14 +334,14 @@ function CatalogProductDetailPage() {
             >
               Deactivate
             </Button>
-          ) : p.status !== "archived" ? (
+          ) : (
             <Button
               variant="secondary"
               onClick={() => setStatus.mutate("active")}
             >
-              Activate
+              {p.status === "archived" ? "Unarchive" : "Activate"}
             </Button>
-          ) : null}
+          )}
           <EntityRowActions
             onSoftDelete={
               p.status !== "archived"
@@ -353,6 +353,16 @@ function CatalogProductDetailPage() {
                 : undefined
             }
             softDeleteTitle="Archive (soft delete)"
+            onUnarchive={
+              p.status === "archived" || p.status === "inactive"
+                ? () => {
+                    if (confirm(`Unarchive “${p.name}”?`)) {
+                      setStatus.mutate("active");
+                    }
+                  }
+                : undefined
+            }
+            unarchiveTitle="Unarchive"
             onDelete={() => {
               if (
                 confirm(
