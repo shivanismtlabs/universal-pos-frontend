@@ -2,122 +2,105 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Plus, Search, Eye, Edit3, Filter } from "lucide-react";
 import { posApi } from "@/lib/api";
-import { ApiError } from "@/lib/api/client";
 import { canWriteCatalog } from "@/lib/roles";
 import { useAuthStore } from "@/lib/auth-store";
 import { useBootstrap } from "@/lib/bootstrap";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { EmptyState, PageSkeleton } from "@/components/page-header";
-import {
-  StockAdjustDialog,
-  type StockAdjustTarget,
-} from "@/components/stock-adjust-dialog";
-import { formatQtyWithUnit, normalizeSellUnit } from "@/lib/sell-units";
-import { cn } from "@/lib/utils";
 import { TablePager } from "@/components/table-pager";
-import { usePagedList } from "@/lib/use-paged-list";
+import { StockAdjustmentFormDialog } from "@/components/stock-adjustment-form-dialog";
+import { StockAdjustmentDetailDialog } from "@/components/stock-adjustment-detail-dialog";
+import { cn } from "@/lib/utils";
 
-/**
- * Zoho-style Inventory → Adjustments — scrollable history + new qty adjustment.
- */
+type StatusTab = "all" | "draft" | "adjusted" | "cancelled";
+type TypeFilter = "all" | "quantity" | "value";
+
 export default function InventoryAdjustmentsPage() {
-  const { hasMode } = useBootstrap();
+  const { data: boot, hasMode } = useBootstrap();
   const roles = useAuthStore((s) => s.user?.roles);
   const canWrite = canWriteCatalog(roles);
   const qc = useQueryClient();
-  const [q, setQ] = useState("");
-  const [pickOpen, setPickOpen] = useState(false);
-  const [pickQ, setPickQ] = useState("");
-  const [adjustTarget, setAdjustTarget] = useState<StockAdjustTarget | null>(
-    null,
+
+  const locations = useMemo(
+    () => boot?.locations?.map((l: any) => ({ id: l.id, name: l.name })) ?? [],
+    [boot],
   );
 
-  const history = useQuery({
-    queryKey: ["pos-sale-stock-adjustments"],
-    queryFn: () => posApi.listSaleStockAdjustments(100),
-    enabled: hasMode("sale"),
-  });
+  const [search, setSearch] = useState("");
+  const [statusTab, setStatusTab] = useState<StatusTab>("all");
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
+  const [selectedLocationId, setSelectedLocationId] = useState<string>("");
+  const [page, setPage] = useState(1);
+  const limit = 20;
 
-  const products = useQuery({
-    queryKey: ["pos-sale-products-adj-pick", pickQ],
+  // Dialog States
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingAdj, setEditingAdj] = useState<any | null>(null);
+  const [detailAdj, setDetailAdj] = useState<any | null>(null);
+
+  const adjustmentsQuery = useQuery({
+    queryKey: [
+      "stock-adjustments-list",
+      selectedLocationId,
+      statusTab,
+      typeFilter,
+      search,
+      page,
+      limit,
+    ],
     queryFn: () =>
-      posApi.listSaleProducts({
-        q: pickQ.trim() || undefined,
+      posApi.listStockAdjustments({
+        locationId: selectedLocationId || undefined,
+        status: statusTab === "all" ? undefined : statusTab,
+        type: typeFilter === "all" ? undefined : typeFilter,
+        search: search.trim() || undefined,
+        page,
+        limit,
       }),
-    enabled: pickOpen && hasMode("sale"),
   });
 
-  const adjust = useMutation({
-    mutationFn: (body: { id: string; delta: number; reason?: string; serialNumber?: string }) =>
-      posApi.adjustSaleStock(body.id, {
-        delta: body.delta,
-        reason: body.reason,
-        serialNumber: body.serialNumber,
-      }),
-    onSuccess: (res) => {
-      toast.success(
-        `Adjusted · now ${formatQtyWithUnit(Number(res.qty), res.sellUnit)}`,
-      );
-      setAdjustTarget(null);
-      setPickOpen(false);
-      void qc.invalidateQueries({ queryKey: ["pos-sale-stock-adjustments"] });
-      void qc.invalidateQueries({ queryKey: ["pos-sale-products"] });
-      void qc.invalidateQueries({ queryKey: ["pos-sale-products-adj-pick"] });
-      void qc.invalidateQueries({ queryKey: ["catalog-products"] });
-      void qc.invalidateQueries({ queryKey: ["inventory-stock"] });
-      void qc.invalidateQueries({ queryKey: ["pos-sale"] });
-    },
-    onError: (e) =>
-      toast.error(
-        e instanceof ApiError ? e.messages.join(", ") : "Adjust failed",
-      ),
-  });
-
-  const items = useMemo(() => {
-    const list = history.data?.items ?? [];
-    const needle = q.trim().toLowerCase();
-    if (!needle) return list;
-    return list.filter(
-      (r) =>
-        r.productName.toLowerCase().includes(needle) ||
-        r.sku.toLowerCase().includes(needle) ||
-        (r.reason ?? "").toLowerCase().includes(needle) ||
-        r.actorName.toLowerCase().includes(needle),
-    );
-  }, [history.data, q]);
-  const pagedAdj = usePagedList(items, 20);
-
-  if (!hasMode("sale")) {
-    return (
-      <EmptyState
-        title="Adjustments for product sales"
-        detail="Enable the Sell products commerce mode to track quantity adjustments."
-        action={
-          <Button asChild>
-            <Link href="/dashboard">Back to dashboard</Link>
-          </Button>
-        }
-      />
-    );
+  function handleRefresh() {
+    void qc.invalidateQueries({ queryKey: ["stock-adjustments-list"] });
+    void qc.invalidateQueries({ queryKey: ["pos-sale-stock-adjustments"] });
+    void qc.invalidateQueries({ queryKey: ["catalog-products"] });
+    void qc.invalidateQueries({ queryKey: ["inventory-stock"] });
   }
 
-  if (history.isLoading && !history.data) {
+  function handleOpenCreate() {
+    setEditingAdj(null);
+    setFormOpen(true);
+  }
+
+  function handleOpenEdit(adj: any) {
+    setEditingAdj(adj);
+    setFormOpen(true);
+  }
+
+  function handleOpenDetail(adj: any) {
+    setDetailAdj(adj);
+  }
+
+  if (adjustmentsQuery.isLoading && !adjustmentsQuery.data) {
     return <PageSkeleton rows={8} />;
   }
 
+  const items = adjustmentsQuery.data?.items ?? [];
+  const total = adjustmentsQuery.data?.total ?? 0;
+  const totalPages = adjustmentsQuery.data?.totalPages ?? 1;
+
   return (
     <div className="flex min-h-0 flex-col gap-4 pb-10">
+      {/* Page Header */}
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="eyebrow">Inventory</p>
           <h1 className="page-title mt-1">Adjustments</h1>
           <p className="page-subtitle mt-1.5 max-w-xl">
-            Correct stock on hand with a reason — theft, damage, found stock, or
-            count variance. Same flow for any Universal POS shop.
+            Track, create, draft, and finalize stock quantity & value adjustments with complete audit history and store isolation.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -128,195 +111,235 @@ export default function InventoryAdjustmentsPage() {
             <Link href="/transfers">Stock transfer</Link>
           </Button>
           {canWrite ? (
-            <Button size="sm" onClick={() => setPickOpen(true)}>
-              + New adjustment
+            <Button size="sm" onClick={handleOpenCreate}>
+              <Plus className="mr-1.5 h-4 w-4" />
+              New Adjustment
             </Button>
           ) : null}
         </div>
       </header>
 
-      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#e4e9f0] bg-white px-4 py-2.5">
-        <Input
-          className="h-9 max-w-sm flex-1 text-[0.8125rem]"
-          placeholder="Search product, SKU, reason, or staff"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
-        <span className="text-[0.75rem] text-[#8b9bb0]">
-          {items.length} record{items.length === 1 ? "" : "s"}
-        </span>
+      {/* Filter Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#e4e9f0] bg-white p-3 shadow-sm">
+        {/* Status Tabs */}
+        <div className="flex flex-wrap gap-1 rounded-lg bg-[#f1f5f9] p-1 text-xs">
+          {(
+            [
+              { id: "all", label: "All" },
+              { id: "draft", label: "Draft" },
+              { id: "adjusted", label: "Finalized / Adjusted" },
+              { id: "cancelled", label: "Cancelled" },
+            ] as const
+          ).map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              className={cn(
+                "rounded-md px-3 py-1.5 font-medium transition",
+                statusTab === tab.id
+                  ? "bg-white text-[#0b1f33] shadow-sm font-semibold"
+                  : "text-[#5a6b7d] hover:text-[#0b1f33]",
+              )}
+              onClick={() => {
+                setStatusTab(tab.id);
+                setPage(1);
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Filters & Search */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Location Select */}
+          <select
+            value={selectedLocationId}
+            onChange={(e) => {
+              setSelectedLocationId(e.target.value);
+              setPage(1);
+            }}
+            className="h-9 rounded-lg border border-[#d9e0ea] bg-white px-3 text-xs text-[#0b1f33] outline-none focus:border-[#1a56db]"
+          >
+            <option value="">All Stores / Locations</option>
+            {locations.map((loc) => (
+              <option key={loc.id} value={loc.id}>
+                {loc.name}
+              </option>
+            ))}
+          </select>
+
+          {/* Type Filter */}
+          <select
+            value={typeFilter}
+            onChange={(e) => {
+              setTypeFilter(e.target.value as TypeFilter);
+              setPage(1);
+            }}
+            className="h-9 rounded-lg border border-[#d9e0ea] bg-white px-3 text-xs text-[#0b1f33] outline-none focus:border-[#1a56db]"
+          >
+            <option value="all">All Types</option>
+            <option value="quantity">Quantity Adj</option>
+            <option value="value">Value Adj</option>
+          </select>
+
+          {/* Search Box */}
+          <div className="relative">
+            <Search className="absolute left-3 top-2.5 h-4 w-4 text-[#8b9bb0]" />
+            <Input
+              className="h-9 w-64 pl-9 text-xs"
+              placeholder="Search No, item, SKU, reason..."
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
+            />
+          </div>
+        </div>
       </div>
 
+      {/* Adjustments Table */}
       {!items.length ? (
         <EmptyState
-          title="No adjustments yet"
-          detail="When you change stock quantities, each change is logged here with before/after qty and reason."
+          title="No adjustments found"
+          detail={
+            search || statusTab !== "all" || typeFilter !== "all"
+              ? "No adjustment records match your search filters."
+              : "Create your first stock adjustment to correct stock quantities or revalue inventory."
+          }
           action={
             canWrite ? (
-              <Button type="button" onClick={() => setPickOpen(true)}>
-                + New adjustment
+              <Button type="button" onClick={handleOpenCreate}>
+                <Plus className="mr-1.5 h-4 w-4" />
+                New Adjustment
               </Button>
             ) : undefined
           }
         />
       ) : (
         <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-[#e4e9f0] bg-white shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
-          <div className="max-h-[min(60dvh,32rem)] overflow-auto overscroll-contain [scrollbar-gutter:stable]">
-            <table className="w-full min-w-[52rem] text-left text-[0.8125rem]">
+          <div className="max-h-[min(65dvh,36rem)] overflow-auto overscroll-contain">
+            <table className="w-full min-w-[56rem] text-left text-xs">
               <thead className="sticky top-0 z-[1] border-b border-[#eef1f4] bg-[#f8fafc] text-[0.7rem] font-semibold tracking-wide text-[#5a6b7d] uppercase">
                 <tr>
-                  <th className="px-4 py-2.5">Date</th>
-                  <th className="px-3 py-2.5">Item</th>
-                  <th className="px-3 py-2.5">SKU</th>
-                  <th className="px-3 py-2.5 text-right">Delta</th>
-                  <th className="px-3 py-2.5 text-right">Before</th>
-                  <th className="px-3 py-2.5 text-right">After</th>
-                  <th className="px-3 py-2.5">Reason</th>
-                  <th className="px-4 py-2.5">By</th>
+                  <th className="px-4 py-3">Adjustment No</th>
+                  <th className="px-3 py-3">Date</th>
+                  <th className="px-3 py-3">Location</th>
+                  <th className="px-3 py-3">Reason</th>
+                  <th className="px-3 py-3 text-center">Items</th>
+                  <th className="px-3 py-3">Type</th>
+                  <th className="px-3 py-3">Status</th>
+                  <th className="px-3 py-3">Created By</th>
+                  <th className="px-4 py-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#eef1f4]">
-                {pagedAdj.slice.map((r) => {
-                  const unit = normalizeSellUnit(r.sellUnit);
-                  const up = r.delta > 0;
-                  const down = r.delta < 0;
+                {items.map((r) => {
+                  const isFinalized = r.status === "adjusted";
+                  const isDraft = r.status === "draft";
+                  const isCancelled = r.status === "cancelled";
+
                   return (
-                    <tr key={r.id} className="hover:bg-[#fafbfc]">
-                      <td className="px-4 py-3 whitespace-nowrap text-[#5a6b7d]">
-                        {new Date(r.createdAt).toLocaleString()}
+                    <tr key={r.id} className="hover:bg-[#fafbfc] transition-colors">
+                      <td className="px-4 py-3 font-mono font-semibold text-[#1a56db]">
+                        <button
+                          type="button"
+                          className="hover:underline"
+                          onClick={() => handleOpenDetail(r)}
+                        >
+                          {r.adjustmentNo}
+                        </button>
+                      </td>
+                      <td className="px-3 py-3 text-[#5a6b7d] whitespace-nowrap">
+                        {new Date(r.adjustmentDate).toLocaleDateString()}
                       </td>
                       <td className="px-3 py-3 font-medium text-[#0b1f33]">
-                        {r.productName}
+                        {r.location?.name || "Store"}
                       </td>
-                      <td className="px-3 py-3 font-mono text-[0.75rem] text-[#5a6b7d]">
-                        {r.sku}
+                      <td className="px-3 py-3 text-[#0b1f33] max-w-[14rem] truncate">
+                        {r.reason}
                       </td>
-                      <td
-                        className={cn(
-                          "px-3 py-3 text-right font-semibold tabular-nums",
-                          up && "text-[#047857]",
-                          down && "text-[#c81e1e]",
-                          !up && !down && "text-[#5a6b7d]",
-                        )}
-                      >
-                        {up ? "+" : ""}
-                        {formatQtyWithUnit(r.delta, unit)}
+                      <td className="px-3 py-3 text-center font-medium tabular-nums text-[#0b1f33]">
+                        {r.lines?.length || 0}
                       </td>
-                      <td className="px-3 py-3 text-right tabular-nums text-[#5a6b7d]">
-                        {formatQtyWithUnit(r.beforeQty, unit)}
+                      <td className="px-3 py-3 capitalize text-[#5a6b7d]">
+                        {r.type}
                       </td>
-                      <td className="px-3 py-3 text-right font-semibold tabular-nums text-[#0b1f33]">
-                        {formatQtyWithUnit(r.afterQty, unit)}
+                      <td className="px-3 py-3">
+                        <span
+                          className={cn(
+                            "inline-flex items-center rounded-full px-2.5 py-0.5 text-[0.7rem] font-semibold",
+                            isFinalized && "bg-[#dcfce7] text-[#15803d]",
+                            isDraft && "bg-[#fef3c7] text-[#b45309]",
+                            isCancelled && "bg-[#fee2e2] text-[#b91c1c]",
+                          )}
+                        >
+                          {isFinalized ? "Finalized" : isDraft ? "Draft" : "Cancelled"}
+                        </span>
                       </td>
-                      <td className="max-w-[12rem] truncate px-3 py-3 text-[#5a6b7d]">
-                        {r.reason || "—"}
+                      <td className="px-3 py-3 text-[#5a6b7d]">
+                        {r.createdBy?.fullName || "Staff"}
                       </td>
-                      <td className="px-4 py-3 text-[#5a6b7d]">{r.actorName}</td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-xs"
+                            onClick={() => handleOpenDetail(r)}
+                          >
+                            <Eye className="mr-1 h-3.5 w-3.5 text-[#5a6b7d]" />
+                            View
+                          </Button>
+                          {canWrite && isDraft ? (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 px-2 text-xs text-[#1a56db]"
+                              onClick={() => handleOpenEdit(r)}
+                            >
+                              <Edit3 className="mr-1 h-3.5 w-3.5" />
+                              Edit
+                            </Button>
+                          ) : null}
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
           </div>
-          <TablePager {...pagedAdj.pagerProps} />
+
+          {/* Table Pager */}
+          <TablePager
+            page={page}
+            totalPages={totalPages}
+            total={total}
+            pageSize={limit}
+            onPage={(p: number) => setPage(p)}
+          />
         </section>
       )}
 
-      {pickOpen ? (
-        <div className="fixed inset-0 z-[85] flex items-center justify-center p-4">
-          <button
-            type="button"
-            className="absolute inset-0 bg-[#0b1f33]/45"
-            aria-label="Close"
-            onClick={() => setPickOpen(false)}
-          />
-          <div className="relative z-10 flex max-h-[85dvh] w-full max-w-lg flex-col overflow-hidden rounded-xl border border-[#e4e9f0] bg-white shadow-xl">
-            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-[#eef1f4] px-5 py-4">
-              <div>
-              <h2 className="text-lg font-semibold text-[#0b1f33]">
-                New adjustment
-              </h2>
-              <p className="mt-1 text-[0.8rem] text-[#5a6b7d]">
-                Pick an item, then type how much to add or remove.
-              </p>
-              </div>
-              <button
-                type="button"
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-[#5a6b7d] hover:bg-[#f1f5f9]"
-                aria-label="Close"
-                onClick={() => setPickOpen(false)}
-              >
-                ×
-              </button>
-            </div>
-            <div className="shrink-0 px-5 pb-3">
-              <Input
-                className="h-9"
-                placeholder="Search items…"
-                value={pickQ}
-                onChange={(e) => setPickQ(e.target.value)}
-                autoFocus
-              />
-            </div>
-            <ul className="min-h-0 flex-1 overflow-y-auto overscroll-contain divide-y divide-[#eef1f4]">
-              {(products.data?.items ?? []).map((item) => (
-                <li key={item.id}>
-                  <button
-                    type="button"
-                    className="flex w-full items-center justify-between gap-3 px-5 py-3 text-left hover:bg-[#f8fafc]"
-                    onClick={() => {
-                      setAdjustTarget({
-                        id: item.id,
-                        name: item.title,
-                        sku: item.sku,
-                        qty: Number(item.qty),
-                        sellUnit: item.sellUnit,
-                        trackSerial: item.requiresSerial ?? item.trackSerial ?? false,
-                      });
-                    }}
-                  >
-                    <span className="min-w-0">
-                      <span className="block truncate font-medium text-[#0b1f33]">
-                        {item.title}
-                      </span>
-                      <span className="font-mono text-[0.72rem] text-[#8b9bb0]">
-                        {item.sku}
-                      </span>
-                    </span>
-                    <span className="shrink-0 text-[0.8rem] font-semibold text-[#1341a8]">
-                      {formatQtyWithUnit(Number(item.qty), item.sellUnit)}
-                    </span>
-                  </button>
-                </li>
-              ))}
-              {!products.data?.items?.length && !products.isLoading ? (
-                <li className="px-5 py-10 text-center text-sm text-[#5a6b7d]">
-                  No items match.{" "}
-                  <Link href="/catalog" className="font-semibold text-[#1a56db]">
-                    Open Items
-                  </Link>
-                </li>
-              ) : null}
-            </ul>
-            <div className="shrink-0 border-t border-[#eef1f4] px-5 py-3 text-right">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setPickOpen(false)}
-              >
-                Cancel
-              </Button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      {/* Form Dialog for Create & Edit */}
+      <StockAdjustmentFormDialog
+        open={formOpen}
+        initialData={editingAdj}
+        locations={locations}
+        defaultLocationId={selectedLocationId}
+        onClose={() => setFormOpen(false)}
+        onSaved={handleRefresh}
+      />
 
-      <StockAdjustDialog
-        target={adjustTarget}
-        busy={adjust.isPending}
-        onClose={() => setAdjustTarget(null)}
-        onSubmit={(args) => adjust.mutate(args)}
+      {/* Details Dialog for Viewing */}
+      <StockAdjustmentDetailDialog
+        adjustment={detailAdj}
+        canWrite={canWrite}
+        onClose={() => setDetailAdj(null)}
+        onRefresh={handleRefresh}
+        onEdit={(adj) => handleOpenEdit(adj)}
       />
     </div>
   );

@@ -2828,18 +2828,112 @@ export const posApi = {
       items: Array<{
         id: string;
         createdAt: string;
-        stockLevelId?: string | null;
-        actorName: string;
         productName: string;
         sku: string;
+        qty: number;
+        sellUnit?: string;
+        delta: number;
         beforeQty: number;
         afterQty: number;
-        delta: number;
-        sellUnit?: string;
         reason?: string | null;
-        locationId?: string | null;
+        actorName: string;
       }>;
     }>(`/pos/sale/stock-adjustments${qs}`, { token: token() });
+  },
+
+  // ─── Formal Inventory Adjustments CRUD API ─────────────────────────────────
+
+  createStockAdjustment(payload: {
+    locationId: string;
+    adjustmentDate: string;
+    type: "quantity" | "value";
+    reason: string;
+    description?: string;
+    attachments?: string[];
+    status?: "draft" | "pending" | "adjusted" | "cancelled";
+    lines: Array<{
+      productId: string;
+      stockLevelId?: string;
+      currentQty: number;
+      adjustmentQty: number;
+      newQty: number;
+      unit?: string;
+      currentUnitCost?: number;
+      adjustmentValue?: number;
+      serialNumber?: string;
+      notes?: string;
+    }>;
+  }) {
+    return apiRequest<any>("/inventory/adjustments", {
+      method: "POST",
+      body: payload,
+      token: token(),
+    });
+  },
+
+  listStockAdjustments(params?: {
+    locationId?: string;
+    status?: "draft" | "pending" | "adjusted" | "cancelled";
+    type?: "quantity" | "value";
+    search?: string;
+    startDate?: string;
+    endDate?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const qs = new URLSearchParams();
+    if (params?.locationId) qs.set("locationId", params.locationId);
+    if (params?.status) qs.set("status", params.status);
+    if (params?.type) qs.set("type", params.type);
+    if (params?.search) qs.set("search", params.search);
+    if (params?.startDate) qs.set("startDate", params.startDate);
+    if (params?.endDate) qs.set("endDate", params.endDate);
+    if (params?.page) qs.set("page", String(params.page));
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const q = qs.toString();
+    return apiRequest<{
+      items: any[];
+      total: number;
+      page: number;
+      limit: number;
+      totalPages: number;
+    }>(`/inventory/adjustments${q ? `?${q}` : ""}`, { token: token() });
+  },
+
+  getStockAdjustment(id: string) {
+    return apiRequest<any>(`/inventory/adjustments/${id}`, {
+      token: token(),
+    });
+  },
+
+  updateStockAdjustment(id: string, payload: any) {
+    return apiRequest<any>(`/inventory/adjustments/${id}`, {
+      method: "PATCH",
+      body: payload,
+      token: token(),
+    });
+  },
+
+  deleteStockAdjustment(id: string) {
+    return apiRequest<{ success: boolean; message: string }>(`/inventory/adjustments/${id}`, {
+      method: "DELETE",
+      token: token(),
+    });
+  },
+
+  finalizeStockAdjustment(id: string) {
+    return apiRequest<any>(`/inventory/adjustments/${id}/finalize`, {
+      method: "POST",
+      token: token(),
+    });
+  },
+
+  cancelStockAdjustment(id: string, reason?: string) {
+    return apiRequest<any>(`/inventory/adjustments/${id}/cancel`, {
+      method: "POST",
+      body: { reason },
+      token: token(),
+    });
   },
   listSaleCategories() {
     return apiRequest<
