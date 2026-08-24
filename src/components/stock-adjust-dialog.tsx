@@ -26,13 +26,14 @@ export type StockAdjustTarget = {
   sellUnit?: string | null;
   /** Pre-set step when opening from +/− buttons */
   presetDelta?: number;
+  trackSerial?: boolean;
 };
 
 type Props = {
   target: StockAdjustTarget | null;
   busy?: boolean;
   onClose: () => void;
-  onSubmit: (args: { id: string; delta: number; reason?: string }) => void;
+  onSubmit: (args: { id: string; delta: number; reason?: string; serialNumber?: string }) => void;
 };
 
 /**
@@ -48,6 +49,7 @@ export function StockAdjustDialog({
   const [counted, setCounted] = useState("");
   const [mode, setMode] = useState<"change" | "set">("change");
   const [reason, setReason] = useState("");
+  const [serialNumber, setSerialNumber] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -56,6 +58,7 @@ export function StockAdjustDialog({
     setCounted(String(target.qty));
     setMode(target.presetDelta != null ? "change" : "set");
     setReason("");
+    setSerialNumber("");
     setFieldErrors({});
   }, [target]);
 
@@ -83,6 +86,14 @@ export function StockAdjustDialog({
       toast.error(zodMessages(parsed.error)[0] ?? "Check the form");
       return;
     }
+    if (active.trackSerial && !serialNumber.trim()) {
+      setFieldErrors((f) => ({
+        ...f,
+        serialNumber: "Serial number is required for this item",
+      }));
+      toast.error("Serial number is required for this item");
+      return;
+    }
     setFieldErrors({});
     const parsedDelta = parsed.data.delta;
     const nextReason = (parsed.data.reason ?? "").trim();
@@ -90,6 +101,7 @@ export function StockAdjustDialog({
       id: active.id,
       delta: parsedDelta,
       reason: nextReason || undefined,
+      serialNumber: serialNumber.trim() || undefined,
     });
   }
 
@@ -220,6 +232,25 @@ export function StockAdjustDialog({
             />
             <FieldError message={fieldErrors.reason} />
           </div>
+          {active.trackSerial ? (
+            <div>
+              <Label htmlFor="stock-serial">Serial Number *</Label>
+              <Input
+                id="stock-serial"
+                value={serialNumber}
+                onChange={(e) => {
+                  setSerialNumber(e.target.value);
+                  setFieldErrors((f) => ({ ...f, serialNumber: "" }));
+                }}
+                placeholder="Enter or scan serial number"
+                className="mt-1"
+              />
+              <p className="mt-1 text-[0.75rem] text-[#5a6b7d]">
+                This item has serial tracking enabled. Specify unit serial number.
+              </p>
+              <FieldError message={fieldErrors.serialNumber} />
+            </div>
+          ) : null}
         </div>
 
         <div className="mt-5 flex flex-wrap justify-end gap-2">

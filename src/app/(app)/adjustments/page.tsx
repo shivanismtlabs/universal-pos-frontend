@@ -52,10 +52,11 @@ export default function InventoryAdjustmentsPage() {
   });
 
   const adjust = useMutation({
-    mutationFn: (body: { id: string; delta: number; reason?: string }) =>
+    mutationFn: (body: { id: string; delta: number; reason?: string; serialNumber?: string }) =>
       posApi.adjustSaleStock(body.id, {
         delta: body.delta,
         reason: body.reason,
+        serialNumber: body.serialNumber,
       }),
     onSuccess: (res) => {
       toast.success(
@@ -270,6 +271,7 @@ export default function InventoryAdjustmentsPage() {
                         sku: item.sku,
                         qty: Number(item.qty),
                         sellUnit: item.sellUnit,
+                        trackSerial: item.requiresSerial ?? item.trackSerial ?? false,
                       });
                     }}
                   >

@@ -2709,6 +2709,8 @@ export const posApi = {
         price: string | number;
         qty: number;
         sellUnit?: string;
+        requiresSerial?: boolean;
+        trackSerial?: boolean;
         isActive: boolean;
         status?: string;
         category?: { id: string; name: string } | null;
@@ -2804,7 +2806,7 @@ export const posApi = {
       token: token(),
     });
   },
-  adjustSaleStock(id: string, body: { delta: number; reason?: string }) {
+  adjustSaleStock(id: string, body: { delta: number; reason?: string; serialNumber?: string }) {
     return apiRequest<{
       id: string;
       sku: string;
