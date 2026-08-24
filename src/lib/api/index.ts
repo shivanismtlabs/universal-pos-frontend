@@ -2710,6 +2710,7 @@ export const posApi = {
         qty: number;
         sellUnit?: string;
         isActive: boolean;
+        status?: string;
         category?: { id: string; name: string } | null;
       }>;
     }>(`/pos/sale/products${q ? `?${q}` : ""}`, { token: token() });

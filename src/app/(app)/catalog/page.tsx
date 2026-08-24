@@ -259,6 +259,16 @@ function ProductsPanel() {
       toast.error(e instanceof ApiError ? e.message : "Archive failed"),
   });
 
+  const unarchive = useMutation({
+    mutationFn: (id: string) => catalogApi.setStatus(id, "active"),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["catalog-products"] });
+      toast.success("Product unarchived (active)");
+    },
+    onError: (e: Error) =>
+      toast.error(e instanceof ApiError ? e.message : "Unarchive failed"),
+  });
+
   const remove = useMutation({
     mutationFn: (id: string) => catalogApi.remove(id),
     onSuccess: (res) => {
@@ -533,6 +543,20 @@ function ProductsPanel() {
                             : undefined
                         }
                         softDeleteTitle="Archive (soft delete)"
+                        onUnarchive={
+                          p.status === "archived"
+                            ? () => {
+                                if (
+                                  confirm(
+                                    `Unarchive “${p.name}”? It will be restored to active.`,
+                                  )
+                                ) {
+                                  unarchive.mutate(p.id);
+                                }
+                              }
+                            : undefined
+                        }
+                        unarchiveTitle="Unarchive (restore to active)"
                         onDelete={() => {
                           if (
                             confirm(
@@ -544,7 +568,7 @@ function ProductsPanel() {
                         }}
                         deleteTitle="Delete"
                         disabled={
-                          archive.isPending || remove.isPending || dup.isPending
+                          archive.isPending || unarchive.isPending || remove.isPending || dup.isPending
                         }
                       />
                       <Button
