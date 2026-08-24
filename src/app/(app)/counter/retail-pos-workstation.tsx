@@ -14,6 +14,7 @@ import { moneyNumber, stablePaymentAttemptKey, clearPaymentAttemptKey, cn } from
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { ReceiptModal, type ReceiptData } from "@/components/receipt-modal";
 import { StripeCheckoutModal } from "@/components/stripe-checkout-modal";
 import { ProductThumb } from "@/components/product-thumb";
@@ -362,11 +363,6 @@ export default function RetailPosWorkstation({
     if (!area) return sellingMenuFilter.categoryIds;
     return area.filter((id) => sellingMenuFilter.categoryIds.includes(id));
   })();
-  const recentSales = useQuery({
-    queryKey: ["pos-sale-recent"],
-    queryFn: () => posApi.listRecentSales(8),
-  });
-
   useEffect(() => {
     if (!pinSwitchEnabled || !stationToken || pinLocked) return;
     let timer: number | undefined;
@@ -2146,34 +2142,6 @@ export default function RetailPosWorkstation({
               </Button>
             ) : null}
           </div>
-          {(recentSales.data?.items ?? []).length ? (
-            <div className="flex gap-1.5 overflow-x-auto border-b border-[#e8edf4] px-4 py-2">
-              {(recentSales.data?.items ?? []).slice(0, 6).map((o) => (
-                <button
-                  key={o.id}
-                  type="button"
-                  className="shrink-0 rounded-full border border-[#e2e8f0] bg-white px-2.5 py-1 text-[0.65rem] font-semibold text-[#5a6b7d] hover:border-[#1a56db] hover:text-[#1a56db]"
-                  onClick={async () => {
-                    try {
-                      const data = await posApi.receipt(o.id);
-                      setReceipt({
-                        data: data as ReceiptData,
-                        change: 0,
-                        cashTendered: null,
-                      });
-                    } catch (e) {
-                      toast.error(
-                        e instanceof Error ? e.message : "Could not load bill",
-                      );
-                    }
-                  }}
-                >
-                  Reprint {o.orderNumber}
-                </button>
-              ))}
-            </div>
-          ) : null}
-
           <div className="space-y-1.5 border-b border-[#e8edf4] px-4 py-3">
             <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
               Customer
@@ -2208,7 +2176,7 @@ export default function RetailPosWorkstation({
                   <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
                     Order type
                   </Label>
-                  <select
+                  <Select
                     className="mt-1 flex h-10 w-full rounded-md border border-[#d9e0ea] bg-white px-3 text-sm text-[#0b1f33]"
                     value={orderType}
                     onChange={(e) => setOrderType(e.target.value)}
@@ -2223,7 +2191,7 @@ export default function RetailPosWorkstation({
                         {m.replaceAll("_", " ")}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </div>
               ) : null}
               {hasCapability("TABLE") ? (
@@ -2232,7 +2200,7 @@ export default function RetailPosWorkstation({
                     <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
                       Area / floor
                     </Label>
-                    <select
+                    <Select
                       className="mt-1 flex h-10 w-full rounded-md border border-[#d9e0ea] bg-white px-3 text-sm text-[#0b1f33]"
                       value={floorFilter}
                       onChange={(e) => setFloorFilter(e.target.value)}
@@ -2243,13 +2211,13 @@ export default function RetailPosWorkstation({
                           {f.name}
                         </option>
                       ))}
-                    </select>
+                    </Select>
                   </div>
                   <div className="field-shell">
                     <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
                       Table
                     </Label>
-                    <select
+                    <Select
                       className="mt-1 flex h-10 w-full rounded-md border border-[#d9e0ea] bg-white px-3 text-sm text-[#0b1f33]"
                       value={resourceId}
                       onChange={(e) => setResourceId(e.target.value)}
@@ -2267,7 +2235,7 @@ export default function RetailPosWorkstation({
                             {t.status !== "available" ? ` · ${t.status}` : ""}
                           </option>
                         ))}
-                    </select>
+                    </Select>
                     {areaCategoryIds.length ||
                     selectedDiningFloor?.taxRatePercent != null ||
                     selectedDiningFloor?.serviceChargePercent != null ? (
@@ -2291,7 +2259,7 @@ export default function RetailPosWorkstation({
                   <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
                     Resource
                   </Label>
-                  <select
+                  <Select
                     className="mt-1 flex h-10 w-full rounded-md border border-[#d9e0ea] bg-white px-3 text-sm text-[#0b1f33]"
                     value={resourceId}
                     onChange={(e) => setResourceId(e.target.value)}
@@ -2302,7 +2270,7 @@ export default function RetailPosWorkstation({
                         {r.name} · {r.status}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </div>
               ) : null}
               {foodFulfillment && hasCapability("TABLE") ? (
@@ -2507,7 +2475,7 @@ export default function RetailPosWorkstation({
                   {(l.requiresVariant || l.requiresBatch || l.requiresSerial) && (
                     <div className="mt-2 grid gap-1">
                       {l.requiresVariant && (
-                        <select
+                        <Select
                           className="h-8 rounded-md border border-[#d6deea] bg-white px-2 text-xs text-[#0b1f33]"
                           value={l.variantId ?? ""}
                           onChange={(e) =>
@@ -2526,10 +2494,10 @@ export default function RetailPosWorkstation({
                               {v.label || v.skuCode}
                             </option>
                           ))}
-                        </select>
+                        </Select>
                       )}
                       {l.requiresBatch && (
-                        <select
+                        <Select
                           className="h-8 rounded-md border border-[#d6deea] bg-white px-2 text-xs text-[#0b1f33]"
                           value={l.batchId ?? ""}
                           onChange={(e) =>
@@ -2548,7 +2516,7 @@ export default function RetailPosWorkstation({
                               {b.batchCode} ({formatQtyWithUnit(b.qtyOnHand, l.sellUnit)})
                             </option>
                           ))}
-                        </select>
+                        </Select>
                       )}
                       {l.requiresSerial && (
                         <Input

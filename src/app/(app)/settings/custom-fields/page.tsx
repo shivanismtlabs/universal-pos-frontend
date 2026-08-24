@@ -4,9 +4,11 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { customFieldsApi, type CustomFieldEntityKey } from "@/lib/api";
+import { CUSTOM_FIELD_QUERY } from "@/lib/product-form-fields";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { PageHeader } from "@/components/page-header";
 
 const ENTITIES: Array<{
@@ -88,6 +90,7 @@ export default function CustomFieldsSettingsPage() {
   const defsQ = useQuery({
     queryKey: ["custom-field-definitions", entity],
     queryFn: () => customFieldsApi.listDefinitions(entity),
+    ...CUSTOM_FIELD_QUERY,
   });
 
   const createDef = useMutation({
@@ -124,8 +127,14 @@ export default function CustomFieldsSettingsPage() {
       setLabel("");
       setOptionsCsv("");
       await Promise.all([
-        qc.invalidateQueries({ queryKey: ["custom-field-definitions"] }),
-        qc.invalidateQueries({ queryKey: ["custom-fields"] }),
+        qc.invalidateQueries({
+          queryKey: ["custom-field-definitions"],
+          refetchType: "all",
+        }),
+        qc.invalidateQueries({
+          queryKey: ["custom-fields"],
+          refetchType: "all",
+        }),
       ]);
     },
     onError: (e) => {
@@ -160,7 +169,7 @@ export default function CustomFieldsSettingsPage() {
         <div className="grid gap-3 md:grid-cols-2">
           <div>
             <Label>Entity</Label>
-            <select
+            <Select
               className="mt-1 h-10 w-full rounded-lg border border-[#e5e7eb] bg-white px-3 text-sm"
               value={entity}
               onChange={(e) =>
@@ -172,11 +181,11 @@ export default function CustomFieldsSettingsPage() {
                   {it.label}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
           <div>
             <Label>Field type</Label>
-            <select
+            <Select
               className="mt-1 h-10 w-full rounded-lg border border-[#e5e7eb] bg-white px-3 text-sm"
               value={dataType}
               onChange={(e) => setDataType(e.target.value)}
@@ -186,7 +195,7 @@ export default function CustomFieldsSettingsPage() {
                   {it}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
           <div>
             <Label>Field key</Label>

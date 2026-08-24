@@ -26,6 +26,7 @@ import { ItemsImportDialog } from "@/components/items-import-dialog";
 import { EntityRowActions } from "@/components/entity-row-actions";
 import { PageHeader, PageSkeleton } from "@/components/page-header";
 import { FieldError } from "@/components/ui/form";
+import { Select } from "@/components/ui/select";
 import { TablePager } from "@/components/table-pager";
 import { pagerFromMeta } from "@/lib/use-paged-list";
 import {
@@ -154,7 +155,7 @@ function InventoryPageInner() {
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <Label>Location *</Label>
-            <select
+            <Select
               className={fieldSelect}
               value={activeLoc}
               onChange={(e) => {
@@ -168,7 +169,7 @@ function InventoryPageInner() {
                   {l.type ? ` (${l.type})` : ""}
                 </option>
               ))}
-            </select>
+            </Select>
             {locations.data && locations.data.length > 1 ? (
               <p className="mt-1 text-[0.72rem] text-[#6b7280]">
                 Stock is per location — switch here if this store looks empty.
@@ -633,7 +634,7 @@ function MoveTab({
       {!locationId ? <FieldError message="Select a location" /> : null}
       <div>
         <Label>Item *</Label>
-        <select
+        <Select
           className={fieldSelect}
           value={stockLevelId}
           onChange={(e) => {
@@ -647,7 +648,7 @@ function MoveTab({
               {i.name} ({i.sku}) — {i.qtyOnHand}
             </option>
           ))}
-        </select>
+        </Select>
         <FieldError message={fieldErrors.stockLevelId} />
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -791,7 +792,7 @@ function DamageTab({
           </p>
           <div>
             <Label>Item *</Label>
-            <select
+            <Select
               className={fieldSelect}
               value={stockLevelId}
               onChange={(e) => {
@@ -805,7 +806,7 @@ function DamageTab({
                   {i.name} — sellable {i.qtyOnHand} {i.sellUnit}
                 </option>
               ))}
-            </select>
+            </Select>
             <FieldError message={fieldErrors.stockLevelId} />
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -1198,7 +1199,7 @@ function LedgerTab({ locationId }: { locationId: string }) {
         </div>
         <div>
           <Label>Movement type</Label>
-          <select
+          <Select
             className={fieldSelect}
             value={type}
             onChange={(e) => setType(e.target.value)}
@@ -1209,7 +1210,7 @@ function LedgerTab({ locationId }: { locationId: string }) {
                 {label}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
       </div>
       <div className="overflow-x-auto rounded-lg border border-[#e5e7eb]">
@@ -1348,7 +1349,7 @@ function WarehousesTab({ canWrite }: { canWrite: boolean }) {
             </div>
             <div>
               <Label>Type</Label>
-              <select
+              <Select
                 className={fieldSelect}
                 value={type}
                 onChange={(e) => setType(e.target.value)}
@@ -1358,7 +1359,7 @@ function WarehousesTab({ canWrite }: { canWrite: boolean }) {
                 <option value="warehouse">Warehouse</option>
                 <option value="office">Office</option>
                 <option value="other">Other</option>
-              </select>
+              </Select>
             </div>
           </div>
           <div>

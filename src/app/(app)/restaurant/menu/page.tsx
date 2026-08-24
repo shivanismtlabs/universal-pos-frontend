@@ -15,6 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { ModalFrame } from "@/components/modal-frame";
 import { ProductThumb } from "@/components/product-thumb";
 import { productKindLabel } from "@/lib/product-kind";
@@ -414,7 +415,7 @@ function MenuForm({
       <div className="grid grid-cols-2 gap-2">
         <div>
           <Label>Channel</Label>
-          <select
+          <Select
             className={cn(diningSelectClass, "mt-1")}
             value={m.channel}
             onChange={(e) =>
@@ -424,11 +425,11 @@ function MenuForm({
             <option value="all">POS + QR</option>
             <option value="pos">POS only</option>
             <option value="qr">QR / online only</option>
-          </select>
+          </Select>
         </div>
         <div>
           <Label>Outlet</Label>
-          <select
+          <Select
             className={cn(diningSelectClass, "mt-1")}
             value={m.locationId ?? ""}
             onChange={(e) => setM({ ...m, locationId: e.target.value || null })}
@@ -439,7 +440,7 @@ function MenuForm({
                 {l.name}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
       </div>
       <label className="flex items-center gap-2 text-sm">
@@ -598,7 +599,7 @@ function AddonsModal({
         {groups.length ? (
           <div className="grid gap-2">
             <Label>New option</Label>
-            <select
+            <Select
               className={diningSelectClass}
               value={groupId}
               onChange={(e) => setGroupId(e.target.value)}
@@ -608,7 +609,7 @@ function AddonsModal({
                   {g.name}
                 </option>
               ))}
-            </select>
+            </Select>
             <div className="flex gap-2">
               <Input
                 placeholder="Name"
@@ -713,7 +714,7 @@ function ItemAvailModal({
         <div className="mt-4 grid gap-2">
           <Label>Attach add-on group</Label>
           <div className="flex gap-2">
-            <select
+            <Select
               className={cn(diningSelectClass, "flex-1")}
               value={groupId}
               onChange={(e) => setGroupId(e.target.value)}
@@ -723,7 +724,7 @@ function ItemAvailModal({
                   {g.name}
                 </option>
               ))}
-            </select>
+            </Select>
             <Button
               type="button"
               variant="secondary"

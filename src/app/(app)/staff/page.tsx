@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FieldError } from "@/components/ui/form";
+import { Select } from "@/components/ui/select";
 import { EMPTY_ROLES, useAuthStore } from "@/lib/auth-store";
 import {
   inviteStaffSchema,
@@ -445,7 +446,7 @@ export default function StaffPage() {
               </div>
               <div>
                 <Label>Role</Label>
-                <select
+                <Select
                   className="mt-1.5 select-field w-full"
                   {...form.register("roleCode")}
                 >
@@ -454,7 +455,7 @@ export default function StaffPage() {
                       {r.label}
                     </option>
                   ))}
-                </select>
+                </Select>
                 <FieldError message={errors.roleCode?.message} />
                 <p className="mt-1 text-[0.7rem] text-[#6b7280]">
                   {allRoleOptions.find(
@@ -464,7 +465,7 @@ export default function StaffPage() {
               </div>
               <div>
                 <Label>Location / store</Label>
-                <select
+                <Select
                   className="mt-1.5 select-field w-full"
                   {...form.register("primaryStoreId")}
                 >
@@ -474,7 +475,7 @@ export default function StaffPage() {
                       {s.name}
                     </option>
                   ))}
-                </select>
+                </Select>
               </div>
               <Button
                 type="submit"

@@ -9,6 +9,7 @@ import { useBootstrap } from "@/lib/bootstrap";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { PageHeader } from "@/components/page-header";
 import { TablePager } from "@/components/table-pager";
 import { cn } from "@/lib/utils";
@@ -197,7 +198,7 @@ export default function ResourcesPage() {
             </div>
             <div>
               <Label>Type</Label>
-              <select
+              <Select
                 className={cn("mt-1", fieldSelect)}
                 value={type}
                 onChange={(e) => setType(e.target.value)}
@@ -207,7 +208,7 @@ export default function ResourcesPage() {
                     {t.label}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div>
               <Label>Capacity</Label>
@@ -245,7 +246,7 @@ export default function ResourcesPage() {
               placeholder="Search name or type"
             />
           </div>
-          <select
+          <Select
             className={cn("w-[10rem]", fieldSelect)}
             value={typeFilter}
             onChange={(e) => {
@@ -258,7 +259,7 @@ export default function ResourcesPage() {
                 {t.label}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
 
         {list.isLoading ? (
@@ -309,7 +310,7 @@ export default function ResourcesPage() {
                         </span>
                       </td>
                       <td className="px-3 py-2">
-                        <select
+                        <Select
                           className="h-8 max-w-[11rem] rounded-lg border border-[#e5e7eb] bg-white px-2 text-xs"
                           value={st.id}
                           disabled={updateStatus.isPending}
@@ -326,7 +327,7 @@ export default function ResourcesPage() {
                               {s.label}
                             </option>
                           ))}
-                        </select>
+                        </Select>
                       </td>
                     </tr>
                   );

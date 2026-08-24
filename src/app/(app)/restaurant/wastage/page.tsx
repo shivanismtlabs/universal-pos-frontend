@@ -9,6 +9,7 @@ import { DiningPanel, DiningShell, diningSelectClass } from "@/components/dining
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 
 const REASONS = [
   { id: "spoilage", label: "Spoilage" },
@@ -84,7 +85,7 @@ export default function WastagePage() {
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <div>
           <Label>Location</Label>
-          <select
+          <Select
             className={`${diningSelectClass} mt-1`}
             value={locationId}
             onChange={(e) => setLocationId(e.target.value)}
@@ -95,11 +96,11 @@ export default function WastagePage() {
                 {l.name}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
         <div>
           <Label>Item</Label>
-            <select
+            <Select
               className={`${diningSelectClass} mt-1`}
               value={productId}
             onChange={(e) => setProductId(e.target.value)}
@@ -110,7 +111,7 @@ export default function WastagePage() {
                 {p.name} ({p.skuCode})
               </option>
             ))}
-          </select>
+          </Select>
         </div>
         <div>
           <Label>Qty</Label>
@@ -118,7 +119,7 @@ export default function WastagePage() {
         </div>
         <div>
           <Label>Reason</Label>
-            <select
+            <Select
               className={`${diningSelectClass} mt-1`}
               value={reason}
             onChange={(e) => setReason(e.target.value)}
@@ -128,7 +129,7 @@ export default function WastagePage() {
                 {r.label}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
         <div className="sm:col-span-2 lg:col-span-1">
           <Label>Notes</Label>

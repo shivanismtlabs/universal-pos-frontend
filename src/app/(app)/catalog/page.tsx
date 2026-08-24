@@ -32,6 +32,7 @@ import { ProductThumb } from "@/components/product-thumb";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { catalogStockOnHandLabel, productKindLabel } from "@/lib/product-kind";
 import { FieldError } from "@/components/ui/form";
+import { Select } from "@/components/ui/select";
 import { useAuthStore } from "@/lib/auth-store";
 import { useBranchStore } from "@/lib/branch-store";
 import {
@@ -333,7 +334,7 @@ function ProductsPanel() {
                     );
                   })}
                 </div>
-        <select
+        <Select
           className="h-9 rounded-md border border-[#dce3ec] bg-white px-2 text-sm"
           value={brandId}
           onChange={(e) => setBrandId(e.target.value)}
@@ -344,8 +345,8 @@ function ProductsPanel() {
               {b.name}
             </option>
           ))}
-        </select>
-        <select
+        </Select>
+        <Select
           className="h-9 rounded-md border border-[#dce3ec] bg-white px-2 text-sm"
           value={kind}
           onChange={(e) => setKind(e.target.value as CatalogProductKind | "")}
@@ -355,7 +356,7 @@ function ProductsPanel() {
               {k.label}
             </option>
           ))}
-        </select>
+        </Select>
         <Button
           type="button"
           variant="secondary"
@@ -948,7 +949,7 @@ function CategoriesPanel() {
         />
         <FieldError message={fieldErrors.name} />
         <Label>Parent (optional)</Label>
-                  <select
+                  <Select
           className="h-9 w-full rounded-md border border-[#dce3ec] px-2 text-sm"
           value={parentId}
           onChange={(e) => setParentId(e.target.value)}
@@ -959,7 +960,7 @@ function CategoriesPanel() {
                         {c.name}
                       </option>
                     ))}
-                  </select>
+                  </Select>
         <Button
           disabled={create.isPending}
           onClick={() => create.mutate()}

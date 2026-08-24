@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FieldError } from "@/components/ui/form";
+import { Select } from "@/components/ui/select";
 import { PageHeader } from "@/components/page-header";
 import { mediaUrl } from "@/lib/utils";
 import { prepareProductImageDataUrl } from "@/lib/image-prepare";
@@ -782,7 +783,7 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
               </div>
               <div>
                 <Label>Business type *</Label>
-                <select
+                <Select
                 className="mt-1 w-full rounded-lg border border-[#e5e7eb] bg-white px-3 py-2 text-sm"
                 value={selectedBusinessType}
                 onChange={(e) => setSelectedBusinessType(e.target.value)}
@@ -797,7 +798,7 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
                       {bt.label}
                     </option>
                   ))}
-                </select>
+                </Select>
                 <p className="mt-1 text-[0.72rem] text-[#6b7280]">
                   Same setup template as when the shop was created. Changing type
                   reapplies that template’s modes &amp; capabilities.{" "}
@@ -808,7 +809,7 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
               <div>
                 <Label>Phone *</Label>
                 <div className="mt-1 flex gap-2">
-                  <select
+                  <Select
                     className="w-[7.25rem] rounded-lg border border-[#e5e7eb] bg-white px-2 py-2 text-sm"
                     value={profile.phoneCountryCode}
                     onChange={(e) =>
@@ -823,7 +824,7 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
                         {c.dial} {c.code}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                   <Input
                     className="flex-1"
                     value={profile.phone}
@@ -1037,7 +1038,7 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <Label>Fiscal year</Label>
-              <select
+              <Select
                 className="mt-1 w-full rounded-lg border border-[#e5e7eb] bg-white px-3 py-2 text-sm"
                 value={profile.fiscalYearStart}
                 onChange={(e) =>
@@ -1052,11 +1053,11 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
                     {o.label}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div>
               <Label>Base currency</Label>
-              <select
+              <Select
                 className="mt-1 w-full rounded-lg border border-[#e5e7eb] bg-white px-3 py-2 text-sm"
                 value={
                   CURRENCY_OPTIONS.includes(
@@ -1084,12 +1085,12 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
                     {c}
                   </option>
                 ))}
-              </select>
+              </Select>
               <FieldError message={brandErrors.currencyCode} />
             </div>
             <div>
               <Label>Time zone</Label>
-              <select
+              <Select
                 className="mt-1 w-full rounded-lg border border-[#e5e7eb] bg-white px-3 py-2 text-sm"
                 value={branding.timezone}
                 onChange={(e) =>
@@ -1106,12 +1107,12 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
                     {z.label}
                   </option>
                 ))}
-              </select>
+              </Select>
               <FieldError message={brandErrors.timezone} />
             </div>
             <div>
               <Label>Date format</Label>
-              <select
+              <Select
                 className="mt-1 w-full rounded-lg border border-[#e5e7eb] bg-white px-3 py-2 text-sm"
                 value={profile.dateFormat}
                 onChange={(e) =>
@@ -1128,11 +1129,11 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
                     {d.label}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div>
               <Label>Language</Label>
-              <select
+              <Select
                 className="mt-1 w-full rounded-lg border border-[#e5e7eb] bg-white px-3 py-2 text-sm"
                 value={branding.locale}
                 onChange={(e) =>
@@ -1147,7 +1148,7 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
                     {l.label}
                   </option>
                 ))}
-              </select>
+              </Select>
               <FieldError message={brandErrors.locale} />
             </div>
           </div>
@@ -1183,7 +1184,7 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
           </div>
           <div>
             <Label>Tax mode</Label>
-            <select
+            <Select
               className="mt-1 w-full rounded-lg border border-[#e5e7eb] bg-white px-3 py-2 text-sm"
               value={tax.taxMode}
               onChange={(e) =>
@@ -1194,7 +1195,7 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
               <option value="simple">Simple percentage (any country)</option>
               <option value="vat">VAT (EU / UK / UAE / AU)</option>
               <option value="none">No tax</option>
-            </select>
+            </Select>
             <FieldError message={taxErrors.taxMode} />
           </div>
           <div>
@@ -1455,7 +1456,7 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
                 value={reasonLabel}
                 onChange={(e) => setReasonLabel(e.target.value)}
               />
-              <select
+              <Select
                 className="h-10 rounded-lg border border-[#e4e9f0] bg-white px-3 text-sm"
                 value={reasonApplies}
                 onChange={(e) => setReasonApplies(e.target.value)}
@@ -1463,7 +1464,7 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
                 <option value="customer">Customer</option>
                 <option value="supplier">Supplier</option>
                 <option value="both">Both</option>
-              </select>
+              </Select>
               <Button
                 type="button"
                 disabled={

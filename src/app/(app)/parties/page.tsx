@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FieldError } from "@/components/ui/form";
+import { Select } from "@/components/ui/select";
 import { formatDate } from "@/lib/utils";
 
 type PartyMember = {
@@ -203,7 +204,7 @@ function PartiesDesk() {
             </div>
             <div>
               <Label>Primary customer</Label>
-              <select
+              <Select
                 className="mt-2 select-field"
                 {...form.register("primaryCustomerId")}
               >
@@ -213,7 +214,7 @@ function PartiesDesk() {
                     {c.fullName} ({c.phone})
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
             <Button type="submit" className="w-full" disabled={create.isPending}>
               {create.isPending ? "Saving…" : "Create group"}
@@ -260,7 +261,7 @@ function PartiesDesk() {
                 noValidate
               >
                 <Label>Add member</Label>
-                <select
+                <Select
                   className="select-field"
                   {...memberForm.register("customerId")}
                 >
@@ -270,7 +271,7 @@ function PartiesDesk() {
                       {c.fullName}
                     </option>
                   ))}
-                </select>
+                </Select>
                 <FieldError
                   message={memberForm.formState.errors.customerId?.message}
                 />

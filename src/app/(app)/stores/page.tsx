@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FieldError } from "@/components/ui/form";
+import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { useBranchStore } from "@/lib/branch-store";
 
@@ -331,7 +332,7 @@ export default function StoresPage() {
             </div>
             <div className="space-y-1">
               <Label>Type</Label>
-              <select
+              <Select
                 className="h-9 w-full rounded-md border border-[#d9e0ea] bg-white px-2 text-sm"
                 value={form.type}
                 onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))}
@@ -340,11 +341,11 @@ export default function StoresPage() {
                 <option value="branch">Branch</option>
                 <option value="warehouse">Warehouse</option>
                 <option value="other">Other</option>
-              </select>
+              </Select>
             </div>
             <div className="space-y-1">
               <Label>Parent location</Label>
-              <select
+              <Select
                 className="h-9 w-full rounded-md border border-[#d9e0ea] bg-white px-2 text-sm"
                 value={form.parentLocationId}
                 onChange={(e) =>
@@ -360,7 +361,7 @@ export default function StoresPage() {
                       {r.code ? ` (${r.code})` : ""}
                     </option>
                   ))}
-              </select>
+              </Select>
               <p className="text-[0.7rem] text-[#8a9bb0]">
                 Optional: this shop sits under another location (like HO). You
                 cannot pick a child as its own parent.
@@ -368,7 +369,7 @@ export default function StoresPage() {
             </div>
             <div className="space-y-1">
               <Label>Manager</Label>
-              <select
+              <Select
                 className="h-9 w-full rounded-md border border-[#d9e0ea] bg-white px-2 text-sm"
                 value={form.managerUserId}
                 onChange={(e) =>
@@ -381,7 +382,7 @@ export default function StoresPage() {
                     {m.fullName} ({m.email})
                   </option>
                 ))}
-              </select>
+              </Select>
               {canEdit ? (
                 <button
                   type="button"

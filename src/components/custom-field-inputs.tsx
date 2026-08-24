@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { MetaFieldDef } from "@/lib/business-config";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 
 const selectClass =
   "mt-1 h-10 w-full rounded-lg border border-[#e5e7eb] bg-white px-3 text-sm";
@@ -49,7 +50,7 @@ export function CustomFieldInputs({
                 Yes
               </label>
             ) : field.type === "select" && field.options?.length ? (
-              <select
+              <Select
                 className={selectClass}
                 value={value}
                 onChange={(e) => set(e.target.value)}
@@ -60,7 +61,7 @@ export function CustomFieldInputs({
                     {o.label}
                   </option>
                 ))}
-              </select>
+              </Select>
             ) : field.type === "textarea" ? (
               <textarea
                 className={textareaClass}

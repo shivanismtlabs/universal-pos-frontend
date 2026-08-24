@@ -4235,6 +4235,28 @@ export const customFieldsApi = {
       }>
     >(`/custom-fields/definitions${q}`, { token: token() });
   },
+  async listProductDefinitions() {
+    const unwrap = (raw: unknown): Array<{ entity?: string }> => {
+      if (Array.isArray(raw)) return raw;
+      if (raw && typeof raw === "object") {
+        const rec = raw as Record<string, unknown>;
+        for (const k of ["data", "items", "rows", "definitions"]) {
+          if (Array.isArray(rec[k]) && rec[k].length) {
+            return rec[k] as Array<{ entity?: string }>;
+          }
+        }
+      }
+      return [];
+    };
+    const isProduct = (entity: unknown) =>
+      String(entity ?? "").toLowerCase() === "product";
+    const scoped = unwrap(await customFieldsApi.listDefinitions("product"));
+    const product = scoped.filter((r) => !r.entity || isProduct(r.entity));
+    if (product.length) return product;
+    return unwrap(await customFieldsApi.listDefinitions()).filter((r) =>
+      isProduct(r.entity),
+    );
+  },
   createDefinition(body: {
     entity: CustomFieldEntityKey;
     fieldKey: string;

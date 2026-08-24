@@ -8,6 +8,7 @@ import { ApiError } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { PageHeader } from "@/components/page-header";
 
 export default function ShiftsPage() {
@@ -137,7 +138,7 @@ export default function ShiftsPage() {
           <div className="mt-3 space-y-2">
             <div>
               <Label>Staff</Label>
-              <select
+              <Select
                 className="mt-1 select-field w-full"
                 value={userId}
                 onChange={(e) => setUserId(e.target.value)}
@@ -148,11 +149,11 @@ export default function ShiftsPage() {
                     {u.fullName}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div>
               <Label>Shift</Label>
-              <select
+              <Select
                 className="mt-1 select-field w-full"
                 value={shiftId}
                 onChange={(e) => setShiftId(e.target.value)}
@@ -163,7 +164,7 @@ export default function ShiftsPage() {
                     {s.name} ({s.startTime}–{s.endTime})
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div>
               <Label>Date</Label>

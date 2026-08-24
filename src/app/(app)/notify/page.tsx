@@ -8,6 +8,7 @@ import { ApiError } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { formatDate, cn } from "@/lib/utils";
 
 type FormValues = {
@@ -241,7 +242,7 @@ export default function NotifyPage() {
           <div className="mt-5 space-y-4">
             <div>
               <Label>Customer</Label>
-              <select
+              <Select
                 className="mt-1.5 select-field"
                 {...form.register("customerId")}
               >
@@ -251,7 +252,7 @@ export default function NotifyPage() {
                     {c.fullName} · {c.phone}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
@@ -271,7 +272,7 @@ export default function NotifyPage() {
 
             <div>
               <Label>Template</Label>
-              <select
+              <Select
                 className="mt-1.5 select-field"
                 {...form.register("templateKey")}
               >
@@ -280,7 +281,7 @@ export default function NotifyPage() {
                     {t.label}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
 
             {form.watch("templateKey") === "custom" ? (

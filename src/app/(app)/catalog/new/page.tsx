@@ -1,12 +1,11 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { catalogApi, customFieldsApi, tenantsApi, type CatalogProductKind } from "@/lib/api";
-import { PageHeader } from "@/components/page-header";
 import { ApiError } from "@/lib/api/client";
 import { useBootstrap } from "@/lib/bootstrap";
 import { useBranchStore } from "@/lib/branch-store";
@@ -14,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FieldError } from "@/components/ui/form";
+import { Select } from "@/components/ui/select";
 import { BarcodeScanInput } from "@/components/barcode-scan-input";
 import { ProductBarcodePreview } from "@/components/product-barcode-preview";
 import {
@@ -27,34 +27,81 @@ import {
 } from "@/lib/validations";
 
 import { activeUnitOptions } from "@/lib/measure-units";
-import { customFieldDefsToMeta } from "@/lib/product-form-fields";
+import {
+  CUSTOM_FIELD_QUERY,
+  mergeProductFormFields,
+} from "@/lib/product-form-fields";
 import { CustomFieldsSection } from "@/components/custom-field-inputs";
+import { cn } from "@/lib/utils";
 
 const KINDS: { id: CatalogProductKind; label: string }[] = [
-  { id: "physical", label: "Physical" },
+  { id: "physical", label: "Goods" },
   { id: "service", label: "Service" },
   { id: "digital", label: "Digital" },
-  { id: "bundle", label: "Bundle / combo" },
+  { id: "bundle", label: "Combo" },
   { id: "rental", label: "Rental" },
 ];
 
 const fieldSelect =
-  "mt-1 w-full rounded-lg border border-[#e5e7eb] bg-white px-3 py-2 text-sm";
+  "mt-0 h-10 w-full rounded-lg border border-[#d9e0ea] bg-white px-3 text-sm text-[#0b1f33] outline-none focus:border-[#1a56db] focus:shadow-[0_0_0_3px_rgba(26,86,219,0.12)]";
 const textareaClass =
-  "mt-1 min-h-[72px] w-full rounded-lg border border-[#e5e7eb] bg-white px-3 py-2 text-sm";
+  "min-h-[72px] w-full rounded-lg border border-[#d9e0ea] bg-white px-3 py-2 text-sm outline-none focus:border-[#1a56db] focus:shadow-[0_0_0_3px_rgba(26,86,219,0.12)]";
+
+function ShopField({
+  label,
+  required,
+  children,
+  hint,
+}: {
+  label: string;
+  required?: boolean;
+  children: ReactNode;
+  hint?: ReactNode;
+}) {
+  return (
+    <div className="grid gap-2 sm:grid-cols-[148px_minmax(0,1fr)] sm:items-start">
+      <Label className="sm:pt-2.5">
+        {label}
+        {required ? " *" : ""}
+      </Label>
+      <div>
+        {children}
+        {hint}
+      </div>
+    </div>
+  );
+}
+
+function ShopSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="space-y-4 border-t border-[#eef1f4] py-6 first:border-t-0 first:pt-0">
+      <h3 className="text-[0.72rem] font-bold uppercase tracking-[0.08em] text-[#21263c]">
+        {title}
+      </h3>
+      <div className="space-y-3.5">{children}</div>
+    </section>
+  );
+}
 
 export default function NewCatalogProductPage() {
   const router = useRouter();
   const qc = useQueryClient();
   const imagePickerRef = useRef<ProductImagePickerHandle>(null);
-  const { data: boot } = useBootstrap();
+  const { data: boot, itemMetaFields } = useBootstrap();
   const customFieldsQ = useQuery({
     queryKey: ["custom-fields", "product"],
-    queryFn: () => customFieldsApi.listDefinitions("product"),
+    queryFn: () => customFieldsApi.listProductDefinitions(),
+    ...CUSTOM_FIELD_QUERY,
   });
   const productFormFields = useMemo(
-    () => customFieldDefsToMeta(customFieldsQ.data),
-    [customFieldsQ.data],
+    () => mergeProductFormFields(customFieldsQ.data, itemMetaFields),
+    [customFieldsQ.data, itemMetaFields],
   );
   const currentLocationId = useBranchStore((s) => s.currentLocationId);
   const defaultLocationId =
@@ -78,6 +125,7 @@ export default function NewCatalogProductPage() {
 
   /** Values for Settings → Custom fields (Product). */
   const [extraFields, setExtraFields] = useState<Record<string, string>>({});
+  const [showMore, setShowMore] = useState(false);
 
   const [form, setForm] = useState({
     name: "",
@@ -105,6 +153,7 @@ export default function NewCatalogProductPage() {
     canPurchase: true,
     availableInPos: true,
     openingQty: "1",
+    reorderPoint: "",
   });
 
   const applyKindDefaults = (kind: CatalogProductKind) => {
@@ -255,6 +304,13 @@ export default function NewCatalogProductPage() {
         openingQty: form.trackInventory
           ? Number(form.openingQty)
           : undefined,
+        reorderPoint: (() => {
+          if (!form.trackInventory) return undefined;
+          const n = Number(form.reorderPoint);
+          return form.reorderPoint.trim() !== "" && Number.isFinite(n)
+            ? n
+            : undefined;
+        })(),
         extraFields: (() => {
           const out: Record<string, unknown> = {};
           const rate = Number(form.taxRatePercent);
@@ -288,381 +344,490 @@ export default function NewCatalogProductPage() {
       toast.error(e instanceof ApiError ? e.message : e.message || "Save failed"),
   });
 
+  const unitSelect = (
+    <Select
+      className={fieldSelect}
+      value={form.unitOfMeasure}
+      onChange={(e) =>
+        setForm((f) => ({ ...f, unitOfMeasure: e.target.value }))
+      }
+    >
+      {unitOptions.some((u) => u.code === form.unitOfMeasure) ? null : (
+        <option value={form.unitOfMeasure}>{form.unitOfMeasure}</option>
+      )}
+      {unitOptions.map((u) => (
+        <option key={u.code} value={u.code}>
+          {u.name} ({u.code})
+        </option>
+      ))}
+    </Select>
+  );
+
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
-      <PageHeader
-        title="New Item"
-        subtitle="Name, price, codes, and extra fields you added in Settings → Custom fields"
-        action={
-          <Button variant="ghost" asChild>
-            <Link href="/catalog">Cancel</Link>
-          </Button>
-        }
-      />
-
-      <section className="space-y-5 rounded-2xl border border-[#e5e7eb] bg-white p-5">
-        <div className="space-y-3">
-            <div>
-              <Label>Name *</Label>
-              <Input
-                className="mt-1"
-                value={form.name}
-                onChange={(e) => {
-                  clearFieldError("name");
-                  setForm((f) => ({ ...f, name: e.target.value }));
-                }}
-                placeholder="Item name"
-              />
-              <FieldError message={fieldErrors.name} />
-            </div>
-            <div>
-              <Label>Type *</Label>
-              <select
-                className={fieldSelect}
-                value={form.kind}
-                onChange={(e) =>
-                  applyKindDefaults(e.target.value as CatalogProductKind)
-                }
-              >
-                {KINDS.map((k) => (
-                  <option key={k.id} value={k.id}>
-                    {k.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <Label>Category</Label>
-              <select
-                className={fieldSelect}
-                value={form.categoryId}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, categoryId: e.target.value }))
-                }
-              >
-                <option value="">Select a category</option>
-                {(cats.data ?? []).map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.parent ? `${c.parent.name} / ` : ""}
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <Label>Brand</Label>
-              <select
-                className={fieldSelect}
-                value={form.brandId}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, brandId: e.target.value }))
-                }
-              >
-                <option value="">Select or add brand</option>
-                {(brands.data ?? []).map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <Label>Short name</Label>
-              <Input
-                className="mt-1"
-                value={form.shortName}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, shortName: e.target.value }))
-                }
-              />
-            </div>
-            <div>
-              <Label>Status</Label>
-              <select
-                className={fieldSelect}
-                value={form.status}
-                onChange={(e) =>
-                  setForm((f) => ({
-                    ...f,
-                    status: e.target.value as typeof f.status,
-                  }))
-                }
-              >
-                <option value="active">Active</option>
-                <option value="draft">Draft</option>
-                <option value="inactive">Inactive</option>
-              </select>
-            </div>
-        </div>
-
-        <ProductImagePicker
-          ref={imagePickerRef}
-          variant="item"
-          label="Upload item photos"
-          productName={form.name}
-          productHint={form.shortDescription || form.description}
-        />
-
-        <div>
-          <Label>Short description</Label>
-          <Input
-            className="mt-1"
-            value={form.shortDescription}
-            onChange={(e) =>
-              setForm((f) => ({ ...f, shortDescription: e.target.value }))
-            }
-          />
-        </div>
-        <div>
-          <Label>Full description</Label>
-          <textarea
-            className={textareaClass}
-            value={form.description}
-            onChange={(e) =>
-              setForm((f) => ({ ...f, description: e.target.value }))
-            }
-          />
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <Label>Unit *</Label>
-            <select
-              className={fieldSelect}
-              value={form.unitOfMeasure}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, unitOfMeasure: e.target.value }))
-              }
-            >
-              {unitOptions.some((u) => u.code === form.unitOfMeasure) ? null : (
-                <option value={form.unitOfMeasure}>{form.unitOfMeasure}</option>
-              )}
-              {unitOptions.map((u) => (
-                <option key={u.code} value={u.code}>
-                  {u.name} ({u.code})
-                </option>
-              ))}
-            </select>
-            <p className="mt-1 text-xs text-[#6b7280]">
-              Change the list in{" "}
-              <Link href="/settings/units" className="text-[#1a56db]">
-                Settings → Units
-              </Link>
+    <div className="mx-auto max-w-5xl pb-10">
+      <div className="overflow-hidden rounded-md border border-[#d9e0ea] bg-white shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
+        <div className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 border-b border-[#eef1f4] bg-white px-4 py-3 sm:px-6">
+          <div className="min-w-0">
+            <h1 className="text-[1.15rem] font-semibold tracking-tight text-[#21263c]">
+              New Item
+            </h1>
+            <p className="mt-0.5 text-[0.75rem] text-[#6b7c93]">
+              Scan a barcode, enter name and rate, then save — same flow as the
+              shop counter.
             </p>
           </div>
-          <div>
-            <Label>SKU</Label>
-            <div className="mt-1 flex">
-              <Input
-                className="rounded-r-none"
-                value={form.skuCode}
-                onChange={(e) => {
-                  clearFieldError("skuCode");
-                  setForm((f) => ({ ...f, skuCode: e.target.value }));
-                }}
-                placeholder="Type or generate"
-              />
-              <Button
-                type="button"
-                variant="secondary"
-                className="h-10 shrink-0 rounded-l-none border-l-0"
-                onClick={() => genSku.mutate()}
-              >
-                Generate
-              </Button>
-            </div>
-            <FieldError message={fieldErrors.skuCode} />
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" size="sm" asChild>
+              <Link href="/catalog">Cancel</Link>
+            </Button>
+            <Button
+              size="sm"
+              disabled={!form.name.trim() || save.isPending}
+              onClick={() => save.mutate()}
+            >
+              {save.isPending ? "Saving…" : "Save"}
+            </Button>
           </div>
-          <div className="sm:col-span-2">
-            <Label>Internal code</Label>
-            <Input
-              className="mt-1"
-              value={form.internalCode}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, internalCode: e.target.value }))
-              }
-            />
-          </div>
-          <div className="sm:col-span-2">
-            <Label>Barcode</Label>
-            <div className="mt-1 flex gap-2">
-              <div className="min-w-0 flex-1">
-                <BarcodeScanInput
-                  value={form.barcode}
-                  onChange={(barcode) => setForm((f) => ({ ...f, barcode }))}
-                  onScan={(barcode) => {
-                    setForm((f) => ({ ...f, barcode }));
-                    toast.success("Barcode captured");
-                  }}
-                  label=""
-                  placeholder="Scan, type, or leave empty"
-                  autoSubmitWedge
-                  showSubmitButton={false}
-                  showHint={false}
-                  className="space-y-0"
-                />
-              </div>
-              <Button
-                type="button"
-                variant="secondary"
-                className="shrink-0"
-                disabled={genBarcode.isPending}
-                onClick={() => genBarcode.mutate()}
-              >
-                {genBarcode.isPending ? "..." : "Generate"}
-              </Button>
-            </div>
-            {barcodeError ? (
-              <p className="mt-1 text-xs text-rose-600">{barcodeError}</p>
-            ) : (
-              <p className="mt-1 text-[0.7rem] leading-snug text-[#6b7280]">
-                Code 128 Â· USB scanner works in this field Â· empty = auto on
-                save
-              </p>
-            )}
-            <ProductBarcodePreview
-              className="mt-3 max-w-xs"
-              value={form.barcode}
-              barcodeType={form.barcodeType}
-              productName={form.name || undefined}
-              sku={form.skuCode || undefined}
-              showPrint
-            />
-          </div>
-          <div>
-            <Label>Selling price (Rate)</Label>
-            <Input
-              className="mt-1"
-              type="number"
-              min={0}
-              step="0.01"
-              value={form.basePrice}
-              onChange={(e) => {
-                clearFieldError("basePrice");
-                setForm((f) => ({ ...f, basePrice: e.target.value }));
-              }}
-            />
-            <FieldError message={fieldErrors.basePrice} />
-          </div>
-          <div>
-            <Label>Cost price</Label>
-            <Input
-              className="mt-1"
-              type="number"
-              min={0}
-              step="0.01"
-              value={form.costPrice}
-              onChange={(e) => {
-                clearFieldError("costPrice");
-                setForm((f) => ({ ...f, costPrice: e.target.value }));
-              }}
-            />
-            <FieldError message={fieldErrors.costPrice} />
-          </div>
-          <div>
-            <Label>MRP / list price</Label>
-            <Input
-              className="mt-1"
-              type="number"
-              min={0}
-              step="0.01"
-              value={form.mrp}
-              onChange={(e) => {
-                clearFieldError("mrp");
-                setForm((f) => ({ ...f, mrp: e.target.value }));
-              }}
-            />
-            <FieldError message={fieldErrors.mrp} />
-          </div>
-          <div>
-            <Label>Tax rate %</Label>
-            <Input
-              className="mt-1"
-              type="number"
-              min={0}
-              max={40}
-              step="0.01"
-              value={form.taxRatePercent}
-              onChange={(e) => {
-                clearFieldError("taxRatePercent");
-                setForm((f) => ({ ...f, taxRatePercent: e.target.value }));
-              }}
-              placeholder="e.g. 5 or 18"
-            />
-            <FieldError message={fieldErrors.taxRatePercent} />
-          </div>
-          <div>
-            <Label>Tax code / HSN / SAC</Label>
-            <Input
-              className="mt-1"
-              value={form.taxCode}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, taxCode: e.target.value }))
-              }
-              placeholder="e.g. GST18 or HSN"
-            />
-          </div>
-          {form.trackInventory ? (
-            <div>
-              <Label>Opening qty (default location)</Label>
-              <Input
-                className="mt-1"
-                type="number"
-                min={1}
-                step={1}
-                value={form.openingQty}
-                onChange={(e) => {
-                  clearFieldError("openingQty");
-                  setForm((f) => ({ ...f, openingQty: e.target.value }));
-                }}
-              />
-              <FieldError message={fieldErrors.openingQty} />
-            </div>
-          ) : null}
         </div>
 
-        <div className="grid gap-2 sm:grid-cols-2">
-          {(
-            [
-              ["trackInventory", "Track inventory"],
-              ["trackSerial", "Serial number tracking"],
-              ["trackBatch", "Batch & expiry"],
-              ["canSell", "Can sell"],
-              ["canPurchase", "Can purchase"],
-              ["availableInPos", "Available in POS"],
-            ] as const
-          ).map(([key, label]) => (
-            <label key={key} className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                className="accent-[#1a56db]"
-                checked={form[key]}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, [key]: e.target.checked }))
+        <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_300px]">
+          <div className="divide-y divide-[#eef1f4] px-4 py-5 sm:px-6">
+            <ShopSection title="At the counter">
+              <ShopField
+                label="Barcode"
+                hint={
+                  barcodeError ? (
+                    <p className="mt-1 text-xs text-rose-600">{barcodeError}</p>
+                  ) : (
+                    <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+                      USB scanner works here. Leave empty to auto-assign on
+                      save.
+                    </p>
+                  )
                 }
-              />
-              {label}
-            </label>
-          ))}
+              >
+                <div className="flex gap-2">
+                  <div className="min-w-0 flex-1">
+                    <BarcodeScanInput
+                      value={form.barcode}
+                      onChange={(barcode) =>
+                        setForm((f) => ({ ...f, barcode }))
+                      }
+                      onScan={(barcode) => {
+                        setForm((f) => ({ ...f, barcode }));
+                        toast.success("Barcode captured");
+                      }}
+                      label=""
+                      placeholder="Scan or type barcode"
+                      autoSubmitWedge
+                      showSubmitButton={false}
+                      showHint={false}
+                      className="space-y-0"
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="shrink-0"
+                    disabled={genBarcode.isPending}
+                    onClick={() => genBarcode.mutate()}
+                  >
+                    {genBarcode.isPending ? "…" : "Generate"}
+                  </Button>
+                </div>
+              </ShopField>
+
+              <ShopField
+                label="Name"
+                required
+                hint={<FieldError message={fieldErrors.name} />}
+              >
+                <Input
+                  autoFocus
+                  placeholder="What you sell — e.g. Dairy milk 55g"
+                  value={form.name}
+                  onChange={(e) => {
+                    clearFieldError("name");
+                    setForm((f) => ({ ...f, name: e.target.value }));
+                  }}
+                />
+              </ShopField>
+
+              <ShopField label="Type" required>
+                <div className="flex flex-wrap gap-2">
+                  {KINDS.map((k) => (
+                    <button
+                      key={k.id}
+                      type="button"
+                      onClick={() => applyKindDefaults(k.id)}
+                      className={cn(
+                        "rounded-md border px-3 py-1.5 text-sm font-medium transition",
+                        form.kind === k.id
+                          ? "border-[#1a56db] bg-[#e8eefb] text-[#1a56db]"
+                          : "border-[#d9e0ea] bg-white text-[#5a6b7d]",
+                      )}
+                    >
+                      {k.label}
+                    </button>
+                  ))}
+                </div>
+              </ShopField>
+
+              <ShopField label="Category">
+                <Select
+                  className={fieldSelect}
+                  value={form.categoryId}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, categoryId: e.target.value }))
+                  }
+                >
+                  <option value="">Select a category</option>
+                  {(cats.data ?? []).map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.parent ? `${c.parent.name} / ` : ""}
+                      {c.name}
+                    </option>
+                  ))}
+                </Select>
+              </ShopField>
+
+              <ShopField
+                label="Unit"
+                required
+                hint={
+                  <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+                    pcs, kg, litre…{" "}
+                    <Link href="/settings/units" className="text-[#1a56db]">
+                      Settings → Units
+                    </Link>
+                  </p>
+                }
+              >
+                {unitSelect}
+              </ShopField>
+
+              <ShopField
+                label="Rate"
+                required
+                hint={
+                  fieldErrors.basePrice ? (
+                    <FieldError message={fieldErrors.basePrice} />
+                  ) : (
+                    <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+                      Selling price per {form.unitOfMeasure || "unit"}
+                    </p>
+                  )
+                }
+              >
+                <Input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  placeholder="0.00"
+                  value={form.basePrice}
+                  onChange={(e) => {
+                    clearFieldError("basePrice");
+                    setForm((f) => ({ ...f, basePrice: e.target.value }));
+                  }}
+                />
+              </ShopField>
+
+              {form.trackInventory ? (
+                <ShopField
+                  label="Stock on Hand"
+                  hint={
+                    fieldErrors.openingQty ? (
+                      <FieldError message={fieldErrors.openingQty} />
+                    ) : (
+                      <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+                        Opening qty at this location
+                      </p>
+                    )
+                  }
+                >
+                  <Input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={form.openingQty}
+                    onChange={(e) => {
+                      clearFieldError("openingQty");
+                      setForm((f) => ({ ...f, openingQty: e.target.value }));
+                    }}
+                  />
+                </ShopField>
+              ) : null}
+
+              {form.trackInventory ? (
+                <ShopField
+                  label="Reorder Point"
+                  hint={
+                    <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+                      Alert when stock falls to this qty (optional)
+                    </p>
+                  }
+                >
+                  <Input
+                    type="number"
+                    min={0}
+                    step={1}
+                    placeholder="e.g. 5"
+                    value={form.reorderPoint}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, reorderPoint: e.target.value }))
+                    }
+                  />
+                </ShopField>
+              ) : null}
+            </ShopSection>
+
+            <ShopSection title="Pricing & tax">
+              <ShopField
+                label="Cost"
+                hint={<FieldError message={fieldErrors.costPrice} />}
+              >
+                <Input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  placeholder="What you paid"
+                  value={form.costPrice}
+                  onChange={(e) => {
+                    clearFieldError("costPrice");
+                    setForm((f) => ({ ...f, costPrice: e.target.value }));
+                  }}
+                />
+              </ShopField>
+              <ShopField
+                label="MRP"
+                hint={<FieldError message={fieldErrors.mrp} />}
+              >
+                <Input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  placeholder="Printed price"
+                  value={form.mrp}
+                  onChange={(e) => {
+                    clearFieldError("mrp");
+                    setForm((f) => ({ ...f, mrp: e.target.value }));
+                  }}
+                />
+              </ShopField>
+              <ShopField
+                label="Tax %"
+                hint={<FieldError message={fieldErrors.taxRatePercent} />}
+              >
+                <Input
+                  type="number"
+                  min={0}
+                  max={40}
+                  step="0.01"
+                  placeholder="5 or 18"
+                  value={form.taxRatePercent}
+                  onChange={(e) => {
+                    clearFieldError("taxRatePercent");
+                    setForm((f) => ({
+                      ...f,
+                      taxRatePercent: e.target.value,
+                    }));
+                  }}
+                />
+              </ShopField>
+              <ShopField label="HSN / SAC">
+                <Input
+                  placeholder="e.g. GST18 or HSN"
+                  value={form.taxCode}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, taxCode: e.target.value }))
+                  }
+                />
+              </ShopField>
+            </ShopSection>
+
+            <ShopSection title="SKU & labels">
+              <ShopField
+                label="SKU"
+                hint={<FieldError message={fieldErrors.skuCode} />}
+              >
+                <div className="flex">
+                  <Input
+                    className="rounded-r-none font-mono uppercase"
+                    placeholder="Leave empty to auto-create"
+                    value={form.skuCode}
+                    onChange={(e) => {
+                      clearFieldError("skuCode");
+                      setForm((f) => ({ ...f, skuCode: e.target.value }));
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="h-10 shrink-0 rounded-l-none border-l-0"
+                    onClick={() => genSku.mutate()}
+                  >
+                    Generate
+                  </Button>
+                </div>
+              </ShopField>
+              {form.barcode ? (
+                <ShopField label="Label">
+                  <ProductBarcodePreview
+                    className="max-w-xs"
+                    value={form.barcode}
+                    barcodeType={form.barcodeType}
+                    productName={form.name || undefined}
+                    sku={form.skuCode || undefined}
+                    showPrint
+                  />
+                </ShopField>
+              ) : null}
+            </ShopSection>
+
+            <ShopSection title="Inventory tracking">
+              <div className="grid gap-2 sm:grid-cols-2">
+                {(
+                  [
+                    ["trackInventory", "Track inventory"],
+                    ["trackSerial", "Serial numbers"],
+                    ["trackBatch", "Batch & expiry"],
+                    ["canSell", "Can sell"],
+                    ["canPurchase", "Can purchase"],
+                    ["availableInPos", "Show on counter"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <label
+                    key={key}
+                    className="flex items-center gap-2 text-sm text-[#0b1f33]"
+                  >
+                    <input
+                      type="checkbox"
+                      className="accent-[#1a56db]"
+                      checked={form[key]}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, [key]: e.target.checked }))
+                      }
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </ShopSection>
+
+            <CustomFieldsSection
+              hint="These boxes come from Settings → Custom fields (choose Product). They save with the item."
+              fields={productFormFields}
+              loading={customFieldsQ.isLoading}
+              values={extraFields}
+              onChange={(key, value) =>
+                setExtraFields((prev) => ({ ...prev, [key]: value }))
+              }
+            />
+
+            <div className="pt-5">
+              <button
+                type="button"
+                className="text-sm font-semibold text-[#1a56db] hover:underline"
+                onClick={() => setShowMore((v) => !v)}
+              >
+                {showMore ? "Hide extra details" : "More details (optional)"}
+              </button>
+              {showMore ? (
+                <div className="mt-4 space-y-3.5">
+                  <ShopField label="Brand">
+                    <Select
+                      className={fieldSelect}
+                      value={form.brandId}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, brandId: e.target.value }))
+                      }
+                    >
+                      <option value="">None</option>
+                      {(brands.data ?? []).map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </ShopField>
+                  <ShopField label="Short name">
+                    <Input
+                      placeholder="Receipt / KOT short name"
+                      value={form.shortName}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, shortName: e.target.value }))
+                      }
+                    />
+                  </ShopField>
+                  <ShopField label="Internal code">
+                    <Input
+                      value={form.internalCode}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          internalCode: e.target.value,
+                        }))
+                      }
+                    />
+                  </ShopField>
+                  <ShopField label="Status">
+                    <Select
+                      className={fieldSelect}
+                      value={form.status}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          status: e.target.value as typeof f.status,
+                        }))
+                      }
+                    >
+                      <option value="active">Active</option>
+                      <option value="draft">Draft</option>
+                      <option value="inactive">Inactive</option>
+                    </Select>
+                  </ShopField>
+                  <ShopField label="Short description">
+                    <Input
+                      value={form.shortDescription}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          shortDescription: e.target.value,
+                        }))
+                      }
+                    />
+                  </ShopField>
+                  <ShopField label="Description">
+                    <textarea
+                      className={textareaClass}
+                      value={form.description}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          description: e.target.value,
+                        }))
+                      }
+                    />
+                  </ShopField>
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          <aside className="border-t border-[#eef1f4] bg-[#fafbfc] px-4 py-5 lg:border-t-0 lg:border-l">
+            <p className="mb-3 text-[0.72rem] font-bold uppercase tracking-[0.08em] text-[#21263c]">
+              Photos
+            </p>
+            <ProductImagePicker
+              ref={imagePickerRef}
+              variant="item"
+              label=""
+              productName={form.name}
+              productHint={form.shortDescription || form.description}
+            />
+          </aside>
         </div>
-
-        <CustomFieldsSection
-          hint="These boxes come from Settings → Custom fields (choose Product). They save with the item."
-          fields={productFormFields}
-          loading={customFieldsQ.isLoading}
-          values={extraFields}
-          onChange={(key, value) =>
-            setExtraFields((prev) => ({ ...prev, [key]: value }))
-          }
-        />
-
-        <Button
-          disabled={!form.name.trim() || save.isPending}
-          onClick={() => save.mutate()}
-        >
-          {save.isPending ? "Saving..." : "Save"}
-        </Button>
-      </section>
+      </div>
     </div>
   );
 }

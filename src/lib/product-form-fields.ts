@@ -1,27 +1,51 @@
 import type { MetaFieldDef } from "@/lib/business-config";
 
 export type CustomFieldDefLite = {
+  entity?: string;
   fieldKey?: string;
+  field_key?: string;
   key?: string;
   label: string;
   dataType?: string;
+  data_type?: string;
   type?: string;
   required?: boolean;
   options?: unknown;
   sortOrder?: number | null;
+  sort_order?: number | null;
 };
+
+function looksLikeDef(rec: Record<string, unknown>): boolean {
+  return Boolean(rec.fieldKey ?? rec.field_key ?? rec.key);
+}
+
+function asDefArray(raw: unknown): CustomFieldDefLite[] | null {
+  if (!raw) return null;
+  if (Array.isArray(raw)) return raw as CustomFieldDefLite[];
+  if (typeof raw !== "object") return null;
+  const rec = raw as Record<string, unknown>;
+  for (const key of ["data", "items", "rows", "definitions"]) {
+    const nested = rec[key];
+    if (Array.isArray(nested) && nested.length) {
+      return nested as CustomFieldDefLite[];
+    }
+    const inner = asDefArray(nested);
+    if (inner?.length) return inner;
+  }
+  if (looksLikeDef(rec)) return [rec as CustomFieldDefLite];
+  return null;
+}
 
 /** Settings/API may return a bare array or `{ data }` / `{ items }`. */
 export function normalizeCustomFieldDefs(raw: unknown): CustomFieldDefLite[] {
-  if (!raw) return [];
-  if (Array.isArray(raw)) return raw as CustomFieldDefLite[];
-  if (typeof raw === "object") {
-    const rec = raw as { data?: unknown; items?: unknown };
-    if (Array.isArray(rec.data)) return rec.data as CustomFieldDefLite[];
-    if (Array.isArray(rec.items)) return rec.items as CustomFieldDefLite[];
-  }
-  return [];
+  return asDefArray(raw) ?? [];
 }
+
+export const CUSTOM_FIELD_QUERY = {
+  staleTime: 0,
+  refetchOnMount: "always" as const,
+  refetchOnWindowFocus: true,
+};
 
 function parseOptions(
   raw: unknown,
@@ -68,14 +92,48 @@ export function customFieldDefsToMeta(
   const skip = new Set(["taxRatePercent"]);
   return normalizeCustomFieldDefs(defs)
     .slice()
-    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
-    .map((d) => ({
-      key: String(d.fieldKey ?? d.key ?? "").trim(),
-      label: d.label,
-      type: mapDataType(String(d.dataType ?? d.type ?? "text")),
-      required: Boolean(d.required),
-      entity: "item" as const,
-      options: parseOptions(d.options),
-    }))
+    .sort(
+      (a, b) => (a.sortOrder ?? a.sort_order ?? 0) - (b.sortOrder ?? b.sort_order ?? 0),
+    )
+    .map((d) => {
+      const key = String(d.fieldKey ?? d.field_key ?? d.key ?? "").trim();
+      const label = String(d.label ?? key).trim();
+      return {
+        key,
+        label: label || key,
+        type: mapDataType(
+          String(d.dataType ?? d.data_type ?? d.type ?? "text"),
+        ),
+        required: Boolean(d.required),
+        entity: "item" as const,
+        options: parseOptions(d.options),
+      };
+    })
     .filter((f) => f.key && !skip.has(f.key));
+}
+
+/** Settings custom fields + BusinessConfig item fields (org signup extras). */
+export function mergeProductFormFields(
+  apiDefs: unknown,
+  configFields?: MetaFieldDef[] | null,
+): MetaFieldDef[] {
+  const fromApi = customFieldDefsToMeta(apiDefs);
+  const seen = new Set(fromApi.map((f) => f.key));
+  const fromConfig: MetaFieldDef[] = [];
+  for (const f of configFields ?? []) {
+    const key = String(f.key ?? "").trim();
+    if (!key || seen.has(key) || skipTaxKey(key)) continue;
+    seen.add(key);
+    fromConfig.push({
+      ...f,
+      key,
+      type: mapDataType(String(f.type ?? "text")),
+      entity: "item",
+    });
+  }
+  return [...fromApi, ...fromConfig];
+}
+
+function skipTaxKey(key: string) {
+  return key === "taxRatePercent";
 }

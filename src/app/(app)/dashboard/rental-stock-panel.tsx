@@ -10,6 +10,7 @@ import { useAuthStore } from "@/lib/auth-store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { ProductThumb } from "@/components/product-thumb";
 import { DynamicCommerceForm } from "@/components/dynamic-commerce-form";
 import {
@@ -289,7 +290,7 @@ export function RentalStockPanel() {
                 Same product, new barcode (second bike, second camera…).
               </p>
               <div className="mt-3 space-y-2">
-                <select
+                <Select
                   className="w-full rounded-xl border border-[#e5e7eb] px-3 py-2.5 text-sm"
                   value={extraUnit.productId}
                   onChange={(e) =>
@@ -302,7 +303,7 @@ export function RentalStockPanel() {
                       {p.title} ({p.sku})
                     </option>
                   ))}
-                </select>
+                </Select>
                 <Input
                   placeholder="Barcode"
                   value={extraUnit.barcode}
@@ -367,7 +368,7 @@ export function RentalStockPanel() {
               value={q}
               onChange={(e) => setQ(e.target.value)}
             />
-            <select
+            <Select
               className="rounded-xl border border-[#e5e7eb] px-3 py-2 text-sm"
               value={filterCat}
               onChange={(e) => setFilterCat(e.target.value)}
@@ -378,7 +379,7 @@ export function RentalStockPanel() {
                   {c.name}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
           <ul className="mt-4 divide-y divide-[#f3f4f6]">
             {(units.data?.items ?? []).map((u) => (
