@@ -1953,6 +1953,8 @@ export function SaleStockPanel({
                                     sku: item.sku,
                                     qty: Number(item.qty),
                                     sellUnit: item.sellUnit,
+                                    trackSerial: Boolean(item.trackSerial ?? item.requiresSerial),
+                                    requiresSerial: Boolean(item.requiresSerial ?? item.trackSerial),
                                   })
                                 }
                               >

@@ -27,6 +27,7 @@ export type StockAdjustTarget = {
   /** Pre-set step when opening from +/− buttons */
   presetDelta?: number;
   trackSerial?: boolean;
+  requiresSerial?: boolean;
 };
 
 type Props = {
@@ -65,6 +66,7 @@ export function StockAdjustDialog({
   if (!target || typeof document === "undefined") return null;
 
   const active = target;
+  const isSerial = Boolean(active.trackSerial || active.requiresSerial);
   const unit = (active.sellUnit || "pcs") as SellUnit;
   const current = Number(active.qty);
   const d =
@@ -86,7 +88,7 @@ export function StockAdjustDialog({
       toast.error(zodMessages(parsed.error)[0] ?? "Check the form");
       return;
     }
-    if (active.trackSerial && !serialNumber.trim()) {
+    if (isSerial && !serialNumber.trim()) {
       setFieldErrors((f) => ({
         ...f,
         serialNumber: "Serial number is required for this item",
@@ -232,7 +234,7 @@ export function StockAdjustDialog({
             />
             <FieldError message={fieldErrors.reason} />
           </div>
-          {active.trackSerial ? (
+          {isSerial ? (
             <div>
               <Label htmlFor="stock-serial">Serial Number *</Label>
               <Input

@@ -703,6 +703,50 @@ export default function NewCatalogProductPage() {
                   </label>
                 ))}
               </div>
+
+              {form.trackInventory ? (
+                <div className="mt-4 grid gap-4 sm:grid-cols-2 pt-3 border-t border-[#e2e8f0]">
+                  <ShopField
+                    label="Stock in Hand (Opening Stock)"
+                    hint={
+                      <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+                        Initial physical units available at store
+                      </p>
+                    }
+                  >
+                    <Input
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={form.openingQty}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, openingQty: e.target.value }))
+                      }
+                      placeholder="e.g. 100"
+                    />
+                  </ShopField>
+
+                  <ShopField
+                    label="Low Stock Alert Qty (Optional)"
+                    hint={
+                      <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+                        Notify when stock falls below this quantity
+                      </p>
+                    }
+                  >
+                    <Input
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={form.reorderPoint}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, reorderPoint: e.target.value }))
+                      }
+                      placeholder="e.g. 5"
+                    />
+                  </ShopField>
+                </div>
+              ) : null}
             </ShopSection>
 
             <CustomFieldsSection
