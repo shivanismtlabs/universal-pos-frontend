@@ -2962,6 +2962,7 @@ export const posApi = {
           }>;
         }>;
         location?: { id: string; name: string; code?: string | null };
+        foodType?: "veg" | "non_veg" | "egg" | null;
       }>;
     }>(`/pos/sale/catalog${q ? `?${q}` : ""}`, { token: token() });
   },
@@ -7980,6 +7981,7 @@ export type CatalogProductListItem = {
   category?: { id: string; name: string; parentId?: string | null } | null;
   brand?: { id: string; name: string } | null;
   counts?: { variants: number; batches: number; bundleLines: number };
+  foodType?: "veg" | "non_veg" | "egg" | null;
 };
 
 export const catalogApi = {

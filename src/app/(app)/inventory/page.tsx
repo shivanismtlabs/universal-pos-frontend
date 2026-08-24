@@ -11,6 +11,15 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
+  Plus,
+  Minus,
+  AlertTriangle,
+  PackagePlus,
+  PackageMinus,
+  SlidersHorizontal,
+  RefreshCw,
+} from "lucide-react";
+import {
   inventoryApi,
   tenantsApi,
 } from "@/lib/api";
@@ -23,6 +32,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { ItemsImportDialog } from "@/components/items-import-dialog";
+import {
+  StockInModal,
+  StockOutModal,
+  DamagedStockModal,
+  BranchPriceReorderModal,
+  RestoreDamagedModal,
+} from "@/components/inventory-modals";
 import { EntityRowActions } from "@/components/entity-row-actions";
 import { PageHeader, PageSkeleton } from "@/components/page-header";
 import { FieldError } from "@/components/ui/form";
@@ -87,6 +103,10 @@ function InventoryPageInner() {
   const branchId = useBranchStore((s) => s.currentLocationId);
   const setBranchId = useBranchStore((s) => s.setCurrentLocationId);
 
+  const [stockInOpen, setStockInOpen] = useState(false);
+  const [stockOutOpen, setStockOutOpen] = useState(false);
+  const [damageOpen, setDamageOpen] = useState(false);
+
   function selectTab(next: Tab) {
     const qs = next === "levels" ? "" : `?tab=${next}`;
     router.replace(`/inventory${qs}`, { scroll: false });
@@ -112,8 +132,6 @@ function InventoryPageInner() {
   const tabs: { id: Tab; label: string }[] = [
     { id: "levels", label: "Stock levels" },
     { id: "alerts", label: "Low stock" },
-    { id: "in", label: "Stock In" },
-    { id: "out", label: "Stock Out" },
     { id: "damage", label: "Damaged" },
     { id: "audit", label: "Physical audit" },
     { id: "ledger", label: "Ledger" },
@@ -121,7 +139,7 @@ function InventoryPageInner() {
   ];
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="space-y-6 px-3 sm:px-4">
       <PageHeader
         eyebrow="Stock"
         title="Inventory"
@@ -129,23 +147,41 @@ function InventoryPageInner() {
         className="[&>div:last-child]:w-full"
         action={
           <div className="flex w-full flex-wrap items-center gap-2">
-            <Button variant="ghost" asChild>
-              <Link href="/transfers">Stock transfer</Link>
-            </Button>
-            <Button variant="ghost" asChild>
-              <Link href="/suppliers">Suppliers & POs</Link>
-            </Button>
-            <Button variant="ghost" asChild>
-              <Link href="/adjustments">Adjustments history</Link>
-            </Button>
             {canWrite ? (
-              <Button
-                type="button"
-                className="ml-auto"
-                onClick={() => setImportOpen(true)}
-              >
-                Import Excel / CSV
-              </Button>
+              <>
+                <Button
+                  type="button"
+                  onClick={() => setStockInOpen(true)}
+                  className="bg-[#1a56db] hover:bg-[#1546b3]"
+                >
+                  <Plus className="mr-1 size-4" />
+                  Stock In
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setStockOutOpen(true)}
+                >
+                  <Minus className="mr-1 size-4" />
+                  Stock Out
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setDamageOpen(true)}
+                >
+                  <AlertTriangle className="mr-1 size-4 text-amber-600" />
+                  Report Damaged
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="ml-auto"
+                  onClick={() => setImportOpen(true)}
+                >
+                  Import Excel / CSV
+                </Button>
+              </>
             ) : null}
           </div>
         }
@@ -202,12 +238,6 @@ function InventoryPageInner() {
       {tab === "alerts" ? (
         <AlertsTab locationId={activeLoc} locationName={activeLocName} />
       ) : null}
-      {tab === "in" && activeLoc ? (
-        <MoveTab mode="in" locationId={activeLoc} canWrite={canWrite} />
-      ) : null}
-      {tab === "out" && activeLoc ? (
-        <MoveTab mode="out" locationId={activeLoc} canWrite={canWrite} />
-      ) : null}
       {tab === "damage" && activeLoc ? (
         <DamageTab locationId={activeLoc} canWrite={canWrite} />
       ) : null}
@@ -221,6 +251,21 @@ function InventoryPageInner() {
         open={importOpen}
         onClose={() => setImportOpen(false)}
         locationId={activeLoc || undefined}
+      />
+      <StockInModal
+        open={stockInOpen}
+        onClose={() => setStockInOpen(false)}
+        locationId={activeLoc}
+      />
+      <StockOutModal
+        open={stockOutOpen}
+        onClose={() => setStockOutOpen(false)}
+        locationId={activeLoc}
+      />
+      <DamagedStockModal
+        open={damageOpen}
+        onClose={() => setDamageOpen(false)}
+        locationId={activeLoc}
       />
     </div>
   );
@@ -259,28 +304,14 @@ function LevelsTab({
     setPage(1);
   }, [q, lowOnly, locationId]);
 
-  const [reorderId, setReorderId] = useState<string | null>(null);
-  const [rp, setRp] = useState("");
-  const [rq, setRq] = useState("");
-  const [sp, setSp] = useState("");
-
-  const saveReorder = useMutation({
-    mutationFn: () =>
-      inventoryApi.setReorder({
-        locationId,
-        stockLevelId: reorderId!,
-        reorderPoint: rp === "" ? undefined : Number(rp),
-        reorderQty: rq === "" ? undefined : Number(rq),
-        sellPrice: sp === "" ? undefined : Number(sp),
-      }),
-    onSuccess: () => {
-      toast.success("Branch price & reorder saved");
-      setReorderId(null);
-      void qc.invalidateQueries({ queryKey: ["inv-levels"] });
-    },
-    onError: (e: Error) =>
-      toast.error(e instanceof ApiError ? e.message : "Failed"),
-  });
+  const [reorderTarget, setReorderTarget] = useState<{
+    stockLevelId: string;
+    name: string;
+    sku: string;
+    sellPrice: number;
+    reorderPoint: number | null;
+    reorderQty: number | null;
+  } | null>(null);
 
   return (
     <div className="space-y-5">
@@ -348,16 +379,14 @@ function LevelsTab({
                   {canWrite ? (
                     <EntityRowActions
                       onEdit={() => {
-                        setReorderId(r.stockLevelId);
-                        setRp(
-                          r.reorderPoint != null ? String(r.reorderPoint) : "",
-                        );
-                        setRq(
-                          r.reorderQty != null ? String(r.reorderQty) : "",
-                        );
-                        setSp(
-                          r.sellPrice != null ? String(r.sellPrice) : "",
-                        );
+                        setReorderTarget({
+                          stockLevelId: r.stockLevelId,
+                          name: r.name,
+                          sku: r.sku,
+                          sellPrice: Number(r.sellPrice ?? 0),
+                          reorderPoint: r.reorderPoint ?? null,
+                          reorderQty: r.reorderQty ?? null,
+                        });
                       }}
                       editTitle="Edit branch price & reorder"
                     />
@@ -382,82 +411,11 @@ function LevelsTab({
         {...pagerFromMeta(meta, page, pageSize, setPage, levelRows.length)}
       />
 
-      {reorderId ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <button
-            type="button"
-            className="absolute inset-0 bg-[#0b1f33]/45"
-            aria-label="Close"
-            onClick={() => setReorderId(null)}
-          />
-          <div className="relative z-10 w-full max-w-md space-y-5 rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-lg">
-            <div className="flex items-start justify-between gap-2">
-            <div>
-              <h3 className="text-base font-semibold text-[#0b1f33]">
-                Branch price & reorder
-              </h3>
-              <p className="mt-1 text-[0.8rem] text-[#6b7280]">
-                Change selling price and when to reorder — only for this shop.
-              </p>
-            </div>
-              <button
-                type="button"
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-[#5a6b7d] hover:bg-[#f1f5f9]"
-                aria-label="Close"
-                onClick={() => setReorderId(null)}
-              >
-                ×
-              </button>
-            </div>
-            <div>
-              <Label>Sell price (this branch)</Label>
-              <Input
-                className="mt-1"
-                type="number"
-                min={0}
-                step="0.01"
-                value={sp}
-                onChange={(e) => setSp(e.target.value)}
-              />
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <Label>Reorder point</Label>
-                <Input
-                  className="mt-1"
-                  type="number"
-                  min={0}
-                  value={rp}
-                  onChange={(e) => setRp(e.target.value)}
-                />
-              </div>
-              <div>
-                <Label>Reorder qty</Label>
-                <Input
-                  className="mt-1"
-                  type="number"
-                  min={0}
-                  value={rq}
-                  onChange={(e) => setRq(e.target.value)}
-                />
-              </div>
-            </div>
-            <Button
-              disabled={saveReorder.isPending}
-              onClick={() => saveReorder.mutate()}
-            >
-              {saveReorder.isPending ? "Saving…" : "Save"}
-            </Button>
-            <Button
-              variant="ghost"
-              className="ml-2"
-              onClick={() => setReorderId(null)}
-            >
-              Cancel
-            </Button>
-          </div>
-        </div>
-      ) : null}
+      <BranchPriceReorderModal
+        target={reorderTarget}
+        onClose={() => setReorderTarget(null)}
+        locationId={locationId}
+      />
     </div>
   );
 }
@@ -697,13 +655,21 @@ function DamageTab({
   locationId: string;
   canWrite: boolean;
 }) {
-  const qc = useQueryClient();
   const levels = useQuery({
     queryKey: ["inv-levels", locationId],
     queryFn: () =>
       inventoryApi.listLevels({ locationId, includeZero: true }),
   });
   const [q, setQ] = useState("");
+  const [reportOpen, setReportOpen] = useState(false);
+  const [restoreTarget, setRestoreTarget] = useState<{
+    stockLevelId: string;
+    name: string;
+    sku: string;
+    qtyDamaged: number;
+    sellUnit?: string;
+  } | null>(null);
+
   const damaged = useMemo(() => {
     const list = (levels.data?.items ?? []).filter((i) => i.qtyDamaged > 0);
     const needle = q.trim().toLowerCase();
@@ -715,146 +681,41 @@ function DamageTab({
         i.productSku.toLowerCase().includes(needle),
     );
   }, [levels.data, q]);
-  const [stockLevelId, setStockLevelId] = useState("");
-  const [qty, setQty] = useState("1");
-  const [reason, setReason] = useState("");
-  const [restoreQty, setRestoreQty] = useState<Record<string, string>>({});
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-
-  const mark = useMutation({
-    mutationFn: () => {
-      const parsed = stockMoveSchema.safeParse({
-        locationId,
-        stockLevelId,
-        qty,
-        reason,
-      });
-      if (!parsed.success) {
-        setFieldErrors(zodFieldErrors(parsed.error));
-        toast.error(zodMessages(parsed.error)[0] ?? "Check the form");
-        throw new Error(zodMessages(parsed.error)[0] ?? "Invalid qty");
-      }
-      setFieldErrors({});
-      return inventoryApi.markDamaged({
-        locationId: parsed.data.locationId,
-        stockLevelId: parsed.data.stockLevelId,
-        qty: parsed.data.qty,
-        reason: parsed.data.reason || undefined,
-      });
-    },
-    onSuccess: () => {
-      toast.success("Moved to damaged");
-      setQty("1");
-      setReason("");
-      setFieldErrors({});
-      void qc.invalidateQueries({ queryKey: ["inv-levels"] });
-    },
-    onError: (e: Error) => {
-      if (e instanceof ApiError) toast.error(e.message);
-    },
-  });
-
-  const restore = useMutation({
-    mutationFn: ({ id, amount }: { id: string; amount: number }) => {
-      const parsed = stockMoveSchema.safeParse({
-        locationId,
-        stockLevelId: id,
-        qty: amount,
-        reason: "Restored to sellable",
-      });
-      if (!parsed.success) {
-        toast.error(zodMessages(parsed.error)[0] ?? "Invalid quantity");
-        throw new Error(zodMessages(parsed.error)[0] ?? "Invalid qty");
-      }
-      return inventoryApi.restoreDamaged({
-        locationId: parsed.data.locationId,
-        stockLevelId: parsed.data.stockLevelId,
-        qty: parsed.data.qty,
-        reason: "Restored to sellable",
-      });
-    },
-    onSuccess: () => {
-      toast.success("Restored to sellable");
-      void qc.invalidateQueries({ queryKey: ["inv-levels"] });
-    },
-    onError: (e: Error) => {
-      if (e instanceof ApiError) toast.error(e.message);
-    },
-  });
 
   return (
     <div className="space-y-4">
-      {canWrite ? (
-        <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-[#0b1f33]">
+            Damaged Stock Registry
+          </h3>
           <p className="text-xs text-[#6b7280]">
-            Move sellable quantity into damaged. Historical orders keep their
-            original stock snapshot.
+            Track and restore damaged stock back to sellable status.
           </p>
-          <div>
-            <Label>Item *</Label>
-            <Select
-              className={fieldSelect}
-              value={stockLevelId}
-              onChange={(e) => {
-                setStockLevelId(e.target.value);
-                setFieldErrors((f) => ({ ...f, stockLevelId: "" }));
-              }}
-            >
-              <option value="">Select item</option>
-              {(levels.data?.items ?? []).map((i) => (
-                <option key={i.stockLevelId} value={i.stockLevelId}>
-                  {i.name} — sellable {i.qtyOnHand} {i.sellUnit}
-                </option>
-              ))}
-            </Select>
-            <FieldError message={fieldErrors.stockLevelId} />
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <Label>Quantity *</Label>
-              <Input
-                className="mt-1"
-                type="number"
-                min={0.001}
-                step="any"
-                value={qty}
-                onChange={(e) => {
-                  setQty(e.target.value);
-                  setFieldErrors((f) => ({ ...f, qty: "" }));
-                }}
-              />
-              <FieldError message={fieldErrors.qty} />
-            </div>
-            <div>
-              <Label>Reason</Label>
-              <Input
-                className="mt-1"
-                placeholder="Broken, expired…"
-                value={reason}
-                onChange={(e) => {
-                  setReason(e.target.value);
-                  setFieldErrors((f) => ({ ...f, reason: "" }));
-                }}
-              />
-              <FieldError message={fieldErrors.reason} />
-            </div>
-          </div>
-          <Button disabled={mark.isPending} onClick={() => mark.mutate()}>
-            {mark.isPending ? "Saving…" : "Save"}
-          </Button>
         </div>
-      ) : null}
+        {canWrite ? (
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => setReportOpen(true)}
+            className="text-xs"
+          >
+            <AlertTriangle className="mr-1.5 size-3.5 text-amber-600" />
+            + Report Damaged Stock
+          </Button>
+        ) : null}
+      </div>
 
       <div>
-        <Label>Search</Label>
+        <Label>Search Damaged Items</Label>
         <Input
           className="mt-1"
-          placeholder="Search damaged items"
+          placeholder="Search name or SKU..."
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
         <p className="mt-1 text-[0.72rem] text-[#6b7280]">
-          {damaged.length} item{damaged.length === 1 ? "" : "s"}
+          {damaged.length} damaged item{damaged.length === 1 ? "" : "s"} at this location.
         </p>
       </div>
 
@@ -872,71 +733,50 @@ function DamageTab({
               </tr>
             </thead>
             <tbody>
-              {damaged.map((d) => {
-                const max = Number(d.qtyDamaged);
-                const entered = restoreQty[d.stockLevelId] ?? "1";
-                const amount = Math.min(
-                  max,
-                  Math.max(0, Number(entered) || 0),
-                );
-                return (
-                  <tr
-                    key={d.stockLevelId}
-                    className="border-b border-[#eef2f8] hover:bg-[#f8fafc]"
-                  >
-                    <td className="px-3 py-2 font-medium text-[#0b1f33]">
-                      {d.name}
-                    </td>
-                    <td className="px-3 py-2 font-mono text-[0.75rem] text-[#5a6b7d]">
-                      {d.sku}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums">
-                      {d.qtyOnHand}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums font-semibold text-[#b45309]">
-                      {d.qtyDamaged}
-                    </td>
-                    <td className="px-3 py-2 text-[#5a6b7d]">{d.sellUnit}</td>
-                    <td className="px-3 py-2">
-                      {canWrite ? (
-                        <div className="flex items-center justify-end gap-1.5">
-                          <Input
-                            className="h-8 w-16 text-right text-xs tabular-nums"
-                            type="number"
-                            min={0.001}
-                            max={max}
-                            step="any"
-                            value={entered}
-                            onChange={(e) =>
-                              setRestoreQty((m) => ({
-                                ...m,
-                                [d.stockLevelId]: e.target.value,
-                              }))
-                            }
-                          />
-                    <Button
-                      size="sm"
-                            variant="secondary"
-                            disabled={amount <= 0 || restore.isPending}
-                            onClick={() =>
-                              restore.mutate({
-                                id: d.stockLevelId,
-                                amount,
-                              })
-                            }
-                          >
-                            Restore
-                    </Button>
-          </div>
-                      ) : (
-                        <span className="block text-right text-[#8b9bb0]">
-                          —
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
+              {damaged.map((d) => (
+                <tr
+                  key={d.stockLevelId}
+                  className="border-b border-[#eef2f8] hover:bg-[#f8fafc]"
+                >
+                  <td className="px-3 py-2 font-medium text-[#0b1f33]">
+                    {d.name}
+                  </td>
+                  <td className="px-3 py-2 font-mono text-[0.75rem] text-[#5a6b7d]">
+                    {d.sku}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {d.qtyOnHand}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums font-semibold text-[#b45309]">
+                    {d.qtyDamaged}
+                  </td>
+                  <td className="px-3 py-2 text-[#5a6b7d]">{d.sellUnit}</td>
+                  <td className="px-3 py-2 text-right">
+                    {canWrite ? (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() =>
+                          setRestoreTarget({
+                            stockLevelId: d.stockLevelId,
+                            name: d.name,
+                            sku: d.sku,
+                            qtyDamaged: d.qtyDamaged,
+                            sellUnit: d.sellUnit,
+                          })
+                        }
+                      >
+                        <RefreshCw className="mr-1 size-3 text-[#1a56db]" />
+                        Restore Stock
+                      </Button>
+                    ) : (
+                      <span className="block text-right text-[#8b9bb0]">
+                        —
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              ))}
               {!damaged.length ? (
                 <tr>
                   <td
@@ -946,11 +786,22 @@ function DamageTab({
                     No damaged quantity at this location.
                   </td>
                 </tr>
-        ) : null}
+              ) : null}
             </tbody>
           </table>
         </div>
       </div>
+
+      <DamagedStockModal
+        open={reportOpen}
+        onClose={() => setReportOpen(false)}
+        locationId={locationId}
+      />
+      <RestoreDamagedModal
+        target={restoreTarget}
+        onClose={() => setRestoreTarget(null)}
+        locationId={locationId}
+      />
     </div>
   );
 }

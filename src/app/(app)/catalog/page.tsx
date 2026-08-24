@@ -97,7 +97,7 @@ function CatalogPageInner() {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4 px-3 sm:px-4">
       <header className="flex flex-wrap items-end justify-between gap-3 border-b border-[#eef1f4] pb-3">
         <div className="min-w-0">
           <p className="eyebrow">Inventory</p>
@@ -302,6 +302,19 @@ function ProductsPanel() {
             onChange={(e) => setQ(e.target.value)}
           />
         </div>
+        <Select
+          wrapperClassName="w-44 sm:w-52"
+          className="h-9 rounded-md border border-[#dce3ec] bg-white px-2 text-sm"
+          value={categoryId}
+          onChange={(e) => setCategoryId(e.target.value)}
+        >
+          <option value="">All Categories</option>
+          {categoryChips.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </Select>
         <div
           role="tablist"
           aria-label="Status filter"
@@ -316,10 +329,10 @@ function ProductsPanel() {
             ] as const
           ).map((t) => {
             const on = statusFilter === t.id;
-                    return (
-                      <button
+            return (
+              <button
                 key={t.label}
-                        type="button"
+                type="button"
                 role="tab"
                 aria-selected={on}
                 onClick={() => setStatusFilter(t.id)}
@@ -330,11 +343,12 @@ function ProductsPanel() {
                 }
               >
                 {t.label}
-                      </button>
-                    );
-                  })}
-                </div>
+              </button>
+            );
+          })}
+        </div>
         <Select
+          wrapperClassName="w-36"
           className="h-9 rounded-md border border-[#dce3ec] bg-white px-2 text-sm"
           value={brandId}
           onChange={(e) => setBrandId(e.target.value)}
@@ -347,6 +361,7 @@ function ProductsPanel() {
           ))}
         </Select>
         <Select
+          wrapperClassName="w-36"
           className="h-9 rounded-md border border-[#dce3ec] bg-white px-2 text-sm"
           value={kind}
           onChange={(e) => setKind(e.target.value as CatalogProductKind | "")}
@@ -369,40 +384,8 @@ function ProductsPanel() {
             <Plus className="mr-1 size-4" />
             Add Product
           </Link>
-              </Button>
+        </Button>
       </div>
-
-      {categoryChips.length ? (
-        <div className="flex min-w-0 gap-1 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          <button
-            type="button"
-            onClick={() => setCategoryId("")}
-            className={cn(
-              "shrink-0 rounded-lg px-3 py-2 text-xs font-semibold transition",
-              !categoryId
-                ? "bg-[#1a56db] text-white shadow-sm"
-                : "bg-white text-[#5a6b7d] ring-1 ring-[#d9e0ea] hover:text-[#0b1f33]",
-            )}
-          >
-            All
-          </button>
-          {categoryChips.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              onClick={() => setCategoryId(c.id)}
-              className={cn(
-                "max-w-[12rem] shrink-0 truncate rounded-lg px-3 py-2 text-xs font-semibold transition",
-                categoryId === c.id
-                  ? "bg-[#1a56db] text-white shadow-sm"
-                  : "bg-white text-[#5a6b7d] ring-1 ring-[#d9e0ea] hover:text-[#0b1f33]",
-              )}
-            >
-              {c.name}
-            </button>
-          ))}
-        </div>
-      ) : null}
 
       <div className="overflow-x-auto rounded-md border border-[#e4e9f0] bg-white">
         <table className="w-full min-w-[820px] text-left text-sm">
