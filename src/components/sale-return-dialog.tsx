@@ -22,11 +22,13 @@ export function SaleReturnDialog({
   orderNumber,
   onClose,
   defaultMode = "return",
+  onRequested,
 }: {
   orderId: string;
   orderNumber: string;
   onClose: () => void;
   defaultMode?: "return" | "exchange";
+  onRequested?: () => void;
 }) {
   const qc = useQueryClient();
   const { money } = useBootstrap();
@@ -92,7 +94,11 @@ export function SaleReturnDialog({
       const prev = map.get(sid);
       const qty = moneyNumber(item.quantity ?? 1);
       const price = moneyNumber(item.unitPrice);
-      const name = item.description ?? "Item";
+        const name =
+          item.description ||
+          item.product?.name ||
+          item.stockLevel?.product?.name ||
+          "Item";
       if (prev) {
         prev.soldQty += qty;
         prev.remaining = Math.max(
@@ -139,7 +145,7 @@ export function SaleReturnDialog({
     for (const l of lines) {
       const q = Math.min(
         l.remaining,
-        Math.max(0, Math.floor(moneyNumber(qtyByLevel[l.stockLevelId] || 0))),
+        Math.max(0, moneyNumber(qtyByLevel[l.stockLevelId] || 0)),
       );
       total += q * l.unitPrice;
     }
@@ -163,7 +169,7 @@ export function SaleReturnDialog({
         stockLevelId: l.stockLevelId,
         quantity: Math.min(
           l.remaining,
-          Math.max(0, Math.floor(moneyNumber(qtyByLevel[l.stockLevelId] || 0))),
+          Math.max(0, moneyNumber(qtyByLevel[l.stockLevelId] || 0)),
         ),
         condition: conditionByLevel[l.stockLevelId] || "good",
       }))
@@ -254,6 +260,7 @@ export function SaleReturnDialog({
           r.message ||
             `Return requested — awaiting approval · ${money(r.amount ?? 0)}`,
         );
+        onRequested?.();
       } else {
         const credit =
           r.storeCreditBalance != null

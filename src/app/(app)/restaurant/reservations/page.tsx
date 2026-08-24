@@ -28,15 +28,22 @@ export default function ReservationsPage() {
   const [startAt, setStartAt] = useState("");
   const [tableId, setTableId] = useState("");
 
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ["dining-reservations"] });
+    void qc.invalidateQueries({ queryKey: ["restaurant-tables"] });
+  };
+
   const rows = useQuery({
     queryKey: ["dining-reservations", locationId],
     queryFn: () => restaurantApi.reservations(locationId),
     enabled: allowed,
+    refetchInterval: 30_000,
   });
   const tables = useQuery({
     queryKey: ["restaurant-tables", locationId],
     queryFn: () => restaurantApi.tables(locationId),
     enabled: allowed,
+    refetchInterval: 30_000,
   });
   const create = useMutation({
     mutationFn: () =>
@@ -49,7 +56,7 @@ export default function ReservationsPage() {
       }),
     onSuccess: () => {
       setGuestName("");
-      void qc.invalidateQueries({ queryKey: ["dining-reservations"] });
+      refresh();
       toast.success("Reservation booked");
     },
     onError: (e: Error) => toast.error(e.message),
@@ -57,10 +64,11 @@ export default function ReservationsPage() {
   const patch = useMutation({
     mutationFn: (opts: { id: string; status: string }) =>
       restaurantApi.updateReservation(opts.id, { status: opts.status }),
-    onSuccess: () =>
-      void qc.invalidateQueries({ queryKey: ["dining-reservations"] }),
+    onSuccess: () => refresh(),
     onError: (e: Error) => toast.error(e.message),
   });
+
+  const list = rows.data ?? [];
 
   if (!allowed) {
     return (
@@ -72,8 +80,6 @@ export default function ReservationsPage() {
       </DiningShell>
     );
   }
-
-  const list = rows.data ?? [];
 
   return (
     <DiningShell
@@ -189,6 +195,16 @@ export default function ReservationsPage() {
                             Cancel
                           </Button>
                         </span>
+                      ) : null}
+                      {r.status === "seated" ? (
+                        <Button
+                          variant="secondary"
+                          onClick={() =>
+                            patch.mutate({ id: r.id, status: "completed" })
+                          }
+                        >
+                          Free table
+                        </Button>
                       ) : null}
                     </td>
                   </tr>

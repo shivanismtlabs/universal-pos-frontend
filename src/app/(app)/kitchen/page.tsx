@@ -147,7 +147,7 @@ export default function KitchenPage() {
             readyTimes.reduce((s, n) => s + n, 0) / readyTimes.length,
           )
         : null;
-    return {
+        return {
       open: open.length,
       delayed,
       critical,
@@ -647,24 +647,24 @@ function KotModal({
           <div className="mt-1.5 flex flex-wrap gap-1">
             {STEPS.map((step) => {
               const active = kot.status === step;
-              return (
-                <button
-                  key={step}
-                  type="button"
+                    return (
+                      <button
+                        key={step}
+                        type="button"
                   disabled={active || setStatus.isPending || step === "cancelled"}
                   onClick={() => setStatus.mutate({ status: step })}
-                  className={cn(
+                        className={cn(
                     "rounded-md border px-2 py-1 text-[0.65rem] font-semibold capitalize",
-                    active
-                      ? "border-[#1a56db] bg-[#eff6ff] text-[#1a56db]"
+                          active
+                            ? "border-[#1a56db] bg-[#eff6ff] text-[#1a56db]"
                       : "border-[#e2e8f0] bg-white text-[#5a6b7d] hover:bg-[#f8fafc]",
-                  )}
-                >
+                        )}
+                      >
                   {step}
-                </button>
-              );
-            })}
-          </div>
+                      </button>
+                    );
+                  })}
+                </div>
         </>
       )}
     </ModalFrame>

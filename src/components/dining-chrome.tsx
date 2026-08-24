@@ -1,8 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useEffect, useRef } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { restaurantApi } from "@/lib/api";
+import { useAuthStore } from "@/lib/auth-store";
 import { useBootstrap } from "@/lib/bootstrap";
+import { useBranchStore } from "@/lib/branch-store";
 import { cn } from "@/lib/utils";
 
 const TABS: Array<{
@@ -40,6 +46,7 @@ const STATUS_STYLE: Record<string, string> = {
   blocked: "bg-[#f8fafc] text-[#475569] ring-1 ring-[#e2e8f0]",
   booked: "bg-[#eff6ff] text-[#1e40af] ring-1 ring-[#bfdbfe]",
   seated: "bg-[#ecfdf3] text-[#166534] ring-1 ring-[#bbf7d0]",
+  completed: "bg-[#f8fafc] text-[#475569] ring-1 ring-[#e2e8f0]",
   cancelled: "bg-[#f8fafc] text-[#64748b] ring-1 ring-[#e2e8f0]",
   no_show: "bg-[#fef2f2] text-[#991b1b] ring-1 ring-[#fecaca]",
   new: "bg-[#eff6ff] text-[#1e40af] ring-1 ring-[#bfdbfe]",
@@ -70,8 +77,84 @@ export function DiningStatusBadge({
   );
 }
 
+const BOOKING_ALERT_MS = 10 * 60 * 1000;
+const SERVE_ALERT_MS = 15 * 60 * 1000;
+
+function alertOnce(key: string) {
+  try {
+    const id = `upos-dining-alert:${key}`;
+    if (sessionStorage.getItem(id)) return false;
+    sessionStorage.setItem(id, "1");
+    return true;
+  } catch {
+    return true;
+  }
+}
+
+function DiningAlerts() {
+  const { hasCapability, data: boot } = useBootstrap();
+  const locationId =
+    useBranchStore((s) => s.currentLocationId) || boot?.locations?.[0]?.id;
+  const seen = useRef(new Set<string>());
+  const canKot =
+    hasCapability("KOT") ||
+    hasCapability("KITCHEN") ||
+    hasCapability("KDS") ||
+    hasCapability("TABLE");
+  const canBook =
+    hasCapability("DINING_RESERVATION") || hasCapability("TABLE");
+
+  const kots = useQuery({
+    queryKey: ["restaurant-kots"],
+    queryFn: () => restaurantApi.kots(),
+    enabled: canKot,
+    refetchInterval: 30_000,
+  });
+  const reservations = useQuery({
+    queryKey: ["dining-reservations", locationId],
+    queryFn: () => restaurantApi.reservations(locationId),
+    enabled: canBook,
+    refetchInterval: 30_000,
+  });
+
+  useEffect(() => {
+    const now = Date.now();
+    for (const k of kots.data ?? []) {
+      if (k.status === "served" || k.status === "cancelled") continue;
+      const start = k.status === "ready" && k.readyAt
+        ? new Date(k.readyAt).getTime()
+        : new Date(k.createdAt).getTime();
+      if (now - start < SERVE_ALERT_MS) continue;
+      const key = `kot-15:${k.id}`;
+      if (seen.current.has(key) || !alertOnce(key)) continue;
+      seen.current.add(key);
+      const where = k.tableName ? ` · ${k.tableName}` : "";
+      toast.warning(
+        k.status === "ready"
+          ? `Not served in 15 min: ${k.kotNumber}${where}`
+          : `Order not served in 15 min: ${k.kotNumber}${where}`,
+      );
+    }
+    for (const r of reservations.data ?? []) {
+      if (r.status !== "booked") continue;
+      const wait = new Date(r.startAt).getTime() - now;
+      if (wait <= 0 || wait > BOOKING_ALERT_MS) continue;
+      const key = `book-10:${r.id}`;
+      if (seen.current.has(key) || !alertOnce(key)) continue;
+      seen.current.add(key);
+      const table = r.table?.name ? ` · ${r.table.name}` : "";
+      toast.warning(`Booking in 10 min: ${r.guestName}${table}`);
+    }
+  }, [kots.data, reservations.data]);
+
+  return null;
+}
+
 export function DiningTabs() {
   const pathname = usePathname();
+  const router = useRouter();
+  const qc = useQueryClient();
+  const identityToken = useAuthStore((s) => s.identityToken);
   const { hasCapability } = useBootstrap();
   const visible = TABS.filter(
     (t) =>
@@ -81,30 +164,48 @@ export function DiningTabs() {
   );
 
   return (
-    <nav
-      aria-label="Dining"
-      className="flex flex-wrap gap-1 border-b border-[#eef1f4]"
-    >
-      {visible.map((t) => {
-        const active = t.exact
-          ? pathname === t.href
-          : pathname === t.href || pathname.startsWith(`${t.href}/`);
-        return (
-          <Link
-            key={t.href}
-            href={t.href}
-            className={cn(
-              "-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors",
-              active
-                ? "border-[#1a56db] text-[#1a56db]"
-                : "border-transparent text-[#5a6b7d] hover:text-[#0b1f33]",
-            )}
-          >
-            {t.label}
-          </Link>
-        );
-      })}
-    </nav>
+    <div className="flex items-center justify-between gap-3 border-b border-[#eef1f4]">
+      <nav
+        aria-label="Dining"
+        className="flex min-w-0 flex-wrap gap-1"
+      >
+        {visible.map((t) => {
+          const active = t.exact
+            ? pathname === t.href
+            : pathname === t.href || pathname.startsWith(`${t.href}/`);
+          return (
+            <Link
+              key={t.href}
+              href={t.href}
+              className={cn(
+                "-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors",
+                active
+                  ? "border-[#1a56db] text-[#1a56db]"
+                  : "border-transparent text-[#5a6b7d] hover:text-[#0b1f33]",
+              )}
+            >
+              {t.label}
+            </Link>
+          );
+        })}
+      </nav>
+      <button
+        type="button"
+        className="mb-px shrink-0 rounded-md border border-[#d9e0ea] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#334155] hover:bg-[#f8fafc]"
+        onClick={() => {
+          qc.clear();
+          useBranchStore.getState().bindTenant(null);
+          if (!identityToken) {
+            toast.message("Sign in again to pick another shop");
+            return;
+          }
+          useAuthStore.getState().clearTenantSession();
+          router.replace("/organizations");
+        }}
+      >
+        Switch organization
+      </button>
+    </div>
   );
 }
 
@@ -130,6 +231,7 @@ export function DiningShell({
         {action ? <div className="shrink-0 pt-0.5">{action}</div> : null}
       </header>
       <DiningTabs />
+      <DiningAlerts />
       {children}
     </div>
   );

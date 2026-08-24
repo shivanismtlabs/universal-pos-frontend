@@ -750,6 +750,11 @@ function isLeafActive(pathname: string, search: string, href: string) {
     return pathname === "/settings";
   }
 
+  // Floor dashboard is `/restaurant` only — not Tables, Menus, Reservations.
+  if (base === "/restaurant") {
+    return pathname === "/restaurant";
+  }
+
   // `/suppliers` directory only — not /suppliers/orders or /suppliers/new
   if (base === "/suppliers") {
     return pathname === "/suppliers";
