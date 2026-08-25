@@ -1,17 +1,21 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { catalogApi, tenantsApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
+import { useBootstrap } from "@/lib/bootstrap";
+import { useBranchStore } from "@/lib/branch-store";
+import { resolveOperatingLocationId } from "@/lib/operating-location";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { ProductThumb } from "@/components/product-thumb";
+import { FoodTypeBadge } from "@/components/food-type-badge";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { ProductBarcodePreview } from "@/components/product-barcode-preview";
 import { EntityRowActions } from "@/components/entity-row-actions";
@@ -29,6 +33,7 @@ export default function CatalogProductViewRoute() {
 function CatalogProductDetailPage() {
   const search = useSearchParams();
   const id = search.get("id")?.trim() || "";
+  const tabParam = search.get("tab")?.trim() || "";
   const router = useRouter();
   const qc = useQueryClient();
   const [tab, setTab] = useState<
@@ -39,13 +44,38 @@ function CatalogProductDetailPage() {
     | "batches"
     | "serials"
     | "inventory"
-  >("overview");
+  >(() =>
+    tabParam === "barcode" ||
+    tabParam === "variants" ||
+    tabParam === "bundle" ||
+    tabParam === "batches" ||
+    tabParam === "serials" ||
+    tabParam === "inventory"
+      ? tabParam
+      : "overview",
+  );
   const [barcodeDraft, setBarcodeDraft] = useState("");
   const [barcodeErr, setBarcodeErr] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<{
     images: string[];
     index: number;
   } | null>(null);
+  const [serialLoc, setSerialLoc] = useState("");
+  const { data: boot } = useBootstrap();
+  const currentLocationId = useBranchStore((s) => s.currentLocationId);
+
+  useEffect(() => {
+    if (
+      tabParam === "barcode" ||
+      tabParam === "variants" ||
+      tabParam === "bundle" ||
+      tabParam === "batches" ||
+      tabParam === "serials" ||
+      tabParam === "inventory"
+    ) {
+      setTab(tabParam);
+    }
+  }, [tabParam]);
 
   const product = useQuery({
     queryKey: ["catalog-product", id],
@@ -56,6 +86,20 @@ function CatalogProductDetailPage() {
     queryKey: ["locations"],
     queryFn: () => tenantsApi.listLocations(),
   });
+
+  useEffect(() => {
+    if (serialLoc) return;
+    const fromBranch = resolveOperatingLocationId({
+      currentLocationId,
+      locations: boot?.locations,
+    });
+    if (fromBranch) {
+      setSerialLoc(fromBranch);
+      return;
+    }
+    const first = locations.data?.[0]?.id;
+    if (first) setSerialLoc(String(first));
+  }, [serialLoc, currentLocationId, boot?.locations, locations.data]);
 
   const p = product.data;
 
@@ -236,15 +280,40 @@ function CatalogProductDetailPage() {
 
   /** Serial */
   const [serial, setSerial] = useState("");
-  const addSerial = useMutation({
-    mutationFn: () => catalogApi.createSerial(id, { serial: serial.trim() }),
+  const enableSerial = useMutation({
+    mutationFn: () =>
+      catalogApi.updateProduct(id, {
+        trackInventory: true,
+        trackSerial: true,
+      }),
     onSuccess: () => {
-      setSerial("");
       invalidate();
+      toast.success("Serial tracking enabled — register units below");
+    },
+    onError: (e: Error) =>
+      toast.error(e instanceof ApiError ? e.message : "Could not enable serials"),
+  });
+  const addSerial = useMutation({
+    mutationFn: () => {
+      const code = serial.trim();
+      if (code.length < 2) {
+        throw new Error("Enter a serial number (at least 2 characters)");
+      }
+      if (!serialLoc) {
+        throw new Error("Select a location for this serial");
+      }
+      return catalogApi.createSerial(id, {
+        serial: code,
+        locationId: serialLoc,
+      });
+    },
+    onSuccess: async () => {
+      setSerial("");
+      await qc.invalidateQueries({ queryKey: ["catalog-product", id] });
       toast.success("Serial registered");
     },
     onError: (e: Error) =>
-      toast.error(e instanceof ApiError ? e.message : "Failed"),
+      toast.error(e instanceof ApiError ? e.message : e.message || "Failed"),
   });
 
   if (!id) {
@@ -319,7 +388,10 @@ function CatalogProductDetailPage() {
             <p className="eyebrow">
               {p.kind} · {p.status}
             </p>
-            <h1 className="page-title mt-1">{p.name}</h1>
+            <h1 className="page-title mt-1 inline-flex items-center gap-2">
+              <FoodTypeBadge value={p.foodType} showLabel />
+              {p.name}
+            </h1>
             <p className="mt-1 font-mono text-sm font-medium text-[#475569]">
               SKU {p.skuCode}
               {p.barcode ? ` · Barcode ${p.barcode}` : ""}
@@ -331,7 +403,7 @@ function CatalogProductDetailPage() {
             <Link href="/catalog">Back</Link>
           </Button>
           <Button asChild>
-            <Link href={`/catalog/edit?id=${p.id}`}>Edit</Link>
+            <Link href={`/catalog/new?id=${p.id}`}>Edit</Link>
           </Button>
           <Button variant="secondary" onClick={() => dup.mutate()}>
             Duplicate
@@ -736,36 +808,92 @@ function CatalogProductDetailPage() {
 
       {tab === "serials" ? (
         <div className="space-y-3">
+          {!p.trackSerial ? (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
+              <p className="text-sm text-amber-900">
+                Serial tracking is off for this item. Enable it to register unit
+                barcodes / serial numbers.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={enableSerial.isPending}
+                  onClick={() => enableSerial.mutate()}
+                >
+                  {enableSerial.isPending ? "Enabling…" : "Enable serial tracking"}
+                </Button>
+                <Button variant="secondary" size="sm" asChild>
+                  <Link href={`/catalog/new?id=${p.id}`}>Edit item</Link>
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-[#5a6b7d]">
+              Register each physical unit once. Serials appear on Counter when
+              selling this item.
+            </p>
+          )}
           <div className="flex flex-wrap gap-2 rounded-md border border-[#e4e9f0] bg-white p-4">
             <div className="min-w-[220px] flex-1">
               <Label>Serial / unit barcode</Label>
               <Input
+                className="mt-1 font-mono"
+                placeholder="e.g. SN-100245"
                 value={serial}
+                disabled={!p.trackSerial && !enableSerial.isSuccess}
                 onChange={(e) => setSerial(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && serial.trim()) {
+                    e.preventDefault();
+                    addSerial.mutate();
+                  }
+                }}
               />
+            </div>
+            <div className="min-w-[160px]">
+              <Label>Location</Label>
+              <Select
+                className="mt-1 h-10 w-full rounded-md border border-[#dce3ec] px-2 text-sm"
+                value={serialLoc}
+                disabled={!p.trackSerial && !enableSerial.isSuccess}
+                onChange={(e) => setSerialLoc(e.target.value)}
+              >
+                <option value="">Select location</option>
+                {locs.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}
+                  </option>
+                ))}
+              </Select>
             </div>
             <Button
               className="self-end"
-              disabled={!serial.trim() || !p.trackSerial}
+              disabled={
+                !serial.trim() ||
+                !serialLoc ||
+                addSerial.isPending ||
+                (!p.trackSerial && !enableSerial.isSuccess)
+              }
               onClick={() => addSerial.mutate()}
             >
-              Register serial
+              {addSerial.isPending ? "Saving…" : "Register serial"}
             </Button>
           </div>
-          {!p.trackSerial ? (
-            <p className="text-sm text-amber-700">
-              Enable serial tracking on this product to register units.
-            </p>
-          ) : null}
-          <ul className="text-sm rounded-md border border-[#e4e9f0] bg-white divide-y divide-[#eef1f4]">
+          <ul className="divide-y divide-[#eef1f4] rounded-md border border-[#e4e9f0] bg-white text-sm">
             {(p.serials ?? []).map((s) => (
-              <li key={s.id} className="px-3 py-2 flex justify-between">
+              <li key={s.id} className="flex justify-between px-3 py-2">
                 <span className="font-mono">{s.serial}</span>
                 <span className="text-[#5a6b7d]">
                   {s.status} · {s.location?.name}
                 </span>
               </li>
             ))}
+            {!p.serials?.length ? (
+              <li className="px-3 py-6 text-center text-[#8a9bb0]">
+                No serials registered yet
+              </li>
+            ) : null}
           </ul>
         </div>
       ) : null}

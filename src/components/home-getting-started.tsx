@@ -22,6 +22,11 @@ import { useAuthStore } from "@/lib/auth-store";
 import { Button } from "@/components/ui/button";
 import { ItemsImportDialog } from "@/components/items-import-dialog";
 import { cn } from "@/lib/utils";
+import {
+  readSetupStepParam,
+  withGettingStartedReturn,
+} from "@/lib/setup-return";
+import { useSearchParams } from "next/navigation";
 
 type StepId =
   | "store"
@@ -63,6 +68,8 @@ function firstName(full?: string | null) {
 export function HomeGettingStarted() {
   const { hasMode, hasCapability, productName, data: boot } = useBootstrap();
   const user = useAuthStore((s) => s.user);
+  const search = useSearchParams();
+  const stepFromUrl = readSetupStepParam(search);
   const hasSale = hasMode("sale");
   const hasRental = hasMode("rental") || hasCapability("AVAILABILITY");
   const hasPlans =
@@ -115,7 +122,10 @@ export function HomeGettingStarted() {
         detail:
           "Your organization and default location are ready. Add more stores anytime from settings.",
         tip: "Universal POS supports multi-store later without changing how items work.",
-        primary: { label: "Open settings", href: "/settings" },
+        primary: {
+          label: "Open settings",
+          href: withGettingStartedReturn("/settings", "store"),
+        },
         done: true,
       },
       {
@@ -125,7 +135,10 @@ export function HomeGettingStarted() {
         detail:
           "Set tax IDs, rates, and receipt fields so invoices match your region (GST/VAT or none).",
         tip: "Tax applies at checkout for any commerce mode you enable.",
-        primary: { label: "Tax & shop settings", href: "/settings/tax" },
+        primary: {
+          label: "Tax & shop settings",
+          href: withGettingStartedReturn("/settings/tax", "tax"),
+        },
         done: taxConfigured,
       },
     ];
@@ -149,8 +162,14 @@ export function HomeGettingStarted() {
           detail:
             "Raise opening stock via purchases or stock adjust so the counter never sells negative quantities.",
           tip: "Purchases from suppliers restock multiple items at once.",
-          primary: { label: "Suppliers / purchases", href: "/suppliers" },
-          secondary: { label: "Stock levels", href: "/inventory" },
+          primary: {
+            label: "Add supplier",
+            href: withGettingStartedReturn("/suppliers/new", "stockup"),
+          },
+          secondary: {
+            label: "Stock levels",
+            href: withGettingStartedReturn("/inventory", "stockup"),
+          },
           done: products > 0 && inStock > 0,
         },
       );
@@ -164,8 +183,14 @@ export function HomeGettingStarted() {
         detail:
           "Add rooms, tables, vehicles, or other assets you assign at the counter. Same resource list for every rental-style business.",
         tip: "Operational status (available / occupied / out of service) is generic — not restaurant-only.",
-        primary: { label: "Resources", href: "/resources" },
-        secondary: { label: "Counter", href: "/counter" },
+        primary: {
+          label: "Resources",
+          href: withGettingStartedReturn("/resources", "resources"),
+        },
+        secondary: {
+          label: "Counter",
+          href: withGettingStartedReturn("/counter", "resources"),
+        },
         done: prefsConfigured,
       });
     }
@@ -178,8 +203,14 @@ export function HomeGettingStarted() {
         detail:
           "Sell recurring access (classes, retainers, clubs) from catalog items in subscription mode.",
         tip: "Check-in uses the same membership record for gym, salon, or coworking.",
-        primary: { label: "Counter · plans", href: "/counter" },
-        secondary: { label: "Check-in", href: "/check-in" },
+        primary: {
+          label: "Counter · plans",
+          href: withGettingStartedReturn("/counter", "plans"),
+        },
+        secondary: {
+          label: "Check-in",
+          href: withGettingStartedReturn("/check-in", "plans"),
+        },
         done: prefsConfigured,
       });
     }
@@ -191,8 +222,14 @@ export function HomeGettingStarted() {
         title: "Manage store preferences",
         detail:
           "Branding, receipts, PIN switch, and commerce modes stay under one shop profile.",
-        primary: { label: "Preferences", href: "/settings" },
-        secondary: { label: "Software plan", href: "/plan" },
+        primary: {
+          label: "Preferences",
+          href: withGettingStartedReturn("/settings", "prefs"),
+        },
+        secondary: {
+          label: "Software plan",
+          href: withGettingStartedReturn("/plan", "prefs"),
+        },
         done: prefsConfigured,
       },
       {
@@ -201,8 +238,14 @@ export function HomeGettingStarted() {
         title: "Setup POS register",
         detail:
           "Open the counter, run a sales register for the shift, and take your first payment.",
-        primary: { label: "Open counter", href: "/counter" },
-        secondary: { label: "All orders", href: "/orders" },
+        primary: {
+          label: "Open counter",
+          href: withGettingStartedReturn("/counter", "register"),
+        },
+        secondary: {
+          label: "All orders",
+          href: withGettingStartedReturn("/orders", "register"),
+        },
         done: prefsConfigured,
       },
       {
@@ -211,8 +254,14 @@ export function HomeGettingStarted() {
         title: "Customers & reports",
         detail:
           "Save customers for credit and history. Review sales and export CSV when needed.",
-        primary: { label: "Customers", href: "/customers" },
-        secondary: { label: "Reports", href: "/reports" },
+        primary: {
+          label: "Customers",
+          href: withGettingStartedReturn("/customers", "customers"),
+        },
+        secondary: {
+          label: "Reports",
+          href: withGettingStartedReturn("/reports", "customers"),
+        },
         done: prefsConfigured,
       },
     );
@@ -236,13 +285,28 @@ export function HomeGettingStarted() {
     steps.find((s) => unlockedIds.has(s.id))?.id ??
     steps[0]?.id ??
     "store";
-  const [activeId, setActiveId] = useState<StepId>(firstOpen);
+  const [activeId, setActiveId] = useState<StepId>(() => {
+    if (
+      stepFromUrl &&
+      steps.some((s) => s.id === stepFromUrl)
+    ) {
+      return stepFromUrl as StepId;
+    }
+    return firstOpen;
+  });
 
   useEffect(() => {
+    if (
+      stepFromUrl &&
+      steps.some((s) => s.id === stepFromUrl)
+    ) {
+      setActiveId(stepFromUrl as StepId);
+      return;
+    }
     if (!unlockedIds.has(activeId)) {
       setActiveId(firstOpen);
     }
-  }, [activeId, firstOpen, unlockedIds]);
+  }, [stepFromUrl, steps, activeId, firstOpen, unlockedIds]);
 
   const active = steps.find((s) => s.id === activeId) ?? steps[0];
   const doneCount = steps.filter((s) => s.done).length;
@@ -388,7 +452,9 @@ export function HomeGettingStarted() {
                     with.
                   </p>
                   <Button asChild className="mt-5" variant="secondary">
-                    <Link href="/catalog/new">Add Item</Link>
+                    <Link href={withGettingStartedReturn("/catalog/new", "build")}>
+                      Add Item
+                    </Link>
                   </Button>
                 </div>
               </div>
@@ -399,7 +465,7 @@ export function HomeGettingStarted() {
                   settings when your shop needs them — core Universal POS stays
                   simple without industry locks.{" "}
                   <Link
-                    href="/settings"
+                    href={withGettingStartedReturn("/settings", "build")}
                     className="font-semibold text-[#1a56db] hover:underline"
                   >
                     Configure item preferences

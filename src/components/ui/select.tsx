@@ -292,7 +292,8 @@ const SearchableSelect = React.forwardRef<HTMLSelectElement, SelectProps>(
         position: "fixed",
         left,
         width,
-        zIndex: 80,
+        // Above ModalFrame (z-90) / inventory modals (z-95) / receipt (z-100)
+        zIndex: 200,
         ...(openUp
           ? {
               bottom: window.innerHeight - r.top + gap,

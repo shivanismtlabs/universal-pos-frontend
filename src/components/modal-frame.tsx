@@ -17,6 +17,8 @@ export function ModalFrame({
   zClass = "z-[90]",
   closeOnOutside = true,
   labelledBy,
+  /** When false, body does not scroll (avoids empty scrollbar gutters). */
+  bodyScroll = true,
 }: {
   onClose: () => void;
   title?: string;
@@ -27,6 +29,7 @@ export function ModalFrame({
   zClass?: string;
   closeOnOutside?: boolean;
   labelledBy?: string;
+  bodyScroll?: boolean;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -61,7 +64,7 @@ export function ModalFrame({
         )}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start justify-between gap-3 border-b border-[#eef1f4] px-5 py-3.5">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-[#eef1f4] px-5 py-3.5">
           <div className="min-w-0">
             {title ? (
               <h2
@@ -84,9 +87,20 @@ export function ModalFrame({
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-5">{children}</div>
+        <div
+          className={cn(
+            "min-h-0 flex-1 p-5",
+            bodyScroll
+              ? "overflow-y-auto overscroll-contain"
+              : "overflow-visible",
+          )}
+        >
+          {children}
+        </div>
         {footer ? (
-          <div className="border-t border-[#eef1f4] px-5 py-3">{footer}</div>
+          <div className="shrink-0 border-t border-[#eef1f4] px-5 py-3">
+            {footer}
+          </div>
         ) : null}
       </div>
     </div>

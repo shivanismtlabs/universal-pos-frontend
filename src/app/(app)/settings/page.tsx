@@ -3,6 +3,7 @@
 import { Suspense, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { SettingsWorkspace } from "./settings-workspace";
+import { preserveReturnTo } from "@/lib/setup-return";
 
 /** Old Settings tab strip used `?tab=` — send those URLs to real pages. */
 const TAB_REDIRECT: Record<string, string> = {
@@ -22,8 +23,8 @@ function LegacyTabRedirect() {
   const dest = tab ? TAB_REDIRECT[tab] : null;
 
   useEffect(() => {
-    if (dest) router.replace(dest);
-  }, [dest, router]);
+    if (dest) router.replace(preserveReturnTo(dest, search));
+  }, [dest, router, search]);
 
   if (dest) {
     return (

@@ -21,6 +21,12 @@ import {
   type CreateCustomerInput,
   type CreateMeasurementInput,
 } from "@/lib/validations";
+import { filterPersonNameInput } from "@/lib/input-guards";
+import {
+  GETTING_STARTED_PATH,
+  readReturnToParam,
+  resolveSetupReturnTo,
+} from "@/lib/setup-return";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -62,6 +68,7 @@ function MeasureValue({ label, value }: { label: string; value: unknown }) {
 export default function CustomersPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const returnTo = readReturnToParam(searchParams);
   const [q, setQ] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
   const [page, setPage] = useState(1);
@@ -199,9 +206,15 @@ export default function CustomersPage() {
         ),
       }),
     onSuccess: (row) => {
-      toast.success("Customer created");
+      toast.success(
+        returnTo ? "Customer created — back to Getting Started" : "Customer created",
+      );
       form.reset();
       setExtraFields({});
+      if (returnTo) {
+        router.push(resolveSetupReturnTo(returnTo, GETTING_STARTED_PATH));
+        return;
+      }
       selectCustomer(row.id);
       void qc.invalidateQueries({ queryKey: ["customers"] });
     },
@@ -488,8 +501,19 @@ export default function CustomersPage() {
             >
               <div>
                 <Label>Full name</Label>
-                <Input className="mt-1.5" {...form.register("fullName")} />
+                <Input
+                  className="mt-1.5"
+                  value={form.watch("fullName")}
+                  onChange={(e) =>
+                    form.setValue("fullName", filterPersonNameInput(e.target.value), {
+                      shouldValidate: true,
+                    })
+                  }
+                />
                 <FieldError message={form.formState.errors.fullName?.message} />
+                <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+                  Letters only — no numbers or special characters
+                </p>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>

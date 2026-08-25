@@ -1,7 +1,8 @@
 "use client";
 
-import { startTransition, useEffect, useMemo, useState } from "react";
+import { Suspense, startTransition, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useBootstrap } from "@/lib/bootstrap";
 import { EmptyState, PageSkeleton } from "@/components/page-header";
 import { HomeDashboard } from "@/components/home-dashboard";
@@ -19,13 +20,35 @@ import { Lock } from "lucide-react";
 type HomeTab = "dashboard" | "getting-started" | "floors";
 type FloorView = "sale" | "rent" | "service" | "subscription";
 
+function parseHomeTab(raw: string | null): HomeTab | null {
+  if (raw === "dashboard" || raw === "getting-started" || raw === "floors") {
+    return raw;
+  }
+  return null;
+}
+
 /**
  * Home after login — Zoho-style Dashboard / Getting Started, plus mode floors.
  * Tabs unlock in order as setup progress completes.
+ * URL `?tab=getting-started` keeps users on the checklist after setup actions.
  */
 export default function DashboardPage() {
+  return (
+    <Suspense fallback={<PageSkeleton rows={6} />}>
+      <DashboardPageInner />
+    </Suspense>
+  );
+}
+
+function DashboardPageInner() {
   const { isLoading, hasMode, data: boot } = useBootstrap();
-  const [homeTab, setHomeTab] = useState<HomeTab>("getting-started");
+  const router = useRouter();
+  const pathname = usePathname();
+  const search = useSearchParams();
+  const tabFromUrl = parseHomeTab(search.get("tab"));
+  const [homeTab, setHomeTab] = useState<HomeTab>(
+    tabFromUrl ?? "getting-started",
+  );
   const [floor, setFloor] = useState<FloorView>("sale");
 
   const hasSale = hasMode("sale");
@@ -64,13 +87,17 @@ export default function DashboardPage() {
   const floorsUnlocked = !hasSale || products > 0;
 
   useEffect(() => {
+    if (tabFromUrl) {
+      setHomeTab(tabFromUrl);
+      return;
+    }
     try {
       const seen = localStorage.getItem("upos-home-setup-seen");
       if (seen === "1" && dashboardUnlocked) setHomeTab("dashboard");
     } catch {
       /* ignore */
     }
-  }, [dashboardUnlocked]);
+  }, [tabFromUrl, dashboardUnlocked]);
 
   useEffect(() => {
     if (homeTab === "dashboard" && dashboardUnlocked) {
@@ -90,6 +117,19 @@ export default function DashboardPage() {
       setHomeTab("getting-started");
     }
   }, [homeTab, dashboardUnlocked, floorsUnlocked]);
+
+  function syncTabUrl(id: HomeTab) {
+    const qs = new URLSearchParams(search.toString());
+    if (id === "getting-started") {
+      qs.set("tab", "getting-started");
+    } else if (id === "dashboard") {
+      qs.set("tab", "dashboard");
+    } else {
+      qs.set("tab", "floors");
+    }
+    const next = qs.toString();
+    router.replace(next ? `${pathname}?${next}` : pathname, { scroll: false });
+  }
 
   if (isLoading) {
     return <PageSkeleton rows={6} />;
@@ -111,14 +151,19 @@ export default function DashboardPage() {
     if (id === "dashboard" && !dashboardUnlocked) {
       toast.message("Finish tax settings in Getting Started first");
       setHomeTab("getting-started");
+      syncTabUrl("getting-started");
       return;
     }
     if (id === "floors" && !floorsUnlocked) {
       toast.message("Add at least one item in Getting Started first");
       setHomeTab("getting-started");
+      syncTabUrl("getting-started");
       return;
     }
-    startTransition(() => setHomeTab(id));
+    startTransition(() => {
+      setHomeTab(id);
+      syncTabUrl(id);
+    });
   }
 
   return (

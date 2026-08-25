@@ -138,7 +138,26 @@ export const enterpriseApi = {
 
   approvals(status?: string) {
     const q = status ? `?status=${encodeURIComponent(status)}` : "";
-    return apiRequest<unknown[]>(`/enterprise/approvals${q}`, {
+    return apiRequest<
+      Array<{
+        id: string;
+        tenantId: string;
+        type: string;
+        entityType: string;
+        entityId?: string | null;
+        amount?: string | number | null;
+        reason?: string | null;
+        status: string;
+        currentStep: number;
+        createdAt: string;
+        steps?: Array<{
+          id: string;
+          stepIndex: number;
+          status: string;
+          note?: string | null;
+        }>;
+      }>
+    >(`/enterprise/approvals${q}`, {
       token: enterpriseToken(),
     });
   },
@@ -152,7 +171,22 @@ export const enterpriseApi = {
   },
 
   staff() {
-    return apiRequest("/enterprise/staff", { token: enterpriseToken() });
+    return apiRequest<{
+      identity: {
+        id: string;
+        email: string;
+        fullName: string;
+        groupRole: string;
+      };
+      memberships: Array<{
+        tenantId: string;
+        name: string;
+        slug: string;
+        userId: string;
+        roles: string[];
+        inGroup: boolean;
+      }>;
+    }>("/enterprise/staff", { token: enterpriseToken() });
   },
 
   suppliers(q?: string) {

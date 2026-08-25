@@ -4,6 +4,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { GEO_COUNTRIES, geoDial, joinE164, splitE164 } from "@/lib/geo";
+import { filterMobileDigits } from "@/lib/input-guards";
 
 type Props = {
   value: string;
@@ -34,7 +35,9 @@ export function PhoneCountryInput({
           wrapperClassName="w-[7.25rem] shrink-0"
           className="h-9 px-2 text-[0.8125rem]"
           value={dial}
-          onChange={(e) => onChange(joinE164(e.target.value, parts.local))}
+          onChange={(e) =>
+            onChange(joinE164(e.target.value, filterMobileDigits(parts.local)))
+          }
           aria-label="Country code"
         >
           {GEO_COUNTRIES.map((c) => (
@@ -45,12 +48,31 @@ export function PhoneCountryInput({
         </Select>
         <Input
           className="flex-1"
-          inputMode="tel"
-          value={parts.local}
-          onChange={(e) => onChange(joinE164(dial, e.target.value))}
+          inputMode="numeric"
+          autoComplete="tel-national"
+          pattern="[0-9]*"
+          value={filterMobileDigits(parts.local)}
+          onChange={(e) =>
+            onChange(joinE164(dial, filterMobileDigits(e.target.value)))
+          }
+          onKeyDown={(e) => {
+            if (
+              e.key === " " ||
+              e.key === "-" ||
+              e.key === "(" ||
+              e.key === ")" ||
+              e.key === "." ||
+              e.key === "+"
+            ) {
+              e.preventDefault();
+            }
+          }}
           placeholder="9876543210"
         />
       </div>
+      <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+        Digits only — no spaces or special characters
+      </p>
     </div>
   );
 }

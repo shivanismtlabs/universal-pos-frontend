@@ -15,10 +15,12 @@ export function CustomFieldInputs({
   fields,
   values,
   onChange,
+  errors,
 }: {
   fields: MetaFieldDef[];
   values: Record<string, string>;
   onChange: (key: string, value: string) => void;
+  errors?: Record<string, string>;
 }) {
   if (!fields.length) return null;
   return (
@@ -26,6 +28,7 @@ export function CustomFieldInputs({
       {fields.map((field) => {
         const value = values[field.key] ?? "";
         const set = (v: string) => onChange(field.key, v);
+        const err = errors?.[field.key];
         return (
           <div
             key={field.key}
@@ -90,6 +93,9 @@ export function CustomFieldInputs({
                 placeholder={field.hint}
               />
             )}
+            {err ? (
+              <p className="mt-1 text-xs text-rose-600">{err}</p>
+            ) : null}
           </div>
         );
       })}
@@ -105,6 +111,7 @@ export function CustomFieldsSection({
   loading,
   values,
   onChange,
+  errors,
 }: {
   title?: string;
   hint: string;
@@ -112,6 +119,7 @@ export function CustomFieldsSection({
   loading?: boolean;
   values: Record<string, string>;
   onChange: (key: string, value: string) => void;
+  errors?: Record<string, string>;
 }) {
   return (
     <section className="space-y-3 rounded-xl border border-[#c9d7f5] bg-[#f5f8ff] p-4">
@@ -126,6 +134,7 @@ export function CustomFieldsSection({
           fields={fields}
           values={values}
           onChange={onChange}
+          errors={errors}
         />
       ) : (
         <p className="text-sm text-[#5a6b7d]">

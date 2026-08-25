@@ -18,6 +18,7 @@ import { Select } from "@/components/ui/select";
 import { ReceiptModal, type ReceiptData } from "@/components/receipt-modal";
 import { StripeCheckoutModal } from "@/components/stripe-checkout-modal";
 import { ProductThumb } from "@/components/product-thumb";
+import { FoodTypeBadge } from "@/components/food-type-badge";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { CustomerPicker } from "@/components/customer-picker";
 import { CustomFieldsSection } from "@/components/custom-field-inputs";
@@ -45,6 +46,11 @@ import type { SplitBillMode, SplitBillPart } from "@/lib/split-bill";
 import { scalePartsToTotal } from "@/lib/split-bill";
 import { diningFeesFromConfig } from "@/lib/dining-fees";
 import { sellingMenuCategoryFilter } from "@/lib/selling-menus";
+import {
+  buildBillSummary,
+  cashChangeDue,
+  lineTaxAmount,
+} from "@/lib/bill-summary";
 
 type CartLine = {
   stockLevelId: string;
@@ -79,6 +85,7 @@ type CartLine = {
   requiresSerial?: boolean;
   serialNumber?: string;
   kind?: string | null;
+  foodType?: "veg" | "non_veg" | "egg" | null;
   modifiers?: string[];
 };
 
@@ -203,9 +210,9 @@ export default function RetailPosWorkstation({
   const [splitPay, setSplitPay] = useState(false);
   const [splitCashAmount, setSplitCashAmount] = useState("");
   const [splitBillOpen, setSplitBillOpen] = useState(false);
-  const [payModal, setPayModal] = useState<"discount" | "draft" | "more" | null>(
-    null,
-  );
+  const [payModal, setPayModal] = useState<
+    "discount" | "draft" | "more" | "customer" | "orderDetails" | null
+  >(null);
   const [rateEdit, setRateEdit] = useState<{
     stockLevelId: string;
     amount: string;
@@ -567,7 +574,12 @@ export default function RetailPosWorkstation({
   const splitRemaining = splitSession
     ? splitSession.parts.length - splitSession.index
     : 0;
-  const canSplitBill = hasCapability("PARTIAL_PAYMENT");
+  const canSplitBill = true; // Universal POS — split / multi-tender for every shop
+  const splitRemainingDue = splitSession
+    ? splitSession.parts
+        .slice(splitSession.index)
+        .reduce((s, p) => s + p.amount, 0)
+    : 0;
   const chargeAmount = (() => {
     if (splitPart) return splitPart.amount;
     if (!allowPartial) return totalDue;
@@ -578,7 +590,56 @@ export default function RetailPosWorkstation({
   const tenderedNum = moneyNumber(cashTendered || 0);
   const changeDue =
     payMethod === "cash" && tenderedNum > 0
-      ? Math.max(0, tenderedNum - chargeAmount)
+      ? cashChangeDue(tenderedNum, chargeAmount)
+      : 0;
+  const billTaxLines = cart.map((l) => {
+    const lineGross = l.unitPrice * l.qty;
+    const productPct =
+      l.taxRatePercent != null &&
+      Number.isFinite(l.taxRatePercent) &&
+      l.taxRatePercent > 0 &&
+      l.taxRatePercent <= 28
+        ? l.taxRatePercent
+        : null;
+    const rateFrac =
+      productPct != null ? productPct / 100 : taxSettings.rate;
+    const tax = lineTaxAmount(lineGross, rateFrac, taxSettings.inclusive);
+    return {
+      lineTotal: lineGross,
+      taxAmount: tax,
+      taxRatePercent: rateFrac > 0 ? rateFrac * 100 : 0,
+    };
+  });
+  const billSummary = buildBillSummary({
+    itemsSubtotal: subtotal,
+    taxTotal: taxAmount,
+    discount: discountNum,
+    loyaltyOff,
+    fees: diningFeeLines,
+    taxInclusive: taxSettings.inclusive,
+    lines: billTaxLines,
+    amountDue: totalDue,
+  });
+  const payMethodConfirmLabel = (() => {
+    const m = payMethod;
+    if (m === "cash") return "Cash";
+    if (m === "qr") return "QR";
+    if (m === "store_credit") return "Wallet";
+    if (m === "upi") return "UPI";
+    if (m === "card") return "Card";
+    if (m === "bank_transfer") return "Bank transfer";
+    if (m === "gift_card") return "Gift card";
+    if (m === "emi") return "EMI";
+    if (m === "wallet") return "App pay";
+    return m;
+  })();
+  const stillDueAfter = splitPart
+    ? Math.max(
+        0,
+        Math.round((splitRemainingDue - chargeAmount) * 100) / 100,
+      )
+    : allowPartial
+      ? Math.max(0, Math.round((totalDue - chargeAmount) * 100) / 100)
       : 0;
 
   useEffect(() => {
@@ -659,6 +720,7 @@ export default function RetailPosWorkstation({
     requiresSerial?: boolean;
     kind?: string | null;
     soldOut?: boolean;
+    foodType?: "veg" | "non_veg" | "egg" | null;
     recipeTracked?: boolean;
     channelPrices?: {
       dine_in?: number;
@@ -678,6 +740,12 @@ export default function RetailPosWorkstation({
     skipModifierPrompt?: boolean;
     serialNumber?: string;
   }) {
+    if (splitSession) {
+      toast.message(
+        "Split payment in progress — finish collecting parts before changing the ticket",
+      );
+      return;
+    }
     const image =
       row.image ?? row.photoUrl ?? row.images?.[0] ?? null;
     const unit = normalizeSellUnit(row.sellUnit);
@@ -755,6 +823,7 @@ export default function RetailPosWorkstation({
                 batchOptions: row.batchOptions ?? [],
           requiresSerial: row.requiresSerial === true,
           kind: row.kind ?? l.kind,
+          foodType: row.foodType ?? l.foodType,
           modifiers: row.modifiers ?? l.modifiers,
         }
             : l,
@@ -794,6 +863,7 @@ export default function RetailPosWorkstation({
               ? row.batchOptions[0].id
               : undefined,
           kind: row.kind ?? null,
+          foodType: row.foodType ?? null,
           modifiers: row.modifiers,
         },
       ];
@@ -1391,12 +1461,12 @@ export default function RetailPosWorkstation({
           orderNumber: result.order.orderNumber,
           parts: [...splitSession.parts.slice(0, nextIndex), ...leftover],
         });
-        setCart([]);
         setCashTendered("");
         toast.success(
           `Part ${splitSession.index + 1} of ${splitSession.parts.length} collected · next ${money(leftover[0]?.amount ?? remaining)}`,
         );
         clearPaymentAttemptKey();
+        // Keep ticket lines visible while collecting remaining split parts
         void qc.invalidateQueries({ queryKey: ["pos-sale-catalog"] });
         return;
       }
@@ -1585,7 +1655,6 @@ export default function RetailPosWorkstation({
     if (splitContinue && splitSession) {
       const next = splitSession.index + 1;
       const last = next >= splitSession.parts.length;
-      setCart([]);
       if (last) {
         resetAfterFullSale();
         setReceipt({
@@ -1638,9 +1707,14 @@ export default function RetailPosWorkstation({
   }
 
   function clearCart() {
+    if (splitSession) {
+      toast.message(
+        "Finish or cancel the split payment before clearing the ticket",
+      );
+      return;
+    }
     setCart([]);
     setCashTendered("");
-    if (!splitFollowUp) setSplitSession(null);
     scanRef.current?.focus();
   }
 
@@ -1788,34 +1862,20 @@ export default function RetailPosWorkstation({
               </button>
 
               {categories.length ? (
-                <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                  <button
-                    type="button"
-                    onClick={() => setCategory("all")}
-                    className={cn(
-                      "shrink-0 rounded-lg px-3 py-2 text-xs font-semibold transition",
-                      category === "all"
-                        ? "bg-[#1a56db] text-white shadow-sm"
-                        : "bg-white text-[#5a6b7d] ring-1 ring-[#d9e0ea] hover:text-[#0b1f33]",
-                    )}
+                <div className="field-shell min-w-[9.5rem] max-w-[14rem] flex-1">
+                  <Label className="sr-only">Category</Label>
+                  <Select
+                    className="flex h-10 w-full rounded-md border border-[#d9e0ea] bg-white px-3 text-sm text-[#0b1f33]"
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value)}
                   >
-                    All
-                  </button>
-                  {categories.map((c) => (
-                    <button
-                      key={c.id}
-                      type="button"
-                      onClick={() => setCategory(c.id)}
-                      className={cn(
-                        "max-w-[10rem] shrink-0 truncate rounded-lg px-3 py-2 text-xs font-semibold transition",
-                        category === c.id
-                          ? "bg-[#1a56db] text-white shadow-sm"
-                          : "bg-white text-[#5a6b7d] ring-1 ring-[#d9e0ea] hover:text-[#0b1f33]",
-                      )}
-                    >
-                      {c.name}
-                    </button>
-                  ))}
+                    <option value="all">All categories</option>
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </Select>
                 </div>
               ) : null}
             </div>
@@ -1857,6 +1917,10 @@ export default function RetailPosWorkstation({
                         inCart
                           ? "border-[#1a56db] ring-1 ring-[#1a56db]/25"
                           : "border-[#e2e8f0] hover:border-[#cbd5e1] hover:shadow-[0_2px_8px_rgba(15,23,42,0.06)]",
+                        row.foodType === "veg" && "border-l-[3px] border-l-[#15803d]",
+                        row.foodType === "non_veg" &&
+                          "border-l-[3px] border-l-[#b91c1c]",
+                        row.foodType === "egg" && "border-l-[3px] border-l-[#a16207]",
                       )}
                     >
                       <div className="relative aspect-[4/3] w-full overflow-hidden bg-[#eef2f7]">
@@ -1891,6 +1955,11 @@ export default function RetailPosWorkstation({
                         >
                           {stock.label}
                         </span>
+                        {row.foodType ? (
+                          <span className="absolute top-1.5 right-1.5 z-[1] rounded-md bg-white/95 px-1 py-0.5 shadow-sm">
+                            <FoodTypeBadge value={row.foodType} showLabel />
+                          </span>
+                        ) : null}
                       </div>
                       <div className="flex min-h-0 flex-1 flex-col gap-1 p-2.5">
                         <p className="line-clamp-2 text-[0.8rem] leading-snug font-semibold text-[#0b1f33]">
@@ -2012,195 +2081,83 @@ export default function RetailPosWorkstation({
             <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
               Customer
             </Label>
-            <CustomerPicker
-              value={customerId}
-              onChange={(id) => setCustomerId(id)}
-              allowWalkIn
-              placeholder="Search name or phone…"
-              showBalances
-              money={money}
-            />
-            {customerId ? (
-              <p className="text-[0.75rem] text-[#5a6b7d]">
-                Wallet (store credit):{" "}
-                <span className="font-semibold tabular-nums text-[#0b1f33]">
-                  {money(walletBalance)}
-                </span>
-                . Use the Wallet button below to take money from this balance.
-              </p>
-            ) : (
-              <p className="text-[0.75rem] text-[#5a6b7d]">
-                Wallet pay needs a customer. Walk-in has no wallet.
-              </p>
-            )}
+            <button
+              type="button"
+              onClick={() => setPayModal("customer")}
+              className="flex min-h-9 w-full items-center justify-between gap-2 rounded-md border border-[#d9e0ea] bg-white px-2.5 py-1.5 text-left hover:border-[#c5d0e0]"
+            >
+              <span className="min-w-0 truncate">
+                {customerId ? (
+                  <>
+                    <span className="block truncate text-sm font-medium text-[#0b1f33]">
+                      {customerWalletQ.data?.fullName ?? "Customer"}
+                    </span>
+                    <span className="block truncate text-[0.65rem] tabular-nums text-[#8b9bb0]">
+                      {customerWalletQ.data?.phone
+                        ? `${customerWalletQ.data.phone} · `
+                        : ""}
+                      wallet {money(walletBalance)}
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-sm text-[#8b9bb0]">
+                    Walk-in · tap to search
+                  </span>
+                )}
+              </span>
+              <span className="shrink-0 text-[0.7rem] font-semibold text-[#1a56db]">
+                {customerId ? "Change" : "Add"}
+              </span>
+            </button>
           </div>
 
           {foodFulfillment || resourceDesk ? (
-            <div className="grid gap-2 border-b border-[#e8edf4] px-4 py-3 sm:grid-cols-2">
-              {foodFulfillment ? (
-                <div className="field-shell">
-                  <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
-                    Order type
-                  </Label>
-                  <Select
-                    className="mt-1 flex h-10 w-full rounded-md border border-[#d9e0ea] bg-white px-3 text-sm text-[#0b1f33]"
-                    value={orderType}
-                    onChange={(e) => setOrderType(e.target.value)}
-                  >
-                    <option value="walk_in">Walk-in</option>
-                    {(diningCfg.data?.enabledDiningModes ?? [
-                      "dine_in",
-                      "takeaway",
-                      "delivery",
-                    ]).map((m) => (
-                      <option key={m} value={m}>
-                        {m.replaceAll("_", " ")}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-              ) : null}
-              {hasCapability("TABLE") ? (
-                <>
-                  <div className="field-shell">
-                    <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
-                      Area / floor
-                    </Label>
-                    <Select
-                      className="mt-1 flex h-10 w-full rounded-md border border-[#d9e0ea] bg-white px-3 text-sm text-[#0b1f33]"
-                      value={floorFilter}
-                      onChange={(e) => setFloorFilter(e.target.value)}
-                    >
-                      <option value="all">All areas</option>
-                      {(diningFloors.data ?? []).map((f) => (
-                        <option key={f.id} value={f.id}>
-                          {f.name}
-                        </option>
-                      ))}
-                    </Select>
-                  </div>
-                  <div className="field-shell">
-                    <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
-                      Table
-                    </Label>
-                    <Select
-                      className="mt-1 flex h-10 w-full rounded-md border border-[#d9e0ea] bg-white px-3 text-sm text-[#0b1f33]"
-                      value={resourceId}
-                      onChange={(e) => setResourceId(e.target.value)}
-                    >
-                      <option value="">None</option>
-                      {(diningTables.data ?? [])
-                        .filter(
-                          (t) =>
-                            floorFilter === "all" || t.floorId === floorFilter,
-                        )
-                        .map((t) => (
-                          <option key={t.id} value={t.id}>
-                            {t.floorName ? `${t.floorName} · ` : ""}
-                            {t.name}
-                            {t.status !== "available" ? ` · ${t.status}` : ""}
-                          </option>
-                        ))}
-                    </Select>
-                    {areaCategoryIds.length ||
-                    selectedDiningFloor?.taxRatePercent != null ||
-                    selectedDiningFloor?.serviceChargePercent != null ? (
-                      <p className="mt-1 text-[0.65rem] text-[#5a6b7d]">
-                        {areaCategoryIds.length
-                          ? `Area menu · ${areaCategoryIds.length} ${areaCategoryIds.length === 1 ? "category" : "categories"}`
-                          : "Full menu"}
-                        {selectedDiningFloor?.taxRatePercent != null
-                          ? ` · tax ${selectedDiningFloor.taxRatePercent}%`
-                          : ""}
-                        {(selectedDiningTable?.areaServiceChargePercent ??
-                          selectedDiningFloor?.serviceChargePercent) != null
-                          ? ` · service ${selectedDiningTable?.areaServiceChargePercent ?? selectedDiningFloor?.serviceChargePercent}%`
-                          : ""}
-                      </p>
-                    ) : null}
-                  </div>
-                </>
-              ) : resourceDesk ? (
-                <div className="field-shell">
-                  <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
-                    Resource
-                  </Label>
-                  <Select
-                    className="mt-1 flex h-10 w-full rounded-md border border-[#d9e0ea] bg-white px-3 text-sm text-[#0b1f33]"
-                    value={resourceId}
-                    onChange={(e) => setResourceId(e.target.value)}
-                  >
-                    <option value="">None</option>
-                    {(resources.data?.data ?? []).map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.name} · {r.status}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-              ) : null}
-              {foodFulfillment && hasCapability("TABLE") ? (
-                <div className="field-shell">
-                  <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
-                    Covers / guests
-                  </Label>
-                  <Input
-                    className="h-10"
-                    inputMode="numeric"
-                    value={guestCount}
-                    onChange={(e) => setGuestCount(e.target.value)}
-                    placeholder="1"
-                  />
-                </div>
-              ) : null}
-              {orderType === "delivery" ? (
-                <>
-                  <div className="field-shell">
-                    <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
-                      Guest name
-                    </Label>
-                    <Input
-                      className="h-10"
-                      value={guestName}
-                      onChange={(e) => setGuestName(e.target.value)}
-                      placeholder="Name"
-                    />
-                  </div>
-                  <div className="field-shell">
-                    <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
-                      Phone
-                    </Label>
-                    <Input
-                      className="h-10"
-                      value={deliveryPhone}
-                      onChange={(e) => setDeliveryPhone(e.target.value)}
-                      placeholder="Mobile"
-                    />
-                  </div>
-                  <div className="field-shell sm:col-span-2">
-                    <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
-                      Delivery address
-                    </Label>
-                    <Input
-                      className="h-10"
-                      value={deliveryAddress}
-                      onChange={(e) => setDeliveryAddress(e.target.value)}
-                      placeholder="Street, area, landmark"
-                    />
-                  </div>
-                </>
-              ) : null}
-              <div className="field-shell sm:col-span-2">
-                <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
-                  Order notes
-                </Label>
-                <Input
-                  className="h-10"
-                  value={orderNote}
-                  onChange={(e) => setOrderNote(e.target.value)}
-                  placeholder="Notes, allergies, prep note, booking reference…"
-                />
-              </div>
+            <div className="space-y-1.5 border-b border-[#e8edf4] px-4 py-3">
+              <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
+                Order details
+              </Label>
+              <button
+                type="button"
+                onClick={() => setPayModal("orderDetails")}
+                className="flex min-h-9 w-full items-center justify-between gap-2 rounded-md border border-[#d9e0ea] bg-white px-2.5 py-1.5 text-left hover:border-[#c5d0e0]"
+              >
+                <span className="min-w-0 truncate text-sm text-[#0b1f33]">
+                  {(() => {
+                    const parts: string[] = [];
+                    if (foodFulfillment) {
+                      parts.push(
+                        orderType.replaceAll("_", " ") || "Walk-in",
+                      );
+                    }
+                    if (hasCapability("TABLE") && selectedDiningTable) {
+                      parts.push(
+                        `${selectedDiningTable.floorName ? `${selectedDiningTable.floorName} · ` : ""}${selectedDiningTable.name}`,
+                      );
+                    } else if (resourceDesk && resourceId) {
+                      const r = (resources.data?.data ?? []).find(
+                        (x) => x.id === resourceId,
+                      );
+                      if (r) parts.push(r.name);
+                    }
+                    if (foodFulfillment && hasCapability("TABLE")) {
+                      parts.push(
+                        `${guestCount || "1"} guest${Number(guestCount) === 1 ? "" : "s"}`,
+                      );
+                    }
+                    if (orderNote.trim()) parts.push("note");
+                    return parts.length
+                      ? parts
+                          .map((p) =>
+                            p.replace(/\b\w/g, (c) => c.toUpperCase()),
+                          )
+                          .join(" · ")
+                      : "Type, table, covers, notes…";
+                  })()}
+                </span>
+                <span className="shrink-0 text-[0.7rem] font-semibold text-[#1a56db]">
+                  Edit
+                </span>
+              </button>
             </div>
           ) : null}
 
@@ -2227,8 +2184,11 @@ export default function RetailPosWorkstation({
                 <ProductThumb src={l.image} label={l.name} size="md" />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-start justify-between gap-2">
-                    <p className="truncate text-sm font-semibold text-[#0b1f33]">
-                      {l.name}
+                    <p className="flex min-w-0 items-center gap-1.5 truncate text-sm font-semibold text-[#0b1f33]">
+                      {l.foodType ? (
+                        <FoodTypeBadge value={l.foodType} className="shrink-0" />
+                      ) : null}
+                      <span className="truncate">{l.name}</span>
                     </p>
                     <p className="shrink-0 text-sm font-bold tabular-nums text-[#0b1f33]">
                       {money(l.unitPrice * l.qty)}
@@ -2256,7 +2216,8 @@ export default function RetailPosWorkstation({
                     <div className="flex shrink-0 items-center rounded-lg bg-[#f8fafc] p-0.5 ring-1 ring-[#e4e9f0]">
                       <button
                         type="button"
-                        className="grid h-7 w-7 place-items-center rounded-md text-sm font-bold text-[#0b1f33] transition hover:bg-[#e8eefb]"
+                        disabled={Boolean(splitSession)}
+                        className="grid h-7 w-7 place-items-center rounded-md text-sm font-bold text-[#0b1f33] transition hover:bg-[#e8eefb] disabled:opacity-40"
                         onClick={() =>
                           setCart((prev) =>
                             prev
@@ -2278,11 +2239,12 @@ export default function RetailPosWorkstation({
                       {allowsDecimalQty(l.sellUnit) ? (
                         <input
                           type="number"
-                          className="w-12 border-0 bg-transparent text-center text-sm font-bold tabular-nums text-[#0b1f33] outline-none"
+                          className="w-12 border-0 bg-transparent text-center text-sm font-bold tabular-nums text-[#0b1f33] outline-none disabled:opacity-40"
                           min={0}
                           max={l.maxQty}
                           step={0.001}
                           value={l.qty}
+                          disabled={Boolean(splitSession)}
                           onChange={(e) => {
                             const raw = Number(e.target.value);
                             if (!Number.isFinite(raw)) return;
@@ -2303,7 +2265,8 @@ export default function RetailPosWorkstation({
                       )}
                       <button
                         type="button"
-                        className="grid h-7 w-7 place-items-center rounded-md text-sm font-bold text-[#0b1f33] transition hover:bg-[#e8eefb]"
+                        disabled={Boolean(splitSession)}
+                        className="grid h-7 w-7 place-items-center rounded-md text-sm font-bold text-[#0b1f33] transition hover:bg-[#e8eefb] disabled:opacity-40"
                         onClick={() =>
                           setCart((prev) =>
                             prev.map((x) => {
@@ -2430,16 +2393,27 @@ export default function RetailPosWorkstation({
             ) : null}
           </ul>
 
-          <div className="mt-auto space-y-3 border-t border-[#e8edf4] bg-[#f8fafc] p-4">
-            <div className="rounded-[12px] border border-[#e2e8f0] bg-white px-3.5 py-3">
+          <div className="mt-auto space-y-2 border-t border-[#e8edf4] bg-[#f8fafc] p-3">
+            <div className="rounded-lg border border-[#e2e8f0] bg-white px-3 py-2.5">
+              <p className="mb-1.5 text-[0.65rem] font-semibold tracking-wide text-[#8b9bb0] uppercase">
+                Bill
+              </p>
+              {(cart.length > 0 || splitFollowUp) && (
+                <div className="mb-0.5 flex justify-between text-[0.8rem] text-[#0b1f33]">
+                  <span>Items</span>
+                  <span className="tabular-nums">
+                    {money(billSummary.itemsSubtotal)}
+                  </span>
+                </div>
+              )}
               {discountNum > 0 ? (
-                <div className="mb-1 flex items-baseline justify-between text-sm text-[#0b1f33]">
+                <div className="mb-0.5 flex justify-between text-[0.8rem] text-[#0b1f33]">
                   <span>Discount</span>
                   <span className="tabular-nums">−{money(discountNum)}</span>
                 </div>
               ) : null}
               {loyaltyOff > 0 ? (
-                <div className="mb-1 flex items-baseline justify-between text-sm text-[#0b1f33]">
+                <div className="mb-0.5 flex justify-between text-[0.8rem] text-[#0b1f33]">
                   <span>Points</span>
                   <span className="tabular-nums">−{money(loyaltyOff)}</span>
                 </div>
@@ -2447,44 +2421,100 @@ export default function RetailPosWorkstation({
               {diningFeeLines.map((f) => (
                 <div
                   key={f.feeCode}
-                  className="mb-1 flex items-baseline justify-between text-sm text-[#0b1f33]"
+                  className="mb-0.5 flex justify-between text-[0.8rem] text-[#0b1f33]"
                 >
                   <span>{f.reason}</span>
                   <span className="tabular-nums">{money(f.amount)}</span>
                 </div>
               ))}
-              <div className="flex items-baseline justify-between">
+              {billSummary.taxTotal > 0 ? (
+                <>
+                  <div className="mb-0.5 flex justify-between text-[0.8rem] text-[#0b1f33]">
+                    <span>Taxable</span>
+                    <span className="tabular-nums">
+                      {money(billSummary.taxableValue)}
+                    </span>
+                  </div>
+                  <div className="my-1 space-y-0.5 rounded-md bg-[#f3f4f6] px-2 py-1.5 text-[0.75rem]">
+                    {billSummary.taxSlabs.map((s) =>
+                      s.rate <= 0 ? (
+                        <div
+                          key="tax"
+                          className="flex justify-between tabular-nums"
+                        >
+                          <span>Tax</span>
+                          <span>{money(s.tax)}</span>
+                        </div>
+                      ) : (
+                        <div key={s.rate} className="space-y-0.5">
+                          <div className="flex justify-between tabular-nums">
+                            <span className="text-[#15803d]">
+                              CGST {s.halfRate}%
+                            </span>
+                            <span>{money(s.cgst)}</span>
+                          </div>
+                          <div className="flex justify-between tabular-nums">
+                            <span className="text-[#1a56db]">
+                              SGST {s.halfRate}%
+                            </span>
+                            <span>{money(s.sgst)}</span>
+                          </div>
+                        </div>
+                      ),
+                    )}
+                  </div>
+                </>
+              ) : null}
+              {billSummary.showRoundOff ? (
+                <div className="mb-0.5 flex justify-between text-[0.75rem] text-[#5a6b7d]">
+                  <span>Round off</span>
+                  <span className="tabular-nums">
+                    {billSummary.roundOff > 0 ? "+" : ""}
+                    {money(billSummary.roundOff)}
+                  </span>
+                </div>
+              ) : null}
+              <div className="mt-1 flex items-baseline justify-between border-t border-[#e8edf4] pt-1.5">
                 <span className="text-sm font-semibold text-[#0b1f33]">
-                  Pay this
+                  Amount due
                 </span>
-                <span className="text-[1.75rem] leading-none font-bold tabular-nums text-[#0b1f33]">
+                <span className="text-lg font-bold tabular-nums text-[#0b1f33]">
                   {money(splitPart ? chargeAmount : totalDue)}
                 </span>
               </div>
-              {taxAmount > 0 ? (
+              {billSummary.taxTotal > 0 ? (
                 <p className="mt-1 text-[0.65rem] text-[#8b9bb0]">
-                  Includes tax {money(taxAmount)}
-                  {discountNum > 0 ? ` · after discount` : ""}
+                  {billSummary.taxInclusive
+                    ? "Prices include tax"
+                    : "Tax added on top"}
+                </p>
+              ) : null}
+              {splitPart || stillDueAfter > 0.001 ? (
+                <p className="mt-1 text-[0.7rem] text-[#1341a8]">
+                  Collecting {money(chargeAmount)}
+                  {stillDueAfter > 0.001
+                    ? ` · still due ${money(stillDueAfter)}`
+                    : ""}
                 </p>
               ) : null}
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-4 gap-1">
               <Button
                 type="button"
                 variant="secondary"
                 size="sm"
-                className="h-10"
+                className="h-8 px-1 text-[0.7rem]"
                 disabled={!cart.length && !splitFollowUp}
                 onClick={() => setPayModal("discount")}
               >
-                {discountNum > 0 ? `Discount ${money(discountNum)}` : "Discount"}
+                {discountNum > 0 ? `−${money(discountNum)}` : "Discount"}
               </Button>
               <Button
                 type="button"
                 variant="secondary"
                 size="sm"
-                className="h-10"
+                className="h-8 px-1 text-[0.7rem]"
                 disabled={
                   !canSplitBill ||
                   (!cart.length && !splitFollowUp) ||
@@ -2500,37 +2530,35 @@ export default function RetailPosWorkstation({
                   setSplitBillOpen(true);
                 }}
               >
-                {splitSession
-                  ? `${splitPart?.label ?? "Split"} · ${money(chargeAmount)}`
-                  : "Split bill"}
+                {splitSession ? "Split…" : "Split"}
               </Button>
               <Button
                 type="button"
                 variant="secondary"
                 size="sm"
-                className="h-10"
+                className="h-8 px-1 text-[0.7rem]"
                 disabled={busy || !cart.length || Boolean(splitSession)}
                 onClick={() => setPayModal("draft")}
               >
-                Save later
+                Save
               </Button>
               <Button
                 type="button"
                 variant="secondary"
                 size="sm"
-                className="h-10"
+                className="h-8 px-1 text-[0.7rem]"
                 onClick={() => setPayModal("more")}
               >
-                More options
+                More
               </Button>
             </div>
             {splitSession ? (
-              <p className="text-[0.7rem] text-[#1a56db]">
-                Collect {splitPart?.label} now
+              <p className="text-[0.65rem] text-[#1a56db]">
+                {splitPart?.label}
+                {` · part ${splitSession.index + 1}/${splitSession.parts.length}`}
                 {splitSession.orderNumber
                   ? ` · ${splitSession.orderNumber}`
-                  : ""}
-                .{" "}
+                  : ""}{" "}
                 <button
                   type="button"
                   className="font-semibold underline"
@@ -2543,7 +2571,7 @@ export default function RetailPosWorkstation({
                     setSplitSession(null);
                   }}
                 >
-                  {splitFollowUp ? "Stop split" : "Cancel split"}
+                  {splitFollowUp ? "Stop" : "Cancel"}
                 </button>
               </p>
             ) : null}
@@ -2578,7 +2606,6 @@ export default function RetailPosWorkstation({
                   reason: m?.reason,
                 };
               });
-              const visible = shownPrimary;
               const methodLabel = (method: string, displayName: string) => {
                 if (method === "store_credit") return "Wallet";
                 if (method === "wallet") return "App pay";
@@ -2587,42 +2614,36 @@ export default function RetailPosWorkstation({
                 return displayName;
               };
               return (
-                <>
-            <div
-              className={cn(
-                "grid gap-1 rounded-[12px] bg-[#eef2f8] p-1",
-                touchMode ? "grid-cols-3" : "grid-cols-3",
-              )}
-            >
-              {visible.map((m) => (
-                <button
-                  key={m.method}
-                  type="button"
-                  disabled={!m.available}
-                  title={m.reason}
-                  data-active={payMethod === m.method ? "true" : "false"}
-                  onClick={() => {
-                    if (!m.available) {
-                      toast.message(m.reason || `${m.displayName} is not configured`);
-                      return;
-                    }
-                    setPayMethod(m.method as PayMethod);
-                    if (m.method !== "cash") setSplitPay(false);
-                  }}
-                  className={cn(
-                    "rounded-[9px] font-bold tracking-[0.04em] uppercase transition",
-                    touchMode ? "py-4 text-xs" : "py-2.5 text-[0.65rem]",
-                    !m.available && "cursor-not-allowed opacity-40",
-                    payMethod === m.method
-                      ? "bg-[#1a56db] text-white shadow-[0_1px_3px_rgba(26,86,219,0.35)]"
-                      : "text-[#5a6b7d] hover:bg-white/80 hover:text-[#0b1f33]",
-                  )}
-                >
-                  {methodLabel(m.method, m.displayName)}
-                </button>
-              ))}
-            </div>
-                </>
+                <div className="grid grid-cols-5 gap-0.5 rounded-lg bg-[#eef2f8] p-0.5">
+                  {shownPrimary.map((m) => (
+                    <button
+                      key={m.method}
+                      type="button"
+                      disabled={!m.available}
+                      title={m.reason}
+                      data-active={payMethod === m.method ? "true" : "false"}
+                      onClick={() => {
+                        if (!m.available) {
+                          toast.message(
+                            m.reason || `${m.displayName} is not configured`,
+                          );
+                          return;
+                        }
+                        setPayMethod(m.method as PayMethod);
+                        if (m.method !== "cash") setSplitPay(false);
+                      }}
+                      className={cn(
+                        "rounded-md py-1.5 text-[0.62rem] font-semibold tracking-wide uppercase transition",
+                        !m.available && "cursor-not-allowed opacity-40",
+                        payMethod === m.method
+                          ? "bg-[#1a56db] text-white"
+                          : "text-[#5a6b7d] hover:bg-white/80 hover:text-[#0b1f33]",
+                      )}
+                    >
+                      {methodLabel(m.method, m.displayName)}
+                    </button>
+                  ))}
+                </div>
               );
             })()}
             {["gift_card", "bank_transfer", "emi", "wallet"].includes(
@@ -2630,14 +2651,14 @@ export default function RetailPosWorkstation({
             ) ? (
               <button
                 type="button"
-                className="w-full rounded-lg border border-[#c9d7f5] bg-[#f5f8ff] px-3 py-2 text-left text-xs font-semibold text-[#1a56db]"
+                className="w-full rounded-md border border-[#c9d7f5] bg-[#f5f8ff] px-2 py-1.5 text-left text-[0.7rem] font-semibold text-[#1a56db]"
                 onClick={() => setPayModal("more")}
               >
-                Extra pay details — tap to fill ({payMethod.replace("_", " ")})
+                Extra details · {payMethod.replace("_", " ")}
               </button>
             ) : null}
             {payMethod === "qr" ? (
-              <div className="space-y-2 rounded-[10px] border border-[#d9e0ea] bg-white p-3">
+              <div className="rounded-lg border border-[#d9e0ea] bg-white p-2">
                 {(() => {
                   const posSettings =
                     boot?.tenant?.settings &&
@@ -2657,51 +2678,65 @@ export default function RetailPosWorkstation({
                     "Universal POS";
                   if (!vpa) {
                     return (
-                      <p className="text-[0.75rem] text-amber-800">
-                        Set your shop UPI ID in Settings → Counter first.
-                        Scanning this incomplete QR causes PhonePe/GPay to show
-                        a technical glitch.
+                      <p className="text-[0.7rem] text-amber-800">
+                        Set UPI ID in Settings → Counter first.
                       </p>
                     );
                   }
                   const upiUri = `upi://pay?pa=${encodeURIComponent(vpa)}&pn=${encodeURIComponent(payee)}&am=${chargeAmount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(productName || "Universal POS")}`;
                   return (
-                    <>
-                      <p className="text-[0.7rem] text-[#5a6b7d]">
-                        Show this QR to the customer (UPI / wallet scan), then
-                        confirm payment collected. Payee: {vpa}
-                      </p>
+                    <div className="flex items-center gap-2">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         alt="Pay QR"
-                        className="mx-auto h-36 w-36 rounded-md border border-[#eef2f8] bg-white"
-                        src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(upiUri)}`}
+                        className="h-20 w-20 shrink-0 rounded border border-[#eef2f8] bg-white"
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(upiUri)}`}
                       />
-                    </>
+                      <p className="text-[0.65rem] leading-snug text-[#5a6b7d]">
+                        Customer scans, then Charge.
+                        <br />
+                        <span className="font-medium text-[#0b1f33]">{vpa}</span>
+                      </p>
+                    </div>
                   );
                 })()}
               </div>
             ) : null}
             {payMethod === "cash" ? (
-              <div className="field-shell">
-                <Label className="text-[0.75rem] font-semibold text-[#0b1f33]">
-                  Cash given
-                </Label>
-                <Input
-                  className="mt-1 text-base tabular-nums"
-                  inputMode="decimal"
-                  placeholder={String(chargeAmount || "")}
-                  value={cashTendered}
-                  onChange={(e) => setCashTendered(e.target.value)}
-                />
-                {tenderedNum > 0 ? (
-                  <p className="mt-1 text-sm font-semibold text-[#1a56db]">
-                    Return {money(changeDue)}
+              <div className="rounded-lg border border-[#e2e8f0] bg-white px-2.5 py-2">
+                <div className="flex items-end gap-2">
+                  <div className="min-w-0 flex-1">
+                    <Label className="text-[0.65rem] font-semibold text-[#5a6b7d]">
+                      Cash given
+                    </Label>
+                    <Input
+                      className="mt-0.5 h-8 text-sm tabular-nums"
+                      inputMode="decimal"
+                      placeholder={String(chargeAmount || "")}
+                      value={cashTendered}
+                      onChange={(e) => setCashTendered(e.target.value)}
+                    />
+                  </div>
+                  {tenderedNum > 0 ? (
+                    <div className="shrink-0 text-right">
+                      <p className="text-[0.6rem] font-medium text-[#8b9bb0]">
+                        Change
+                      </p>
+                      <p className="text-base font-bold tabular-nums text-[#1a56db]">
+                        {money(changeDue)}
+                      </p>
+                    </div>
+                  ) : null}
+                </div>
+                {tenderedNum > 0 && tenderedNum + 0.001 < chargeAmount ? (
+                  <p className="mt-1 text-[0.65rem] font-medium text-amber-700">
+                    Short by {money(chargeAmount - tenderedNum)}
                   </p>
-                ) : (
-                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                ) : null}
+                {tenderedNum <= 0 ? (
+                  <div className="mt-1.5 flex flex-wrap gap-1">
                     {(currencyCode === "INR"
-                      ? [chargeAmount, 500, 1000, 2000]
+                      ? [chargeAmount, 500, 1000, 2000, 3000]
                       : currencyCode === "USD"
                         ? [chargeAmount, 20, 50, 100]
                         : [chargeAmount]
@@ -2711,38 +2746,32 @@ export default function RetailPosWorkstation({
                         <button
                           key={n}
                           type="button"
-                          className={cn(
-                            "rounded-lg border border-[#cfd8e6] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#5a6b7d] hover:border-[#1a56db]/45 hover:bg-[#e8eefb] hover:text-[#0b1f33]",
-                            touchMode && "px-3 py-2.5 text-sm",
-                          )}
+                          className="rounded-md border border-[#cfd8e6] bg-white px-2 py-0.5 text-[0.65rem] font-semibold text-[#5a6b7d] hover:border-[#1a56db]/45 hover:bg-[#e8eefb]"
                           onClick={() => setCashTendered(String(n))}
                         >
                           {n === chargeAmount ? "Exact" : money(n)}
                         </button>
                       ))}
                   </div>
-                )}
+                ) : null}
               </div>
             ) : payMethod === "card" || payMethod === "upi" ? (
-              <p className="text-[0.7rem] text-[#5a6b7d]">
+              <p className="text-[0.65rem] text-[#5a6b7d]">
                 {stripeConfig.data?.enabled
-                  ? "Card / UPI opens on the next screen."
-                  : "Card / UPI not set up. Use cash or QR."}
+                  ? "Opens on the next screen."
+                  : "Not set up — use cash or QR."}
               </p>
             ) : payMethod === "store_credit" ? (
-              <p className="text-[0.7rem] text-[#5a6b7d]">
+              <p className="text-[0.65rem] text-[#5a6b7d]">
                 {customerId
-                  ? `Takes from customer wallet (${money(walletBalance)} left).`
-                  : "Pick a customer first to use wallet."}
+                  ? `Wallet · ${money(walletBalance)} left`
+                  : "Pick a customer first."}
               </p>
             ) : null}
 
             <Button
-              size="lg"
-              className={cn(
-                "h-12 w-full text-[0.95rem]",
-                touchMode && "h-16 text-lg",
-              )}
+              size="sm"
+              className="h-9 w-full text-sm font-semibold"
               disabled={
                 busy ||
                 stripeBusy ||
@@ -2760,13 +2789,13 @@ export default function RetailPosWorkstation({
             >
               {busy || stripeBusy
                 ? payMethod === "card" || payMethod === "upi"
-                  ? "Opening Stripe…"
+                  ? "Opening…"
                   : "Processing…"
                 : splitPart
                   ? `Collect ${splitPart.label} · ${money(chargeAmount)}`
                   : allowPartial && chargeAmount < totalDue - 0.001
-                  ? `Collect ${money(chargeAmount)}`
-                  : `Charge ${money(chargeAmount)}`}
+                    ? `Collect ${money(chargeAmount)}`
+                    : `Charge · ${payMethodConfirmLabel} · ${money(chargeAmount)}`}
             </Button>
           </div>
         </aside>
@@ -3035,6 +3064,213 @@ export default function RetailPosWorkstation({
               </div>
             );
           })()}
+        </ModalFrame>
+      ) : null}
+
+      {payModal === "customer" ? (
+        <ModalFrame
+          title="Attach customer"
+          subtitle="Search or add — tap a row to attach. Needed for wallet."
+          onClose={() => setPayModal(null)}
+          className="max-w-sm"
+          bodyScroll
+        >
+          <CustomerPicker
+            embedded
+            value={customerId}
+            onChange={(id) => setCustomerId(id)}
+            onPicked={() => setPayModal(null)}
+            allowWalkIn
+            walkInLabel="Walk-in Guest"
+            placeholder="Name or phone…"
+            showBalances
+            money={money}
+          />
+        </ModalFrame>
+      ) : null}
+
+      {payModal === "orderDetails" ? (
+        <ModalFrame
+          title="Order details"
+          subtitle="Type, table, covers, and notes for this ticket."
+          onClose={() => setPayModal(null)}
+          className="max-w-md"
+          footer={
+            <Button
+              className="w-full"
+              size="sm"
+              onClick={() => setPayModal(null)}
+            >
+              Done
+            </Button>
+          }
+        >
+          <div className="grid gap-3 sm:grid-cols-2">
+            {foodFulfillment ? (
+              <div className="field-shell">
+                <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
+                  Order type
+                </Label>
+                <Select
+                  className="mt-1 flex h-10 w-full rounded-md border border-[#d9e0ea] bg-white px-3 text-sm text-[#0b1f33]"
+                  value={orderType}
+                  onChange={(e) => setOrderType(e.target.value)}
+                >
+                  <option value="walk_in">Walk-in</option>
+                  {(diningCfg.data?.enabledDiningModes ?? [
+                    "dine_in",
+                    "takeaway",
+                    "delivery",
+                  ]).map((m) => (
+                    <option key={m} value={m}>
+                      {m.replaceAll("_", " ")}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            ) : null}
+            {hasCapability("TABLE") ? (
+              <>
+                <div className="field-shell">
+                  <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
+                    Area / floor
+                  </Label>
+                  <Select
+                    className="mt-1 flex h-10 w-full rounded-md border border-[#d9e0ea] bg-white px-3 text-sm text-[#0b1f33]"
+                    value={floorFilter}
+                    onChange={(e) => setFloorFilter(e.target.value)}
+                  >
+                    <option value="all">All areas</option>
+                    {(diningFloors.data ?? []).map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.name}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <div className="field-shell">
+                  <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
+                    Table
+                  </Label>
+                  <Select
+                    className="mt-1 flex h-10 w-full rounded-md border border-[#d9e0ea] bg-white px-3 text-sm text-[#0b1f33]"
+                    value={resourceId}
+                    onChange={(e) => setResourceId(e.target.value)}
+                  >
+                    <option value="">None</option>
+                    {(diningTables.data ?? [])
+                      .filter(
+                        (t) =>
+                          floorFilter === "all" || t.floorId === floorFilter,
+                      )
+                      .map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.floorName ? `${t.floorName} · ` : ""}
+                          {t.name}
+                          {t.status !== "available" ? ` · ${t.status}` : ""}
+                        </option>
+                      ))}
+                  </Select>
+                  {areaCategoryIds.length ||
+                  selectedDiningFloor?.taxRatePercent != null ||
+                  selectedDiningFloor?.serviceChargePercent != null ? (
+                    <p className="mt-1 text-[0.65rem] text-[#5a6b7d]">
+                      {areaCategoryIds.length
+                        ? `Area menu · ${areaCategoryIds.length} ${areaCategoryIds.length === 1 ? "category" : "categories"}`
+                        : "Full menu"}
+                      {selectedDiningFloor?.taxRatePercent != null
+                        ? ` · tax ${selectedDiningFloor.taxRatePercent}%`
+                        : ""}
+                      {(selectedDiningTable?.areaServiceChargePercent ??
+                        selectedDiningFloor?.serviceChargePercent) != null
+                        ? ` · service ${selectedDiningTable?.areaServiceChargePercent ?? selectedDiningFloor?.serviceChargePercent}%`
+                        : ""}
+                    </p>
+                  ) : null}
+                </div>
+              </>
+            ) : resourceDesk ? (
+              <div className="field-shell">
+                <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
+                  Resource
+                </Label>
+                <Select
+                  className="mt-1 flex h-10 w-full rounded-md border border-[#d9e0ea] bg-white px-3 text-sm text-[#0b1f33]"
+                  value={resourceId}
+                  onChange={(e) => setResourceId(e.target.value)}
+                >
+                  <option value="">None</option>
+                  {(resources.data?.data ?? []).map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name} · {r.status}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            ) : null}
+            {foodFulfillment && hasCapability("TABLE") ? (
+              <div className="field-shell">
+                <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
+                  Covers / guests
+                </Label>
+                <Input
+                  className="mt-1 h-10"
+                  inputMode="numeric"
+                  value={guestCount}
+                  onChange={(e) => setGuestCount(e.target.value)}
+                  placeholder="1"
+                />
+              </div>
+            ) : null}
+            {orderType === "delivery" ? (
+              <>
+                <div className="field-shell">
+                  <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
+                    Guest name
+                  </Label>
+                  <Input
+                    className="mt-1 h-10"
+                    value={guestName}
+                    onChange={(e) => setGuestName(e.target.value)}
+                    placeholder="Name"
+                  />
+                </div>
+                <div className="field-shell">
+                  <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
+                    Phone
+                  </Label>
+                  <Input
+                    className="mt-1 h-10"
+                    value={deliveryPhone}
+                    onChange={(e) => setDeliveryPhone(e.target.value)}
+                    placeholder="Mobile"
+                  />
+                </div>
+                <div className="field-shell sm:col-span-2">
+                  <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
+                    Delivery address
+                  </Label>
+                  <Input
+                    className="mt-1 h-10"
+                    value={deliveryAddress}
+                    onChange={(e) => setDeliveryAddress(e.target.value)}
+                    placeholder="Street, area, landmark"
+                  />
+                </div>
+              </>
+            ) : null}
+            <div className="field-shell sm:col-span-2">
+              <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
+                Order notes
+              </Label>
+              <Input
+                className="mt-1 h-10"
+                value={orderNote}
+                onChange={(e) => setOrderNote(e.target.value)}
+                placeholder="Notes, allergies, prep note, booking reference…"
+              />
+            </div>
+          </div>
         </ModalFrame>
       ) : null}
 

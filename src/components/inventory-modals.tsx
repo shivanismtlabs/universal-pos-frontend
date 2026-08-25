@@ -25,6 +25,96 @@ import {
   zodMessages,
 } from "@/lib/validations";
 
+/** Backend paginate() caps at 100 — load full page for modal pickers */
+const STOCK_PICKER_LIMIT = 100;
+
+function useStockLevelPicker(locationId: string, open: boolean) {
+  return useQuery({
+    queryKey: ["inv-levels-picker", locationId],
+    queryFn: () =>
+      inventoryApi.listLevels({
+        locationId,
+        includeZero: true,
+        page: 1,
+        limit: STOCK_PICKER_LIMIT,
+      }),
+    enabled: open && Boolean(locationId),
+  });
+}
+
+function StockItemSelect({
+  locationId,
+  open,
+  value,
+  onChange,
+  placeholder,
+  optionLabel,
+}: {
+  locationId: string;
+  open: boolean;
+  value: string;
+  onChange: (id: string) => void;
+  placeholder: string;
+  optionLabel: (i: {
+    stockLevelId: string;
+    name: string;
+    sku: string;
+    qtyOnHand: number;
+    sellUnit: string;
+  }) => string;
+}) {
+  const levels = useStockLevelPicker(locationId, open);
+  const items = levels.data?.items ?? [];
+  const total = levels.data?.meta?.total ?? items.length;
+
+  return (
+    <div>
+      {!locationId ? (
+        <p className="mt-1 text-xs text-amber-700">
+          Select a store / location on the Inventory page first.
+        </p>
+      ) : levels.isLoading ? (
+        <p className="mt-1 text-xs text-[#5a6b7d]">Loading stock list…</p>
+      ) : levels.isError ? (
+        <p className="mt-1 text-xs text-[#a01818]">
+          Could not load stock list.{" "}
+          <button
+            type="button"
+            className="font-semibold underline"
+            onClick={() => void levels.refetch()}
+          >
+            Retry
+          </button>
+        </p>
+      ) : items.length === 0 ? (
+        <p className="mt-1 text-xs text-[#5a6b7d]">
+          No stock items at this location yet. Add products or receive stock
+          first.
+        </p>
+      ) : null}
+      <Select
+        className="mt-1 h-10 rounded-lg border border-[#dce3ec] bg-white px-3 text-sm"
+        value={value}
+        disabled={!locationId || levels.isLoading || items.length === 0}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        <option value="">{placeholder}</option>
+        {items.map((i) => (
+          <option key={i.stockLevelId} value={i.stockLevelId}>
+            {optionLabel(i)}
+          </option>
+        ))}
+      </Select>
+      {total > items.length ? (
+        <p className="mt-1 text-[0.65rem] text-[#8b9bb0]">
+          Showing first {items.length} of {total} items — type in the dropdown
+          search to filter this list.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 /** Common portal overlay styling */
 function ModalBackdrop({
   children,
@@ -66,12 +156,6 @@ export function StockInModal({
   const [reason, setReason] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  const levels = useQuery({
-    queryKey: ["inv-levels", locationId],
-    queryFn: () => inventoryApi.listLevels({ locationId, includeZero: true }),
-    enabled: open && Boolean(locationId),
-  });
-
   useEffect(() => {
     if (open) {
       setStockLevelId("");
@@ -105,6 +189,7 @@ export function StockInModal({
       toast.success("Stock received successfully!");
       onClose();
       void qc.invalidateQueries({ queryKey: ["inv-levels"] });
+      void qc.invalidateQueries({ queryKey: ["inv-levels-picker"] });
       void qc.invalidateQueries({ queryKey: ["inv-ledger"] });
     },
     onError: (e: Error) => {
@@ -151,21 +236,19 @@ export function StockInModal({
           <Label className="text-xs font-semibold text-[#0b1f33]">
             Select Item *
           </Label>
-          <Select
-            className="mt-1 h-10 rounded-lg border border-[#dce3ec] bg-white px-3 text-sm"
+          <StockItemSelect
+            locationId={locationId}
+            open={open}
             value={stockLevelId}
-            onChange={(e) => {
-              setStockLevelId(e.target.value);
+            onChange={(id) => {
+              setStockLevelId(id);
               setFieldErrors((f) => ({ ...f, stockLevelId: "" }));
             }}
-          >
-            <option value="">-- Choose item to add stock --</option>
-            {(levels.data?.items ?? []).map((i) => (
-              <option key={i.stockLevelId} value={i.stockLevelId}>
-                {i.name} ({i.sku}) — Current: {i.qtyOnHand} {i.sellUnit}
-              </option>
-            ))}
-          </Select>
+            placeholder="-- Choose item to add stock --"
+            optionLabel={(i) =>
+              `${i.name} (${i.sku}) — Current: ${i.qtyOnHand} ${i.sellUnit}`
+            }
+          />
           <FieldError message={fieldErrors.stockLevelId} />
         </div>
 
@@ -261,11 +344,7 @@ export function StockOutModal({
   const [reason, setReason] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  const levels = useQuery({
-    queryKey: ["inv-levels", locationId],
-    queryFn: () => inventoryApi.listLevels({ locationId, includeZero: true }),
-    enabled: open && Boolean(locationId),
-  });
+  const levels = useStockLevelPicker(locationId, open);
 
   useEffect(() => {
     if (open) {
@@ -304,6 +383,7 @@ export function StockOutModal({
       toast.success("Stock out recorded");
       onClose();
       void qc.invalidateQueries({ queryKey: ["inv-levels"] });
+      void qc.invalidateQueries({ queryKey: ["inv-levels-picker"] });
       void qc.invalidateQueries({ queryKey: ["inv-ledger"] });
     },
     onError: (e: Error) => {
@@ -350,21 +430,19 @@ export function StockOutModal({
           <Label className="text-xs font-semibold text-[#0b1f33]">
             Select Item *
           </Label>
-          <Select
-            className="mt-1 h-10 rounded-lg border border-[#dce3ec] bg-white px-3 text-sm"
+          <StockItemSelect
+            locationId={locationId}
+            open={open}
             value={stockLevelId}
-            onChange={(e) => {
-              setStockLevelId(e.target.value);
+            onChange={(id) => {
+              setStockLevelId(id);
               setFieldErrors((f) => ({ ...f, stockLevelId: "" }));
             }}
-          >
-            <option value="">-- Choose item to remove stock --</option>
-            {(levels.data?.items ?? []).map((i) => (
-              <option key={i.stockLevelId} value={i.stockLevelId}>
-                {i.name} ({i.sku}) — Available: {i.qtyOnHand} {i.sellUnit}
-              </option>
-            ))}
-          </Select>
+            placeholder="-- Choose item to remove stock --"
+            optionLabel={(i) =>
+              `${i.name} (${i.sku}) — Available: ${i.qtyOnHand} ${i.sellUnit}`
+            }
+          />
           <FieldError message={fieldErrors.stockLevelId} />
         </div>
 
@@ -468,12 +546,6 @@ export function DamagedStockModal({
   const [reason, setReason] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  const levels = useQuery({
-    queryKey: ["inv-levels", locationId],
-    queryFn: () => inventoryApi.listLevels({ locationId, includeZero: true }),
-    enabled: open && Boolean(locationId),
-  });
-
   useEffect(() => {
     if (open) {
       setStockLevelId("");
@@ -508,6 +580,7 @@ export function DamagedStockModal({
       toast.success("Moved quantity to damaged stock");
       onClose();
       void qc.invalidateQueries({ queryKey: ["inv-levels"] });
+      void qc.invalidateQueries({ queryKey: ["inv-levels-picker"] });
     },
     onError: (e: Error) => {
       if (e instanceof ApiError) toast.error(e.message);
@@ -553,21 +626,19 @@ export function DamagedStockModal({
           <Label className="text-xs font-semibold text-[#0b1f33]">
             Select Item *
           </Label>
-          <Select
-            className="mt-1 h-10 rounded-lg border border-[#dce3ec] bg-white px-3 text-sm"
+          <StockItemSelect
+            locationId={locationId}
+            open={open}
             value={stockLevelId}
-            onChange={(e) => {
-              setStockLevelId(e.target.value);
+            onChange={(id) => {
+              setStockLevelId(id);
               setFieldErrors((f) => ({ ...f, stockLevelId: "" }));
             }}
-          >
-            <option value="">-- Choose item --</option>
-            {(levels.data?.items ?? []).map((i) => (
-              <option key={i.stockLevelId} value={i.stockLevelId}>
-                {i.name} ({i.sku}) — Sellable: {i.qtyOnHand} {i.sellUnit}
-              </option>
-            ))}
-          </Select>
+            placeholder="-- Choose damaged item --"
+            optionLabel={(i) =>
+              `${i.name} (${i.sku}) — Sellable: ${i.qtyOnHand} ${i.sellUnit}`
+            }
+          />
           <FieldError message={fieldErrors.stockLevelId} />
         </div>
 

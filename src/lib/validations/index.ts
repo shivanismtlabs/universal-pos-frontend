@@ -10,18 +10,18 @@ export const strongPasswordSchema = z
   .regex(/\d/, "Include a number")
   .regex(/[^A-Za-z0-9]/, "Include a special character");
 
-/** Any country: 7–15 digits; +, spaces, dashes, () allowed */
+/** Any country: optional +, then digits only (7–15 digit total). No spaces or symbols. */
 export const phoneSchema = z
   .string()
   .trim()
-  .max(22, "Phone is too long")
+  .max(18, "Phone is too long")
   .refine(
     (v) => {
-      if (!/^\+?[\d\s().-]+$/.test(v)) return false;
+      if (!/^\+?\d+$/.test(v)) return false;
       const digits = v.replace(/\D/g, "");
       return digits.length >= 7 && digits.length <= 15;
     },
-    { message: "Enter a valid phone number (any country)" },
+    { message: "Enter digits only (7–15), no spaces or symbols" },
   );
 
 /** @deprecated use phoneSchema — kept for older imports */
@@ -37,6 +37,55 @@ export const tenantSlugSchema = z
     /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
     "Use lowercase kebab-case (e.g. demo-shop)",
   );
+
+/** Person / display name — letters and single spaces only (no numbers or symbols) */
+export const personNameSchema = z
+  .string()
+  .trim()
+  .min(2, "Name must be at least 2 characters")
+  .max(255, "Name is too long")
+  .refine((v) => v.trim().length >= 2, "Enter a real name (not only spaces)")
+  .refine(
+    (v) => /[A-Za-z\u0900-\u097F]/.test(v),
+    "Name must include letters",
+  )
+  .refine(
+    (v) => /^[A-Za-z\u0900-\u097F]+(?: [A-Za-z\u0900-\u097F]+)*$/.test(v),
+    "Use letters only (no numbers or special characters)",
+  );
+
+/** Zoho-style identity signup (before organization setup) */
+export const signupIdentitySchema = z
+  .object({
+    fullName: personNameSchema,
+    email: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .min(1, "Email is required")
+      .email("Enter a valid email")
+      .max(255),
+    password: strongPasswordSchema,
+    confirmPassword: z.string().min(1, "Confirm your password"),
+    phone: phoneSchema,
+  })
+  .refine((v) => v.password === v.confirmPassword, {
+    message: "Passwords do not match",
+    path: ["confirmPassword"],
+  })
+  .refine(
+    (v) => {
+      const local = v.email.split("@")[0]?.toLowerCase() ?? "";
+      return (
+        !local || local.length < 2 || !v.password.toLowerCase().includes(local)
+      );
+    },
+    {
+      message: "Password must not contain your email name",
+      path: ["password"],
+    },
+  );
+export type SignupIdentityInput = z.infer<typeof signupIdentitySchema>;
 
 export const loginSchema = z.object({
   email: z
@@ -148,7 +197,7 @@ export function passwordStrength(
   return { checks, score, ok: score === 7 };
 }
 export const createCustomerSchema = z.object({
-  fullName: z.string().min(2, "Name is required").max(255),
+  fullName: personNameSchema,
   phone: phoneSchema,
   email: z
     .string()
@@ -661,13 +710,23 @@ export const createCatalogProductSchema = z
       .string()
       .trim()
       .min(2, "Product name must be at least 2 characters")
-      .max(255, "Product name is too long"),
+      .max(255, "Product name is too long")
+      .refine(
+        (v) => v.trim().length >= 2,
+        "Enter a real name (not only spaces)",
+      ),
+    shortName: z
+      .string()
+      .trim()
+      .max(80, "Short name is too long")
+      .optional()
+      .or(z.literal("")),
     kind: z.enum(["physical", "service", "digital", "bundle", "rental"]),
     status: z.enum(["active", "inactive", "draft", "archived"]),
     skuCode: z
       .string()
       .trim()
-      .max(32)
+      .max(18, "SKU must be 18 characters or less")
       .optional()
       .or(z.literal(""))
       .refine(
@@ -676,7 +735,39 @@ export const createCatalogProductSchema = z
           (/^[A-Za-z0-9][A-Za-z0-9._\-/]*$/.test(v) && v.length >= 2),
         "SKU: 2+ chars, letters/numbers and . _ - / only",
       ),
-    barcode: z.string().trim().max(32).optional().or(z.literal("")),
+    barcode: z
+      .string()
+      .trim()
+      .optional()
+      .or(z.literal(""))
+      .refine(
+        (v) => !v || (v.length >= 4 && v.length <= 64),
+        "Barcode must be 4–64 characters",
+      ),
+    internalCode: z
+      .string()
+      .trim()
+      .max(64, "Internal code is too long")
+      .optional()
+      .or(z.literal("")),
+    shortDescription: z
+      .string()
+      .trim()
+      .max(500, "Short description is too long")
+      .optional()
+      .or(z.literal("")),
+    description: z
+      .string()
+      .trim()
+      .max(5000, "Description is too long")
+      .optional()
+      .or(z.literal("")),
+    taxCode: z
+      .string()
+      .trim()
+      .max(32, "HSN / SAC is too long")
+      .optional()
+      .or(z.literal("")),
     basePrice: z.coerce
       .number({ invalid_type_error: "Enter a valid selling price" })
       .min(0, "Price cannot be negative")
@@ -709,18 +800,70 @@ export const createCatalogProductSchema = z
       .number({ invalid_type_error: "Enter a valid tax %" })
       .min(0, "Tax % cannot be negative")
       .max(40, "Tax % looks too high"),
-    unitOfMeasure: z.string().trim().min(1).max(16),
+    unitOfMeasure: z
+      .string()
+      .trim()
+      .min(1, "Select a unit")
+      .max(16, "Unit code is too long"),
     trackInventory: z.boolean(),
     openingQty: z.string().optional().or(z.literal("")),
+    reorderPoint: z.string().optional().or(z.literal("")),
   })
   .superRefine((v, ctx) => {
-    if (!v.trackInventory) return;
-    const q = Number(v.openingQty);
-    if (!Number.isFinite(q) || q < 1) {
+    if (v.trackInventory) {
+      const raw = (v.openingQty ?? "").trim();
+      if (raw === "") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["openingQty"],
+          message: "Enter opening stock (0 or more)",
+        });
+      } else {
+        const q = Number(raw);
+        if (!Number.isFinite(q) || q < 0) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["openingQty"],
+            message: "Opening quantity cannot be negative",
+          });
+        } else if (!Number.isInteger(q)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["openingQty"],
+            message: "Opening quantity must be a whole number",
+          });
+        }
+      }
+
+      const rp = (v.reorderPoint ?? "").trim();
+      if (rp !== "") {
+        const n = Number(rp);
+        if (!Number.isFinite(n) || n < 0) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["reorderPoint"],
+            message: "Reorder point cannot be negative",
+          });
+        } else if (!Number.isInteger(n)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["reorderPoint"],
+            message: "Reorder point must be a whole number",
+          });
+        }
+      }
+    }
+
+    if (
+      v.mrp !== undefined &&
+      Number.isFinite(v.mrp) &&
+      Number.isFinite(v.basePrice) &&
+      v.mrp + 1e-9 < v.basePrice
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["openingQty"],
-        message: "Opening quantity must be at least 1",
+        path: ["mrp"],
+        message: "MRP should be at least the selling rate",
       });
     }
   });
@@ -728,12 +871,23 @@ export type CreateCatalogProductInput = z.infer<
   typeof createCatalogProductSchema
 >;
 
+/** Required custom / meta fields on New/Edit Item (keys on `extraFields`). */
+export function validateRequiredProductExtraFields(
+  fields: { key: string; label: string; required?: boolean; type?: string }[],
+  values: Record<string, string>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const f of fields) {
+    if (!f.required) continue;
+    if (f.type === "boolean") continue;
+    const v = (values[f.key] ?? "").trim();
+    if (!v) out[f.key] = `${f.label} is required`;
+  }
+  return out;
+}
+
 export const inviteStaffSchema = z.object({
-  fullName: z
-    .string()
-    .trim()
-    .min(2, "Name must be at least 2 characters")
-    .max(255),
+  fullName: personNameSchema,
   email: emailSchema,
   password: strongPasswordSchema,
   phone: optionalPhoneSchema,

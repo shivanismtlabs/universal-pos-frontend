@@ -10,6 +10,9 @@ import { moneyNumber } from "@/lib/utils";
 import { useBootstrapOptional } from "@/lib/bootstrap";
 import { notifyApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
+import {
+  buildBillSummary,
+} from "@/lib/bill-summary";
 
 function ReceiptOrderBarcode({ value }: { value: string }) {
   const ref = useRef<SVGSVGElement | null>(null);
@@ -136,36 +139,6 @@ function pad2(n: number) {
   return n.toFixed(2);
 }
 
-function gstSlabs(
-  items: ReceiptData["items"],
-  taxTotal: number,
-): Array<{ rate: number; tax: number }> {
-  const map = new Map<number, number>();
-  let summed = 0;
-  for (const item of items) {
-    const tax = moneyNumber(item.taxAmount);
-    if (tax <= 0) continue;
-    const line = moneyNumber(item.lineTotal);
-    let rate = moneyNumber(item.taxRatePercent ?? 0);
-    // HSN codes were once misread as rates (capped at 40) — prefer real math
-    if (!rate || rate > 28) {
-      if (line > 0) rate = (tax / line) * 100;
-    }
-    const key = Math.round(rate * 10) / 10;
-    map.set(key, (map.get(key) ?? 0) + tax);
-    summed += tax;
-  }
-  if (!map.size && taxTotal > 0) {
-    return [{ rate: 0, tax: taxTotal }];
-  }
-  if (map.size && Math.abs(summed - taxTotal) > 0.05 && taxTotal > summed) {
-    map.set(0, (map.get(0) ?? 0) + (taxTotal - summed));
-  }
-  return [...map.entries()]
-    .map(([rate, tax]) => ({ rate, tax }))
-    .sort((a, b) => b.rate - a.rate);
-}
-
 export function ReceiptModal({
   data,
   loading,
@@ -245,10 +218,21 @@ export function ReceiptModal({
     moneyNumber(data?.totals.feesTotal) ||
     feeRows.reduce((s, f) => s + moneyNumber(f.amount), 0);
   const itemsSub = Math.max(0, subtotal - feesTotal);
-  const grand = Math.max(0, subtotal - discount + taxTotal);
-  const rounded = Math.round(grand);
-  const roundOff = Number((rounded - grand).toFixed(2));
-  const slabs = data ? gstSlabs(data.items, taxTotal) : [];
+  // Receipt totals historically treat tax as additive on printed grand
+  // (same as exclusive). Keep that so printed QR/total stay unchanged.
+  const bill = buildBillSummary({
+    itemsSubtotal: itemsSub,
+    taxTotal,
+    discount,
+    fees: feeRows,
+    taxInclusive: false,
+    lines: data?.items ?? [],
+    amountDue: Math.max(0, subtotal - discount + taxTotal),
+  });
+  const grand = bill.grand;
+  const rounded = bill.roundedTotal;
+  const roundOff = bill.roundOff;
+  const slabs = bill.taxSlabs;
   const when = data?.printedAt
     ? new Date(data.printedAt)
     : new Date();
@@ -496,15 +480,13 @@ export function ReceiptModal({
               <div className="flex justify-between">
                 <span>Taxable Value</span>
                 <span className="tabular-nums">
-                  {pad2(Math.max(0, subtotal - discount))}
+                  {pad2(bill.taxableValue)}
                 </span>
               </div>
               {slabs.length ? (
                 <div className="mt-1 bg-[#f3f4f6] px-1 py-1 print:bg-[#f3f4f6]">
                   <p className="font-bold">GST Breakup</p>
                   {slabs.map((s) => {
-                    const half = s.tax / 2;
-                    const halfPct = s.rate / 2;
                     if (s.rate <= 0) {
                       return (
                         <div key="tax" className="flex justify-between">
@@ -516,12 +498,12 @@ export function ReceiptModal({
                     return (
                       <div key={s.rate}>
                         <div className="flex justify-between">
-                          <span>CGST {pad2(halfPct)}%</span>
-                          <span className="tabular-nums">{pad2(half)}</span>
+                          <span>CGST {pad2(s.halfRate)}%</span>
+                          <span className="tabular-nums">{pad2(s.cgst)}</span>
                         </div>
                         <div className="flex justify-between">
-                          <span>SGST {pad2(halfPct)}%</span>
-                          <span className="tabular-nums">{pad2(half)}</span>
+                          <span>SGST {pad2(s.halfRate)}%</span>
+                          <span className="tabular-nums">{pad2(s.sgst)}</span>
                         </div>
                       </div>
                     );
@@ -532,7 +514,7 @@ export function ReceiptModal({
                 <span>Grand Total</span>
                 <span className="tabular-nums">{pad2(grand)}</span>
               </div>
-              {roundOff !== 0 ? (
+              {bill.showRoundOff ? (
                 <div className="flex justify-between">
                   <span>Round Off</span>
                   <span className="tabular-nums">
@@ -547,7 +529,7 @@ export function ReceiptModal({
               </div>
               {tenderedAmt != null && moneyNumber(tenderedAmt) > 0 ? (
                 <div className="flex justify-between">
-                  <span>Cash tendered</span>
+                  <span>Cash given</span>
                   <span className="tabular-nums">
                     {pad2(moneyNumber(tenderedAmt))}
                   </span>
@@ -555,7 +537,7 @@ export function ReceiptModal({
               ) : null}
               {changeAmt != null && moneyNumber(changeAmt) > 0 ? (
                 <div className="flex justify-between">
-                  <span>Change</span>
+                  <span>Change to return</span>
                   <span className="tabular-nums">
                     {pad2(moneyNumber(changeAmt))}
                   </span>

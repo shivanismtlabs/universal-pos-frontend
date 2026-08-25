@@ -77,7 +77,11 @@ const createOrgSchema = z
       .min(2, "Organization name must be at least 2 characters")
       .max(100, "Organization name is too long")
       .refine((v) => /[A-Za-z]/.test(v), "Organization name must include letters"),
-    phone: z.string().trim().max(22, "Phone is too long"),
+    phone: z
+      .string()
+      .trim()
+      .min(1, "Phone is required")
+      .max(22, "Phone is too long"),
     addressLine1: z
       .string()
       .trim()
@@ -117,11 +121,9 @@ const createOrgSchema = z
     email: z
       .string()
       .trim()
+      .min(1, "Business email is required")
       .max(120, "Email is too long")
-      .refine(
-        (v) => !v || /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v),
-        "Enter a valid email (name@domain.com)",
-      ),
+      .email("Enter a valid email (name@domain.com)"),
     website: z
       .string()
       .trim()
@@ -168,7 +170,13 @@ const createOrgSchema = z
         message: "Enter your business type (at least 2 characters)",
       });
     }
-    if (v.phone && !isValidNationalPhone(v.phone, v.countryCode)) {
+    if (!v.phone.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["phone"],
+        message: "Phone is required",
+      });
+    } else if (!isValidNationalPhone(v.phone, v.countryCode)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["phone"],
@@ -177,7 +185,7 @@ const createOrgSchema = z
             ? "Enter a valid 10-digit Indian mobile (starts with 6–9)"
             : "Enter a valid phone number for the selected country",
       });
-    } else if (v.phone) {
+    } else {
       const parsed = phoneSchema.safeParse(v.phone);
       if (!parsed.success) {
         ctx.addIssue({
@@ -237,6 +245,9 @@ const createOrgSchema = z
   });
 
 type CreateForm = z.infer<typeof createOrgSchema>;
+
+const fieldErr =
+  "border-[#fca5a5] focus:border-[#dc2626] focus:shadow-[0_0_0_3px_rgba(220,38,38,0.12)]";
 
 type IconType = ComponentType<{ className?: string; strokeWidth?: number }>;
 
@@ -401,7 +412,7 @@ function OrganizationsPageInner() {
 
   const form = useForm<CreateForm>({
     resolver: zodResolver(createOrgSchema),
-    mode: "onBlur",
+    mode: "onChange",
     reValidateMode: "onChange",
     defaultValues: {
       businessType: "",
@@ -897,8 +908,14 @@ function OrganizationsPageInner() {
                           <Label htmlFor="business-label">Your business</Label>
                           <Input
                             id="business-label"
-                            className="mt-0.5 h-9"
+                            className={cn(
+                              "mt-0.5 h-9",
+                              form.formState.errors.businessLabel && fieldErr,
+                            )}
                             placeholder="e.g. Swimming academy"
+                            aria-invalid={Boolean(
+                              form.formState.errors.businessLabel,
+                            )}
                             {...form.register("businessLabel")}
                           />
                           <FieldError
@@ -963,8 +980,14 @@ function OrganizationsPageInner() {
                   <div className="sm:col-span-2">
                     <Label>Organization name *</Label>
                     <Input
-                      className="mt-1"
+                      className={cn(
+                        "mt-1",
+                        form.formState.errors.organizationName && fieldErr,
+                      )}
                       placeholder="City Apparel Store"
+                      aria-invalid={Boolean(
+                        form.formState.errors.organizationName,
+                      )}
                       {...form.register("organizationName")}
                     />
                     <FieldError
@@ -976,8 +999,12 @@ function OrganizationsPageInner() {
                   <div>
                     <Label>Branch / store name</Label>
                     <Input
-                      className="mt-1"
+                      className={cn(
+                        "mt-1",
+                        form.formState.errors.storeName && fieldErr,
+                      )}
                       placeholder="Main Store"
+                      aria-invalid={Boolean(form.formState.errors.storeName)}
                       {...form.register("storeName")}
                     />
                     <FieldError
@@ -986,6 +1013,8 @@ function OrganizationsPageInner() {
                   </div>
                   <div>
                     <PhoneCountryInput
+                      label="Phone *"
+                      required
                       value={form.watch("phone") ?? ""}
                       onChange={(v) =>
                         form.setValue("phone", v, { shouldValidate: true })
@@ -996,11 +1025,15 @@ function OrganizationsPageInner() {
                     />
                   </div>
                   <div>
-                    <Label>Email</Label>
+                    <Label>Email *</Label>
                     <Input
-                      className="mt-1"
+                      className={cn(
+                        "mt-1",
+                        form.formState.errors.email && fieldErr,
+                      )}
                       type="email"
                       placeholder="billing@shop.com"
+                      aria-invalid={Boolean(form.formState.errors.email)}
                       {...form.register("email")}
                     />
                     <FieldError
@@ -1010,8 +1043,12 @@ function OrganizationsPageInner() {
                   <div className="sm:col-span-2">
                     <Label>Website</Label>
                     <Input
-                      className="mt-1"
+                      className={cn(
+                        "mt-1",
+                        form.formState.errors.website && fieldErr,
+                      )}
                       placeholder="https://www.example.com"
+                      aria-invalid={Boolean(form.formState.errors.website)}
                       {...form.register("website")}
                     />
                     <FieldError
@@ -1021,8 +1058,14 @@ function OrganizationsPageInner() {
                   <div className="sm:col-span-2">
                     <Label>Address *</Label>
                     <Input
-                      className="mt-1"
+                      className={cn(
+                        "mt-1",
+                        form.formState.errors.addressLine1 && fieldErr,
+                      )}
                       placeholder="Street address"
+                      aria-invalid={Boolean(
+                        form.formState.errors.addressLine1,
+                      )}
                       {...form.register("addressLine1")}
                     />
                     <FieldError
@@ -1032,8 +1075,14 @@ function OrganizationsPageInner() {
                   <div className="sm:col-span-2">
                     <Label>Address line 2</Label>
                     <Input
-                      className="mt-1"
+                      className={cn(
+                        "mt-1",
+                        form.formState.errors.addressLine2 && fieldErr,
+                      )}
                       placeholder="Area, landmark (optional)"
+                      aria-invalid={Boolean(
+                        form.formState.errors.addressLine2,
+                      )}
                       {...form.register("addressLine2")}
                     />
                     <FieldError
@@ -1068,8 +1117,12 @@ function OrganizationsPageInner() {
                     <Label>City *</Label>
                     {cityOptions.length ? (
                       <Select
-                        className="mt-1"
+                        className={cn(
+                          "mt-1",
+                          form.formState.errors.city && fieldErr,
+                        )}
                         disabled={!selectedState}
+                        aria-invalid={Boolean(form.formState.errors.city)}
                         {...form.register("city")}
                       >
                         <option value="">
@@ -1085,8 +1138,12 @@ function OrganizationsPageInner() {
                       </Select>
                     ) : (
                       <Input
-                        className="mt-1"
+                        className={cn(
+                          "mt-1",
+                          form.formState.errors.city && fieldErr,
+                        )}
                         placeholder="City"
+                        aria-invalid={Boolean(form.formState.errors.city)}
                         {...form.register("city")}
                       />
                     )}
@@ -1097,10 +1154,14 @@ function OrganizationsPageInner() {
                   <div>
                     <Label>Postal code *</Label>
                     <Input
-                      className="mt-1"
+                      className={cn(
+                        "mt-1",
+                        form.formState.errors.postalCode && fieldErr,
+                      )}
                       placeholder="PIN / ZIP"
                       inputMode="numeric"
                       maxLength={12}
+                      aria-invalid={Boolean(form.formState.errors.postalCode)}
                       {...form.register("postalCode")}
                     />
                     <FieldError
@@ -1110,8 +1171,12 @@ function OrganizationsPageInner() {
                   <div>
                     <Label>Tax ID / GSTIN</Label>
                     <Input
-                      className="mt-1 uppercase"
+                      className={cn(
+                        "mt-1 uppercase",
+                        form.formState.errors.taxId && fieldErr,
+                      )}
                       placeholder="29AABCU9603R1ZM"
+                      aria-invalid={Boolean(form.formState.errors.taxId)}
                       {...form.register("taxId")}
                     />
                     <FieldError
@@ -1121,9 +1186,13 @@ function OrganizationsPageInner() {
                   <div>
                     <Label>PAN</Label>
                     <Input
-                      className="mt-1 uppercase"
+                      className={cn(
+                        "mt-1 uppercase",
+                        form.formState.errors.pan && fieldErr,
+                      )}
                       placeholder="AAAAA9999A"
                       maxLength={10}
+                      aria-invalid={Boolean(form.formState.errors.pan)}
                       {...form.register("pan")}
                     />
                     <FieldError
@@ -1133,7 +1202,13 @@ function OrganizationsPageInner() {
                   <div>
                     <Label>Organization type</Label>
                     <Select
-                      className="mt-1"
+                      className={cn(
+                        "mt-1",
+                        form.formState.errors.organizationType && fieldErr,
+                      )}
+                      aria-invalid={Boolean(
+                        form.formState.errors.organizationType,
+                      )}
                       {...form.register("organizationType")}
                     >
                       <option value="">Select (optional)</option>
@@ -1150,9 +1225,15 @@ function OrganizationsPageInner() {
                     />
                   </div>
                   <div>
-                    <Label>Currency</Label>
+                    <Label>Currency *</Label>
                     <Select
-                      className="mt-1"
+                      className={cn(
+                        "mt-1",
+                        form.formState.errors.currencyCode && fieldErr,
+                      )}
+                      aria-invalid={Boolean(
+                        form.formState.errors.currencyCode,
+                      )}
                       {...form.register("currencyCode")}
                     >
                       <option value="INR">INR — Indian Rupee</option>
@@ -1166,8 +1247,15 @@ function OrganizationsPageInner() {
                     />
                   </div>
                   <div>
-                    <Label>Time zone</Label>
-                    <Select className="mt-1" {...form.register("timezone")}>
+                    <Label>Time zone *</Label>
+                    <Select
+                      className={cn(
+                        "mt-1",
+                        form.formState.errors.timezone && fieldErr,
+                      )}
+                      aria-invalid={Boolean(form.formState.errors.timezone)}
+                      {...form.register("timezone")}
+                    >
                       <option value="Asia/Kolkata">
                         Asia/Kolkata (IST)
                       </option>
@@ -1182,8 +1270,15 @@ function OrganizationsPageInner() {
                     />
                   </div>
                   <div>
-                    <Label>Language</Label>
-                    <Select className="mt-1" {...form.register("locale")}>
+                    <Label>Language *</Label>
+                    <Select
+                      className={cn(
+                        "mt-1",
+                        form.formState.errors.locale && fieldErr,
+                      )}
+                      aria-invalid={Boolean(form.formState.errors.locale)}
+                      {...form.register("locale")}
+                    >
                       <option value="en-IN">English (India)</option>
                       <option value="hi-IN">Hindi</option>
                       <option value="en-US">English (US)</option>
@@ -1193,9 +1288,15 @@ function OrganizationsPageInner() {
                     />
                   </div>
                   <div>
-                    <Label>Fiscal year starts</Label>
+                    <Label>Fiscal year starts *</Label>
                     <Select
-                      className="mt-1"
+                      className={cn(
+                        "mt-1",
+                        form.formState.errors.fiscalYearStart && fieldErr,
+                      )}
+                      aria-invalid={Boolean(
+                        form.formState.errors.fiscalYearStart,
+                      )}
                       {...form.register("fiscalYearStart")}
                     >
                       {["January", "April", "July", "October"].map((m) => (
@@ -1209,10 +1310,16 @@ function OrganizationsPageInner() {
                     />
                   </div>
                   <div>
-                    <Label>Inventory start date</Label>
+                    <Label>Inventory start date *</Label>
                     <Input
-                      className="mt-1"
+                      className={cn(
+                        "mt-1",
+                        form.formState.errors.inventoryStartDate && fieldErr,
+                      )}
                       type="date"
+                      aria-invalid={Boolean(
+                        form.formState.errors.inventoryStartDate,
+                      )}
                       {...form.register("inventoryStartDate")}
                     />
                     <FieldError

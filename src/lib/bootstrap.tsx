@@ -139,6 +139,10 @@ export function BootstrapProvider({ children }: { children: ReactNode }) {
   const hasCapability = useCallback(
     (code: string) =>
       capabilities.includes(code) ||
+      // Universal core — every shop can split / partial-pay and use credit
+      code === "PARTIAL_PAYMENT" ||
+      code === "STORE_CREDIT" ||
+      code === "CUSTOM_FIELDS" ||
       // Soft fallback while tenants migrate: screen + module already gate many flows
       (code === "BOOKING" && hasMode("service")) ||
       (code === "INVENTORY" && hasMode("sale")),

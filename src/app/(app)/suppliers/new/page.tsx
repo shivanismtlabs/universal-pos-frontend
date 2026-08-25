@@ -1,8 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ArrowLeft } from "lucide-react";
@@ -13,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { useSetupReturn } from "@/lib/use-setup-return";
 
 const STATUSES = [
   { id: "active", label: "Active" },
@@ -92,9 +92,9 @@ function Section({
   );
 }
 
-export default function NewSupplierPage() {
-  const router = useRouter();
+function NewSupplierPageInner() {
   const qc = useQueryClient();
+  const { fromSetupFlow, returnTo, redirectAfterSetupSave } = useSetupReturn();
   const [form, setForm] = useState<SupplierWriteBody>(emptyForm);
 
   const set = (
@@ -122,9 +122,15 @@ export default function NewSupplierPage() {
       });
     },
     onSuccess: (row) => {
-      toast.success("Supplier created");
+      toast.success(
+        fromSetupFlow
+          ? "Supplier created — back to Getting Started"
+          : "Supplier created",
+      );
       void qc.invalidateQueries({ queryKey: ["suppliers"] });
-      router.push(`/suppliers${row?.id ? `?highlight=${row.id}` : ""}`);
+      redirectAfterSetupSave(
+        `/suppliers${row?.id ? `?highlight=${row.id}` : ""}`,
+      );
     },
     onError: (e) =>
       toast.error(
@@ -148,7 +154,7 @@ export default function NewSupplierPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="secondary" asChild>
-            <Link href="/suppliers">
+            <Link href={returnTo ?? "/suppliers"}>
               <ArrowLeft className="mr-1.5 size-4" />
               Cancel
             </Link>
@@ -468,7 +474,7 @@ export default function NewSupplierPage() {
 
       <div className="flex justify-end gap-2 border-t border-[#e8ecf1] pt-4">
         <Button variant="secondary" asChild>
-          <Link href="/suppliers">Cancel</Link>
+          <Link href={returnTo ?? "/suppliers"}>Cancel</Link>
         </Button>
         <Button
           type="button"
@@ -479,5 +485,17 @@ export default function NewSupplierPage() {
         </Button>
       </div>
     </div>
+  );
+}
+
+export default function NewSupplierPage() {
+  return (
+    <Suspense
+      fallback={
+        <p className="py-10 text-center text-sm text-[#6b7280]">Loading…</p>
+      }
+    >
+      <NewSupplierPageInner />
+    </Suspense>
   );
 }

@@ -68,6 +68,7 @@ import { StationPinLock } from "@/components/station-pin-lock";
 import { ShellEntitySearch } from "@/components/shell-entity-search";
 import { BranchSelector } from "@/components/branch-selector";
 import { OfflineStatusBanner } from "@/components/offline-status-banner";
+import { SetupReturnBanner } from "@/components/setup-return-banner";
 import { SessionIdleWatcher } from "@/components/session-idle-watcher";
 import { InboxPopupListener } from "@/components/inbox-popup-listener";
 import { toast } from "sonner";
@@ -1660,6 +1661,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               wide ? "max-w-none" : "mx-auto w-full max-w-[72rem]",
             )}
           >
+            <div className="print:hidden">
+              <Suspense fallback={null}>
+                <SetupReturnBanner />
+              </Suspense>
+            </div>
             {canAccessPath(pathname, roles, permissions) ? children : null}
           </div>
         </main>

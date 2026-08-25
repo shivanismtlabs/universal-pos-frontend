@@ -533,9 +533,15 @@ function MoveTab({
 }) {
   const qc = useQueryClient();
   const levels = useQuery({
-    queryKey: ["inv-levels", locationId],
+    queryKey: ["inv-levels-picker", locationId],
     queryFn: () =>
-      inventoryApi.listLevels({ locationId, includeZero: true }),
+      inventoryApi.listLevels({
+        locationId,
+        includeZero: true,
+        page: 1,
+        limit: 100,
+      }),
+    enabled: Boolean(locationId),
   });
   const [stockLevelId, setStockLevelId] = useState("");
   const [qty, setQty] = useState("1");
@@ -656,9 +662,15 @@ function DamageTab({
   canWrite: boolean;
 }) {
   const levels = useQuery({
-    queryKey: ["inv-levels", locationId],
+    queryKey: ["inv-levels-picker", locationId],
     queryFn: () =>
-      inventoryApi.listLevels({ locationId, includeZero: true }),
+      inventoryApi.listLevels({
+        locationId,
+        includeZero: true,
+        page: 1,
+        limit: 100,
+      }),
+    enabled: Boolean(locationId),
   });
   const [q, setQ] = useState("");
   const [reportOpen, setReportOpen] = useState(false);

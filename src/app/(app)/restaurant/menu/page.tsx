@@ -18,6 +18,7 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { ModalFrame } from "@/components/modal-frame";
 import { ProductThumb } from "@/components/product-thumb";
+import { FoodTypeBadge } from "@/components/food-type-badge";
 import { productKindLabel } from "@/lib/product-kind";
 import { cn } from "@/lib/utils";
 
@@ -193,7 +194,14 @@ export default function SellingMenusPage() {
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-2">
                       <ProductThumb src={p.photoUrl} label={p.name} size="sm" />
-                      <span className="font-medium text-[#0b1f33]">{p.name}</span>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <FoodTypeBadge value={p.foodType} />
+                          <span className="font-medium text-[#0b1f33]">
+                            {p.name}
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   </td>
                   <td className="px-3 py-2 font-mono text-xs text-[#5a6b7d]">
@@ -232,7 +240,7 @@ export default function SellingMenusPage() {
                     </button>
                     <span className="mx-1.5 text-[#e2e8f0]">|</span>
                     <Link
-                      href={`/catalog/edit?id=${p.id}`}
+                      href={`/catalog/new?id=${p.id}`}
                       className="text-xs font-semibold text-[#1a56db]"
                     >
                       Edit
@@ -737,7 +745,7 @@ function ItemAvailModal({
         </div>
       ) : null}
       <p className="mt-3 text-xs text-[#8b9bb0]">
-        <Link href={`/catalog/edit?id=${product.id}`} className="text-[#1a56db]">
+        <Link href={`/catalog/new?id=${product.id}`} className="text-[#1a56db]">
           Open full item
         </Link>{" "}
         for description, tax, packaging is shop-level on Setup, combo lines, and

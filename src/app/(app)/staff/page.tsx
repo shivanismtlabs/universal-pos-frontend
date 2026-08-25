@@ -22,6 +22,7 @@ import { Label } from "@/components/ui/label";
 import { FieldError } from "@/components/ui/form";
 import { Select } from "@/components/ui/select";
 import { EMPTY_ROLES, useAuthStore } from "@/lib/auth-store";
+import { filterPersonNameInput, filterMobileDigits } from "@/lib/input-guards";
 import {
   inviteStaffSchema,
   passwordStrength,
@@ -394,8 +395,21 @@ export default function StaffPage() {
             >
               <div>
                 <Label>Full name</Label>
-                <Input className="mt-1.5" {...form.register("fullName")} />
+                <Input
+                  className="mt-1.5"
+                  value={form.watch("fullName")}
+                  onChange={(e) =>
+                    form.setValue(
+                      "fullName",
+                      filterPersonNameInput(e.target.value),
+                      { shouldValidate: true },
+                    )
+                  }
+                />
                 <FieldError message={errors.fullName?.message} />
+                <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+                  Letters only — no numbers or special characters
+                </p>
               </div>
               <div>
                 <Label>Email</Label>
@@ -439,10 +453,19 @@ export default function StaffPage() {
                 <Label>Phone</Label>
                 <Input
                   className="mt-1.5"
-                  placeholder="+91… or any country"
-                  {...form.register("phone")}
+                  inputMode="numeric"
+                  placeholder="9876543210"
+                  value={form.watch("phone")}
+                  onChange={(e) =>
+                    form.setValue("phone", filterMobileDigits(e.target.value), {
+                      shouldValidate: true,
+                    })
+                  }
                 />
                 <FieldError message={errors.phone?.message} />
+                <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+                  Digits only — no spaces or special characters
+                </p>
               </div>
               <div>
                 <Label>Role</Label>

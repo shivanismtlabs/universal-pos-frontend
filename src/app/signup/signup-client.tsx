@@ -10,56 +10,25 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import Link from "next/link";
-import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FieldError } from "@/components/ui/form";
 import { AuthShell } from "@/components/auth-shell";
-// Google sign-up UI — keep for later, hide the buttons for now.
-// import {
-//   AuthDivider,
-//   AuthGoogleButton,
-// } from "@/components/auth-google-button";
+import { PhoneCountryInput } from "@/components/phone-country-input";
 import {
-  phoneSchema,
-  strongPasswordSchema,
+  signupIdentitySchema,
   passwordStrength,
+  type SignupIdentityInput,
 } from "@/lib/validations";
+import { filterPersonNameInput } from "@/lib/input-guards";
 import { authApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { applyPortalResponse } from "@/lib/auth-portal";
 import { cn } from "@/lib/utils";
 
-const signupSchema = z
-  .object({
-    fullName: z.string().trim().min(2, "Name is required").max(255),
-    email: z
-      .string()
-      .trim()
-      .toLowerCase()
-      .email("Enter a valid email")
-      .max(255),
-    password: strongPasswordSchema,
-    confirmPassword: z.string().min(1, "Confirm your password"),
-    phone: phoneSchema.optional().or(z.literal("")),
-  })
-  .refine((v) => v.password === v.confirmPassword, {
-    message: "Passwords do not match",
-    path: ["confirmPassword"],
-  })
-  .refine(
-    (v) => {
-      const local = v.email.split("@")[0]?.toLowerCase() ?? "";
-      return !local || local.length < 2 || !v.password.toLowerCase().includes(local);
-    },
-    {
-      message: "Password must not contain your email name",
-      path: ["password"],
-    },
-  );
-
-type SignupInput = z.infer<typeof signupSchema>;
+const fieldErr =
+  "border-[#fca5a5] focus:border-[#dc2626] focus:shadow-[0_0_0_3px_rgba(220,38,38,0.12)]";
 
 export default function SignupClient() {
   const router = useRouter();
@@ -69,10 +38,12 @@ export default function SignupClient() {
     register,
     handleSubmit,
     watch,
-    formState: { errors, isSubmitting },
-  } = useForm<SignupInput>({
-    resolver: zodResolver(signupSchema),
+    setValue,
+    formState: { errors, isSubmitting, isValid },
+  } = useForm<SignupIdentityInput>({
+    resolver: zodResolver(signupIdentitySchema),
     mode: "onChange",
+    reValidateMode: "onChange",
     defaultValues: {
       fullName: "",
       email: "",
@@ -84,6 +55,7 @@ export default function SignupClient() {
 
   const password = watch("password") ?? "";
   const email = watch("email") ?? "";
+  const phone = watch("phone") ?? "";
   const strength = passwordStrength(password, { email });
   /** Signup has 6 rules (no shop slug). */
   const signupScore = [
@@ -107,13 +79,13 @@ export default function SignupClient() {
   const showPasswordHints =
     password.length > 0 || Boolean(errors.password);
 
-  async function onSubmit(values: SignupInput) {
+  async function onSubmit(values: SignupIdentityInput) {
     try {
       const data = await authApi.signup({
         fullName: values.fullName.trim(),
         email: values.email.trim().toLowerCase(),
         password: values.password,
-        ...(values.phone?.trim() ? { phone: values.phone.trim() } : {}),
+        phone: values.phone.trim(),
       });
       const dest = applyPortalResponse(data);
       if (dest === "orgs") {
@@ -121,7 +93,6 @@ export default function SignupClient() {
         router.replace("/organizations");
         return;
       }
-      // Older live API auto-creates a shop — still collect business type / org details
       toast.success("Account created — complete your organization profile");
       router.replace("/organizations?setup=1");
     } catch (e) {
@@ -131,51 +102,43 @@ export default function SignupClient() {
     }
   }
 
-  // Restore with AuthGoogleButton when Google sign-up design is enabled again.
-  // async function onGoogle(idToken: string) {
-  //   try {
-  //     const data = await authApi.googleAuth({ idToken, mode: "register" });
-  //     applyPortalResponse(data);
-  //     toast.success("Signed in with Google — choose or create a shop");
-  //     router.replace("/organizations");
-  //   } catch (e) {
-  //     toast.error(
-  //       e instanceof ApiError ? e.messages.join(", ") : "Google sign-up failed",
-  //     );
-  //   }
-  // }
-
   return (
     <AuthShell
       wide
       title="Create your workspace"
       subtitle="Start a 15-day trial. You’ll set up the company next — no card required."
     >
-      {/* Google sign-up — design hidden for now, do not delete.
-      <AuthGoogleButton
-        mode="register"
-        onCredential={onGoogle}
-        disabled={isSubmitting}
-      />
-      <AuthDivider label="or sign up with email" />
-      */}
-
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
+      <form
+        onSubmit={handleSubmit(onSubmit, () =>
+          toast.error("Please fix the highlighted fields"),
+        )}
+        className="space-y-4"
+        noValidate
+      >
         <div className="space-y-1.5">
           <Label
             htmlFor="fullName"
             className="text-[0.8125rem] font-semibold text-[#111827]"
           >
-            Full name
+            Full name *
           </Label>
           <Input
             id="fullName"
             autoComplete="name"
             placeholder="Your name"
-            className="h-11 rounded-lg"
-            {...register("fullName")}
+            className={cn("h-11 rounded-lg", errors.fullName && fieldErr)}
+            aria-invalid={Boolean(errors.fullName)}
+            {...register("fullName", {
+              onChange: (e) => {
+                const next = filterPersonNameInput(e.target.value);
+                setValue("fullName", next, { shouldValidate: true });
+              },
+            })}
           />
           <FieldError message={errors.fullName?.message} />
+          <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+            Letters only — no numbers or special characters
+          </p>
         </div>
 
         <div className="space-y-1.5">
@@ -183,33 +146,28 @@ export default function SignupClient() {
             htmlFor="email"
             className="text-[0.8125rem] font-semibold text-[#111827]"
           >
-            Email
+            Email *
           </Label>
           <Input
             id="email"
             type="email"
             autoComplete="email"
             placeholder="name@company.com"
-            className="h-11 rounded-lg"
+            className={cn("h-11 rounded-lg", errors.email && fieldErr)}
+            aria-invalid={Boolean(errors.email)}
             {...register("email")}
           />
           <FieldError message={errors.email?.message} />
         </div>
 
         <div className="space-y-1.5">
-          <Label
-            htmlFor="phone"
-            className="text-[0.8125rem] font-semibold text-[#111827]"
-          >
-            Phone
-          </Label>
-          <Input
-            id="phone"
-            type="tel"
-            autoComplete="tel"
-            placeholder="+91 …"
-            className="h-11 rounded-lg"
-            {...register("phone")}
+          <PhoneCountryInput
+            label="Phone *"
+            required
+            value={phone}
+            onChange={(v) =>
+              setValue("phone", v, { shouldValidate: true, shouldDirty: true })
+            }
           />
           <FieldError message={errors.phone?.message} />
         </div>
@@ -219,14 +177,18 @@ export default function SignupClient() {
             htmlFor="password"
             className="text-[0.8125rem] font-semibold text-[#111827]"
           >
-            Password
+            Password *
           </Label>
           <div className="relative">
             <Input
               id="password"
               type={showPassword ? "text" : "password"}
               autoComplete="new-password"
-              className="h-11 rounded-lg pr-16"
+              className={cn(
+                "h-11 rounded-lg pr-16",
+                errors.password && fieldErr,
+              )}
+              aria-invalid={Boolean(errors.password)}
               {...register("password")}
             />
             <button
@@ -268,6 +230,7 @@ export default function SignupClient() {
               )}
             </>
           ) : null}
+          <FieldError message={errors.password?.message} />
         </div>
 
         <div className="space-y-1.5">
@@ -275,13 +238,17 @@ export default function SignupClient() {
             htmlFor="confirmPassword"
             className="text-[0.8125rem] font-semibold text-[#111827]"
           >
-            Confirm password
+            Confirm password *
           </Label>
           <Input
             id="confirmPassword"
             type={showPassword ? "text" : "password"}
             autoComplete="new-password"
-            className="h-11 rounded-lg"
+            className={cn(
+              "h-11 rounded-lg",
+              errors.confirmPassword && fieldErr,
+            )}
+            aria-invalid={Boolean(errors.confirmPassword)}
             {...register("confirmPassword")}
           />
           <FieldError message={errors.confirmPassword?.message} />
@@ -295,7 +262,7 @@ export default function SignupClient() {
         <Button
           type="submit"
           className="h-11 w-full rounded-lg text-[0.9375rem] font-semibold"
-          disabled={isSubmitting}
+          disabled={isSubmitting || !isValid}
         >
           {isSubmitting ? "Creating account…" : "Create workspace"}
         </Button>

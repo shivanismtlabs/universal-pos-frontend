@@ -29,12 +29,15 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { ModeBadge } from "@/components/mode-badge";
 import { ProductThumb } from "@/components/product-thumb";
+import { FoodTypeBadge } from "@/components/food-type-badge";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { catalogStockOnHandLabel, productKindLabel } from "@/lib/product-kind";
 import { FieldError } from "@/components/ui/form";
 import { Select } from "@/components/ui/select";
 import { useAuthStore } from "@/lib/auth-store";
 import { useBranchStore } from "@/lib/branch-store";
+import { useBootstrap } from "@/lib/bootstrap";
+import { resolveOperatingLocationId } from "@/lib/operating-location";
 import {
   createBrandSchema,
   createCategorySchema,
@@ -168,7 +171,14 @@ function ProductsPanel() {
   const router = useRouter();
   const qc = useQueryClient();
   const tenantId = useAuthStore((s) => s.user?.tenantId);
-  const locationId = useBranchStore((s) => s.currentLocationId);
+  const authStoreId = useAuthStore((s) => s.user?.storeId);
+  const currentLocationId = useBranchStore((s) => s.currentLocationId);
+  const { data: boot } = useBootstrap();
+  const locationId = resolveOperatingLocationId({
+    currentLocationId,
+    locations: boot?.locations,
+    authStoreId,
+  });
   const [q, setQ] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
   const [kind, setKind] = useState<CatalogProductKind | "">("");
@@ -222,6 +232,7 @@ function ProductsPanel() {
         page,
         limit: pageSize,
       }),
+    enabled: Boolean(tenantId),
     refetchOnMount: "always",
     placeholderData: (prev) => prev,
   });
@@ -470,8 +481,9 @@ function ProductsPanel() {
                   <td className="px-3 py-2">
                     <Link
                       href={`/catalog/view?id=${p.id}`}
-                      className="font-medium text-[#0b1f33] hover:text-[#1a56db]"
+                      className="inline-flex items-center gap-1.5 font-medium text-[#0b1f33] hover:text-[#1a56db]"
                     >
+                      <FoodTypeBadge value={p.foodType} />
                       {p.name}
                     </Link>
                     {p.brand?.name ? (
@@ -500,7 +512,7 @@ function ProductsPanel() {
                     })}
                   </td>
                   <td className="px-3 py-2 text-[#5a6b7d]">
-                    {p.sellUnit || p.unitOfMeasure || "pcs"}
+                    {p.unitOfMeasure || p.sellUnit || "pcs"}
                   </td>
                   <td className="px-3 py-2">
                     <StatusPill status={p.status} />
@@ -509,7 +521,7 @@ function ProductsPanel() {
                     <div className="flex items-center justify-end gap-0.5">
                       <CatalogRowActions
                         onEdit={() =>
-                          router.push(`/catalog/edit?id=${p.id}`)
+                          router.push(`/catalog/new?id=${p.id}`)
                         }
                         editTitle="Edit"
                         onSoftDelete={
@@ -716,6 +728,16 @@ function BrandsPanel() {
     onError: (e: Error) =>
       toast.error(e instanceof ApiError ? e.message : "Failed"),
   });
+  const reactivate = useMutation({
+    mutationFn: (id: string) =>
+      catalogApi.updateBrand(id, { isActive: true }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["catalog-brands"] });
+      toast.success("Brand reactivated");
+    },
+    onError: (e: Error) =>
+      toast.error(e instanceof ApiError ? e.message : "Failed"),
+  });
   const remove = useMutation({
     mutationFn: (id: string) => catalogApi.removeBrand(id),
     onSuccess: (res) => {
@@ -822,6 +844,16 @@ function BrandsPanel() {
                         : undefined
                     }
                     softDeleteTitle="Deactivate (soft delete)"
+                    onUnarchive={
+                      !b.isActive
+                        ? () => {
+                            if (confirm(`Reactivate brand “${b.name}”?`)) {
+                              reactivate.mutate(b.id);
+                            }
+                          }
+                        : undefined
+                    }
+                    unarchiveTitle="Reactivate"
                     onDelete={() => {
                       if (
                         confirm(
@@ -913,6 +945,16 @@ function CategoriesPanel() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["catalog-categories"] });
       toast.success("Category deactivated");
+    },
+    onError: (e: Error) =>
+      toast.error(e instanceof ApiError ? e.message : "Failed"),
+  });
+  const reactivate = useMutation({
+    mutationFn: (id: string) =>
+      catalogApi.updateCategory(id, { isActive: true }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["catalog-categories"] });
+      toast.success("Category reactivated");
     },
     onError: (e: Error) =>
       toast.error(e instanceof ApiError ? e.message : "Failed"),
@@ -1052,6 +1094,16 @@ function CategoriesPanel() {
                         : undefined
                     }
                     softDeleteTitle="Deactivate (soft delete)"
+                    onUnarchive={
+                      !c.isActive
+                        ? () => {
+                            if (confirm(`Reactivate category “${c.name}”?`)) {
+                              reactivate.mutate(c.id);
+                            }
+                          }
+                        : undefined
+                    }
+                    unarchiveTitle="Reactivate"
                     onDelete={() => {
                       if (
                         confirm(

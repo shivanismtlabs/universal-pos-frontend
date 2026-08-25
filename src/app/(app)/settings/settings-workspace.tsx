@@ -25,6 +25,7 @@ import { PageHeader } from "@/components/page-header";
 import { mediaUrl } from "@/lib/utils";
 import { prepareProductImageDataUrl } from "@/lib/image-prepare";
 import { canUseBiometrics, biometricBlockReason, registerDeviceBiometric } from "@/lib/webauthn";
+import { useSetupReturn } from "@/lib/use-setup-return";
 import {
   expenseCategoryNameSchema,
   settingsBrandSchema,
@@ -154,11 +155,17 @@ const BUSINESS_TYPES = [
  */
 function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
   const qc = useQueryClient();
+  const { fromSetupFlow, redirectAfterSetupSave } = useSetupReturn();
   const roles = useAuthStore((s) => s.user?.roles);
   const canEdit = canManageStaff(roles);
   const { data: boot, refetch, productName, businessType } = useBootstrap();
   const tab = lockedSection;
   const [selectedBusinessType, setSelectedBusinessType] = useState("retail");
+
+  function goBackToGettingStartedIfNeeded() {
+    if (!fromSetupFlow) return;
+    redirectAfterSetupSave();
+  }
 
   const locationsQ = useQuery({
     queryKey: ["tenant-locations"],
@@ -455,6 +462,7 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
     onSuccess: () => {
       toast.success("Business profile saved");
       invalidate();
+      goBackToGettingStartedIfNeeded();
     },
     onError: (e) => {
       if (e instanceof ApiError || !(e instanceof Error)) toast.error(errMsg(e));
@@ -519,6 +527,7 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
     onSuccess: () => {
       toast.success("Tax settings saved");
       invalidate();
+      goBackToGettingStartedIfNeeded();
     },
     onError: (e) => {
       if (e instanceof ApiError || !(e instanceof Error)) toast.error(errMsg(e));
@@ -533,6 +542,7 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
     onSuccess: () => {
       toast.success("Receipt footer saved");
       invalidate();
+      goBackToGettingStartedIfNeeded();
     },
     onError: (e) => toast.error(errMsg(e)),
   });
@@ -569,6 +579,7 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
     onSuccess: () => {
       toast.success("Counter settings saved");
       invalidate();
+      goBackToGettingStartedIfNeeded();
     },
     onError: (e) => {
       const raw = errMsg(e);
