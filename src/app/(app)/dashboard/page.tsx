@@ -93,11 +93,18 @@ function DashboardPageInner() {
     }
     try {
       const seen = localStorage.getItem("upos-home-setup-seen");
-      if (seen === "1" && dashboardUnlocked) setHomeTab("dashboard");
+      if (seen === "1" && dashboardUnlocked) {
+        setHomeTab("dashboard");
+        if (search.get("tab") !== "dashboard") {
+          const qs = new URLSearchParams(search.toString());
+          qs.set("tab", "dashboard");
+          router.replace(`${pathname}?${qs.toString()}`, { scroll: false });
+        }
+      }
     } catch {
       /* ignore */
     }
-  }, [tabFromUrl, dashboardUnlocked]);
+  }, [tabFromUrl, dashboardUnlocked, pathname, router, search]);
 
   useEffect(() => {
     if (homeTab === "dashboard" && dashboardUnlocked) {

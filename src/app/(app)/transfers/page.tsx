@@ -46,8 +46,12 @@ export default function StockTransferPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const history = useQuery({
-    queryKey: ["stock-transfers", page],
-    queryFn: () => inventoryApi.listStockTransfers({ page, limit: pageSize }),
+    queryKey: ["stock-transfers", page, pageSize, q.trim()],
+    queryFn: () =>
+      inventoryApi.listStockTransfers({
+        page: q.trim() ? 1 : page,
+        limit: q.trim() ? 100 : pageSize,
+      }),
     placeholderData: (prev) => prev,
   });
 
@@ -69,7 +73,14 @@ export default function StockTransferPage() {
       return hay.includes(needle);
     });
   }, [history.data?.items, q]);
-  const meta = history.data?.meta;
+  const meta = q.trim()
+    ? {
+        page: 1,
+        limit: items.length || pageSize,
+        total: items.length,
+        totalPages: 1,
+      }
+    : history.data?.meta;
 
   if (history.isLoading && !history.data) {
     return <PageSkeleton rows={8} />;
@@ -106,7 +117,10 @@ export default function StockTransferPage() {
           className="h-9 max-w-sm flex-1 text-[0.8125rem]"
           placeholder="Search location, product, SKU, notes, or staff"
           value={q}
-          onChange={(e) => setQ(e.target.value)}
+          onChange={(e) => {
+            setQ(e.target.value);
+            if (page !== 1) setPage(1);
+          }}
         />
         <span className="text-[0.75rem] text-[#8b9bb0]">
           {items.length} record{items.length === 1 ? "" : "s"}
@@ -275,6 +289,15 @@ function TransferComposer({
         setFieldErrors(zodFieldErrors(parsed.error));
         toast.error(zodMessages(parsed.error)[0] ?? "Check the form");
         throw new Error(zodMessages(parsed.error)[0] ?? "Invalid transfer");
+      }
+      for (const line of parsed.data.lines) {
+        const cart = lines.find((l) => l.productId === line.productId);
+        if (cart && line.qty > cart.max) {
+          const msg = `"${cart.name}" qty cannot exceed ${cart.max} on hand`;
+          setFieldErrors((f) => ({ ...f, lines: msg }));
+          toast.error(msg);
+          throw new Error(msg);
+        }
       }
       setFieldErrors({});
       return inventoryApi.transferStock({
@@ -501,14 +524,23 @@ function TransferComposer({
                       inputMode="decimal"
                       value={l.qty}
                       onChange={(e) => {
+                        const next = e.target.value;
                         setLines((prev) =>
                           prev.map((x) =>
                             x.productId === l.productId
-                              ? { ...x, qty: e.target.value }
+                              ? { ...x, qty: next }
                               : x,
                           ),
                         );
-                        setFieldErrors((f) => ({ ...f, lines: "" }));
+                        const n = Number(next);
+                        if (Number.isFinite(n) && n > l.max) {
+                          setFieldErrors((f) => ({
+                            ...f,
+                            lines: `Max on hand is ${l.max} ${l.unit}`,
+                          }));
+                        } else {
+                          setFieldErrors((f) => ({ ...f, lines: "" }));
+                        }
                       }}
                     />
                     <button

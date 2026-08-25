@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Search, Eye, Edit3, Filter } from "lucide-react";
+import { Plus, Search, Eye, Edit3 } from "lucide-react";
 import { posApi } from "@/lib/api";
 import { canWriteCatalog } from "@/lib/roles";
 import { useAuthStore } from "@/lib/auth-store";
@@ -16,31 +16,75 @@ import { StockAdjustmentFormDialog } from "@/components/stock-adjustment-form-di
 import { StockAdjustmentDetailDialog } from "@/components/stock-adjustment-detail-dialog";
 import { cn } from "@/lib/utils";
 
-type StatusTab = "all" | "draft" | "adjusted" | "cancelled";
+type StatusTab = "all" | "draft" | "pending" | "adjusted" | "cancelled";
 type TypeFilter = "all" | "quantity" | "value";
 
+function statusLabel(status: string) {
+  switch (status) {
+    case "adjusted":
+      return "Finalized";
+    case "draft":
+      return "Draft";
+    case "pending":
+      return "Pending";
+    case "cancelled":
+      return "Cancelled";
+    default:
+      return status;
+  }
+}
+
+function statusPillClass(status: string) {
+  switch (status) {
+    case "adjusted":
+      return "bg-[#dcfce7] text-[#15803d]";
+    case "draft":
+      return "bg-[#fef3c7] text-[#b45309]";
+    case "pending":
+      return "bg-[#e0e7ff] text-[#3730a3]";
+    case "cancelled":
+      return "bg-[#fee2e2] text-[#b91c1c]";
+    default:
+      return "bg-[#f1f5f9] text-[#5a6b7d]";
+  }
+}
+
 export default function InventoryAdjustmentsPage() {
-  const { data: boot, hasMode } = useBootstrap();
+  const { data: boot } = useBootstrap();
   const roles = useAuthStore((s) => s.user?.roles);
   const canWrite = canWriteCatalog(roles);
   const qc = useQueryClient();
 
   const locations = useMemo(
-    () => boot?.locations?.map((l: any) => ({ id: l.id, name: l.name })) ?? [],
+    () =>
+      (boot?.locations ?? [])
+        .filter((l: { isActive?: boolean }) => l.isActive !== false)
+        .map((l: { id: string; name: string }) => ({
+          id: l.id,
+          name: l.name,
+        })),
     [boot],
   );
 
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusTab, setStatusTab] = useState<StatusTab>("all");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
-  const [selectedLocationId, setSelectedLocationId] = useState<string>("");
+  const [selectedLocationId, setSelectedLocationId] = useState("");
   const [page, setPage] = useState(1);
   const limit = 20;
 
-  // Dialog States
   const [formOpen, setFormOpen] = useState(false);
   const [editingAdj, setEditingAdj] = useState<any | null>(null);
-  const [detailAdj, setDetailAdj] = useState<any | null>(null);
+  const [detailAdjId, setDetailAdjId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      setDebouncedSearch(search.trim());
+      setPage(1);
+    }, 280);
+    return () => window.clearTimeout(t);
+  }, [search]);
 
   const adjustmentsQuery = useQuery({
     queryKey: [
@@ -48,7 +92,7 @@ export default function InventoryAdjustmentsPage() {
       selectedLocationId,
       statusTab,
       typeFilter,
-      search,
+      debouncedSearch,
       page,
       limit,
     ],
@@ -57,7 +101,7 @@ export default function InventoryAdjustmentsPage() {
         locationId: selectedLocationId || undefined,
         status: statusTab === "all" ? undefined : statusTab,
         type: typeFilter === "all" ? undefined : typeFilter,
-        search: search.trim() || undefined,
+        search: debouncedSearch || undefined,
         page,
         limit,
       }),
@@ -68,6 +112,11 @@ export default function InventoryAdjustmentsPage() {
     void qc.invalidateQueries({ queryKey: ["pos-sale-stock-adjustments"] });
     void qc.invalidateQueries({ queryKey: ["catalog-products"] });
     void qc.invalidateQueries({ queryKey: ["inventory-stock"] });
+    if (detailAdjId) {
+      void qc.invalidateQueries({
+        queryKey: ["stock-adjustment", detailAdjId],
+      });
+    }
   }
 
   function handleOpenCreate() {
@@ -80,10 +129,6 @@ export default function InventoryAdjustmentsPage() {
     setFormOpen(true);
   }
 
-  function handleOpenDetail(adj: any) {
-    setDetailAdj(adj);
-  }
-
   if (adjustmentsQuery.isLoading && !adjustmentsQuery.data) {
     return <PageSkeleton rows={8} />;
   }
@@ -91,16 +136,21 @@ export default function InventoryAdjustmentsPage() {
   const items = adjustmentsQuery.data?.items ?? [];
   const total = adjustmentsQuery.data?.total ?? 0;
   const totalPages = adjustmentsQuery.data?.totalPages ?? 1;
+  const hasFilters =
+    Boolean(debouncedSearch) ||
+    statusTab !== "all" ||
+    typeFilter !== "all" ||
+    Boolean(selectedLocationId);
 
   return (
     <div className="flex min-h-0 flex-col gap-4 pb-10">
-      {/* Page Header */}
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="eyebrow">Inventory</p>
           <h1 className="page-title mt-1">Adjustments</h1>
           <p className="page-subtitle mt-1.5 max-w-xl">
-            Track, create, draft, and finalize stock quantity & value adjustments with complete audit history and store isolation.
+            Track, create, draft, and finalize stock quantity & value
+            adjustments with complete audit history and store isolation.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -119,15 +169,14 @@ export default function InventoryAdjustmentsPage() {
         </div>
       </header>
 
-      {/* Filter Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#e4e9f0] bg-white p-3 shadow-sm">
-        {/* Status Tabs */}
         <div className="flex flex-wrap gap-1 rounded-lg bg-[#f1f5f9] p-1 text-xs">
           {(
             [
               { id: "all", label: "All" },
               { id: "draft", label: "Draft" },
-              { id: "adjusted", label: "Finalized / Adjusted" },
+              { id: "pending", label: "Pending" },
+              { id: "adjusted", label: "Finalized" },
               { id: "cancelled", label: "Cancelled" },
             ] as const
           ).map((tab) => (
@@ -137,7 +186,7 @@ export default function InventoryAdjustmentsPage() {
               className={cn(
                 "rounded-md px-3 py-1.5 font-medium transition",
                 statusTab === tab.id
-                  ? "bg-white text-[#0b1f33] shadow-sm font-semibold"
+                  ? "bg-white font-semibold text-[#0b1f33] shadow-sm"
                   : "text-[#5a6b7d] hover:text-[#0b1f33]",
               )}
               onClick={() => {
@@ -150,9 +199,7 @@ export default function InventoryAdjustmentsPage() {
           ))}
         </div>
 
-        {/* Filters & Search */}
         <div className="flex flex-wrap items-center gap-2">
-          {/* Location Select */}
           <select
             value={selectedLocationId}
             onChange={(e) => {
@@ -169,7 +216,6 @@ export default function InventoryAdjustmentsPage() {
             ))}
           </select>
 
-          {/* Type Filter */}
           <select
             value={typeFilter}
             onChange={(e) => {
@@ -183,28 +229,23 @@ export default function InventoryAdjustmentsPage() {
             <option value="value">Value Adj</option>
           </select>
 
-          {/* Search Box */}
           <div className="relative">
-            <Search className="absolute left-3 top-2.5 h-4 w-4 text-[#8b9bb0]" />
+            <Search className="absolute top-2.5 left-3 h-4 w-4 text-[#8b9bb0]" />
             <Input
               className="h-9 w-64 pl-9 text-xs"
               placeholder="Search No, item, SKU, reason..."
               value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setPage(1);
-              }}
+              onChange={(e) => setSearch(e.target.value)}
             />
           </div>
         </div>
       </div>
 
-      {/* Adjustments Table */}
       {!items.length ? (
         <EmptyState
           title="No adjustments found"
           detail={
-            search || statusTab !== "all" || typeFilter !== "all"
+            hasFilters
               ? "No adjustment records match your search filters."
               : "Create your first stock adjustment to correct stock quantities or revalue inventory."
           }
@@ -236,28 +277,28 @@ export default function InventoryAdjustmentsPage() {
               </thead>
               <tbody className="divide-y divide-[#eef1f4]">
                 {items.map((r) => {
-                  const isFinalized = r.status === "adjusted";
                   const isDraft = r.status === "draft";
-                  const isCancelled = r.status === "cancelled";
-
                   return (
-                    <tr key={r.id} className="hover:bg-[#fafbfc] transition-colors">
+                    <tr
+                      key={r.id}
+                      className="transition-colors hover:bg-[#fafbfc]"
+                    >
                       <td className="px-4 py-3 font-mono font-semibold text-[#1a56db]">
                         <button
                           type="button"
                           className="hover:underline"
-                          onClick={() => handleOpenDetail(r)}
+                          onClick={() => setDetailAdjId(r.id)}
                         >
                           {r.adjustmentNo}
                         </button>
                       </td>
-                      <td className="px-3 py-3 text-[#5a6b7d] whitespace-nowrap">
+                      <td className="px-3 py-3 whitespace-nowrap text-[#5a6b7d]">
                         {new Date(r.adjustmentDate).toLocaleDateString()}
                       </td>
                       <td className="px-3 py-3 font-medium text-[#0b1f33]">
                         {r.location?.name || "Store"}
                       </td>
-                      <td className="px-3 py-3 text-[#0b1f33] max-w-[14rem] truncate">
+                      <td className="max-w-[14rem] truncate px-3 py-3 text-[#0b1f33]">
                         {r.reason}
                       </td>
                       <td className="px-3 py-3 text-center font-medium tabular-nums text-[#0b1f33]">
@@ -270,12 +311,10 @@ export default function InventoryAdjustmentsPage() {
                         <span
                           className={cn(
                             "inline-flex items-center rounded-full px-2.5 py-0.5 text-[0.7rem] font-semibold",
-                            isFinalized && "bg-[#dcfce7] text-[#15803d]",
-                            isDraft && "bg-[#fef3c7] text-[#b45309]",
-                            isCancelled && "bg-[#fee2e2] text-[#b91c1c]",
+                            statusPillClass(r.status),
                           )}
                         >
-                          {isFinalized ? "Finalized" : isDraft ? "Draft" : "Cancelled"}
+                          {statusLabel(r.status)}
                         </span>
                       </td>
                       <td className="px-3 py-3 text-[#5a6b7d]">
@@ -287,7 +326,7 @@ export default function InventoryAdjustmentsPage() {
                             variant="ghost"
                             size="sm"
                             className="h-7 px-2 text-xs"
-                            onClick={() => handleOpenDetail(r)}
+                            onClick={() => setDetailAdjId(r.id)}
                           >
                             <Eye className="mr-1 h-3.5 w-3.5 text-[#5a6b7d]" />
                             View
@@ -312,7 +351,6 @@ export default function InventoryAdjustmentsPage() {
             </table>
           </div>
 
-          {/* Table Pager */}
           <TablePager
             page={page}
             totalPages={totalPages}
@@ -323,23 +361,24 @@ export default function InventoryAdjustmentsPage() {
         </section>
       )}
 
-      {/* Form Dialog for Create & Edit */}
       <StockAdjustmentFormDialog
         open={formOpen}
         initialData={editingAdj}
         locations={locations}
-        defaultLocationId={selectedLocationId}
+        defaultLocationId={selectedLocationId || locations[0]?.id}
         onClose={() => setFormOpen(false)}
         onSaved={handleRefresh}
       />
 
-      {/* Details Dialog for Viewing */}
       <StockAdjustmentDetailDialog
-        adjustment={detailAdj}
+        adjustmentId={detailAdjId}
         canWrite={canWrite}
-        onClose={() => setDetailAdj(null)}
+        onClose={() => setDetailAdjId(null)}
         onRefresh={handleRefresh}
-        onEdit={(adj) => handleOpenEdit(adj)}
+        onEdit={(adj) => {
+          setDetailAdjId(null);
+          handleOpenEdit(adj);
+        }}
       />
     </div>
   );

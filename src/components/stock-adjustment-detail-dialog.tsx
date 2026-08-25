@@ -2,7 +2,7 @@
 
 import { createPortal } from "react-dom";
 import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { X, CheckCircle2, AlertCircle, Ban, Edit3, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import { ApiError } from "@/lib/api/client";
 import { formatQtyWithUnit } from "@/lib/sell-units";
 
 type Props = {
-  adjustment: any | null;
+  adjustmentId: string | null;
   canWrite?: boolean;
   onClose: () => void;
   onRefresh: () => void;
@@ -19,7 +19,7 @@ type Props = {
 };
 
 export function StockAdjustmentDetailDialog({
-  adjustment,
+  adjustmentId,
   canWrite,
   onClose,
   onRefresh,
@@ -28,19 +28,32 @@ export function StockAdjustmentDetailDialog({
   const [cancelReason, setCancelReason] = useState("");
   const [showCancelPrompt, setShowCancelPrompt] = useState(false);
 
+  const detailQ = useQuery({
+    queryKey: ["stock-adjustment", adjustmentId],
+    queryFn: () => posApi.getStockAdjustment(adjustmentId!),
+    enabled: Boolean(adjustmentId),
+  });
+
+  const adjustment = detailQ.data;
+
   const finalizeMutation = useMutation({
-    mutationFn: () => posApi.finalizeStockAdjustment(adjustment.id),
+    mutationFn: () => posApi.finalizeStockAdjustment(adjustment!.id),
     onSuccess: (res) => {
-      toast.success(`Adjustment ${res.adjustmentNo} finalized and stock updated!`);
+      toast.success(
+        `Adjustment ${res.adjustmentNo} finalized and stock updated!`,
+      );
       onRefresh();
       onClose();
     },
     onError: (e) =>
-      toast.error(e instanceof ApiError ? e.messages.join(", ") : "Finalize failed"),
+      toast.error(
+        e instanceof ApiError ? e.messages.join(", ") : "Finalize failed",
+      ),
   });
 
   const cancelMutation = useMutation({
-    mutationFn: () => posApi.cancelStockAdjustment(adjustment.id, cancelReason),
+    mutationFn: () =>
+      posApi.cancelStockAdjustment(adjustment!.id, cancelReason),
     onSuccess: (res) => {
       toast.success(`Adjustment ${res.adjustmentNo} cancelled`);
       setShowCancelPrompt(false);
@@ -48,25 +61,66 @@ export function StockAdjustmentDetailDialog({
       onClose();
     },
     onError: (e) =>
-      toast.error(e instanceof ApiError ? e.messages.join(", ") : "Cancel failed"),
+      toast.error(
+        e instanceof ApiError ? e.messages.join(", ") : "Cancel failed",
+      ),
   });
 
   const deleteMutation = useMutation({
-    mutationFn: () => posApi.deleteStockAdjustment(adjustment.id),
+    mutationFn: () => posApi.deleteStockAdjustment(adjustment!.id),
     onSuccess: () => {
       toast.success("Draft adjustment deleted");
       onRefresh();
       onClose();
     },
     onError: (e) =>
-      toast.error(e instanceof ApiError ? e.messages.join(", ") : "Delete failed"),
+      toast.error(
+        e instanceof ApiError ? e.messages.join(", ") : "Delete failed",
+      ),
   });
 
-  if (!adjustment || typeof document === "undefined") return null;
+  if (!adjustmentId || typeof document === "undefined") return null;
+
+  if (detailQ.isLoading || !adjustment) {
+    return createPortal(
+      <div className="fixed inset-0 z-[90] flex items-center justify-center bg-[#0b1f33]/45 p-4">
+        <div className="rounded-xl border border-[#d9e0ea] bg-white px-6 py-5 text-sm text-[#5a6b7d] shadow-xl">
+          {detailQ.isError ? (
+            <div className="space-y-3">
+              <p className="text-[#c81e1e]">Could not load adjustment.</p>
+              <Button size="sm" variant="secondary" onClick={onClose}>
+                Close
+              </Button>
+            </div>
+          ) : (
+            "Loading adjustment…"
+          )}
+        </div>
+      </div>,
+      document.body,
+    );
+  }
 
   const isDraft = adjustment.status === "draft";
+  const isPending = adjustment.status === "pending";
   const isFinalized = adjustment.status === "adjusted";
   const isCancelled = adjustment.status === "cancelled";
+  const canFinalize = isDraft || isPending;
+
+  const statusText = isFinalized
+    ? "Finalized / Adjusted"
+    : isDraft
+      ? "Draft"
+      : isPending
+        ? "Pending"
+        : "Cancelled";
+  const statusClass = isFinalized
+    ? "rounded-full bg-[#dcfce7] px-2.5 py-0.5 text-xs font-semibold text-[#15803d]"
+    : isDraft
+      ? "rounded-full bg-[#fef3c7] px-2.5 py-0.5 text-xs font-semibold text-[#b45309]"
+      : isPending
+        ? "rounded-full bg-[#e0e7ff] px-2.5 py-0.5 text-xs font-semibold text-[#3730a3]"
+        : "rounded-full bg-[#fee2e2] px-2.5 py-0.5 text-xs font-semibold text-[#b91c1c]";
 
   const modalBody = (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-[#0b1f33]/45 p-4">
@@ -75,23 +129,12 @@ export function StockAdjustmentDetailDialog({
         aria-modal
         className="relative flex max-h-[90dvh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-[#d9e0ea] bg-white shadow-2xl"
       >
-        {/* Header */}
-        <div className="flex shrink-0 items-center justify-between border-b border-[#eef1f4] px-6 py-4 bg-[#f8fafc]">
+        <div className="flex shrink-0 items-center justify-between border-b border-[#eef1f4] bg-[#f8fafc] px-6 py-4">
           <div className="flex items-center gap-3">
             <h2 className="text-lg font-semibold tracking-tight text-[#0b1f33]">
               {adjustment.adjustmentNo}
             </h2>
-            <span
-              className={
-                isFinalized
-                  ? "rounded-full bg-[#dcfce7] px-2.5 py-0.5 text-xs font-semibold text-[#15803d]"
-                  : isDraft
-                  ? "rounded-full bg-[#fef3c7] px-2.5 py-0.5 text-xs font-semibold text-[#b45309]"
-                  : "rounded-full bg-[#fee2e2] px-2.5 py-0.5 text-xs font-semibold text-[#b91c1c]"
-              }
-            >
-              {isFinalized ? "Finalized / Adjusted" : isDraft ? "Draft" : "Cancelled"}
-            </span>
+            <span className={statusClass}>{statusText}</span>
           </div>
           <button
             type="button"
@@ -102,12 +145,10 @@ export function StockAdjustmentDetailDialog({
           </button>
         </div>
 
-        {/* Content Body */}
-        <div className="min-h-0 flex-1 overflow-y-auto p-6 space-y-6">
-          {/* Metadata Grid */}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 rounded-xl border border-[#e2e8f0] p-4 text-xs bg-[#fafbfc]">
+        <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-6">
+          <div className="grid gap-4 rounded-xl border border-[#e2e8f0] bg-[#fafbfc] p-4 text-xs sm:grid-cols-2 lg:grid-cols-4">
             <div>
-              <span className="block text-[#8b9bb0] uppercase tracking-wider font-semibold">
+              <span className="block font-semibold tracking-wider text-[#8b9bb0] uppercase">
                 Date
               </span>
               <span className="mt-0.5 block font-medium text-[#0b1f33]">
@@ -115,7 +156,7 @@ export function StockAdjustmentDetailDialog({
               </span>
             </div>
             <div>
-              <span className="block text-[#8b9bb0] uppercase tracking-wider font-semibold">
+              <span className="block font-semibold tracking-wider text-[#8b9bb0] uppercase">
                 Location
               </span>
               <span className="mt-0.5 block font-medium text-[#0b1f33]">
@@ -123,7 +164,7 @@ export function StockAdjustmentDetailDialog({
               </span>
             </div>
             <div>
-              <span className="block text-[#8b9bb0] uppercase tracking-wider font-semibold">
+              <span className="block font-semibold tracking-wider text-[#8b9bb0] uppercase">
                 Type
               </span>
               <span className="mt-0.5 block font-medium text-[#0b1f33] capitalize">
@@ -131,7 +172,7 @@ export function StockAdjustmentDetailDialog({
               </span>
             </div>
             <div>
-              <span className="block text-[#8b9bb0] uppercase tracking-wider font-semibold">
+              <span className="block font-semibold tracking-wider text-[#8b9bb0] uppercase">
                 Reason
               </span>
               <span className="mt-0.5 block font-medium text-[#0b1f33]">
@@ -142,19 +183,22 @@ export function StockAdjustmentDetailDialog({
 
           {adjustment.description ? (
             <div className="rounded-lg border border-[#e2e8f0] bg-white p-3 text-xs">
-              <span className="font-semibold text-[#5a6b7d]">Description / Note:</span>
-              <p className="mt-1 text-[#0b1f33] whitespace-pre-wrap">{adjustment.description}</p>
+              <span className="font-semibold text-[#5a6b7d]">
+                Description / Note:
+              </span>
+              <p className="mt-1 whitespace-pre-wrap text-[#0b1f33]">
+                {adjustment.description}
+              </p>
             </div>
           ) : null}
 
-          {/* Line Items Table */}
           <div className="space-y-2">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-[#5a6b7d]">
+            <h3 className="text-xs font-bold tracking-wider text-[#5a6b7d] uppercase">
               Adjusted Line Items ({adjustment.lines?.length || 0})
             </h3>
             <div className="overflow-hidden rounded-xl border border-[#e4e9f0]">
               <table className="w-full text-left text-xs">
-                <thead className="border-b border-[#eef1f4] bg-[#f8fafc] uppercase tracking-wider font-semibold text-[#5a6b7d]">
+                <thead className="border-b border-[#eef1f4] bg-[#f8fafc] font-semibold tracking-wider text-[#5a6b7d] uppercase">
                   <tr>
                     <th className="px-3 py-2.5">Item & SKU</th>
                     <th className="px-3 py-2.5 text-right">Current Stock</th>
@@ -182,7 +226,10 @@ export function StockAdjustmentDetailDialog({
                       </td>
                       <td className="px-3 py-2.5 text-right font-semibold tabular-nums text-[#047857]">
                         {Number(line.adjustmentQty) > 0 ? "+" : ""}
-                        {formatQtyWithUnit(Number(line.adjustmentQty), line.unit)}
+                        {formatQtyWithUnit(
+                          Number(line.adjustmentQty),
+                          line.unit,
+                        )}
                       </td>
                       <td className="px-3 py-2.5 text-right font-bold tabular-nums text-[#0b1f33]">
                         {formatQtyWithUnit(Number(line.newQty), line.unit)}
@@ -202,8 +249,7 @@ export function StockAdjustmentDetailDialog({
             </div>
           </div>
 
-          {/* Audit Metadata */}
-          <div className="rounded-xl border border-[#e2e8f0] bg-[#f8fafc] p-4 text-xs space-y-1 text-[#5a6b7d]">
+          <div className="space-y-1 rounded-xl border border-[#e2e8f0] bg-[#f8fafc] p-4 text-xs text-[#5a6b7d]">
             <p>
               Created by:{" "}
               <strong className="text-[#0b1f33]">
@@ -232,20 +278,19 @@ export function StockAdjustmentDetailDialog({
           </div>
         </div>
 
-        {/* Footer Actions */}
-        <div className="flex shrink-0 items-center justify-between border-t border-[#eef1f4] px-6 py-4 bg-[#f8fafc]">
+        <div className="flex shrink-0 items-center justify-between border-t border-[#eef1f4] bg-[#f8fafc] px-6 py-4">
           <Button variant="secondary" size="sm" onClick={onClose}>
             Close
           </Button>
 
-          {canWrite ? (
+          {canWrite && !isCancelled ? (
             <div className="flex gap-2">
               {isDraft ? (
                 <>
                   <Button
                     variant="outline"
                     size="sm"
-                    className="text-rose-600 border-rose-200 hover:bg-rose-50"
+                    className="border-rose-200 text-rose-600 hover:bg-rose-50"
                     disabled={deleteMutation.isPending}
                     onClick={() => deleteMutation.mutate()}
                   >
@@ -256,33 +301,37 @@ export function StockAdjustmentDetailDialog({
                     variant="outline"
                     size="sm"
                     onClick={() => {
-                      onClose();
                       if (onEdit) onEdit(adjustment);
                     }}
                   >
                     <Edit3 className="mr-1.5 h-3.5 w-3.5" />
                     Edit Draft
                   </Button>
-                  <Button
-                    size="sm"
-                    disabled={finalizeMutation.isPending}
-                    onClick={() => finalizeMutation.mutate()}
-                  >
-                    <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
-                    Finalize & Apply Stock
-                  </Button>
                 </>
               ) : null}
 
-              {isFinalized ? (
+              {canFinalize ? (
+                <Button
+                  size="sm"
+                  disabled={finalizeMutation.isPending}
+                  onClick={() => finalizeMutation.mutate()}
+                >
+                  <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
+                  Finalize & Apply Stock
+                </Button>
+              ) : null}
+
+              {isFinalized || isPending ? (
                 <Button
                   variant="outline"
                   size="sm"
-                  className="text-rose-600 border-rose-200 hover:bg-rose-50"
+                  className="border-rose-200 text-rose-600 hover:bg-rose-50"
                   onClick={() => setShowCancelPrompt(true)}
                 >
                   <Ban className="mr-1.5 h-3.5 w-3.5" />
-                  Cancel / Reverse Adjustment
+                  {isFinalized
+                    ? "Cancel / Reverse Adjustment"
+                    : "Cancel Adjustment"}
                 </Button>
               ) : null}
             </div>
@@ -290,16 +339,21 @@ export function StockAdjustmentDetailDialog({
         </div>
       </div>
 
-      {/* Cancel Prompt Modal */}
       {showCancelPrompt ? (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl border border-[#d9e0ea]">
-            <div className="flex items-center gap-2 text-rose-600 font-semibold">
+          <div className="w-full max-w-md rounded-xl border border-[#d9e0ea] bg-white p-6 shadow-2xl">
+            <div className="flex items-center gap-2 font-semibold text-rose-600">
               <AlertCircle className="h-5 w-5" />
-              <span>Cancel & Reverse Adjustment</span>
+              <span>
+                {isFinalized
+                  ? "Cancel & Reverse Adjustment"
+                  : "Cancel Adjustment"}
+              </span>
             </div>
             <p className="mt-2 text-xs text-[#5a6b7d]">
-              Cancelling a finalized adjustment will automatically generate a stock reversal entry to revert inventory levels.
+              {isFinalized
+                ? "Cancelling a finalized adjustment will automatically reverse inventory levels."
+                : "This will mark the adjustment as cancelled."}
             </p>
             <div className="mt-4">
               <label className="block text-xs font-medium text-[#0b1f33]">

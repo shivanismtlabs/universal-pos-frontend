@@ -27,6 +27,7 @@ const DEFAULT_REASONS = [
 
 export type FormLine = {
   productId: string;
+  stockLevelId?: string;
   name: string;
   sku: string;
   currentQty: number;
@@ -85,6 +86,7 @@ export function StockAdjustmentFormDialog({
       setLines(
         (initialData.lines || []).map((l: any) => ({
           productId: l.productId,
+          stockLevelId: l.stockLevelId || undefined,
           name: l.product?.name || l.name || "Item",
           sku: l.product?.skuCode || l.sku || "",
           currentQty: Number(l.currentQty ?? 0),
@@ -120,11 +122,12 @@ export function StockAdjustmentFormDialog({
           q: itemSearchQ.trim() || undefined,
         });
         if (res?.items && res.items.length > 0) return res.items;
-      } catch (e) {
+      } catch {
         /* fallback to catalogApi */
       }
       const catRes = await catalogApi.listProducts({
         q: itemSearchQ.trim() || undefined,
+        locationId: locationId || undefined,
         limit: 100,
       });
       return (catRes?.items ?? []).map((p: any) => ({
@@ -133,13 +136,13 @@ export function StockAdjustmentFormDialog({
         sku: p.skuCode,
         title: p.name,
         price: p.basePrice,
-        qty: p.stockLevels?.find((s: any) => s.locationId === locationId)?.qtyOnHand ?? 0,
-        sellUnit: p.unitOfMeasure || "pcs",
-        requiresSerial: p.trackSerial,
-        trackSerial: p.trackSerial,
+        qty: Number(p.stockOnHand ?? 0),
+        sellUnit: p.sellUnit || p.unitOfMeasure || "pcs",
+        requiresSerial: Boolean(p.trackSerial),
+        trackSerial: Boolean(p.trackSerial),
       }));
     },
-    enabled: open,
+    enabled: open && Boolean(locationId),
   });
 
   const saveMutation = useMutation({
@@ -154,7 +157,7 @@ export function StockAdjustmentFormDialog({
         status: asStatus,
         lines: lines.map((l) => ({
           productId: l.productId,
-          stockLevelId: undefined,
+          stockLevelId: l.stockLevelId || undefined,
           currentQty: l.currentQty,
           adjustmentQty: l.adjustmentQty,
           newQty: l.newQty,
@@ -186,16 +189,25 @@ export function StockAdjustmentFormDialog({
   if (!open || typeof document === "undefined") return null;
 
   function handleAddProduct(item: any) {
-    if (lines.some((l) => l.productId === item.id || l.productId === item.productId)) {
+    const productId = item.productId || item.id;
+    if (lines.some((l) => l.productId === productId)) {
       toast.info("Item is already added to adjustment lines");
       return;
     }
-    const currentQty = Number(item.qty ?? 0);
-    const unitPrice = Number(item.price ?? 0);
+    const currentQty = Number(item.qty ?? item.qtyOnHand ?? 0);
+    const unitPrice = Number(
+      item.price ?? item.sellPrice ?? item.costPrice ?? 0,
+    );
+    // POS sale products use stockLevel id as `id` and product as `productId`
+    const stockLevelId =
+      item.productId && item.id && item.productId !== item.id
+        ? String(item.id)
+        : undefined;
     const newLine: FormLine = {
-      productId: item.productId || item.id,
+      productId,
+      stockLevelId,
       name: item.title || item.name,
-      sku: item.sku,
+      sku: item.sku || item.skuCode || "",
       currentQty,
       adjustmentQty: 1,
       newQty: currentQty + 1,
@@ -244,6 +256,13 @@ export function StockAdjustmentFormDialog({
     lines.forEach((l, i) => {
       if (type === "quantity" && Math.abs(l.adjustmentQty) < 1e-9) {
         errs[`line_${i}`] = "Adjustment qty cannot be zero";
+      }
+      if (
+        type === "value" &&
+        Math.abs(l.adjustmentValue) < 1e-9 &&
+        Math.abs(l.adjustmentQty) < 1e-9
+      ) {
+        errs[`line_${i}`] = "Adjustment value or qty cannot be zero";
       }
       if (l.newQty < 0) {
         errs[`line_${i}`] = "New stock cannot be negative";
@@ -306,7 +325,16 @@ export function StockAdjustmentFormDialog({
               <select
                 id="adj-location"
                 value={locationId}
-                onChange={(e) => setLocationId(e.target.value)}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setLocationId(next);
+                  if (lines.length) {
+                    setLines([]);
+                    toast.info(
+                      "Location changed — re-add items for the correct stock on hand",
+                    );
+                  }
+                }}
                 className="mt-1 h-9 w-full rounded-lg border border-[#d9e0ea] bg-white px-3 text-sm text-[#0b1f33] outline-none focus:border-[#1a56db]"
               >
                 {locations.map((loc) => (

@@ -111,7 +111,9 @@ export function OverviewDashboard({ embed = false }: { embed?: boolean }) {
     enabled: hasService,
   });
 
-  const revenue = moneyNum(sales.data?.totals?.subtotal);
+  const revenue =
+    moneyNum(sales.data?.totals?.subtotal) +
+    moneyNum(sales.data?.totals?.taxTotal);
   const orderCount = sales.data?.totals?.orderCount ?? 0;
   const products = floor.data?.counts?.products ?? 0;
   const inStock = floor.data?.counts?.inStock ?? 0;
@@ -127,8 +129,8 @@ export function OverviewDashboard({ embed = false }: { embed?: boolean }) {
     const vals = (recent.data?.items ?? [])
       .slice(0, 7)
       .reverse()
-      .map((o) => moneyNum(o.subtotal));
-    if (vals.length < 2) return [12, 18, 14, 22, 20, 28, 26];
+      .map((o) => moneyNum(o.total ?? o.subtotal));
+    if (vals.length < 2) return [] as number[];
     const max = Math.max(...vals, 1);
     return vals.map((v) => Math.max(8, Math.round((v / max) * 36)));
   }, [recent.data]);
@@ -430,22 +432,30 @@ export function OverviewDashboard({ embed = false }: { embed?: boolean }) {
               Recent
             </span>
           </div>
-          <div className="mt-6 flex h-40 items-end gap-2 px-1">
-            {spark.map((h, i) => (
-              <div
-                key={i}
-                className="flex flex-1 flex-col items-center justify-end gap-1"
-              >
-                <div
-                  className="w-full max-w-[2.25rem] rounded-t-md bg-[linear-gradient(180deg,#5b8def_0%,#1a56db_100%)]"
-                  style={{ height: `${h * 3.2}px` }}
-                />
+          {spark.length ? (
+            <>
+              <div className="mt-6 flex h-40 items-end gap-2 px-1">
+                {spark.map((h, i) => (
+                  <div
+                    key={i}
+                    className="flex flex-1 flex-col items-center justify-end gap-1"
+                  >
+                    <div
+                      className="w-full max-w-[2.25rem] rounded-t-md bg-[linear-gradient(180deg,#5b8def_0%,#1a56db_100%)]"
+                      style={{ height: `${h * 3.2}px` }}
+                    />
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-          <p className="mt-3 text-[0.75rem] text-[#8b9bb0]">
-            Total sales {money(revenue)} · open counter to grow this number
-          </p>
+              <p className="mt-3 text-[0.75rem] text-[#8b9bb0]">
+                Total sales {money(revenue)} · recent closed tickets
+              </p>
+            </>
+          ) : (
+            <p className="mt-8 rounded-lg border border-dashed border-[#d9e0ea] bg-[#fafbfc] px-4 py-10 text-center text-[0.8125rem] text-[#8b9bb0]">
+              No closed tickets yet — open the counter to start the sales trend.
+            </p>
+          )}
         </section>
 
         <section className="rounded-[14px] border border-[#d9e0ea] bg-white p-5 shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
@@ -454,53 +464,47 @@ export function OverviewDashboard({ embed = false }: { embed?: boolean }) {
           </h2>
           <p className="text-[0.75rem] text-[#5a6b7d]">By method</p>
 
-          <div className="mt-5 flex items-center gap-5">
-            <Donut
-              segments={
-                payMethods.length
-                  ? payMethods.map((m, i) => ({
-                      pct: (moneyNum(m.amount) / payTotal) * 100,
-                      color: ["#1a56db", "#5b8def", "#0b1f33", "#94a3b8"][
-                        i % 4
-                      ]!,
-                    }))
-                  : [
-                      { pct: 70, color: "#1a56db" },
-                      { pct: 30, color: "#e8eefb" },
-                    ]
-              }
-              center={payMethods.length ? formatInr(payTotal) : "—"}
-            />
-            <ul className="min-w-0 flex-1 space-y-2">
-              {(payMethods.length
-                ? payMethods
-                : [
-                    { method: "cash", count: 0, amount: 0 },
-                    { method: "upi", count: 0, amount: 0 },
-                  ]
-              ).map((m, i) => (
-                <li
-                  key={m.method}
-                  className="flex items-center justify-between gap-2 text-sm"
-                >
-                  <span className="flex items-center gap-2 text-[#5a6b7d]">
-                    <span
-                      className="h-2.5 w-2.5 rounded-full"
-                      style={{
-                        background: ["#1a56db", "#5b8def", "#0b1f33", "#94a3b8"][
-                          i % 4
-                        ],
-                      }}
-                    />
-                    <span className="capitalize">{m.method}</span>
-                  </span>
-                  <span className="font-semibold tabular-nums text-[#0b1f33]">
-                    {money(m.amount)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </div>
+          {payMethods.length ? (
+            <div className="mt-5 flex items-center gap-5">
+              <Donut
+                segments={payMethods.map((m, i) => ({
+                  pct: (moneyNum(m.amount) / payTotal) * 100,
+                  color: ["#1a56db", "#5b8def", "#0b1f33", "#94a3b8"][i % 4]!,
+                }))}
+                center={formatInr(payTotal)}
+              />
+              <ul className="min-w-0 flex-1 space-y-2">
+                {payMethods.map((m, i) => (
+                  <li
+                    key={m.method}
+                    className="flex items-center justify-between gap-2 text-sm"
+                  >
+                    <span className="flex items-center gap-2 text-[#5a6b7d]">
+                      <span
+                        className="h-2.5 w-2.5 rounded-full"
+                        style={{
+                          background: [
+                            "#1a56db",
+                            "#5b8def",
+                            "#0b1f33",
+                            "#94a3b8",
+                          ][i % 4],
+                        }}
+                      />
+                      <span className="capitalize">{m.method}</span>
+                    </span>
+                    <span className="font-semibold tabular-nums text-[#0b1f33]">
+                      {money(m.amount)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p className="mt-8 rounded-lg border border-dashed border-[#d9e0ea] bg-[#fafbfc] px-4 py-10 text-center text-[0.8125rem] text-[#8b9bb0]">
+              No payments recorded yet for this period.
+            </p>
+          )}
         </section>
       </div>
 

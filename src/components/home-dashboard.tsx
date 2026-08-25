@@ -80,7 +80,9 @@ export function HomeDashboard() {
     enabled: hasSale,
   });
 
-  const revenue = moneyNum(sales.data?.totals?.subtotal);
+  const revenue =
+    moneyNum(sales.data?.totals?.subtotal) +
+    moneyNum(sales.data?.totals?.taxTotal);
   const orderCount = sales.data?.totals?.orderCount ?? 0;
   const productCount = floor.data?.counts?.products ?? 0;
   const inStock = floor.data?.counts?.inStock ?? 0;
@@ -200,7 +202,7 @@ export function HomeDashboard() {
         />
       </div>
 
-      {lens === "sales" && hasSalesActivity ? (
+      {lens === "sales" ? (
         <section className="rounded-xl border border-[#e4e9f0] bg-white p-4 shadow-[0_1px_2px_rgba(11,31,51,0.04)] sm:p-5">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
@@ -219,114 +221,131 @@ export function HomeDashboard() {
             </Link>
           </div>
 
-          <div
-            className={cn(
-              "mt-4 grid gap-4",
-              spark.length ? "lg:grid-cols-[1.15fr_1fr]" : "",
-            )}
-          >
-            {spark.length ? (
-              <div className="rounded-lg border border-[#eef1f4] bg-[#fafbfc] px-3 pb-2 pt-3">
-                <div className="flex h-36 items-end gap-1.5">
-                  {spark.map((bar, i) => (
-                    <div
-                      key={`${bar.label}-${i}`}
-                      className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1"
-                    >
-                      <span className="text-[0.6rem] tabular-nums text-[#6b7280]">
-                        {bar.sales > 0 ? Math.round(bar.sales) : ""}
-                      </span>
-                      <div
-                        className="w-full max-w-[1.75rem] rounded-t-sm bg-[#1a56db]"
-                        style={{ height: `${bar.pct}%` }}
-                        title={`${bar.label}: ${money(bar.sales)}`}
-                      />
-                      <span className="text-[0.65rem] tabular-nums text-[#8b9bb0]">
-                        {bar.label}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-                <p className="mt-1 text-center text-[0.7rem] text-[#8b9bb0]">
-                  Last 7 days · {orderCount} ticket{orderCount === 1 ? "" : "s"}
-                </p>
-              </div>
-            ) : null}
-
-            <div className="overflow-hidden rounded-lg border border-[#eef1f4] bg-[#fafbfc]">
-              {kindRows.length ? (
-                <ul className="space-y-2 p-3">
-                  {kindRows.map((row) => (
-                    <ChannelRow
-                      key={row.kind}
-                      color={
-                        row.kind === "sale"
-                          ? "#1a56db"
-                          : row.kind === "service"
-                            ? "#16a34a"
-                            : "#7c3aed"
-                      }
-                      label={
-                        row.kind === "sale"
-                          ? "Point of Sale"
-                          : row.kind.charAt(0).toUpperCase() + row.kind.slice(1)
-                      }
-                      amount={money(moneyNum(row.subtotal))}
-                      orders={row.count}
-                    />
-                  ))}
-                </ul>
-              ) : tickets.length ? (
-                <>
-                  <table className="w-full text-left text-sm">
-                    <thead className="border-b border-[#e5e7eb] text-xs uppercase text-[#6b7280]">
-                      <tr>
-                        <th className="px-3 py-1.5 font-medium">Ticket</th>
-                        <th className="px-3 py-1.5 font-medium">Amount</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {ticketSlice.map((t) => (
-                        <tr
-                          key={t.id}
-                          className="border-b border-[#f3f4f6] last:border-0"
-                        >
-                          <td className="px-3 py-1.5">
-                            <p className="font-medium text-[#111827]">
-                              {t.orderNumber}
-                            </p>
-                            <p className="text-[0.7rem] text-[#8b9bb0]">
-                              {t.customerName || "Walk-in"} · {t.itemCount} item
-                              {t.itemCount === 1 ? "" : "s"}
-                            </p>
-                          </td>
-                          <td className="px-3 py-1.5 text-right tabular-nums font-semibold text-[#0b1f33]">
-                            {money(moneyNum(t.subtotal))}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <TablePager
-                    page={ticketPage}
-                    totalPages={ticketPages}
-                    total={tickets.length}
-                    pageSize={ticketPageSize}
-                    onPage={setTicketPage}
-                  />
-                </>
-              ) : (
-                <ul className="space-y-2 p-3">
-                  <ChannelRow
-                    color="#1a56db"
-                    label="Point of Sale"
-                    amount={money(revenue)}
-                    orders={orderCount}
-                  />
-                </ul>
+          {hasSalesActivity ? (
+            <div
+              className={cn(
+                "mt-4 grid gap-4",
+                spark.length ? "lg:grid-cols-[1.15fr_1fr]" : "",
               )}
+            >
+              {spark.length ? (
+                <div className="rounded-lg border border-[#eef1f4] bg-[#fafbfc] px-3 pb-2 pt-3">
+                  <div className="flex h-36 items-end gap-1.5">
+                    {spark.map((bar, i) => (
+                      <div
+                        key={`${bar.label}-${i}`}
+                        className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1"
+                      >
+                        <span className="text-[0.6rem] tabular-nums text-[#6b7280]">
+                          {bar.sales > 0 ? Math.round(bar.sales) : ""}
+                        </span>
+                        <div
+                          className="w-full max-w-[1.75rem] rounded-t-sm bg-[#1a56db]"
+                          style={{ height: `${bar.pct}%` }}
+                          title={`${bar.label}: ${money(bar.sales)}`}
+                        />
+                        <span className="text-[0.65rem] tabular-nums text-[#8b9bb0]">
+                          {bar.label}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-1 text-center text-[0.7rem] text-[#8b9bb0]">
+                    Last 7 days · {orderCount} ticket
+                    {orderCount === 1 ? "" : "s"}
+                  </p>
+                </div>
+              ) : null}
+
+              <div className="overflow-hidden rounded-lg border border-[#eef1f4] bg-[#fafbfc]">
+                {kindRows.length ? (
+                  <ul className="space-y-2 p-3">
+                    {kindRows.map((row) => (
+                      <ChannelRow
+                        key={row.kind}
+                        color={
+                          row.kind === "sale"
+                            ? "#1a56db"
+                            : row.kind === "service"
+                              ? "#16a34a"
+                              : "#7c3aed"
+                        }
+                        label={
+                          row.kind === "sale"
+                            ? "Point of Sale"
+                            : row.kind.charAt(0).toUpperCase() +
+                              row.kind.slice(1)
+                        }
+                        amount={money(moneyNum(row.subtotal))}
+                        orders={row.count}
+                      />
+                    ))}
+                  </ul>
+                ) : tickets.length ? (
+                  <>
+                    <table className="w-full text-left text-sm">
+                      <thead className="border-b border-[#e5e7eb] text-xs uppercase text-[#6b7280]">
+                        <tr>
+                          <th className="px-3 py-1.5 font-medium">Ticket</th>
+                          <th className="px-3 py-1.5 font-medium">Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {ticketSlice.map((t) => (
+                          <tr
+                            key={t.id}
+                            className="border-b border-[#f3f4f6] last:border-0"
+                          >
+                            <td className="px-3 py-1.5">
+                              <p className="font-medium text-[#111827]">
+                                {t.orderNumber}
+                              </p>
+                              <p className="text-[0.7rem] text-[#8b9bb0]">
+                                {t.customerName || "Walk-in"} · {t.itemCount}{" "}
+                                item{t.itemCount === 1 ? "" : "s"}
+                              </p>
+                            </td>
+                            <td className="px-3 py-1.5 text-right tabular-nums font-semibold text-[#0b1f33]">
+                              {money(
+                                moneyNum(t.total ?? t.subtotal),
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <TablePager
+                      page={ticketPage}
+                      totalPages={ticketPages}
+                      total={tickets.length}
+                      pageSize={ticketPageSize}
+                      onPage={setTicketPage}
+                    />
+                  </>
+                ) : (
+                  <ul className="space-y-2 p-3">
+                    <ChannelRow
+                      color="#1a56db"
+                      label="Point of Sale"
+                      amount={money(revenue)}
+                      orders={orderCount}
+                    />
+                  </ul>
+                )}
+              </div>
             </div>
-          </div>
+          ) : (
+            <p className="mt-4 rounded-lg border border-dashed border-[#e4e9f0] bg-[#fafbfc] px-4 py-8 text-center text-[0.8125rem] text-[#8b9bb0]">
+              No closed tickets in this period.{" "}
+              <Link
+                href="/counter"
+                className="font-semibold text-[#1a56db] hover:underline"
+              >
+                Open counter
+              </Link>{" "}
+              to record a sale.
+            </p>
+          )}
         </section>
       ) : null}
 
