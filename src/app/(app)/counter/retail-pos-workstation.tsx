@@ -36,6 +36,8 @@ import { SplitBillModal } from "@/components/split-bill-modal";
 import { ModalFrame } from "@/components/modal-frame";
 import { StationPinLock } from "@/components/station-pin-lock";
 import { BarcodeScanInput } from "@/components/barcode-scan-input";
+import { guardedAction } from "@/components/unsaved-work-guard";
+import { useUnsavedWorkStore } from "@/lib/unsaved-work-store";
 import {
   enqueueOfflineEvent,
   flushOfflineQueue,
@@ -108,7 +110,8 @@ type PayMethod =
   | "qr"
   | "emi"
   | "store_credit"
-  | "gift_card";
+  | "gift_card"
+  | "collect_later";
 
 const TOUCH_KEY = "upos-counter-touch-mode";
 
@@ -281,6 +284,7 @@ export default function RetailPosWorkstation({
     label: string;
   } | null>(null);
   const [touchMode, setTouchMode] = useState(false);
+  const [showBillDetails, setShowBillDetails] = useState(false);
   const [busy, setBusy] = useState(false);
   const [offlinePending, setOfflinePending] = useState(0);
   const [online, setOnline] = useState(true);
@@ -1228,7 +1232,11 @@ export default function RetailPosWorkstation({
       return;
     }
     if (payMethod === "gift_card" && !giftCardCode.trim()) {
-      toast.error("Enter gift card code");
+      toast.error("Enter the gift card code");
+      return;
+    }
+    if (payMethod === "collect_later" && !customerId) {
+      toast.error("Select a customer for pay-on-pickup / credit");
       return;
     }
     if (payMethod === "bank_transfer") {
@@ -1735,10 +1743,14 @@ export default function RetailPosWorkstation({
     }
   }
 
-  async function parkCart() {
+  async function parkCart(): Promise<boolean> {
     if (!locationId || !cart.length) {
       toast.error("Cart is empty");
-      return;
+      return false;
+    }
+    if (splitSession) {
+      toast.message("Finish or cancel the split payment before saving a draft");
+      return false;
     }
     setBusy(true);
     try {
@@ -1763,15 +1775,71 @@ export default function RetailPosWorkstation({
       setDiscountAmount("");
       setParkLabel("");
       setPayModal(null);
+      setCustomerId("");
+      setOrderNote("");
+      setCashTendered("");
       toast.success(`Draft saved ${parkedSale.orderNumber}`);
+      return true;
     } catch (e) {
       toast.error(
         e instanceof ApiError ? e.messages.join(", ") : "Park failed",
       );
+      return false;
     } finally {
       setBusy(false);
     }
   }
+
+  function discardTicket() {
+    setCart([]);
+    setDiscountAmount("");
+    setParkLabel("");
+    setCashTendered("");
+    setCustomerId("");
+    setOrderNote("");
+    setAllowPartial(false);
+    setPayAmount("");
+    setSplitPay(false);
+    setSplitCashAmount("");
+    setSplitSession(null);
+    setPayModal(null);
+    scanRef.current?.focus();
+  }
+
+  // Register dirty ticket with shell — Leave / Switch shop asks Save or discard
+  useEffect(() => {
+    const dirty =
+      cart.length > 0 || Boolean(splitSession) || Boolean(stripeCheckout);
+    const summary = splitSession
+      ? `Split payment open · ${money(totalDue)} still on this ticket`
+      : stripeCheckout
+        ? "Card / UPI payment in progress"
+        : cart.length
+          ? `${cart.length} line${cart.length === 1 ? "" : "s"} · ${money(totalDue)}`
+          : "";
+    useUnsavedWorkStore.getState().register({
+      dirty,
+      summary,
+      canSave: cart.length > 0 && !splitSession && !stripeCheckout,
+      saveLabel: "Save draft",
+      onSave: () => parkCart(),
+      onDiscard: () => discardTicket(),
+    });
+    return () => {
+      useUnsavedWorkStore.getState().clear();
+    };
+    // parkCart/discard close over latest state when invoked from dialog
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    cart,
+    splitSession,
+    stripeCheckout,
+    totalDue,
+    customerId,
+    discountNum,
+    parkLabel,
+    locationId,
+  ]);
 
   function openRateEdit(line: CartLine) {
     const base = line.listPrice ?? line.unitPrice;
@@ -1905,9 +1973,11 @@ export default function RetailPosWorkstation({
       );
       return;
     }
-    setCart([]);
-    setCashTendered("");
-    scanRef.current?.focus();
+    if (cart.length) {
+      guardedAction(() => discardTicket());
+      return;
+    }
+    discardTicket();
   }
 
   return (
@@ -1926,30 +1996,23 @@ export default function RetailPosWorkstation({
         onUnlocked={() => setManualPinSwitch(false)}
       />
       {!compact ? (
-        <header className="mb-4 flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <p className="text-[0.75rem] font-medium text-[#5a6b7d]">
-                Counter
-              </p>
-            </div>
-            <h1 className="mt-1 text-xl font-bold tracking-tight text-[#0b1f33] sm:text-2xl">
-              {productName}
-            </h1>
-            <p className="mt-1 text-sm text-[#5a6b7d]">
-              Tap a product, then charge.
-            </p>
-          </div>
+        <header className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm font-semibold text-[#0b1f33]">
+            {productName}
+            <span className="ml-2 font-normal text-[#8b9bb0]">
+              Tap · charge
+            </span>
+          </p>
           <div className="flex flex-wrap items-center gap-2">
             {canApproveRefund(roles) ? (
               <Link href="/returns">
                 <Button type="button" size="sm" variant="secondary">
-                  Returns desk
+                  Returns
                 </Button>
               </Link>
             ) : null}
             {actingUser ? (
-              <span className="rounded-md border border-[#d9e0ea] bg-white px-2.5 py-1.5 text-xs font-medium text-[#0b1f33]">
+              <span className="text-xs font-medium text-[#5a6b7d]">
                 {actingUser.fullName}
               </span>
             ) : null}
@@ -1992,14 +2055,14 @@ export default function RetailPosWorkstation({
         </div>
       ) : null}
 
-      <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,0.72fr)] items-stretch gap-4">
-        <section className="flex h-0 min-h-full flex-col overflow-hidden rounded-[16px] border border-[#d9e0ea] bg-white shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
-          <div className="shrink-0 space-y-3 border-b border-[#e8edf4] bg-[#f8fafc] p-3.5">
+      <div className="grid grid-cols-[minmax(0,1.45fr)_minmax(300px,0.7fr)] items-stretch gap-3">
+        <section className="flex h-0 min-h-full flex-col overflow-hidden rounded-xl border border-[#e2e8f0] bg-white">
+          <div className="shrink-0 space-y-2 border-b border-[#eef2f8] bg-white p-3">
             <BarcodeScanInput
               value={scan}
               onChange={setScan}
               onScan={resolveScan}
-              label="Scan barcode / SKU"
+              label=""
               placeholder="Scan barcode or type SKU"
               disabled={lookup.isPending}
               autoFocus
@@ -2010,7 +2073,7 @@ export default function RetailPosWorkstation({
               <button type="submit" tabIndex={-1} />
             </form>
 
-            <div className="flex flex-wrap items-center gap-2.5">
+            <div className="flex flex-wrap items-center gap-2">
               <div className="relative w-0 flex-1">
                 <span
                   aria-hidden
@@ -2033,10 +2096,10 @@ export default function RetailPosWorkstation({
                   </svg>
                 </span>
                 <Input
-                  placeholder="Search products"
+                  placeholder="Search"
                   value={filter}
                   onChange={(e) => setFilter(e.target.value)}
-                  className="h-10 border-[#d9e0ea] bg-white pl-9 shadow-none"
+                  className="h-9 border-[#e2e8f0] bg-[#f8fafc] pl-9 shadow-none"
                 />
               </div>
 
@@ -2044,24 +2107,24 @@ export default function RetailPosWorkstation({
                 type="button"
                 onClick={() => setLowStockOnly((v) => !v)}
                 className={cn(
-                  "shrink-0 rounded-lg px-3 py-2 text-xs font-semibold transition",
+                  "shrink-0 rounded-md px-2.5 py-1.5 text-xs font-semibold transition",
                   lowStockOnly
                     ? "bg-[#fff7ed] text-[#9a3412] ring-1 ring-[#fdba74]"
-                    : "bg-white text-[#5a6b7d] ring-1 ring-[#d9e0ea] hover:text-[#0b1f33]",
+                    : "bg-[#f8fafc] text-[#5a6b7d] ring-1 ring-[#e2e8f0] hover:text-[#0b1f33]",
                 )}
               >
                 Low stock
               </button>
 
               {categories.length ? (
-                <div className="field-shell min-w-[9.5rem] max-w-[14rem] flex-1">
+                <div className="field-shell min-w-[8.5rem] max-w-[12rem] flex-1">
                   <Label className="sr-only">Category</Label>
                   <Select
-                    className="flex h-10 w-full rounded-md border border-[#d9e0ea] bg-white px-3 text-sm text-[#0b1f33]"
+                    className="flex h-9 w-full rounded-md border border-[#e2e8f0] bg-[#f8fafc] px-2.5 text-sm text-[#0b1f33]"
                     value={category}
                     onChange={(e) => setCategory(e.target.value)}
                   >
-                    <option value="all">All categories</option>
+                    <option value="all">All</option>
                     {categories.map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.name}
@@ -2073,7 +2136,7 @@ export default function RetailPosWorkstation({
             </div>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto border-t border-[#eef2f8] bg-[#f4f6f9]">
+          <div className="min-h-0 flex-1 overflow-y-auto bg-[#f7f8fb]">
             <ul
               className={cn(
                 "grid min-h-full content-start gap-2 p-2.5",
@@ -2092,7 +2155,6 @@ export default function RetailPosWorkstation({
                   row.trackQty !== false && !row.recipeTracked
                     ? Math.max(0, Number(row.qtyOnHand) - cartQty)
                     : 999;
-                const kindLabel = productKindLabel(row.kind);
                 const stock = productStockHint({
                   kind: row.kind,
                   trackQty: row.trackQty,
@@ -2105,17 +2167,17 @@ export default function RetailPosWorkstation({
                       type="button"
                       onClick={() => upsertLine(row)}
                       className={cn(
-                        "flex h-full w-full flex-col overflow-hidden rounded-xl border bg-white text-left shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition",
+                        "flex h-full w-full flex-col overflow-hidden rounded-lg border bg-white text-left transition",
                         inCart
-                          ? "border-[#1a56db] ring-1 ring-[#1a56db]/25"
-                          : "border-[#e2e8f0] hover:border-[#cbd5e1] hover:shadow-[0_2px_8px_rgba(15,23,42,0.06)]",
+                          ? "border-[#1a56db] ring-1 ring-[#1a56db]/20"
+                          : "border-[#e8edf4] hover:border-[#cbd5e1]",
                         row.foodType === "veg" && "border-l-[3px] border-l-[#15803d]",
                         row.foodType === "non_veg" &&
                           "border-l-[3px] border-l-[#b91c1c]",
                         row.foodType === "egg" && "border-l-[3px] border-l-[#a16207]",
                       )}
                     >
-                      <div className="relative aspect-[4/3] w-full overflow-hidden bg-[#eef2f7]">
+                      <div className="relative aspect-[3/2] w-full overflow-hidden bg-[#eef2f7]">
                         <div className="absolute inset-0">
                           <ProductThumb
                             src={src}
@@ -2135,43 +2197,49 @@ export default function RetailPosWorkstation({
                             }
                           />
                         </div>
-                        <span
-                          className={cn(
-                            "absolute top-1.5 left-1.5 z-[1] max-w-[calc(100%-0.75rem)] truncate rounded-md px-1.5 py-0.5 text-[0.62rem] font-bold",
-                            stock.tone === "out"
-                              ? "bg-[#fef2f2] text-[#c81e1e]"
-                              : stock.tone === "low"
-                                ? "bg-[#fff7ed] text-[#9a3412]"
-                                : "bg-white/95 text-[#1a56db]",
-                          )}
-                        >
-                          {stock.label}
-                        </span>
+                        {stock.tone !== "ok" ? (
+                          <span
+                            className={cn(
+                              "absolute top-1 left-1 z-[1] max-w-[calc(100%-0.5rem)] truncate rounded px-1.5 py-0.5 text-[0.6rem] font-bold",
+                              stock.tone === "out"
+                                ? "bg-[#fef2f2] text-[#c81e1e]"
+                                : "bg-[#fff7ed] text-[#9a3412]",
+                            )}
+                          >
+                            {stock.label}
+                          </span>
+                        ) : null}
                         {row.foodType ? (
-                          <span className="absolute top-1.5 right-1.5 z-[1] rounded-md bg-white/95 px-1 py-0.5 shadow-sm">
-                            <FoodTypeBadge value={row.foodType} showLabel />
+                          <span className="absolute top-1.5 right-1.5 z-[1]">
+                            <FoodTypeBadge
+                              value={row.foodType}
+                              showLabel
+                              size="lg"
+                            />
+                          </span>
+                        ) : null}
+                        {inCart ? (
+                          <span className="absolute right-1.5 bottom-1.5 z-[1] grid h-6 min-w-6 place-items-center rounded-md bg-[#1a56db] px-1.5 text-[0.7rem] font-bold text-white">
+                            {inCart.qty}
                           </span>
                         ) : null}
                       </div>
-                      <div className="flex min-h-0 flex-1 flex-col gap-1 p-2.5">
-                        <p className="line-clamp-2 text-[0.8rem] leading-snug font-semibold text-[#0b1f33]">
-                          {row.name}
-                        </p>
-                        <p className="truncate font-mono text-[0.62rem] text-[#94a3b8]">
-                          {row.sku}
-                          {row.category?.name
-                            ? ` · ${row.category.name}`
-                            : ""}
-                          {kindLabel ? ` · ${kindLabel}` : ""}
-                        </p>
-                        <div className="mt-auto flex items-center justify-between gap-2 pt-1">
-                          <p className="text-[0.9rem] font-extrabold tabular-nums text-[#0b1f33]">
-                            {money(row.sellPrice)}
+                      <div className="flex min-h-0 flex-1 flex-col gap-0.5 p-2">
+                        <div className="flex items-start gap-1.5">
+                          {row.foodType ? (
+                            <FoodTypeBadge
+                              value={row.foodType}
+                              size="md"
+                              className="mt-0.5 shrink-0"
+                            />
+                          ) : null}
+                          <p className="line-clamp-2 min-w-0 flex-1 text-[0.78rem] leading-snug font-semibold text-[#0b1f33]">
+                            {row.name}
                           </p>
-                          <span className="inline-flex h-7 min-w-[2.75rem] items-center justify-center rounded-lg bg-[#1a56db] px-2 text-[0.68rem] font-bold tracking-wide text-white">
-                            {inCart ? `+${inCart.qty}` : "ADD"}
-                          </span>
                         </div>
+                        <p className="mt-auto text-[0.88rem] font-bold tabular-nums text-[#0b1f33]">
+                          {money(row.sellPrice)}
+                        </p>
                       </div>
                     </button>
                   </li>
@@ -2245,38 +2313,37 @@ export default function RetailPosWorkstation({
           ) : null}
         </section>
 
-        <aside className="flex min-h-0 flex-col self-start overflow-hidden rounded-[16px] border border-[#d9e0ea] bg-white shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
-          <div className="flex items-center justify-between gap-2 border-b border-[#e8edf4] px-4 py-3.5">
+        <aside className="flex min-h-0 flex-col self-start overflow-hidden rounded-xl border border-[#e2e8f0] bg-white">
+          <div className="flex items-center justify-between gap-2 border-b border-[#eef2f8] px-3 py-2.5">
             <div>
-              <p className="eyebrow">Ticket</p>
-              <p className="mt-0.5 text-sm font-semibold text-[#0b1f33]">
+              <p className="text-sm font-semibold text-[#0b1f33]">
                 {cart.length
                   ? `${cart.reduce((n, l) => n + l.qty, 0)} item${
                       cart.reduce((n, l) => n + l.qty, 0) === 1 ? "" : "s"
                     }`
-                  : "Empty — tap a product"}
+                  : "Ticket"}
               </p>
+              {!cart.length ? (
+                <p className="text-[0.7rem] text-[#8b9bb0]">Tap a product to add</p>
+              ) : null}
             </div>
             {cart.length ? (
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="text-[#c81e1e] hover:bg-[#fff6f6] hover:text-[#a01818]"
+                className="h-8 text-[#c81e1e] hover:bg-[#fff6f6] hover:text-[#a01818]"
                 onClick={clearCart}
               >
                 Clear
               </Button>
             ) : null}
           </div>
-          <div className="space-y-1.5 border-b border-[#e8edf4] px-4 py-3">
-            <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
-              Customer
-            </Label>
+          <div className="border-b border-[#eef2f8] px-3 py-2">
             <button
               type="button"
               onClick={() => setPayModal("customer")}
-              className="flex min-h-9 w-full items-center justify-between gap-2 rounded-md border border-[#d9e0ea] bg-white px-2.5 py-1.5 text-left hover:border-[#c5d0e0]"
+              className="flex min-h-9 w-full items-center justify-between gap-2 rounded-md bg-[#f8fafc] px-2.5 py-1.5 text-left ring-1 ring-[#e8edf4] hover:ring-[#c5d0e0]"
             >
               <span className="min-w-0 truncate">
                 {customerId ? (
@@ -2293,7 +2360,7 @@ export default function RetailPosWorkstation({
                   </>
                 ) : (
                   <span className="text-sm text-[#8b9bb0]">
-                    Walk-in · tap to search
+                    Walk-in customer
                   </span>
                 )}
               </span>
@@ -2353,11 +2420,9 @@ export default function RetailPosWorkstation({
             </div>
           ) : null}
 
-          {/* <div className="border-b border-[#e8edf4] px-4 py-3">
-            
-          </div> */}
+          {/* ticket lines */}
 
-          <ul className="max-h-48 flex-1 space-y-1.5 overflow-y-auto px-3 py-3">
+          <ul className="max-h-[min(42vh,22rem)] min-h-[8rem] flex-1 space-y-1 overflow-y-auto px-2 py-2">
             {cart.map((l) => {
               const catalogRate = l.listPrice ?? l.unitPrice;
               const rateChanged =
@@ -2370,15 +2435,20 @@ export default function RetailPosWorkstation({
               return (
               <li
                 key={l.stockLevelId}
-                className="rounded-[10px] border border-[#e8edf4] bg-white px-2 py-2"
+                className="rounded-lg bg-[#f8fafc] px-2 py-1.5 ring-1 ring-[#eef2f8]"
               >
                 <div className="flex items-start gap-2">
-                <ProductThumb src={l.image} label={l.name} size="md" />
+                <ProductThumb src={l.image} label={l.name} size="sm" />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-start justify-between gap-2">
                     <p className="flex min-w-0 items-center gap-1.5 truncate text-sm font-semibold text-[#0b1f33]">
                       {l.foodType ? (
-                        <FoodTypeBadge value={l.foodType} className="shrink-0" />
+                        <FoodTypeBadge
+                          value={l.foodType}
+                          showLabel
+                          size="sm"
+                          className="shrink-0"
+                        />
                       ) : null}
                       <span className="truncate">{l.name}</span>
                     </p>
@@ -2386,30 +2456,15 @@ export default function RetailPosWorkstation({
                       {money(l.unitPrice * l.qty)}
                     </p>
                   </div>
-                  {productKindLabel(l.kind) ? (
-                    <p className="text-[0.65rem] font-medium text-[#5a6b7d]">
-                      {productKindLabel(l.kind)}
-                    </p>
-                  ) : null}
-                  <p className="truncate font-mono text-[0.65rem] text-[#8b9bb0]">
-                    {l.sku}
-                    {" · "}
+                  <p className="truncate text-[0.65rem] text-[#8b9bb0]">
                     {money(l.unitPrice)} {priceUnitLabel(l.sellUnit)}
-                    {l.taxRatePercent != null &&
-                    Number.isFinite(l.taxRatePercent) &&
-                    l.taxRatePercent > 0 &&
-                    l.taxRatePercent <= 28
-                      ? ` · tax ${l.taxRatePercent}%`
-                      : taxSettings.rate > 0
-                        ? ` · tax ${Math.round(taxSettings.rate * 1000) / 10}%`
-                        : ""}
                   </p>
-                  <div className="mt-1.5 flex items-center justify-between gap-2">
-                    <div className="flex shrink-0 items-center rounded-lg bg-[#f8fafc] p-0.5 ring-1 ring-[#e4e9f0]">
+                  <div className="mt-1 flex items-center justify-between gap-2">
+                    <div className="flex shrink-0 items-center rounded-md bg-white p-0.5 ring-1 ring-[#e4e9f0]">
                       <button
                         type="button"
                         disabled={Boolean(splitSession)}
-                        className="grid h-7 w-7 place-items-center rounded-md text-sm font-bold text-[#0b1f33] transition hover:bg-[#e8eefb] disabled:opacity-40"
+                        className="grid h-7 w-7 place-items-center rounded text-sm font-bold text-[#0b1f33] transition hover:bg-[#e8eefb] disabled:opacity-40"
                         onClick={() =>
                           setCart((prev) =>
                             prev
@@ -2480,26 +2535,24 @@ export default function RetailPosWorkstation({
                     <button
                       type="button"
                       className={cn(
-                        "inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-[0.7rem] font-semibold",
+                        "text-[0.68rem] font-semibold",
                         rateChanged
-                          ? "border-[#fdba74] bg-[#fff7ed] text-[#c2410c]"
-                          : "border-[#e2e8f0] bg-[#f8fafc] text-[#475569] hover:border-[#1a56db] hover:text-[#1a56db]",
+                          ? "text-[#c2410c]"
+                          : "text-[#1a56db] hover:underline",
                       )}
-                      title="Change this item’s price (urgent / special)"
+                      title="Change this item’s price"
                       onClick={() => openRateEdit(l)}
                     >
                       {rateChanged ? (
-                        <>
-                          <span className="tabular-nums">
-                            {money(l.unitPrice)}
-                          </span>
-                          <span className="text-[0.6rem] font-medium opacity-80">
+                        <span className="tabular-nums">
+                          {money(l.unitPrice)}
+                          <span className="ml-0.5 text-[0.6rem] opacity-80">
                             ({ratePct > 0 ? "+" : ""}
                             {ratePct}%)
                           </span>
-                        </>
+                        </span>
                       ) : (
-                        "Change price"
+                        "Price"
                       )}
                     </button>
                   </div>
@@ -2595,101 +2648,112 @@ export default function RetailPosWorkstation({
             ) : null}
           </ul>
 
-          <div className="mt-auto space-y-2 border-t border-[#e8edf4] bg-[#f8fafc] p-3">
-            <div className="rounded-lg border border-[#e2e8f0] bg-white px-3 py-2.5">
-              <p className="mb-1.5 text-[0.65rem] font-semibold tracking-wide text-[#8b9bb0] uppercase">
-                Bill
-              </p>
-              {(cart.length > 0 || splitFollowUp) && (
-                <div className="mb-0.5 flex justify-between text-[0.8rem] text-[#0b1f33]">
-                  <span>Items</span>
-                  <span className="tabular-nums">
-                    {money(billSummary.itemsSubtotal)}
-                  </span>
-                </div>
-              )}
-              {discountNum > 0 ? (
-                <div className="mb-0.5 flex justify-between text-[0.8rem] text-[#0b1f33]">
-                  <span>Discount</span>
-                  <span className="tabular-nums">−{money(discountNum)}</span>
-                </div>
-              ) : null}
-              {loyaltyOff > 0 ? (
-                <div className="mb-0.5 flex justify-between text-[0.8rem] text-[#0b1f33]">
-                  <span>Points</span>
-                  <span className="tabular-nums">−{money(loyaltyOff)}</span>
-                </div>
-              ) : null}
-              {diningFeeLines.map((f) => (
-                <div
-                  key={f.feeCode}
-                  className="mb-0.5 flex justify-between text-[0.8rem] text-[#0b1f33]"
-                >
-                  <span>{f.reason}</span>
-                  <span className="tabular-nums">{money(f.amount)}</span>
-                </div>
-              ))}
-              {billSummary.taxTotal > 0 ? (
-                <>
-                  <div className="mb-0.5 flex justify-between text-[0.8rem] text-[#0b1f33]">
-                    <span>Taxable</span>
-                    <span className="tabular-nums">
-                      {money(billSummary.taxableValue)}
-                    </span>
-                  </div>
-                  <div className="my-1 space-y-0.5 rounded-md bg-[#f3f4f6] px-2 py-1.5 text-[0.75rem]">
-                    {billSummary.taxSlabs.map((s) =>
-                      s.rate <= 0 ? (
-                        <div
-                          key="tax"
-                          className="flex justify-between tabular-nums"
-                        >
-                          <span>Tax</span>
-                          <span>{money(s.tax)}</span>
-                        </div>
-                      ) : (
-                        <div key={s.rate} className="space-y-0.5">
-                          <div className="flex justify-between tabular-nums">
-                            <span className="text-[#15803d]">
-                              CGST {s.halfRate}%
-                            </span>
-                            <span>{money(s.cgst)}</span>
-                          </div>
-                          <div className="flex justify-between tabular-nums">
-                            <span className="text-[#1a56db]">
-                              SGST {s.halfRate}%
-                            </span>
-                            <span>{money(s.sgst)}</span>
-                          </div>
-                        </div>
-                      ),
-                    )}
-                  </div>
-                </>
-              ) : null}
-              {billSummary.showRoundOff ? (
-                <div className="mb-0.5 flex justify-between text-[0.75rem] text-[#5a6b7d]">
-                  <span>Round off</span>
-                  <span className="tabular-nums">
-                    {billSummary.roundOff > 0 ? "+" : ""}
-                    {money(billSummary.roundOff)}
-                  </span>
-                </div>
-              ) : null}
-              <div className="mt-1 flex items-baseline justify-between border-t border-[#e8edf4] pt-1.5">
+          <div className="mt-auto space-y-2 border-t border-[#eef2f8] bg-white p-3">
+            <div className="rounded-lg bg-[#f8fafc] px-3 py-2.5 ring-1 ring-[#eef2f8]">
+              <div className="flex items-baseline justify-between gap-2">
                 <span className="text-sm font-semibold text-[#0b1f33]">
                   Amount due
                 </span>
-                <span className="text-lg font-bold tabular-nums text-[#0b1f33]">
+                <span className="text-xl font-bold tabular-nums text-[#0b1f33]">
                   {money(splitPart ? chargeAmount : totalDue)}
                 </span>
               </div>
-              {billSummary.taxTotal > 0 ? (
-                <p className="mt-1 text-[0.65rem] text-[#8b9bb0]">
-                  {billSummary.taxInclusive
-                    ? "Prices include tax"
-                    : "Tax added on top"}
-                </p>
+              {(cart.length > 0 ||
+                splitFollowUp ||
+                discountNum > 0 ||
+                billSummary.taxTotal > 0) && (
+                <button
+                  type="button"
+                  className="mt-1 text-[0.7rem] font-semibold text-[#1a56db] hover:underline"
+                  onClick={() => setShowBillDetails((v) => !v)}
+                >
+                  {showBillDetails ? "Hide details" : "Bill details"}
+                </button>
+              )}
+              {showBillDetails ? (
+                <div className="mt-2 space-y-0.5 border-t border-[#e8edf4] pt-2">
+                  {(cart.length > 0 || splitFollowUp) && (
+                    <div className="flex justify-between text-[0.78rem] text-[#0b1f33]">
+                      <span>Items</span>
+                      <span className="tabular-nums">
+                        {money(billSummary.itemsSubtotal)}
+                      </span>
+                    </div>
+                  )}
+                  {discountNum > 0 ? (
+                    <div className="flex justify-between text-[0.78rem] text-[#0b1f33]">
+                      <span>Discount</span>
+                      <span className="tabular-nums">−{money(discountNum)}</span>
+                    </div>
+                  ) : null}
+                  {loyaltyOff > 0 ? (
+                    <div className="flex justify-between text-[0.78rem] text-[#0b1f33]">
+                      <span>Points</span>
+                      <span className="tabular-nums">−{money(loyaltyOff)}</span>
+                    </div>
+                  ) : null}
+                  {diningFeeLines.map((f) => (
+                    <div
+                      key={f.feeCode}
+                      className="flex justify-between text-[0.78rem] text-[#0b1f33]"
+                    >
+                      <span>{f.reason}</span>
+                      <span className="tabular-nums">{money(f.amount)}</span>
+                    </div>
+                  ))}
+                  {billSummary.taxTotal > 0 ? (
+                    <>
+                      <div className="flex justify-between text-[0.78rem] text-[#0b1f33]">
+                        <span>Taxable</span>
+                        <span className="tabular-nums">
+                          {money(billSummary.taxableValue)}
+                        </span>
+                      </div>
+                      <div className="my-1 space-y-0.5 rounded-md bg-white px-2 py-1.5 text-[0.72rem] ring-1 ring-[#eef2f8]">
+                        {billSummary.taxSlabs.map((s) =>
+                          s.rate <= 0 ? (
+                            <div
+                              key="tax"
+                              className="flex justify-between tabular-nums"
+                            >
+                              <span>Tax</span>
+                              <span>{money(s.tax)}</span>
+                            </div>
+                          ) : (
+                            <div key={s.rate} className="space-y-0.5">
+                              <div className="flex justify-between tabular-nums">
+                                <span className="text-[#15803d]">
+                                  CGST {s.halfRate}%
+                                </span>
+                                <span>{money(s.cgst)}</span>
+                              </div>
+                              <div className="flex justify-between tabular-nums">
+                                <span className="text-[#1a56db]">
+                                  SGST {s.halfRate}%
+                                </span>
+                                <span>{money(s.sgst)}</span>
+                              </div>
+                            </div>
+                          ),
+                        )}
+                      </div>
+                      <p className="text-[0.65rem] text-[#8b9bb0]">
+                        {billSummary.taxInclusive
+                          ? "Prices include tax"
+                          : "Tax added on top"}
+                      </p>
+                    </>
+                  ) : null}
+                  {billSummary.showRoundOff ? (
+                    <div className="flex justify-between text-[0.75rem] text-[#5a6b7d]">
+                      <span>Round off</span>
+                      <span className="tabular-nums">
+                        {billSummary.roundOff > 0 ? "+" : ""}
+                        {money(billSummary.roundOff)}
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
               ) : null}
               {splitPart || stillDueAfter > 0.001 ? (
                 <p className="mt-1 text-[0.7rem] text-[#1341a8]">
@@ -2701,12 +2765,12 @@ export default function RetailPosWorkstation({
               ) : null}
             </div>
 
-            <div className="grid grid-cols-4 gap-1">
+            <div className="grid grid-cols-3 gap-1.5">
               <Button
                 type="button"
                 variant="secondary"
                 size="sm"
-                className="h-8 px-1 text-[0.7rem]"
+                className="h-9 text-[0.72rem]"
                 disabled={!cart.length && !splitFollowUp}
                 onClick={() => setPayModal("discount")}
               >
@@ -2716,7 +2780,7 @@ export default function RetailPosWorkstation({
                 type="button"
                 variant="secondary"
                 size="sm"
-                className="h-8 px-1 text-[0.7rem]"
+                className="h-9 text-[0.72rem]"
                 disabled={
                   !canSplitBill ||
                   (!cart.length && !splitFollowUp) ||
@@ -2738,17 +2802,7 @@ export default function RetailPosWorkstation({
                 type="button"
                 variant="secondary"
                 size="sm"
-                className="h-8 px-1 text-[0.7rem]"
-                disabled={busy || !cart.length || Boolean(splitSession)}
-                onClick={() => setPayModal("draft")}
-              >
-                Save
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                className="h-8 px-1 text-[0.7rem]"
+                className="h-9 text-[0.72rem]"
                 onClick={() => setPayModal("more")}
               >
                 More
@@ -2783,27 +2837,13 @@ export default function RetailPosWorkstation({
               const byMethod = new Map(
                 catalogItems.map((m) => [m.method, m] as const),
               );
-              const frontRow = [
-                "cash",
-                "qr",
-                "store_credit",
-                "card",
-                "upi",
-              ] as const;
+              const frontRow = ["cash", "upi", "card"] as const;
               const shownPrimary = frontRow.map((method) => {
                 const m = byMethod.get(method);
-                const alwaysOn =
-                  method === "cash" ||
-                  method === "qr" ||
-                  method === "store_credit";
+                const alwaysOn = method === "cash";
                 return {
                   method,
-                  displayName:
-                    method === "qr"
-                      ? "QR"
-                      : method === "store_credit"
-                        ? "Wallet"
-                        : m?.displayName ?? method,
+                  displayName: m?.displayName ?? method,
                   available: alwaysOn || Boolean(m?.available),
                   reason: m?.reason,
                 };
@@ -2813,38 +2853,53 @@ export default function RetailPosWorkstation({
                 if (method === "wallet") return "App pay";
                 if (method === "gift_card") return "Gift";
                 if (method === "bank_transfer") return "Bank";
+                if (method === "upi") return "UPI";
+                if (method === "collect_later") return "Pay later";
                 return displayName;
               };
               return (
-                <div className="grid grid-cols-5 gap-0.5 rounded-lg bg-[#eef2f8] p-0.5">
-                  {shownPrimary.map((m) => (
-                    <button
-                      key={m.method}
-                      type="button"
-                      disabled={!m.available}
-                      title={m.reason}
-                      data-active={payMethod === m.method ? "true" : "false"}
-                      onClick={() => {
-                        if (!m.available) {
-                          toast.message(
-                            m.reason || `${m.displayName} is not configured`,
-                          );
-                          return;
-                        }
-                        setPayMethod(m.method as PayMethod);
-                        if (m.method !== "cash") setSplitPay(false);
-                      }}
-                      className={cn(
-                        "rounded-md py-1.5 text-[0.62rem] font-semibold tracking-wide uppercase transition",
-                        !m.available && "cursor-not-allowed opacity-40",
-                        payMethod === m.method
-                          ? "bg-[#1a56db] text-white"
-                          : "text-[#5a6b7d] hover:bg-white/80 hover:text-[#0b1f33]",
-                      )}
-                    >
-                      {methodLabel(m.method, m.displayName)}
-                    </button>
-                  ))}
+                <div className="space-y-1.5">
+                  <div className="grid grid-cols-3 gap-1 rounded-lg bg-[#eef2f8] p-1">
+                    {shownPrimary.map((m) => (
+                      <button
+                        key={m.method}
+                        type="button"
+                        disabled={!m.available}
+                        title={m.reason}
+                        data-active={payMethod === m.method ? "true" : "false"}
+                        onClick={() => {
+                          if (!m.available) {
+                            toast.message(
+                              m.reason || `${m.displayName} is not configured`,
+                            );
+                            return;
+                          }
+                          setPayMethod(m.method as PayMethod);
+                          if (m.method !== "cash") setSplitPay(false);
+                        }}
+                        className={cn(
+                          "rounded-md py-2 text-[0.75rem] font-semibold transition",
+                          !m.available && "cursor-not-allowed opacity-40",
+                          payMethod === m.method
+                            ? "bg-[#1a56db] text-white shadow-sm"
+                            : "text-[#5a6b7d] hover:bg-white/80 hover:text-[#0b1f33]",
+                        )}
+                      >
+                        {methodLabel(m.method, m.displayName)}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    className="w-full text-center text-[0.7rem] font-semibold text-[#1a56db] hover:underline"
+                    onClick={() => setPayModal("more")}
+                  >
+                    {["qr", "store_credit", "wallet", "gift_card", "bank_transfer", "emi", "collect_later"].includes(
+                      payMethod,
+                    )
+                      ? `Paying with ${methodLabel(payMethod, payMethod)} · change`
+                      : "QR · Wallet · Pay on pickup · more"}
+                  </button>
                 </div>
               );
             })()}
@@ -3012,7 +3067,7 @@ export default function RetailPosWorkstation({
 
             <Button
               size="sm"
-              className="h-9 w-full text-sm font-semibold"
+              className="h-11 w-full text-base font-semibold"
               disabled={
                 busy ||
                 stripeBusy ||
@@ -3027,6 +3082,7 @@ export default function RetailPosWorkstation({
                   !stripeConfig.data?.enabled) ||
                 (payMethod === "emi" &&
                   (!customerId || !emiProvider.trim())) ||
+                (payMethod === "collect_later" && !customerId) ||
                 (payMethod === "qr" && !activeQrVpa)
               }
               onClick={() => void checkout()}
@@ -3037,7 +3093,9 @@ export default function RetailPosWorkstation({
                   ? `Collect ${splitPart.label} · ${money(chargeAmount)}`
                   : allowPartial && chargeAmount < totalDue - 0.001
                     ? `Collect ${money(chargeAmount)}`
-                    : `Charge · ${payMethodConfirmLabel} · ${money(chargeAmount)}`}
+                    : payMethod === "collect_later"
+                      ? `Book · pay later · ${money(chargeAmount)}`
+                      : `Charge · ${money(chargeAmount)}`}
             </Button>
           </div>
         </aside>
@@ -3678,60 +3736,86 @@ export default function RetailPosWorkstation({
                 catalogItems.map((m) => [m.method, m] as const),
               );
               const extraRow = [
+                "qr",
+                "store_credit",
                 "gift_card",
                 "bank_transfer",
                 "emi",
                 "wallet",
+                "collect_later",
               ] as const;
               const extras = extraRow.map((method) => {
                 const m = byMethod.get(method);
+                const alwaysOn =
+                  method === "qr" ||
+                  method === "store_credit" ||
+                  method === "collect_later";
                 return {
                   method,
                   displayName:
-                    method === "gift_card"
-                      ? "Gift card"
-                      : method === "bank_transfer"
-                        ? "Bank transfer"
-                        : method === "emi"
-                          ? "EMI"
-                          : "App pay",
-                  available: Boolean(m?.available),
+                    method === "qr"
+                      ? "QR / UPI scan"
+                      : method === "store_credit"
+                        ? "Wallet"
+                        : method === "gift_card"
+                          ? "Gift card"
+                          : method === "bank_transfer"
+                            ? "Bank transfer"
+                            : method === "emi"
+                              ? "EMI"
+                              : method === "collect_later"
+                                ? "Pay on pickup"
+                                : "App pay",
+                  available: alwaysOn || Boolean(m?.available),
                   reason: m?.reason,
                 };
               });
               return (
-                <div>
-                  <p className="mb-1.5 text-xs font-semibold text-[#0b1f33]">
-                    Extra pay methods
-                  </p>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {extras.map((m) => (
-                      <button
-                        key={m.method}
-                        type="button"
-                        title={m.reason}
-                        onClick={() => {
-                          if (!m.available) {
-                            toast.message(
-                              m.reason || `${m.displayName} is not set up`,
-                            );
-                            return;
-                          }
-                          setPayMethod(m.method as PayMethod);
-                          if ((m.method as string) !== "cash") setSplitPay(false);
-                        }}
-                        className={cn(
-                          "rounded-lg border px-3 py-2.5 text-left text-sm font-semibold",
-                          !m.available && "cursor-not-allowed opacity-40",
-                          payMethod === m.method
-                            ? "border-[#1a56db] bg-[#e8eefb] text-[#1a56db]"
-                            : "border-[#d9e0ea] bg-white text-[#0b1f33]",
-                        )}
-                      >
-                        {m.displayName}
-                      </button>
-                    ))}
+                <div className="space-y-3">
+                  <div>
+                    <p className="mb-1.5 text-xs font-semibold text-[#0b1f33]">
+                      More pay methods
+                    </p>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {extras.map((m) => (
+                        <button
+                          key={m.method}
+                          type="button"
+                          title={m.reason}
+                          onClick={() => {
+                            if (!m.available) {
+                              toast.message(
+                                m.reason || `${m.displayName} is not set up`,
+                              );
+                              return;
+                            }
+                            setPayMethod(m.method as PayMethod);
+                            if ((m.method as string) !== "cash")
+                              setSplitPay(false);
+                            setPayModal(null);
+                          }}
+                          className={cn(
+                            "rounded-lg border px-3 py-2.5 text-left text-sm font-semibold",
+                            !m.available && "cursor-not-allowed opacity-40",
+                            payMethod === m.method
+                              ? "border-[#1a56db] bg-[#e8eefb] text-[#1a56db]"
+                              : "border-[#d9e0ea] bg-white text-[#0b1f33]",
+                          )}
+                        >
+                          {m.displayName}
+                        </button>
+                      ))}
+                    </div>
                   </div>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="w-full"
+                    disabled={busy || !cart.length || Boolean(splitSession)}
+                    onClick={() => setPayModal("draft")}
+                  >
+                    Save draft / park bill
+                  </Button>
                 </div>
               );
             })()}
@@ -3870,21 +3954,43 @@ export default function RetailPosWorkstation({
               </div>
             ) : null}
 
+            {payMethod === "collect_later" ? (
+              <p className="rounded-lg border border-[#e8edf4] bg-[#f8fafc] px-3 py-2 text-sm text-[#5a6b7d]">
+                Charge now books the sale with{" "}
+                <span className="font-semibold text-[#0b1f33]">balance due</span>
+                . Customer pays when they take the stuff — collect from Orders
+                later. Prefer a customer on the ticket.
+              </p>
+            ) : null}
+
             {payMethod === "wallet" ? (
               <p className="text-sm text-[#5a6b7d]">
                 Confirm after the customer pays in the wallet app, then Charge.
               </p>
             ) : null}
 
-            <label className="flex items-center gap-2 text-sm font-medium text-[#0b1f33]">
+            <label className="flex items-start gap-2 text-sm font-medium text-[#0b1f33]">
               <input
                 type="checkbox"
-                className="h-4 w-4 accent-[#1a56db]"
+                className="mt-0.5 h-4 w-4 accent-[#1a56db]"
                 checked={allowPartial}
                 disabled={Boolean(splitSession)}
-                onChange={(e) => setAllowPartial(e.target.checked)}
+                onChange={(e) => {
+                  setAllowPartial(e.target.checked);
+                  if (e.target.checked && !payAmount) {
+                    setPayAmount(
+                      String(Math.round((totalDue / 2) * 100) / 100),
+                    );
+                  }
+                }}
               />
-              Collect only part now
+              <span>
+                Collect part now
+                <span className="mt-0.5 block text-[0.72rem] font-normal text-[#8b9bb0]">
+                  Pay half (or any amount) now — rest when they return / pick up.
+                  Order stays open with balance due.
+                </span>
+              </span>
             </label>
             {allowPartial && !splitSession ? (
               <div className="field-shell">
@@ -3896,6 +4002,29 @@ export default function RetailPosWorkstation({
                   onChange={(e) => setPayAmount(e.target.value)}
                   placeholder={String(totalDue || "")}
                 />
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {[0.25, 0.5, 0.75].map((f) => (
+                    <button
+                      key={f}
+                      type="button"
+                      className="rounded-md border border-[#e2e8f0] bg-white px-2 py-1 text-[0.7rem] font-semibold text-[#475569] hover:border-[#1a56db] hover:text-[#1a56db]"
+                      onClick={() =>
+                        setPayAmount(
+                          String(Math.round(totalDue * f * 100) / 100),
+                        )
+                      }
+                    >
+                      {Math.round(f * 100)}%
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    className="rounded-md border border-[#e2e8f0] bg-white px-2 py-1 text-[0.7rem] font-semibold text-[#475569] hover:border-[#1a56db] hover:text-[#1a56db]"
+                    onClick={() => setPayAmount(String(totalDue))}
+                  >
+                    Full
+                  </button>
+                </div>
                 <p className="mt-1 text-xs text-[#5a6b7d]">
                   Left after this: {money(Math.max(0, totalDue - chargeAmount))}
                 </p>

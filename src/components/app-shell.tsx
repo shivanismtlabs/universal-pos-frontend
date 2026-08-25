@@ -71,6 +71,11 @@ import { OfflineStatusBanner } from "@/components/offline-status-banner";
 import { SetupReturnBanner } from "@/components/setup-return-banner";
 import { SessionIdleWatcher } from "@/components/session-idle-watcher";
 import { InboxPopupListener } from "@/components/inbox-popup-listener";
+import {
+  UnsavedWorkGuard,
+  guardedAction,
+  guardedNavClick,
+} from "@/components/unsaved-work-guard";
 import { toast } from "sonner";
 import {
   getDeviceId,
@@ -988,7 +993,7 @@ function SidebarBody({
               <Link
                 key={g.id}
                 href={g.href}
-                onClick={onNavigate}
+                onClick={(e) => guardedNavClick(e, g.href!, onNavigate)}
                 className={cn(linkClass(active), "mb-1")}
               >
                 <Icon className="h-4 w-4 shrink-0" strokeWidth={2} />
@@ -1081,7 +1086,9 @@ function SidebarBody({
                                     <Link
                                       key={`${c.href}:${c.label}`}
                                       href={c.href}
-                                      onClick={onNavigate}
+                                      onClick={(e) =>
+                                        guardedNavClick(e, c.href, onNavigate)
+                                      }
                                       className={subLinkClass(active)}
                                     >
                                       {active ? (
@@ -1106,7 +1113,9 @@ function SidebarBody({
                       <Link
                         key={`${c.href}:${c.label}`}
                         href={c.href}
-                        onClick={onNavigate}
+                        onClick={(e) =>
+                          guardedNavClick(e, c.href, onNavigate)
+                        }
                         className={subLinkClass(active)}
                       >
                         {active ? (
@@ -1131,7 +1140,7 @@ function SidebarBody({
 
         <Link
           href="/notifications"
-          onClick={onNavigate}
+          onClick={(e) => guardedNavClick(e, "/notifications", onNavigate)}
           className={cn(
             linkClass(pathname.startsWith("/notifications")),
             "relative",
@@ -1466,15 +1475,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   function switchOrganization() {
-    qc.clear();
-    useBranchStore.getState().bindTenant(null);
-    if (!identityToken) {
-      toast.message("Sign in again to pick another shop");
-      void logout();
-      return;
-    }
-    useAuthStore.getState().clearTenantSession();
-    router.replace("/organizations");
+    guardedAction(() => {
+      qc.clear();
+      useBranchStore.getState().bindTenant(null);
+      if (!identityToken) {
+        toast.message("Sign in again to pick another shop");
+        void logout();
+        return;
+      }
+      useAuthStore.getState().clearTenantSession();
+      router.replace("/organizations");
+    });
   }
 
   if (isLoading) {
@@ -1505,7 +1516,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const acting = user ?? stationUser;
   const sidebarProps = {
-    onLogout: () => void logout(),
+    onLogout: () => guardedAction(() => void logout()),
     onSwitchOrg: () => switchOrganization(),
     userName: acting?.fullName,
     userEmail: acting?.email,
@@ -1527,6 +1538,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       ) : null}
       <SessionIdleWatcher />
       <InboxPopupListener />
+      <UnsavedWorkGuard />
       {/* Light expandable sidebar */}
       <aside className="app-shell-aside hidden h-dvh w-[17.5rem] shrink-0 flex-col border-r border-[#e2e8f0] md:flex print:hidden">
         <Suspense fallback={<div className="h-full bg-[#fafbfc]" />}>

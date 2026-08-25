@@ -42,20 +42,31 @@ const FOOD_TYPE_META: Record<
 export function FoodTypeBadge({
   value,
   showLabel = false,
+  size = "md",
   className,
 }: {
   value: unknown;
   showLabel?: boolean;
+  /** sm = tiny icon; md = standard; lg = POS tile readable */
+  size?: "sm" | "md" | "lg";
   className?: string;
 }) {
   const type = parseFoodType(value);
   if (!type) return null;
   const meta = FOOD_TYPE_META[type];
+  const box =
+    size === "lg" ? "h-4 w-4" : size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5";
+  const dot =
+    size === "lg" ? "h-2 w-2" : size === "sm" ? "h-1 w-1" : "h-1.5 w-1.5";
+  const labelText =
+    size === "lg" ? "text-[0.7rem]" : "text-[0.65rem]";
   return (
     <span
       className={cn(
         "inline-flex items-center gap-1",
-        showLabel ? "rounded-md border border-[#e2e8f0] bg-white px-1.5 py-0.5" : null,
+        showLabel
+          ? "rounded-md border border-[#e2e8f0] bg-white px-1.5 py-0.5 shadow-sm"
+          : null,
         className,
       )}
       title={meta.label}
@@ -63,14 +74,15 @@ export function FoodTypeBadge({
     >
       <span
         className={cn(
-          "inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-[2px] border-2 bg-white",
+          "inline-flex shrink-0 items-center justify-center rounded-[2px] border-2 bg-white",
+          box,
           meta.ring,
         )}
       >
-        <span className={cn("h-1.5 w-1.5 rounded-[1px]", meta.mark)} />
+        <span className={cn("rounded-[1px]", dot, meta.mark)} />
       </span>
       {showLabel ? (
-        <span className={cn("text-[0.65rem] font-semibold", meta.text)}>
+        <span className={cn("font-semibold leading-none", labelText, meta.text)}>
           {meta.label}
         </span>
       ) : null}
