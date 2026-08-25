@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Search, Eye, Edit3 } from "lucide-react";
-import { posApi } from "@/lib/api";
+import { posApi, type StockAdjustment } from "@/lib/api";
 import { canWriteCatalog } from "@/lib/roles";
 import { useAuthStore } from "@/lib/auth-store";
 import { useBootstrap } from "@/lib/bootstrap";
@@ -75,7 +75,7 @@ export default function InventoryAdjustmentsPage() {
   const limit = 20;
 
   const [formOpen, setFormOpen] = useState(false);
-  const [editingAdj, setEditingAdj] = useState<any | null>(null);
+  const [editingAdj, setEditingAdj] = useState<StockAdjustment | null>(null);
   const [detailAdjId, setDetailAdjId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -124,7 +124,7 @@ export default function InventoryAdjustmentsPage() {
     setFormOpen(true);
   }
 
-  function handleOpenEdit(adj: any) {
+  function handleOpenEdit(adj: StockAdjustment) {
     setEditingAdj(adj);
     setFormOpen(true);
   }

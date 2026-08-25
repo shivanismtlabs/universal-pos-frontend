@@ -1,15 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, Trash2, X, Search, CheckCircle2 } from "lucide-react";
+import { Trash2, X, Search, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FieldError } from "@/components/ui/form";
-import { catalogApi, posApi } from "@/lib/api";
+import { catalogApi, posApi, type StockAdjustment } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { formatQtyWithUnit } from "@/lib/sell-units";
 import { cn } from "@/lib/utils";
@@ -41,9 +41,27 @@ export type FormLine = {
   notes?: string;
 };
 
+type AdjSearchItem = {
+  id: string;
+  productId?: string;
+  sku?: string;
+  skuCode?: string;
+  title?: string;
+  name?: string;
+  price?: number | string;
+  sellPrice?: number | string;
+  costPrice?: number | string;
+  qty?: number;
+  qtyOnHand?: number;
+  sellUnit?: string;
+  unitOfMeasure?: string;
+  requiresSerial?: boolean;
+  trackSerial?: boolean;
+};
+
 type Props = {
   open: boolean;
-  initialData?: any;
+  initialData?: StockAdjustment | null;
   locations: Array<{ id: string; name: string }>;
   defaultLocationId?: string;
   onClose: () => void;
@@ -84,7 +102,7 @@ export function StockAdjustmentFormDialog({
       setDescription(initialData.description || "");
       setAttachments(initialData.attachments || []);
       setLines(
-        (initialData.lines || []).map((l: any) => ({
+        (initialData.lines || []).map((l) => ({
           productId: l.productId,
           stockLevelId: l.stockLevelId || undefined,
           name: l.product?.name || l.name || "Item",
@@ -130,16 +148,23 @@ export function StockAdjustmentFormDialog({
         locationId: locationId || undefined,
         limit: 100,
       });
-      return (catRes?.items ?? []).map((p: any) => ({
+      return (catRes?.items ?? []).map((p) => ({
         id: p.id,
         productId: p.id,
         sku: p.skuCode,
         title: p.name,
         price: p.basePrice,
-        qty: Number(p.stockOnHand ?? 0),
-        sellUnit: p.sellUnit || p.unitOfMeasure || "pcs",
-        requiresSerial: Boolean(p.trackSerial),
-        trackSerial: Boolean(p.trackSerial),
+        qty: Number(
+          (p as { stockOnHand?: number | string }).stockOnHand ?? 0,
+        ),
+        sellUnit:
+          p.sellUnit ||
+          (p as { unitOfMeasure?: string }).unitOfMeasure ||
+          "pcs",
+        requiresSerial: Boolean(
+          (p as { trackSerial?: boolean }).trackSerial,
+        ),
+        trackSerial: Boolean((p as { trackSerial?: boolean }).trackSerial),
       }));
     },
     enabled: open && Boolean(locationId),
@@ -188,7 +213,7 @@ export function StockAdjustmentFormDialog({
 
   if (!open || typeof document === "undefined") return null;
 
-  function handleAddProduct(item: any) {
+  function handleAddProduct(item: AdjSearchItem) {
     const productId = item.productId || item.id;
     if (lines.some((l) => l.productId === productId)) {
       toast.info("Item is already added to adjustment lines");
@@ -206,12 +231,12 @@ export function StockAdjustmentFormDialog({
     const newLine: FormLine = {
       productId,
       stockLevelId,
-      name: item.title || item.name,
+      name: item.title || item.name || "Item",
       sku: item.sku || item.skuCode || "",
       currentQty,
       adjustmentQty: 1,
       newQty: currentQty + 1,
-      unit: item.sellUnit || "pcs",
+      unit: item.sellUnit || item.unitOfMeasure || "pcs",
       currentUnitCost: unitPrice,
       adjustmentValue: unitPrice,
       requiresSerial: item.requiresSerial ?? item.trackSerial ?? false,
@@ -438,7 +463,7 @@ export function StockAdjustmentFormDialog({
 
             {/* Product search & pick list */}
             <div className="mt-2.5 max-h-52 overflow-y-auto rounded-lg border border-[#d9e0ea] bg-white shadow-sm divide-y divide-[#eef1f4]">
-              {(searchProducts.data ?? []).map((item: any) => {
+              {(searchProducts.data ?? []).map((item: AdjSearchItem) => {
                 const isAdded = lines.some((l) => l.productId === item.id || l.productId === item.productId);
                 return (
                   <button

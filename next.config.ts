@@ -8,6 +8,8 @@ const apiOrigin = (
   .replace(/\/v1\/?$/i, "");
 
 const nextConfig: NextConfig = {
+  // Live deploys must not fail on lint; keep CI/local `next lint` for quality.
+  eslint: { ignoreDuringBuilds: true },
   async rewrites() {
     return [
       {

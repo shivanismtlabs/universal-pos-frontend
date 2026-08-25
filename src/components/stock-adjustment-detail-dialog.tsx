@@ -6,7 +6,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { X, CheckCircle2, AlertCircle, Ban, Edit3, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { posApi } from "@/lib/api";
+import { posApi, type StockAdjustment, type StockAdjustmentLine } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { formatQtyWithUnit } from "@/lib/sell-units";
 
@@ -15,7 +15,7 @@ type Props = {
   canWrite?: boolean;
   onClose: () => void;
   onRefresh: () => void;
-  onEdit?: (adj: any) => void;
+  onEdit?: (adj: StockAdjustment) => void;
 };
 
 export function StockAdjustmentDetailDialog({
@@ -211,7 +211,7 @@ export function StockAdjustmentDetailDialog({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#eef1f4]">
-                  {(adjustment.lines || []).map((line: any) => (
+                  {(adjustment.lines || []).map((line: StockAdjustmentLine) => (
                     <tr key={line.id} className="hover:bg-[#fafbfc]">
                       <td className="px-3 py-2.5">
                         <span className="block font-medium text-[#0b1f33]">
@@ -255,7 +255,7 @@ export function StockAdjustmentDetailDialog({
               <strong className="text-[#0b1f33]">
                 {adjustment.createdBy?.fullName || "Staff"}
               </strong>{" "}
-              on {new Date(adjustment.createdAt).toLocaleString()}
+              on {new Date(adjustment.createdAt ?? Date.now()).toLocaleString()}
             </p>
             {adjustment.finalizedAt ? (
               <p>

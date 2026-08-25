@@ -2485,6 +2485,67 @@ export const paymentsApi = {
   },
 };
 
+export type StockAdjustmentLine = {
+  id?: string;
+  productId: string;
+  stockLevelId?: string | null;
+  name?: string;
+  sku?: string;
+  currentQty: number | string;
+  adjustmentQty: number | string;
+  newQty: number | string;
+  unit?: string;
+  currentUnitCost?: number | string;
+  adjustmentValue?: number | string;
+  serialNumber?: string | null;
+  notes?: string | null;
+  requiresSerial?: boolean;
+  product?: { name?: string; skuCode?: string } | null;
+};
+
+export type StockAdjustment = {
+  id: string;
+  adjustmentNo?: string;
+  locationId: string;
+  location?: { id?: string; name?: string } | null;
+  adjustmentDate: string;
+  type: "quantity" | "value";
+  reason: string;
+  description?: string | null;
+  attachments?: string[];
+  status: "draft" | "pending" | "adjusted" | "cancelled";
+  lines?: StockAdjustmentLine[];
+  createdAt?: string;
+  updatedAt?: string;
+  createdBy?: { id?: string; fullName?: string; name?: string } | null;
+  finalizedAt?: string | null;
+  finalizedBy?: { id?: string; fullName?: string; name?: string } | null;
+  cancelledAt?: string | null;
+  cancelledBy?: { id?: string; fullName?: string; name?: string } | null;
+};
+
+export type StockAdjustmentWritePayload = {
+  locationId: string;
+  adjustmentDate: string;
+  type: "quantity" | "value";
+  reason: string;
+  description?: string;
+  attachments?: string[];
+  status?: "draft" | "pending" | "adjusted" | "cancelled";
+  lines: Array<{
+    productId: string;
+    stockLevelId?: string;
+    currentQty: number;
+    adjustmentQty: number;
+    newQty: number;
+    unit?: string;
+    currentUnitCost?: number;
+    adjustmentValue?: number;
+    serialNumber?: string;
+    notes?: string;
+  }>;
+};
+
 export const posApi = {
   saleSchema() {
     return apiRequest<{
@@ -2843,28 +2904,8 @@ export const posApi = {
 
   // ─── Formal Inventory Adjustments CRUD API ─────────────────────────────────
 
-  createStockAdjustment(payload: {
-    locationId: string;
-    adjustmentDate: string;
-    type: "quantity" | "value";
-    reason: string;
-    description?: string;
-    attachments?: string[];
-    status?: "draft" | "pending" | "adjusted" | "cancelled";
-    lines: Array<{
-      productId: string;
-      stockLevelId?: string;
-      currentQty: number;
-      adjustmentQty: number;
-      newQty: number;
-      unit?: string;
-      currentUnitCost?: number;
-      adjustmentValue?: number;
-      serialNumber?: string;
-      notes?: string;
-    }>;
-  }) {
-    return apiRequest<any>("/inventory/adjustments", {
+  createStockAdjustment(payload: StockAdjustmentWritePayload) {
+    return apiRequest<StockAdjustment>("/inventory/adjustments", {
       method: "POST",
       body: payload,
       token: token(),
@@ -2892,7 +2933,7 @@ export const posApi = {
     if (params?.limit) qs.set("limit", String(params.limit));
     const q = qs.toString();
     return apiRequest<{
-      items: any[];
+      items: StockAdjustment[];
       total: number;
       page: number;
       limit: number;
@@ -2901,13 +2942,13 @@ export const posApi = {
   },
 
   getStockAdjustment(id: string) {
-    return apiRequest<any>(`/inventory/adjustments/${id}`, {
+    return apiRequest<StockAdjustment>(`/inventory/adjustments/${id}`, {
       token: token(),
     });
   },
 
-  updateStockAdjustment(id: string, payload: any) {
-    return apiRequest<any>(`/inventory/adjustments/${id}`, {
+  updateStockAdjustment(id: string, payload: Partial<StockAdjustmentWritePayload>) {
+    return apiRequest<StockAdjustment>(`/inventory/adjustments/${id}`, {
       method: "PATCH",
       body: payload,
       token: token(),
@@ -2922,14 +2963,14 @@ export const posApi = {
   },
 
   finalizeStockAdjustment(id: string) {
-    return apiRequest<any>(`/inventory/adjustments/${id}/finalize`, {
+    return apiRequest<StockAdjustment>(`/inventory/adjustments/${id}/finalize`, {
       method: "POST",
       token: token(),
     });
   },
 
   cancelStockAdjustment(id: string, reason?: string) {
-    return apiRequest<any>(`/inventory/adjustments/${id}/cancel`, {
+    return apiRequest<StockAdjustment>(`/inventory/adjustments/${id}/cancel`, {
       method: "POST",
       body: { reason },
       token: token(),

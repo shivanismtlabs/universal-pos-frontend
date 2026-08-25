@@ -173,7 +173,7 @@ export function CategorySelectCombobox({
 
             {!filtered.length && search.trim() ? (
               <div className="p-3 text-center text-xs text-[#5a6b7d]">
-                No existing category found matching "{search}"
+                No existing category found matching &ldquo;{search}&rdquo;
               </div>
             ) : null}
           </div>
@@ -188,7 +188,7 @@ export function CategorySelectCombobox({
                 onClick={() => handleQuickCreate(search)}
               >
                 <Plus className="h-3.5 w-3.5" />
-                Add "{search.trim()}" as new category
+                Add &ldquo;{search.trim()}&rdquo; as new category
               </button>
             ) : null}
 
