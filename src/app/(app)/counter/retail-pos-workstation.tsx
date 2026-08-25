@@ -43,7 +43,7 @@ import {
 } from "@/lib/sell-units";
 import { productKindLabel, productStockHint } from "@/lib/product-kind";
 import type { SplitBillMode, SplitBillPart } from "@/lib/split-bill";
-import { scalePartsToTotal } from "@/lib/split-bill";
+import { roundMoney, scalePartsToTotal } from "@/lib/split-bill";
 import { diningFeesFromConfig } from "@/lib/dining-fees";
 import { sellingMenuCategoryFilter } from "@/lib/selling-menus";
 import {
@@ -113,8 +113,8 @@ export default function RetailPosWorkstation({
   const qc = useQueryClient();
   const { money, productName, currencyCode, data: boot, hasCapability } =
     useBootstrap();
-  const roles = useAuthStore((s) => s.user?.roles ?? []);
   const actingUser = useAuthStore((s) => s.user);
+  const roles = actingUser?.roles ?? [];
   const lockStation = useAuthStore((s) => s.lockStation);
   const stationToken = useAuthStore((s) => s.stationToken);
   const pinLocked = useAuthStore((s) => s.pinLocked);
@@ -1013,7 +1013,9 @@ export default function RetailPosWorkstation({
           ? { gatewayRef: giftCardCode.trim() }
           : {}),
       });
-      const next = splitSession.index + 1;
+      const currentPartRemaining = Math.max(0, splitPart.amount - payAmt);
+      const partFullyPaid = currentPartRemaining <= 0.009;
+      const next = partFullyPaid ? splitSession.index + 1 : splitSession.index;
       const last = next >= splitSession.parts.length || due - payAmt <= 0.009;
       setCashTendered("");
       if (last) {
@@ -1027,6 +1029,19 @@ export default function RetailPosWorkstation({
         toast.success(
           `Sale ${splitSession.orderNumber} · all parts collected`,
         );
+      } else if (!partFullyPaid) {
+        const updatedParts = [...splitSession.parts];
+        updatedParts[splitSession.index] = {
+          ...splitPart,
+          amount: roundMoney(currentPartRemaining),
+        };
+        setSplitSession({
+          ...splitSession,
+          parts: updatedParts,
+        });
+        toast.success(
+          `Collected ${money(payAmt)} · Part ${splitSession.index + 1} remaining: ${money(currentPartRemaining)}`,
+        );
       } else {
         const leftover = scalePartsToTotal(
           splitSession.parts.slice(next),
@@ -1038,7 +1053,7 @@ export default function RetailPosWorkstation({
           parts: [...splitSession.parts.slice(0, next), ...leftover],
         });
         toast.success(
-          `Part ${next} of ${splitSession.parts.length} collected`,
+          `Part ${splitSession.index + 1} of ${splitSession.parts.length} collected`,
         );
       }
       clearPaymentAttemptKey();
@@ -1431,9 +1446,7 @@ export default function RetailPosWorkstation({
           : {}),
       });
 
-      const nextSplit =
-        splitSession && splitSession.index + 1 < splitSession.parts.length;
-      if (nextSplit && splitSession) {
+      if (splitSession) {
         const remaining = moneyNumber(
           result.balanceDue ?? result.order.balanceDue,
         );
