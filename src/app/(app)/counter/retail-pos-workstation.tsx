@@ -1298,6 +1298,29 @@ export default function RetailPosWorkstation({
     chargeLock.current = true;
     setBusy(true);
     try {
+      // Cash needs a register session — open one quietly if the shift was never started.
+      if (
+        (payMethod === "cash" ||
+          (splitPay && moneyNumber(splitCashAmount || 0) > 0)) &&
+        !registerSession?.id &&
+        locationId
+      ) {
+        try {
+          await posApi.openRegister({
+            locationId,
+            openingFloat: moneyNumber(openingFloat || 0),
+          });
+          void qc.invalidateQueries({ queryKey: ["pos-sale-register"] });
+        } catch (regErr) {
+          // Already open elsewhere is fine; other errors surface on checkout.
+          const msg =
+            regErr instanceof ApiError ? regErr.messages.join(" ") : "";
+          if (!/already open/i.test(msg)) {
+            /* continue — API also auto-opens on cash */
+          }
+        }
+      }
+
       const fingerprint = JSON.stringify({
         locationId,
         customerId,
