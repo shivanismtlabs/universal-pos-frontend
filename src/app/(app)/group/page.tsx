@@ -37,6 +37,7 @@ function money(n: number | null | undefined, code = "INR") {
 function PanelState({
   loading,
   error,
+  errorMessage,
   empty,
   emptyText,
   onRetry,
@@ -44,6 +45,7 @@ function PanelState({
 }: {
   loading?: boolean;
   error?: boolean;
+  errorMessage?: string;
   empty?: boolean;
   emptyText?: string;
   onRetry?: () => void;
@@ -59,7 +61,15 @@ function PanelState({
   if (error) {
     return (
       <div className="rounded-lg border border-[#f5c2c2] bg-[#fff6f6] p-4 text-sm text-[#a01818]">
-        <p>Could not load this view.</p>
+        <p className="font-semibold">Could not load this view.</p>
+        {errorMessage ? (
+          <p className="mt-1 text-[0.8rem] text-[#b45309]">{errorMessage}</p>
+        ) : (
+          <p className="mt-1 text-[0.8rem] text-[#8b9bb0]">
+            Check you are signed in, then tap Retry. If this keeps failing,
+            restart the API so group permissions refresh.
+          </p>
+        )}
         {onRetry ? (
           <Button type="button" size="sm" className="mt-2" onClick={onRetry}>
             Retry
@@ -76,6 +86,12 @@ function PanelState({
     );
   }
   return <>{children}</>;
+}
+
+function queryErrorMessage(err: unknown): string | undefined {
+  if (err instanceof ApiError) return err.messages.join(", ") || err.message;
+  if (err instanceof Error) return err.message;
+  return undefined;
 }
 
 export default function GroupDashboardPage() {
@@ -206,6 +222,9 @@ export default function GroupDashboardPage() {
         <PanelState
           loading={dashQ.isPending || groupQ.isPending}
           error={dashQ.isError || groupQ.isError}
+          errorMessage={
+            queryErrorMessage(dashQ.error) || queryErrorMessage(groupQ.error)
+          }
           onRetry={() => {
             void dashQ.refetch();
             void groupQ.refetch();
@@ -280,6 +299,7 @@ export default function GroupDashboardPage() {
         <PanelState
           loading={pnlQ.isPending}
           error={pnlQ.isError}
+          errorMessage={queryErrorMessage(pnlQ.error)}
           empty={!pnlQ.isPending && !(pnlQ.data?.businesses?.length)}
           emptyText="No businesses to show in group P&L."
           onRetry={() => void pnlQ.refetch()}
@@ -349,6 +369,7 @@ export default function GroupDashboardPage() {
         <PanelState
           loading={cmpQ.isPending}
           error={cmpQ.isError}
+          errorMessage={queryErrorMessage(cmpQ.error)}
           empty={!cmpQ.isPending && !(cmpQ.data?.rows?.length)}
           emptyText="No businesses to compare yet."
           onRetry={() => void cmpQ.refetch()}
@@ -427,6 +448,7 @@ export default function GroupDashboardPage() {
             <PanelState
               loading={invQry.isFetching}
               error={invQry.isError}
+              errorMessage={queryErrorMessage(invQry.error)}
               empty={!invQry.isFetching && !(invQry.data?.items?.length)}
               emptyText={`No stock matches for “${invSearch}”.`}
               onRetry={() => void invQry.refetch()}
@@ -508,6 +530,7 @@ export default function GroupDashboardPage() {
           <PanelState
             loading={apprQ.isPending}
             error={apprQ.isError}
+            errorMessage={queryErrorMessage(apprQ.error)}
             empty={!apprQ.isPending && approvals.length === 0}
             emptyText={
               apprFilter === "pending"
@@ -636,6 +659,7 @@ export default function GroupDashboardPage() {
         <PanelState
           loading={staffQ.isPending}
           error={staffQ.isError}
+          errorMessage={queryErrorMessage(staffQ.error)}
           empty={!staffQ.isPending && !(staff?.memberships?.length)}
           emptyText="No shop memberships on this identity."
           onRetry={() => void staffQ.refetch()}

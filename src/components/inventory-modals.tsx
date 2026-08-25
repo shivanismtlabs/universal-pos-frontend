@@ -28,6 +28,20 @@ import {
 /** Backend paginate() caps at 100 — load full page for modal pickers */
 const STOCK_PICKER_LIMIT = 100;
 
+function parseSerialList(text: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of text.split(/[\n,;]+/)) {
+    const s = part.trim();
+    if (!s) continue;
+    const key = s.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+  }
+  return out;
+}
+
 function useStockLevelPicker(locationId: string, open: boolean) {
   return useQuery({
     queryKey: ["inv-levels-picker", locationId],
@@ -154,23 +168,37 @@ export function StockInModal({
   const [stockLevelId, setStockLevelId] = useState("");
   const [qty, setQty] = useState("1");
   const [reason, setReason] = useState("");
+  const [serialsText, setSerialsText] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  const levels = useStockLevelPicker(locationId, open);
+  const selectedItem = (levels.data?.items ?? []).find(
+    (i) => i.stockLevelId === stockLevelId,
+  );
+  const requiresSerial = Boolean(
+    selectedItem?.requiresSerial ?? selectedItem?.trackSerial,
+  );
 
   useEffect(() => {
     if (open) {
       setStockLevelId("");
       setQty("1");
       setReason("");
+      setSerialsText("");
       setFieldErrors({});
     }
   }, [open]);
 
   const run = useMutation({
     mutationFn: () => {
+      const serials = requiresSerial ? parseSerialList(serialsText) : [];
+      const qtyValue = requiresSerial
+        ? String(serials.length || qty)
+        : qty;
       const parsed = stockMoveSchema.safeParse({
         locationId,
         stockLevelId,
-        qty,
+        qty: qtyValue,
         reason,
       });
       if (!parsed.success) {
@@ -178,11 +206,35 @@ export function StockInModal({
         toast.error(zodMessages(parsed.error)[0] ?? "Please fix errors in form");
         throw new Error("Invalid form");
       }
+      if (requiresSerial) {
+        if (!serials.length) {
+          setFieldErrors({
+            serials: "Enter one serial number per unit received",
+          });
+          toast.error("This item requires serial numbers");
+          throw new Error("Serials required");
+        }
+        if (serials.length !== parsed.data.qty) {
+          setFieldErrors({
+            serials: `Need ${parsed.data.qty} serial(s); you entered ${serials.length}`,
+          });
+          toast.error(
+            `Enter exactly ${parsed.data.qty} serial number(s) — one per unit`,
+          );
+          throw new Error("Serial count mismatch");
+        }
+      }
       setFieldErrors({});
       return inventoryApi.stockIn({
         locationId: parsed.data.locationId,
         reason: parsed.data.reason || undefined,
-        lines: [{ stockLevelId: parsed.data.stockLevelId, qty: parsed.data.qty }],
+        lines: [
+          {
+            stockLevelId: parsed.data.stockLevelId,
+            qty: parsed.data.qty,
+            ...(requiresSerial ? { serialNumbers: serials } : {}),
+          },
+        ],
       });
     },
     onSuccess: () => {
@@ -242,7 +294,12 @@ export function StockInModal({
             value={stockLevelId}
             onChange={(id) => {
               setStockLevelId(id);
-              setFieldErrors((f) => ({ ...f, stockLevelId: "" }));
+              setSerialsText("");
+              setFieldErrors((f) => ({
+                ...f,
+                stockLevelId: "",
+                serials: "",
+              }));
             }}
             placeholder="-- Choose item to add stock --"
             optionLabel={(i) =>
@@ -251,6 +308,32 @@ export function StockInModal({
           />
           <FieldError message={fieldErrors.stockLevelId} />
         </div>
+
+        {requiresSerial ? (
+          <div>
+            <Label className="text-xs font-semibold text-[#0b1f33]">
+              Serial numbers * (one per unit)
+            </Label>
+            <textarea
+              className="mt-1 min-h-[110px] w-full rounded-lg border border-[#dce3ec] bg-white px-3 py-2 font-mono text-sm text-[#0b1f33] outline-none focus:border-[#1a56db]"
+              value={serialsText}
+              onChange={(e) => {
+                const next = e.target.value;
+                setSerialsText(next);
+                const count = parseSerialList(next).length;
+                if (count > 0) setQty(String(count));
+                setFieldErrors((f) => ({ ...f, serials: "", qty: "" }));
+              }}
+              placeholder={"SN-1001\nSN-1002\nSN-1003"}
+            />
+            <p className="mt-1 text-[0.72rem] text-[#5a6b7d]">
+              This item tracks serials. Paste one serial per line (or comma-
+              separated). Quantity is set to the number of serials (
+              {parseSerialList(serialsText).length || 0}).
+            </p>
+            <FieldError message={fieldErrors.serials} />
+          </div>
+        ) : null}
 
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
@@ -263,6 +346,7 @@ export function StockInModal({
               min={0.001}
               step="any"
               value={qty}
+              disabled={requiresSerial}
               onChange={(e) => {
                 setQty(e.target.value);
                 setFieldErrors((f) => ({ ...f, qty: "" }));
@@ -342,6 +426,7 @@ export function StockOutModal({
   const [stockLevelId, setStockLevelId] = useState("");
   const [qty, setQty] = useState("1");
   const [reason, setReason] = useState("");
+  const [serialsText, setSerialsText] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const levels = useStockLevelPicker(locationId, open);
@@ -351,6 +436,7 @@ export function StockOutModal({
       setStockLevelId("");
       setQty("1");
       setReason("");
+      setSerialsText("");
       setFieldErrors({});
     }
   }, [open]);
@@ -358,13 +444,20 @@ export function StockOutModal({
   const selectedItem = (levels.data?.items ?? []).find(
     (i) => i.stockLevelId === stockLevelId,
   );
+  const requiresSerial = Boolean(
+    selectedItem?.requiresSerial ?? selectedItem?.trackSerial,
+  );
 
   const run = useMutation({
     mutationFn: () => {
+      const serials = requiresSerial ? parseSerialList(serialsText) : [];
+      const qtyValue = requiresSerial
+        ? String(serials.length || qty)
+        : qty;
       const parsed = stockMoveSchema.safeParse({
         locationId,
         stockLevelId,
-        qty,
+        qty: qtyValue,
         reason,
       });
       if (!parsed.success) {
@@ -372,11 +465,35 @@ export function StockOutModal({
         toast.error(zodMessages(parsed.error)[0] ?? "Please fix errors in form");
         throw new Error("Invalid form");
       }
+      if (requiresSerial) {
+        if (!serials.length) {
+          setFieldErrors({
+            serials: "Enter one serial number per unit removed",
+          });
+          toast.error("This item requires serial numbers");
+          throw new Error("Serials required");
+        }
+        if (serials.length !== parsed.data.qty) {
+          setFieldErrors({
+            serials: `Need ${parsed.data.qty} serial(s); you entered ${serials.length}`,
+          });
+          toast.error(
+            `Enter exactly ${parsed.data.qty} serial number(s) — one per unit`,
+          );
+          throw new Error("Serial count mismatch");
+        }
+      }
       setFieldErrors({});
       return inventoryApi.stockOut({
         locationId: parsed.data.locationId,
         reason: parsed.data.reason || undefined,
-        lines: [{ stockLevelId: parsed.data.stockLevelId, qty: parsed.data.qty }],
+        lines: [
+          {
+            stockLevelId: parsed.data.stockLevelId,
+            qty: parsed.data.qty,
+            ...(requiresSerial ? { serialNumbers: serials } : {}),
+          },
+        ],
       });
     },
     onSuccess: () => {
@@ -436,7 +553,12 @@ export function StockOutModal({
             value={stockLevelId}
             onChange={(id) => {
               setStockLevelId(id);
-              setFieldErrors((f) => ({ ...f, stockLevelId: "" }));
+              setSerialsText("");
+              setFieldErrors((f) => ({
+                ...f,
+                stockLevelId: "",
+                serials: "",
+              }));
             }}
             placeholder="-- Choose item to remove stock --"
             optionLabel={(i) =>
@@ -455,6 +577,31 @@ export function StockOutModal({
           </div>
         ) : null}
 
+        {requiresSerial ? (
+          <div>
+            <Label className="text-xs font-semibold text-[#0b1f33]">
+              Serial numbers * (one per unit)
+            </Label>
+            <textarea
+              className="mt-1 min-h-[110px] w-full rounded-lg border border-[#dce3ec] bg-white px-3 py-2 font-mono text-sm text-[#0b1f33] outline-none focus:border-[#1a56db]"
+              value={serialsText}
+              onChange={(e) => {
+                const next = e.target.value;
+                setSerialsText(next);
+                const count = parseSerialList(next).length;
+                if (count > 0) setQty(String(count));
+                setFieldErrors((f) => ({ ...f, serials: "", qty: "" }));
+              }}
+              placeholder={"SN-1001\nSN-1002"}
+            />
+            <p className="mt-1 text-[0.72rem] text-[#5a6b7d]">
+              Enter the serials you are removing. Quantity follows the serial
+              count ({parseSerialList(serialsText).length || 0}).
+            </p>
+            <FieldError message={fieldErrors.serials} />
+          </div>
+        ) : null}
+
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <Label className="text-xs font-semibold text-[#0b1f33]">
@@ -466,6 +613,7 @@ export function StockOutModal({
               min={0.001}
               step="any"
               value={qty}
+              disabled={requiresSerial}
               onChange={(e) => {
                 setQty(e.target.value);
                 setFieldErrors((f) => ({ ...f, qty: "" }));

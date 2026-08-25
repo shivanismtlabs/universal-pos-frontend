@@ -228,7 +228,7 @@ export default function RetailPosWorkstation({
   const [splitCashAmount, setSplitCashAmount] = useState("");
   const [splitBillOpen, setSplitBillOpen] = useState(false);
   const [payModal, setPayModal] = useState<
-    "discount" | "draft" | "more" | "customer" | "orderDetails" | null
+    "discount" | "draft" | "drafts" | "more" | "customer" | "orderDetails" | null
   >(null);
   const [rateEdit, setRateEdit] = useState<{
     stockLevelId: string;
@@ -477,6 +477,14 @@ export default function RetailPosWorkstation({
     refetchInterval: 60_000,
   });
   const registerSession = register.data?.session ?? null;
+
+  const parkedQ = useQuery({
+    queryKey: ["pos-sale-parked", locationId],
+    queryFn: () => posApi.listParkedSales(locationId),
+    enabled: Boolean(locationId),
+    refetchInterval: 30_000,
+  });
+  const parkedItems = parkedQ.data?.items ?? [];
 
   const openRegister = useMutation({
     mutationFn: () => {
@@ -1778,7 +1786,10 @@ export default function RetailPosWorkstation({
       setCustomerId("");
       setOrderNote("");
       setCashTendered("");
-      toast.success(`Draft saved ${parkedSale.orderNumber}`);
+      toast.success(
+        `Draft saved ${parkedSale.orderNumber} — open from Drafts on Counter`,
+      );
+      void qc.invalidateQueries({ queryKey: ["pos-sale-parked"] });
       return true;
     } catch (e) {
       toast.error(
@@ -1840,6 +1851,67 @@ export default function RetailPosWorkstation({
     parkLabel,
     locationId,
   ]);
+
+  async function resumeParked(orderId: string) {
+    if (splitSession) {
+      toast.message("Finish or cancel the split payment first");
+      return;
+    }
+    if (cart.length) {
+      toast.message("Clear or save the current ticket before opening a draft");
+      return;
+    }
+    setBusy(true);
+    try {
+      const resumed = await posApi.resumeParkedSale(orderId);
+      const lines: CartLine[] = resumed.cart.map((l) => ({
+        stockLevelId: l.stockLevelId,
+        sku: l.sku,
+        name: l.name,
+        unitPrice: l.unitPrice,
+        listPrice: l.unitPrice,
+        qty: l.qty,
+        maxQty: Math.max(l.maxQty, l.qty),
+        sellUnit: normalizeSellUnit(l.sellUnit ?? "pcs"),
+      }));
+      if (!lines.length) {
+        toast.error("This draft has no items");
+        return;
+      }
+      setCart(lines);
+      setCustomerId(resumed.customerId ?? "");
+      setDiscountAmount(
+        resumed.discountAmount > 0 ? String(resumed.discountAmount) : "",
+      );
+      setOrderNote(resumed.note ?? "");
+      await posApi.discardParkedSale(orderId).catch(() => null);
+      void qc.invalidateQueries({ queryKey: ["pos-sale-parked"] });
+      setPayModal(null);
+      toast.success(`Opened draft ${resumed.orderNumber}`);
+      scanRef.current?.focus();
+    } catch (e) {
+      toast.error(
+        e instanceof ApiError ? e.messages.join(", ") : "Could not open draft",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function discardParked(orderId: string) {
+    setBusy(true);
+    try {
+      await posApi.discardParkedSale(orderId);
+      void qc.invalidateQueries({ queryKey: ["pos-sale-parked"] });
+      toast.success("Draft discarded");
+    } catch (e) {
+      toast.error(
+        e instanceof ApiError ? e.messages.join(", ") : "Could not discard",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
 
   function openRateEdit(line: CartLine) {
     const base = line.listPrice ?? line.unitPrice;
@@ -2004,6 +2076,19 @@ export default function RetailPosWorkstation({
             </span>
           </p>
           <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => setPayModal("drafts")}
+            >
+              Drafts
+              {parkedItems.length > 0 ? (
+                <span className="ml-1.5 rounded-full bg-[#1a56db] px-1.5 py-0.5 text-[0.65rem] font-bold text-white">
+                  {parkedItems.length > 99 ? "99+" : parkedItems.length}
+                </span>
+              ) : null}
+            </Button>
             {canApproveRefund(roles) ? (
               <Link href="/returns">
                 <Button type="button" size="sm" variant="secondary">
@@ -2337,7 +2422,18 @@ export default function RetailPosWorkstation({
               >
                 Clear
               </Button>
-            ) : null}
+            ) : (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 text-[#1a56db] hover:bg-[#eef4ff]"
+                onClick={() => setPayModal("drafts")}
+              >
+                Drafts
+                {parkedItems.length > 0 ? ` (${parkedItems.length})` : ""}
+              </Button>
+            )}
           </div>
           <div className="border-b border-[#eef2f8] px-3 py-2">
             <button
@@ -3680,7 +3776,7 @@ export default function RetailPosWorkstation({
       {payModal === "draft" ? (
         <ModalFrame
           title="Save for later"
-          subtitle="Hold this ticket. You can open it again from drafts."
+          subtitle="Hold this ticket. Open it again from Drafts on the Counter."
           onClose={() => setPayModal(null)}
           footer={
             <div className="flex gap-2">
@@ -3714,6 +3810,82 @@ export default function RetailPosWorkstation({
               {money(totalDue)}
             </p>
           </div>
+        </ModalFrame>
+      ) : null}
+
+      {payModal === "drafts" ? (
+        <ModalFrame
+          title="Saved drafts"
+          subtitle="Parked bills for this counter — open to continue charging."
+          onClose={() => setPayModal(null)}
+          className="max-w-lg"
+          footer={
+            <Button className="w-full" variant="secondary" onClick={() => setPayModal(null)}>
+              Close
+            </Button>
+          }
+        >
+          {parkedQ.isLoading ? (
+            <p className="text-sm text-[#8b9bb0]">Loading drafts…</p>
+          ) : parkedItems.length === 0 ? (
+            <p className="text-sm text-[#5a6b7d]">
+              No drafts yet. Save a ticket with{" "}
+              <span className="font-semibold text-[#0b1f33]">Save draft</span>{" "}
+              (or Leave → Save draft) to see it here.
+            </p>
+          ) : (
+            <ul className="max-h-[22rem] space-y-2 overflow-y-auto">
+              {parkedItems.map((d) => (
+                <li
+                  key={d.id}
+                  className="rounded-lg border border-[#e8edf4] bg-[#fafbfc] px-3 py-2.5"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-[#0b1f33]">
+                        {d.label?.trim() || d.orderNumber}
+                      </p>
+                      <p className="mt-0.5 text-[0.72rem] text-[#8b9bb0]">
+                        {d.orderNumber}
+                        {d.label?.trim() ? ` · ${d.customerName}` : ` · ${d.customerName}`}
+                        {d.itemCount != null
+                          ? ` · ${d.itemCount} item${d.itemCount === 1 ? "" : "s"}`
+                          : ""}
+                      </p>
+                      <p className="mt-0.5 text-sm font-semibold tabular-nums text-[#1a56db]">
+                        {money(Number(d.balanceDue))}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 flex-col gap-1">
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={busy || cart.length > 0 || Boolean(splitSession)}
+                        title={
+                          cart.length
+                            ? "Clear or save the current ticket first"
+                            : "Open on counter"
+                        }
+                        onClick={() => void resumeParked(d.id)}
+                      >
+                        Open
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        className="text-[#b91c1c]"
+                        disabled={busy}
+                        onClick={() => void discardParked(d.id)}
+                      >
+                        Discard
+                      </Button>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </ModalFrame>
       ) : null}
 

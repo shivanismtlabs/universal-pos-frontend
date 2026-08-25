@@ -34,8 +34,9 @@ import {
   zodFieldErrors,
   zodMessages,
 } from "@/lib/validations";
-import { GEO_COUNTRIES, geoDial } from "@/lib/geo";
+import { geoDial, joinE164, splitE164 } from "@/lib/geo";
 import { CountryStateFields } from "@/components/country-state-fields";
+import { PhoneCountryInput } from "@/components/phone-country-input";
 
 export type SettingsSection =
   | "branding"
@@ -744,14 +745,14 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
 
   if (!canEdit) {
     return (
-      <div className="mx-auto max-w-lg py-16 text-center text-sm text-[#6b7280]">
+      <div className="mx-auto max-w-lg px-3 py-16 text-center text-sm text-[#6b7280] sm:px-4">
         Only owners and managers can change shop settings.
       </div>
     );
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="mx-auto max-w-3xl space-y-4 px-3 sm:px-4">
         <PageHeader
           title={meta.title}
           eyebrow="Business settings"
@@ -851,36 +852,19 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
                   uses the universal profile (no industry-only fields).
                 </p>
               </div>
-              <div>
-                <Label>Phone *</Label>
-                <div className="mt-1 flex gap-2">
-                  <Select
-                    className="w-[7.25rem] rounded-lg border border-[#e5e7eb] bg-white px-2 py-2 text-sm"
-                    value={profile.phoneCountryCode}
-                    onChange={(e) =>
-                      setProfile((p) => ({
-                        ...p,
-                        phoneCountryCode: e.target.value,
-                      }))
-                    }
-                  >
-                    {GEO_COUNTRIES.map((c) => (
-                      <option key={c.code} value={c.dial}>
-                        {c.dial} {c.code}
-                      </option>
-                    ))}
-                  </Select>
-                  <Input
-                    className="flex-1"
-                    value={profile.phone}
-                    onChange={(e) =>
-                      setProfile((p) => ({ ...p, phone: e.target.value }))
-                    }
-                    placeholder="9876543210"
-                    inputMode="tel"
-                  />
-                </div>
-              </div>
+              <PhoneCountryInput
+                required
+                fallbackCountry={profile.countryCode || "IN"}
+                value={joinE164(profile.phoneCountryCode, profile.phone)}
+                onChange={(full) => {
+                  const parts = splitE164(full, profile.countryCode || "IN");
+                  setProfile((p) => ({
+                    ...p,
+                    phoneCountryCode: parts.dial || p.phoneCountryCode,
+                    phone: parts.local,
+                  }));
+                }}
+              />
               <div>
                 <Label>Email</Label>
                 <Input

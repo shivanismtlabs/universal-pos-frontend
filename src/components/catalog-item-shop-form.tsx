@@ -118,6 +118,7 @@ export function patchCatalogTrackingFlags<T extends CatalogItemShopValues>(
         ...prev,
         trackSerial: true,
         trackInventory: true,
+        openingQty: "0",
       };
     }
     return { ...prev, trackSerial: false };
@@ -502,6 +503,15 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                         <Link href="/inventory" className="text-[#1a56db]">
                           Inventory
                         </Link>
+                        {form.trackSerial
+                          ? " (serial items: register serials or Stock In with serials)"
+                          : ""}
+                      </p>
+                    ) : form.trackSerial ? (
+                      <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+                        Serial tracking is on — leave this at 0. After save,
+                        register each unit on Serials (or Stock In). Each serial
+                        adds 1 to Stock on Hand.
                       </p>
                     ) : (
                       <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
@@ -512,19 +522,27 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                   }
                 >
                   <Input
-                    readOnly={stockReadOnly}
-                    className={stockReadOnly ? "bg-[#f4f6fa]" : undefined}
-                    type={stockReadOnly ? "text" : "number"}
-                    min={stockReadOnly ? undefined : 0}
-                    step={stockReadOnly ? undefined : "any"}
-                    placeholder={stockReadOnly ? undefined : "e.g. 50"}
+                    readOnly={stockReadOnly || form.trackSerial}
+                    className={
+                      stockReadOnly || form.trackSerial
+                        ? "bg-[#f4f6fa]"
+                        : undefined
+                    }
+                    type={stockReadOnly || form.trackSerial ? "text" : "number"}
+                    min={stockReadOnly || form.trackSerial ? undefined : 0}
+                    step={stockReadOnly || form.trackSerial ? undefined : "any"}
+                    placeholder={
+                      stockReadOnly || form.trackSerial ? undefined : "e.g. 50"
+                    }
                     value={
                       stockReadOnly
                         ? (stockOnHandDisplay ?? "—")
-                        : form.openingQty
+                        : form.trackSerial
+                          ? "0"
+                          : form.openingQty
                     }
                     onChange={
-                      stockReadOnly
+                      stockReadOnly || form.trackSerial
                         ? undefined
                         : (e) => {
                             clearFieldError("openingQty");
@@ -713,8 +731,11 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                   <strong className="font-semibold text-[#0b1f33]">
                     Serials
                   </strong>{" "}
-                  tab. Inventory tracking stays on while serial numbers are
-                  enabled.
+                  tab (or use Inventory → Stock In with serials).{" "}
+                  <strong className="font-semibold text-[#0b1f33]">
+                    Each serial adds 1 to Stock on Hand
+                  </strong>
+                  — do not type a free stock number while serial tracking is on.
                 </p>
               ) : null}
             </ShopSection>

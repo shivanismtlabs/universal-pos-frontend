@@ -310,7 +310,9 @@ function CatalogProductDetailPage() {
     onSuccess: async () => {
       setSerial("");
       await qc.invalidateQueries({ queryKey: ["catalog-product", id] });
-      toast.success("Serial registered");
+      void qc.invalidateQueries({ queryKey: ["catalog-products"] });
+      void qc.invalidateQueries({ queryKey: ["inv-levels"] });
+      toast.success("Serial registered · Stock on Hand +1");
     },
     onError: (e: Error) =>
       toast.error(e instanceof ApiError ? e.message : e.message || "Failed"),
@@ -830,7 +832,8 @@ function CatalogProductDetailPage() {
             </div>
           ) : (
             <p className="text-sm text-[#5a6b7d]">
-              Register each physical unit once. Serials appear on Counter when
+              Register each physical unit once. Each serial adds 1 to Stock on
+              Hand at the selected location. Serials appear on Counter when
               selling this item.
             </p>
           )}

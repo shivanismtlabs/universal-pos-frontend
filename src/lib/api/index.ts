@@ -1124,6 +1124,8 @@ export const inventoryApi = {
         reorderQty: number | null;
         isLowStock: boolean;
         sellPrice: number;
+        trackSerial?: boolean;
+        requiresSerial?: boolean;
         location?: { id: string; name: string; type?: string };
         photoUrl?: string | null;
       }>;
@@ -1154,6 +1156,8 @@ export const inventoryApi = {
       productId?: string;
       qty: number;
       reason?: string;
+      serialNumber?: string;
+      serialNumbers?: string[];
     }>;
   }) {
     return apiRequest<{ locationId: string; lines: unknown[] }>(
@@ -1174,6 +1178,8 @@ export const inventoryApi = {
       productId?: string;
       qty: number;
       reason?: string;
+      serialNumber?: string;
+      serialNumbers?: string[];
     }>;
   }) {
     return apiRequest<{ locationId: string; lines: unknown[] }>(

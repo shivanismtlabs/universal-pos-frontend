@@ -456,16 +456,9 @@ export function CatalogItemEditor() {
       };
 
       if (isEdit) {
-        const reorderN = Number(form.reorderPoint);
-        return catalogApi.updateProduct(id, {
-          ...shared,
-          reorderPoint:
-            trackInventory &&
-            form.reorderPoint.trim() !== "" &&
-            Number.isFinite(reorderN)
-              ? reorderN
-              : null,
-        });
+        // Live/older APIs may not whitelist top-level reorderPoint yet
+        // ("property reorderPoint should not exist"). Meta is enough via extraFields.
+        return catalogApi.updateProduct(id, shared);
       }
 
       return catalogApi.createProduct({
@@ -482,7 +475,9 @@ export function CatalogItemEditor() {
         photoUrl: uniquePhotos[0],
         locationId: defaultLocationId || undefined,
         openingQty: trackInventory
-          ? Math.max(0, Number(form.openingQty) || 0)
+          ? form.trackSerial
+            ? 0
+            : Math.max(0, Number(form.openingQty) || 0)
           : undefined,
         reorderPoint: (() => {
           if (!trackInventory) return undefined;
@@ -503,9 +498,11 @@ export function CatalogItemEditor() {
       toast.success(
         returnTo
           ? "Product created — back to Getting Started"
-          : form.trackInventory && Number(form.openingQty) > 0
-            ? `Product created · Stock on Hand ${Number(form.openingQty)}`
-            : "Product created",
+          : form.trackSerial
+            ? "Product created — register serials to build Stock on Hand"
+            : form.trackInventory && Number(form.openingQty) > 0
+              ? `Product created · Stock on Hand ${Number(form.openingQty)}`
+              : "Product created",
       );
       if (returnTo) {
         router.push(afterSaveHref);

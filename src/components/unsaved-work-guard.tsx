@@ -90,7 +90,7 @@ export function UnsavedWorkGuard() {
       <ul className="space-y-2 text-sm text-[#5a6b7d]">
         <li>
           <span className="font-semibold text-[#0b1f33]">Save draft</span> —
-          hold the cart (customer can pay later / pick up later).
+          hold the cart. Open again from Counter → Drafts.
         </li>
         <li>
           <span className="font-semibold text-[#0b1f33]">Leave without saving</span>{" "}
