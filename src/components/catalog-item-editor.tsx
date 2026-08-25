@@ -228,23 +228,31 @@ export function CatalogItemEditor() {
       meta && typeof meta.taxRatePercent === "number"
         ? String(meta.taxRatePercent)
         : p.taxCode?.match(/(\d+(?:\.\d+)?)/)?.[1] || "5";
+    const locId = defaultLocationId || currentLocationId || "";
+    const levelAtBranch = p.inventoryByLocation?.find(
+      (l) => l.locationId === locId,
+    );
     const reorderFromMeta =
       meta &&
       (typeof meta.reorderPoint === "number" ||
         typeof meta.reorderPoint === "string")
         ? String(meta.reorderPoint)
         : "";
+    const reorderFromLevel =
+      levelAtBranch?.reorderPoint != null
+        ? String(levelAtBranch.reorderPoint)
+        : "";
     setForm({
       name: p.name ?? "",
       shortName: p.shortName ?? "",
       kind: p.kind,
-      status: p.status === "archived" ? "inactive" : p.status,
+      status: p.status || "active",
       skuCode: p.skuCode ?? "",
       barcode: p.barcode ?? "",
       barcodeType: p.barcodeType || "code128",
       internalCode: p.internalCode ?? "",
-      categoryId: p.category?.id ?? "",
-      brandId: p.brand?.id ?? "",
+      categoryId: p.categoryId || p.category?.id || "",
+      brandId: p.brandId || p.brand?.id || "",
       shortDescription: p.shortDescription ?? "",
       description: p.description ?? "",
       basePrice: String(p.basePrice ?? p.sellingPrice ?? 0),
@@ -260,11 +268,17 @@ export function CatalogItemEditor() {
       canPurchase: p.canPurchase !== false,
       availableInPos: p.availableInPos !== false,
       openingQty: "0",
-      reorderPoint: reorderFromMeta,
+      reorderPoint: reorderFromMeta || reorderFromLevel,
     });
     setPhotoUrl(p.photoUrl ?? "");
     setHydrated(true);
-  }, [product.data, hydrated, isEdit]);
+  }, [
+    product.data,
+    hydrated,
+    isEdit,
+    defaultLocationId,
+    currentLocationId,
+  ]);
 
   useEffect(() => {
     if (!isEdit || !product.data || !productFormFields.length) return;
@@ -274,10 +288,15 @@ export function CatalogItemEditor() {
         ? (meta as Record<string, unknown>)
         : {}),
     };
+    if (product.data.foodType && bag.foodType == null) {
+      bag.foodType = product.data.foodType;
+    }
     const extras: Record<string, string> = {};
     for (const f of productFormFields) {
       const v = bag[f.key];
-      if (v != null && f.key !== "taxRatePercent") extras[f.key] = String(v);
+      if (v != null && f.key !== "taxRatePercent" && f.key !== "reorderPoint") {
+        extras[f.key] = String(v);
+      }
     }
     setExtraFields(extras);
   }, [product.data, productFormFields, isEdit]);
@@ -415,7 +434,7 @@ export function CatalogItemEditor() {
 
       const shared = {
         name: form.name.trim(),
-        shortName: form.shortName.trim() || undefined,
+        shortName: form.shortName.trim() || (isEdit ? null : undefined),
         kind: form.kind as CatalogProductKind,
         status: form.status as CatalogProductStatus,
         skuCode: form.skuCode.trim() || undefined,
@@ -425,11 +444,12 @@ export function CatalogItemEditor() {
           : isEdit
             ? null
             : undefined,
-        internalCode: form.internalCode.trim() || undefined,
+        internalCode: form.internalCode.trim() || (isEdit ? null : undefined),
         categoryId: form.categoryId || (isEdit ? null : undefined),
         brandId: form.brandId || (isEdit ? null : undefined),
-        shortDescription: form.shortDescription.trim() || undefined,
-        description: form.description.trim() || undefined,
+        shortDescription:
+          form.shortDescription.trim() || (isEdit ? null : undefined),
+        description: form.description.trim() || (isEdit ? null : undefined),
         basePrice: Number(form.basePrice) || 0,
         costPrice: form.costPrice
           ? Number(form.costPrice)
@@ -439,7 +459,8 @@ export function CatalogItemEditor() {
         mrp: form.mrp ? Number(form.mrp) : isEdit ? null : undefined,
         taxCode: taxCodeFromForm(form) ?? (isEdit ? null : undefined),
         unitOfMeasure: form.unitOfMeasure,
-        photoUrl: uniquePhotos[0] || (isEdit ? photoUrl.trim() || null : undefined),
+        photoUrl:
+          uniquePhotos[0] || (isEdit ? photoUrl.trim() || null : undefined),
         images: uniquePhotos.length ? uniquePhotos : undefined,
         trackInventory,
         trackSerial,
@@ -456,9 +477,16 @@ export function CatalogItemEditor() {
       };
 
       if (isEdit) {
-        // Live/older APIs may not whitelist top-level reorderPoint yet
-        // ("property reorderPoint should not exist"). Meta is enough via extraFields.
-        return catalogApi.updateProduct(id, shared);
+        const reorderN = Number(form.reorderPoint);
+        return catalogApi.updateProduct(id, {
+          ...shared,
+          reorderPoint:
+            trackInventory &&
+            form.reorderPoint.trim() !== "" &&
+            Number.isFinite(reorderN)
+              ? reorderN
+              : null,
+        });
       }
 
       return catalogApi.createProduct({
@@ -563,10 +591,12 @@ export function CatalogItemEditor() {
 
   const stockOnHand =
     product.data?.inventoryByLocation?.find(
-      (l) => l.locationId === currentLocationId,
+      (l) => l.locationId === (defaultLocationId || currentLocationId),
     )?.qtyOnHand ??
     product.data?.stockOnHand ??
     null;
+
+  const hasOptionalDetails = isEdit;
 
   return (
     <>
@@ -590,7 +620,14 @@ export function CatalogItemEditor() {
         productFormFields={productFormFields}
         customFieldsLoading={customFieldsQ.isLoading}
         categories={cats.data ?? []}
-        brands={brands.data ?? []}
+        brands={(() => {
+          const list = brands.data ?? [];
+          const b = product.data?.brand;
+          if (b?.id && !list.some((x) => x.id === b.id)) {
+            return [{ id: b.id, name: b.name }, ...list];
+          }
+          return list;
+        })()}
         unitOptions={unitOptions}
         imagePickerRef={imagePickerRef}
         onGenerateSku={() => genSku.mutate()}
@@ -603,6 +640,14 @@ export function CatalogItemEditor() {
         stockLocationName={stockLocationName}
         stockOnHandDisplay={
           isEdit ? (stockOnHand == null ? "—" : String(stockOnHand)) : undefined
+        }
+        defaultShowMore={hasOptionalDetails}
+        categorySelectedLabel={
+          product.data?.category
+            ? product.data.category.parent
+              ? `${product.data.category.parent.name} / ${product.data.category.name}`
+              : product.data.category.name
+            : null
         }
         photosExtra={
           existingImages.length ? (

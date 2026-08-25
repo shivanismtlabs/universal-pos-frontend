@@ -23,6 +23,8 @@ type Props = {
   categories: CategoryItem[];
   className?: string;
   placeholder?: string;
+  /** When the selected id is not in `categories` yet (edit hydrate), show this label */
+  selectedLabel?: string | null;
 };
 
 export function CategorySelectCombobox({
@@ -31,6 +33,7 @@ export function CategorySelectCombobox({
   categories,
   className,
   placeholder = "Select or search category...",
+  selectedLabel,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -51,25 +54,42 @@ export function CategorySelectCombobox({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  const categoriesWithSelected = useMemo(() => {
+    if (!value) return categories;
+    if (categories.some((c) => c.id === value)) return categories;
+    if (!selectedLabel?.trim()) return categories;
+    return [
+      {
+        id: value,
+        name: selectedLabel.trim(),
+        parentId: null,
+        parent: null,
+      },
+      ...categories,
+    ];
+  }, [categories, value, selectedLabel]);
+
   const selectedCategory = useMemo(
-    () => categories.find((c) => c.id === value),
-    [categories, value],
+    () => categoriesWithSelected.find((c) => c.id === value),
+    [categoriesWithSelected, value],
   );
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return categories;
-    return categories.filter((c) => {
+    if (!q) return categoriesWithSelected;
+    return categoriesWithSelected.filter((c) => {
       const full = c.parent ? `${c.parent.name} / ${c.name}` : c.name;
       return full.toLowerCase().includes(q);
     });
-  }, [categories, search]);
+  }, [categoriesWithSelected, search]);
 
   const exactMatchExists = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return true;
-    return categories.some((c) => c.name.trim().toLowerCase() === q);
-  }, [categories, search]);
+    return categoriesWithSelected.some(
+      (c) => c.name.trim().toLowerCase() === q,
+    );
+  }, [categoriesWithSelected, search]);
 
   const createCategoryMutation = useMutation({
     mutationFn: (data: { name: string; parentId?: string }) =>

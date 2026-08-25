@@ -2562,6 +2562,39 @@ export type StockAdjustmentWritePayload = {
   }>;
 };
 
+/** Live servers without /inventory/adjustments still expose /inventory/adjust. */
+async function applyStockAdjustmentViaLegacy(
+  payload: StockAdjustmentWritePayload,
+): Promise<StockAdjustment> {
+  if (!payload.lines?.length) {
+    throw new ApiError(400, "At least one adjustment line is required");
+  }
+  for (const line of payload.lines) {
+    const delta = Number(line.adjustmentQty);
+    if (!Number.isFinite(delta) || delta === 0) continue;
+    await inventoryApi.adjust({
+      locationId: payload.locationId,
+      productId: line.productId,
+      ...(line.stockLevelId ? { stockLevelId: line.stockLevelId } : {}),
+      delta,
+      reason: [payload.reason, line.notes].filter(Boolean).join(" — "),
+    });
+  }
+  const stamp = Date.now().toString(36).toUpperCase();
+  return {
+    id: `legacy-adj-${stamp}`,
+    adjustmentNo: `ADJ-${stamp}`,
+    locationId: payload.locationId,
+    adjustmentDate: payload.adjustmentDate,
+    type: payload.type,
+    reason: payload.reason,
+    description: payload.description,
+    status: "adjusted",
+    lines: payload.lines,
+    finalizedAt: new Date().toISOString(),
+  };
+}
+
 export const posApi = {
   saleSchema() {
     return apiRequest<{
@@ -2925,6 +2958,15 @@ export const posApi = {
       method: "POST",
       body: payload,
       token: token(),
+    }).catch(async (e) => {
+      if (!isMissingRoute(e)) throw e;
+      if (payload.status === "draft" || payload.status === "pending") {
+        throw new ApiError(
+          404,
+          "Draft adjustments need a newer API. Use Confirm & Apply Stock Change to update stock now.",
+        );
+      }
+      return applyStockAdjustmentViaLegacy(payload);
     });
   },
 
@@ -2954,7 +2996,43 @@ export const posApi = {
       page: number;
       limit: number;
       totalPages: number;
-    }>(`/inventory/adjustments${q ? `?${q}` : ""}`, { token: token() });
+    }>(`/inventory/adjustments${q ? `?${q}` : ""}`, { token: token() }).catch(
+      async (e) => {
+        if (!isMissingRoute(e)) throw e;
+        const legacy = await posApi.listSaleStockAdjustments(params?.limit ?? 80);
+        const mapped: StockAdjustment[] = (legacy.items ?? []).map((row, i) => ({
+          id: row.id || `legacy-${i}`,
+          adjustmentNo: row.sku ? `ADJ-${row.sku}` : undefined,
+          locationId: params?.locationId || "",
+          adjustmentDate: row.createdAt,
+          type: "quantity" as const,
+          reason: row.reason || "Stock adjustment",
+          status: "adjusted" as const,
+          createdAt: row.createdAt,
+          createdBy: { fullName: row.actorName },
+          lines: [
+            {
+              productId: row.id,
+              name: row.productName,
+              sku: row.sku,
+              currentQty: row.beforeQty,
+              adjustmentQty: row.delta,
+              newQty: row.afterQty,
+              unit: row.sellUnit || "pcs",
+            },
+          ],
+        }));
+        const page = params?.page ?? 1;
+        const limit = params?.limit ?? 20;
+        return {
+          items: mapped,
+          total: mapped.length,
+          page,
+          limit,
+          totalPages: Math.max(1, Math.ceil(mapped.length / limit) || 1),
+        };
+      },
+    );
   },
 
   getStockAdjustment(id: string) {
@@ -2968,6 +3046,29 @@ export const posApi = {
       method: "PATCH",
       body: payload,
       token: token(),
+    }).catch(async (e) => {
+      if (!isMissingRoute(e)) throw e;
+      if (
+        payload.status === "adjusted" &&
+        payload.locationId &&
+        payload.lines?.length &&
+        payload.reason
+      ) {
+        return applyStockAdjustmentViaLegacy({
+          locationId: payload.locationId,
+          adjustmentDate:
+            payload.adjustmentDate || new Date().toISOString().slice(0, 10),
+          type: payload.type || "quantity",
+          reason: payload.reason,
+          description: payload.description,
+          status: "adjusted",
+          lines: payload.lines,
+        });
+      }
+      throw new ApiError(
+        404,
+        "This API build does not support draft adjustments. Apply stock with Confirm & Apply.",
+      );
     });
   },
 
@@ -8152,6 +8253,8 @@ export type CatalogProductListItem = {
   canSell?: boolean;
   canPurchase?: boolean;
   availableInPos?: boolean;
+  categoryId?: string | null;
+  brandId?: string | null;
   category?: { id: string; name: string; parentId?: string | null } | null;
   brand?: { id: string; name: string } | null;
   counts?: { variants: number; batches: number; bundleLines: number };
@@ -8245,6 +8348,7 @@ export const catalogApi = {
           qtyOnHand: number;
           sellPrice: number;
           sellUnit: string;
+          reorderPoint?: number | null;
         }>;
         qr: { payload: string; display: string; chartUrl: string };
       }

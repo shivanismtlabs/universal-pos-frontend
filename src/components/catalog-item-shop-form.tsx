@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useEffect,
   useState,
   type Dispatch,
   type ReactNode,
@@ -215,6 +216,8 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
   stockReadOnly,
   stockOnHandDisplay,
   stockLocationName,
+  defaultShowMore,
+  categorySelectedLabel,
 }: {
   title: string;
   subtitle: string;
@@ -244,10 +247,18 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
   stockOnHandDisplay?: string | null;
   /** Branch name where create Stock on Hand is applied */
   stockLocationName?: string;
+  /** Open “More details” when editing items that already have optional fields filled */
+  defaultShowMore?: boolean;
+  /** Edit: category name when id is not yet in the categories list */
+  categorySelectedLabel?: string | null;
 }) {
-  const [showMore, setShowMore] = useState(false);
+  const [showMore, setShowMore] = useState(Boolean(defaultShowMore));
   const foodTypeField = productFormFields.find((f) => f.key === "foodType");
   const otherFormFields = productFormFields.filter((f) => f.key !== "foodType");
+
+  useEffect(() => {
+    if (defaultShowMore) setShowMore(true);
+  }, [defaultShowMore]);
 
   return (
     <div
@@ -421,7 +432,43 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                     setForm((f) => ({ ...f, categoryId: val }))
                   }
                   categories={categories}
+                  selectedLabel={categorySelectedLabel}
                 />
+              </ShopField>
+
+              <ShopField label="Brand">
+                <Select
+                  className={fieldSelect}
+                  value={form.brandId}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, brandId: e.target.value }))
+                  }
+                >
+                  <option value="">None</option>
+                  {brands.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </Select>
+              </ShopField>
+
+              <ShopField label="Status">
+                <Select
+                  className={fieldSelect}
+                  value={form.status}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      status: e.target.value,
+                    }))
+                  }
+                >
+                  <option value="active">Active</option>
+                  <option value="draft">Draft</option>
+                  <option value="inactive">Inactive</option>
+                  <option value="archived">Archived</option>
+                </Select>
               </ShopField>
 
               <ShopField
@@ -764,22 +811,6 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
               </button>
               {showMore ? (
                 <div className="mt-4 space-y-3.5">
-                  <ShopField label="Brand">
-                    <Select
-                      className={fieldSelect}
-                      value={form.brandId}
-                      onChange={(e) =>
-                        setForm((f) => ({ ...f, brandId: e.target.value }))
-                      }
-                    >
-                      <option value="">None</option>
-                      {brands.map((b) => (
-                        <option key={b.id} value={b.id}>
-                          {b.name}
-                        </option>
-                      ))}
-                    </Select>
-                  </ShopField>
                   <ShopField
                     label="Short name"
                     hint={<FieldError message={fieldErrors.shortName} />}
@@ -807,23 +838,6 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                         }));
                       }}
                     />
-                  </ShopField>
-                  <ShopField label="Status">
-                    <Select
-                      className={fieldSelect}
-                      value={form.status}
-                      onChange={(e) =>
-                        setForm((f) => ({
-                          ...f,
-                          status: e.target.value,
-                        }))
-                      }
-                    >
-                      <option value="active">Active</option>
-                      <option value="draft">Draft</option>
-                      <option value="inactive">Inactive</option>
-                      <option value="archived">Archived</option>
-                    </Select>
                   </ShopField>
                   <ShopField
                     label="Short description"
