@@ -603,7 +603,21 @@ function OrderDetailInner() {
         {[
           ["Subtotal", formatInr(data.subtotal)],
           ["Tax", formatInr(data.taxTotal)],
-          ["Deposit", formatInr(data.depositTotal)],
+          [
+            "Deposit left",
+            formatInr(
+              moneyNumber(
+                data.depositDue ??
+                  Math.max(
+                    0,
+                    moneyNumber(data.depositRequired) -
+                      moneyNumber(
+                        data.depositCollected ?? data.depositTotal,
+                      ),
+                  ),
+              ),
+            ),
+          ],
           ["Pickup", formatDate(data.pickupDate)],
         ].map(([k, v]) => (
           <div
@@ -616,6 +630,18 @@ function OrderDetailInner() {
             <p className="mt-1 text-[0.95rem] font-bold tabular-nums text-[#0b1f33]">
               {v}
             </p>
+            {k === "Deposit left" &&
+            moneyNumber(data.depositRequired ?? data.depositTotal) > 0 ? (
+              <p className="mt-0.5 text-[0.65rem] tabular-nums text-[#94a3b8]">
+                {formatInr(data.depositCollected ?? data.depositTotal)} of{" "}
+                {formatInr(
+                  data.depositRequired ??
+                    moneyNumber(data.depositCollected ?? data.depositTotal) +
+                      moneyNumber(data.depositDue),
+                )}{" "}
+                paid
+              </p>
+            ) : null}
           </div>
         ))}
       </div>

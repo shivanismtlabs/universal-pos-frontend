@@ -1437,6 +1437,12 @@ export const ordersApi = {
       subtotal: string | number;
       taxTotal: string | number;
       depositTotal: string | number;
+      /** Sum of unit deposits required on this ticket */
+      depositRequired?: string | number;
+      /** Successful deposit payments collected so far (= depositTotal) */
+      depositCollected?: string | number;
+      /** Remaining deposit still to collect */
+      depositDue?: string | number;
       discountTotal?: string | number;
       balanceDue: string | number;
       eventDate?: string | null;
@@ -1482,6 +1488,7 @@ export const ordersApi = {
           id: string;
           barcodeSku: string;
           variantLabel?: string | null;
+          depositAmount?: string | number | null;
         } | null;
         stockLevel?: {
           id: string;
@@ -3649,9 +3656,22 @@ export const posApi = {
         units: number;
         available: number;
         checkedOut: number;
+        services?: number;
       };
       categories: Array<{ id: string; name: string }>;
       units: Array<RentalUnitRow>;
+      services?: Array<{
+        id: string;
+        productId: string;
+        title: string;
+        sku: string;
+        rentalPrice: string | number;
+        deposit?: string | number;
+        kind: "service";
+        category?: { id: string; name: string } | null;
+        image?: string | null;
+        photoUrl?: string | null;
+      }>;
     }>(`/pos/rental/floor${qs}`, { token: token() });
   },
   listRentalCategories() {

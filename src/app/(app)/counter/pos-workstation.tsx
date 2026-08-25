@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
+  catalogApi,
   customersApi,
   ordersApi,
   paymentsApi,
@@ -133,6 +134,18 @@ export default function PosWorkstation() {
     queryFn: () => posApi.rentalFloor(locationId || undefined),
   });
 
+  /** Service catalog items (no units) — also fetched when floor API omits services */
+  const serviceCatalog = useQuery({
+    queryKey: ["catalog-services-for-rental"],
+    queryFn: () =>
+      catalogApi.listProducts({
+        kind: "service",
+        status: "active",
+        availableInPos: true,
+        limit: 80,
+      }),
+  });
+
   const ticket = useQuery({
     queryKey: ["order", selectedId],
     queryFn: () => ordersApi.get(selectedId!),
@@ -182,9 +195,41 @@ export default function PosWorkstation() {
 
   useEffect(() => {
     if (!ticket.data) return;
-    const due = moneyNumber(ticket.data.balanceDue);
-    setAmount(due > 0 ? String(due) : "");
-  }, [ticket.data?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+    const balanceDue = moneyNumber(ticket.data.balanceDue);
+    const required = moneyNumber(
+      ticket.data.depositRequired ??
+        (ticket.data.items ?? []).reduce(
+          (sum, i) => sum + moneyNumber(i.stockUnit?.depositAmount),
+          0,
+        ),
+    );
+    const collected = moneyNumber(
+      ticket.data.depositCollected ?? ticket.data.depositTotal,
+    );
+    const depositDue = moneyNumber(
+      ticket.data.depositDue ?? Math.max(0, required - collected),
+    );
+    // After partial pay, refresh the amount box to remaining deposit or balance
+    if (payType === "deposit") {
+      setAmount(
+        depositDue > 0
+          ? String(depositDue)
+          : balanceDue > 0
+            ? String(balanceDue)
+            : "",
+      );
+    } else {
+      setAmount(balanceDue > 0 ? String(balanceDue) : "");
+    }
+  }, [
+    ticket.data?.id,
+    ticket.data?.balanceDue,
+    ticket.data?.depositTotal,
+    ticket.data?.depositDue,
+    ticket.data?.depositCollected,
+    ticket.data?.depositRequired,
+    payType,
+  ]);
 
   const filteredQueue = useMemo(() => {
     let rows = queue.data?.items ?? [];
@@ -239,13 +284,80 @@ export default function PosWorkstation() {
     });
   }, [floor.data?.units, unitFilter, unitCategory]);
 
-  const floorCategories = floor.data?.categories ?? [];
+  const floorServices = useMemo(() => {
+    type Svc = {
+      id: string;
+      productId: string;
+      title: string;
+      sku: string;
+      rentalPrice: string | number;
+      category?: { id: string; name: string } | null;
+      image?: string | null;
+      photoUrl?: string | null;
+    };
+    const fromFloor: Svc[] = (floor.data?.services ?? []).map((s) => ({
+      id: s.id,
+      productId: s.productId || s.id,
+      title: s.title,
+      sku: s.sku,
+      rentalPrice: s.rentalPrice,
+      category: s.category,
+      image: s.image,
+      photoUrl: s.photoUrl,
+    }));
+    const fromCatalog: Svc[] = (serviceCatalog.data?.items ?? []).map((p) => ({
+      id: p.id,
+      productId: p.id,
+      title: p.name,
+      sku: p.skuCode,
+      rentalPrice: p.basePrice,
+      category: p.category
+        ? { id: p.category.id, name: p.category.name }
+        : null,
+      image: p.photoUrl,
+      photoUrl: p.photoUrl,
+    }));
+    const byId = new Map<string, Svc>();
+    for (const s of [...fromFloor, ...fromCatalog]) {
+      byId.set(s.productId, s);
+    }
+    const q = unitFilter.trim().toLowerCase();
+    return [...byId.values()].filter((s) => {
+      if (unitCategory !== "all" && s.category?.id !== unitCategory) {
+        return false;
+      }
+      if (!q) return true;
+      return (
+        s.title.toLowerCase().includes(q) ||
+        s.sku.toLowerCase().includes(q)
+      );
+    });
+  }, [
+    floor.data?.services,
+    serviceCatalog.data?.items,
+    unitFilter,
+    unitCategory,
+  ]);
+
+  const floorCategories = useMemo(() => {
+    const base = floor.data?.categories ?? [];
+    const map = new Map(base.map((c) => [c.id, c]));
+    for (const s of floorServices) {
+      if (s.category?.id && !map.has(s.category.id)) {
+        map.set(s.category.id, s.category);
+      }
+    }
+    return [...map.values()];
+  }, [floor.data?.categories, floorServices]);
+
+  const readyCount = floorUnits.length + floorServices.length;
 
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ["orders"] });
     void qc.invalidateQueries({ queryKey: ["order", selectedId] });
     void qc.invalidateQueries({ queryKey: ["reports"] });
     void qc.invalidateQueries({ queryKey: ["pos-rental-floor"] });
+    void qc.invalidateQueries({ queryKey: ["catalog-services-for-rental"] });
   };
 
   const createRental = useMutation({
@@ -560,6 +672,33 @@ export default function PosWorkstation() {
     barcodeRef.current?.focus();
   }
 
+  async function applyService(svc: {
+    productId: string;
+    title: string;
+    sku: string;
+    rentalPrice: string | number;
+  }) {
+    const orderData = ticket.data;
+    const ticketMutable = orderData ? canMutateRentalItems(orderData) : false;
+    if (!selectedId || !ticketMutable) {
+      toast.info("Create or open a quote, then add the service");
+      return;
+    }
+    try {
+      await ordersApi.addItem(selectedId, {
+        itemKind: "product",
+        productId: svc.productId,
+        unitPrice: moneyNumber(svc.rentalPrice),
+        quantity: 1,
+        description: svc.title,
+      });
+      toast.success(`Added ${svc.title}`);
+      invalidate();
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  }
+
   async function scanBarcode(code?: string) {
     const sku = (code ?? barcode).trim().toUpperCase();
     if (!sku) {
@@ -601,7 +740,19 @@ export default function PosWorkstation() {
   const data = ticket.data;
   const lifecycle = data ? rentalLifecycleOf(data) : "quote";
   const balance = moneyNumber(data?.balanceDue);
-  const depositTotal = moneyNumber(data?.depositTotal);
+  const depositCollected = moneyNumber(
+    data?.depositCollected ?? data?.depositTotal,
+  );
+  const depositRequired = moneyNumber(
+    data?.depositRequired ??
+      (data?.items ?? []).reduce(
+        (sum, i) => sum + moneyNumber(i.stockUnit?.depositAmount),
+        0,
+      ),
+  );
+  const depositDue = moneyNumber(
+    data?.depositDue ?? Math.max(0, depositRequired - depositCollected),
+  );
   const settled = Boolean(data) && balance <= 0;
   const credit = settled ? Math.abs(balance) : 0;
   const canAddItems = data ? canMutateRentalItems(data) : false;
@@ -617,8 +768,8 @@ export default function PosWorkstation() {
   const suggestDeposit = () => {
     if (!data) return;
     const target = Math.min(
-      depositTotal > 0 ? depositTotal : balance,
-      balance > 0 ? balance : depositTotal,
+      depositDue > 0 ? depositDue : depositRequired,
+      balance > 0 ? balance : depositDue,
     );
     if (target > 0) {
       setPayType("deposit");
@@ -836,7 +987,7 @@ export default function PosWorkstation() {
       <section className="overflow-hidden rounded-[12px] border border-[#d9e0ea] bg-white">
         <div className="flex flex-wrap items-center gap-2 border-b border-[#eef2f8] px-3 py-2.5">
           <p className="mr-1 text-xs font-semibold tracking-wide text-[#8b9bb0] uppercase">
-            Available units
+            Available to rent
           </p>
           <Input
             className="h-9 max-w-[14rem] border-[#d9e0ea] bg-[#f8fafc] shadow-none"
@@ -874,10 +1025,45 @@ export default function PosWorkstation() {
             ))}
           </div>
           <span className="text-[0.7rem] text-[#8b9bb0]">
-            {floorUnits.length} ready
+            {readyCount} ready
           </span>
         </div>
         <ul className="max-h-[14rem] divide-y divide-[#eef2f8] overflow-y-auto">
+          {floorServices.map((s) => (
+            <li key={`svc-${s.productId}`}>
+              <div
+                onClick={() => void applyService(s)}
+                className="flex w-full cursor-pointer items-center gap-2.5 px-3 py-2 text-left transition hover:bg-[#f8fafc]"
+              >
+                <ProductThumb
+                  src={s.image ?? s.photoUrl}
+                  label={s.title}
+                  size="sm"
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-[#0b1f33]">
+                    {s.title}
+                    <span className="ml-1.5 rounded bg-[#fff7ed] px-1.5 py-0.5 text-[0.6rem] font-semibold text-[#c2410c]">
+                      Service
+                    </span>
+                  </p>
+                  <p className="font-mono text-[0.65rem] text-[#8b9bb0]">
+                    {s.sku}
+                    {s.category?.name ? ` · ${s.category.name}` : ""}
+                    {" · no unit needed"}
+                  </p>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className="text-sm font-bold tabular-nums text-[#0b1f33]">
+                    {money(s.rentalPrice)}
+                  </p>
+                </div>
+                <span className="inline-flex h-7 items-center rounded-md bg-[#1a56db] px-2 text-[0.65rem] font-semibold text-white">
+                  ADD
+                </span>
+              </div>
+            </li>
+          ))}
           {floorUnits.map((u) => (
             <li key={u.id}>
               <div
@@ -919,11 +1105,11 @@ export default function PosWorkstation() {
               </div>
             </li>
           ))}
-          {!floorUnits.length ? (
+          {!readyCount ? (
             <li className="px-3 py-8 text-center text-sm text-[#5a6b7d]">
-              {floor.isLoading
-                ? "Loading units…"
-                : "No available units — add stock in Products"}
+              {floor.isLoading || serviceCatalog.isLoading
+                ? "Loading…"
+                : "No units or services — add Items (service) or rental stock units"}
             </li>
           ) : null}
         </ul>
@@ -1092,7 +1278,14 @@ export default function PosWorkstation() {
               <div className="grid grid-cols-3 divide-x divide-[#d9e0ea] border-b border-[#d9e0ea] bg-[#f8fafc] text-sm">
                 {[
                   ["Due", money(data.balanceDue)],
-                  ["Deposit", money(data.depositTotal)],
+                  [
+                    "Deposit left",
+                    depositDue > 0
+                      ? money(depositDue)
+                      : depositRequired > 0
+                        ? money(0)
+                        : money(depositCollected),
+                  ],
                   ["Rent", money(data.subtotal)],
                 ].map(([k, v]) => (
                   <div key={k} className="px-3 py-2.5">
@@ -1102,6 +1295,12 @@ export default function PosWorkstation() {
                     <p className="font-semibold tabular-nums text-[#0b1f33]">
                       {v}
                     </p>
+                    {k === "Deposit left" && depositRequired > 0 ? (
+                      <p className="mt-0.5 text-[0.65rem] tabular-nums text-[#8b9bb0]">
+                        {money(depositCollected)} of {money(depositRequired)}{" "}
+                        paid
+                      </p>
+                    ) : null}
                   </div>
                 ))}
               </div>
@@ -1356,7 +1555,7 @@ export default function PosWorkstation() {
                     <button
                       type="button"
                       className="text-[0.7rem] font-semibold text-[#0b1f33] hover:underline disabled:opacity-40"
-                      disabled={depositTotal <= 0 && balance <= 0}
+                      disabled={depositDue <= 0 && balance <= 0}
                       onClick={suggestDeposit}
                     >
                       Suggest deposit

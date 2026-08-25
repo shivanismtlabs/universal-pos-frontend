@@ -477,16 +477,9 @@ export function CatalogItemEditor() {
       };
 
       if (isEdit) {
-        const reorderN = Number(form.reorderPoint);
-        return catalogApi.updateProduct(id, {
-          ...shared,
-          reorderPoint:
-            trackInventory &&
-            form.reorderPoint.trim() !== "" &&
-            Number.isFinite(reorderN)
-              ? reorderN
-              : null,
-        });
+        // Live / older APIs reject top-level reorderPoint on PATCH (forbidNonWhitelisted).
+        // Reorder lives in extraFields → product meta (and stock sync when API supports it).
+        return catalogApi.updateProduct(id, shared);
       }
 
       return catalogApi.createProduct({
@@ -596,6 +589,30 @@ export function CatalogItemEditor() {
     product.data?.stockOnHand ??
     null;
 
+  const categoriesForForm = (() => {
+    const list = cats.data ?? [];
+    const c = product.data?.category;
+    if (c?.id && !list.some((x) => x.id === c.id)) {
+      return [
+        {
+          id: c.id,
+          name: c.name,
+          parentId: c.parentId ?? c.parent?.id ?? null,
+          parent: c.parent ?? null,
+        },
+        ...list,
+      ];
+    }
+    return list;
+  })();
+
+  const unitsForForm = (() => {
+    const code = form.unitOfMeasure?.trim();
+    if (!code) return unitOptions;
+    if (unitOptions.some((u) => u.code === code)) return unitOptions;
+    return [{ code, name: code }, ...unitOptions];
+  })();
+
   const hasOptionalDetails = isEdit;
 
   return (
@@ -619,7 +636,7 @@ export function CatalogItemEditor() {
         barcodeError={barcodeError}
         productFormFields={productFormFields}
         customFieldsLoading={customFieldsQ.isLoading}
-        categories={cats.data ?? []}
+        categories={categoriesForForm}
         brands={(() => {
           const list = brands.data ?? [];
           const b = product.data?.brand;
@@ -628,7 +645,7 @@ export function CatalogItemEditor() {
           }
           return list;
         })()}
-        unitOptions={unitOptions}
+        unitOptions={unitsForForm}
         imagePickerRef={imagePickerRef}
         onGenerateSku={() => genSku.mutate()}
         onGenerateBarcode={() => genBarcode.mutate()}

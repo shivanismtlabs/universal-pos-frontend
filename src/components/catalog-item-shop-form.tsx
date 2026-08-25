@@ -352,7 +352,11 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                       key={k.id}
                       type="button"
                       onClick={() =>
-                        setForm((f) => applyCatalogKindDefaults(f, k.id))
+                        setForm((f) =>
+                          f.kind === k.id
+                            ? f
+                            : applyCatalogKindDefaults(f, k.id),
+                        )
                       }
                       className={cn(
                         "rounded-md border px-3 py-1.5 text-sm font-medium transition",

@@ -154,7 +154,7 @@ export function ReceiptModal({
   loading,
   onClose,
   change,
-  cashTendered,
+  cashTendered: _cashTendered,
 }: {
   data: ReceiptData | null | undefined;
   loading?: boolean;
@@ -215,7 +215,6 @@ export function ReceiptModal({
   }, [onClose]);
 
   const changeAmt = change ?? data?.change;
-  const tenderedAmt = cashTendered ?? data?.cashTendered;
   const balanceDue = moneyNumber(data?.totals.balanceDue);
   const isPaid = balanceDue <= 0;
   const [sending, setSending] = useState(false);
@@ -552,14 +551,6 @@ export function ReceiptModal({
                 <span>Rounded Total</span>
                 <span className="tabular-nums">{pad2(rounded)}</span>
               </div>
-              {tenderedAmt != null && moneyNumber(tenderedAmt) > 0 ? (
-                <div className="flex justify-between">
-                  <span>Cash given</span>
-                  <span className="tabular-nums">
-                    {pad2(moneyNumber(tenderedAmt))}
-                  </span>
-                </div>
-              ) : null}
               {changeAmt != null && moneyNumber(changeAmt) > 0 ? (
                 <div className="flex justify-between">
                   <span>Change to return</span>
