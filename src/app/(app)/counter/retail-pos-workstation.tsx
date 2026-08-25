@@ -4,7 +4,17 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { customersApi, loyaltyApi, ordersApi, paymentsApi, posApi, resourcesApi, restaurantApi, tenantsApi } from "@/lib/api";
+import { customersApi, loyaltyApi, ordersApi, paymentsApi, posApi, resourcesApi, restaurantApi, tenantsApi, billingApi } from "@/lib/api";
+import {
+  UPI_PSP_OPTIONS,
+  buildUpiPayUri,
+  isValidUpiVpa,
+  normalizeInMobile,
+  shopPhoneFromTenantSettings,
+  shopUpiFromPosSettings,
+  vpaFromMobile,
+  type UpiPspSuffix,
+} from "@/lib/shop-upi";
 import { ApiError } from "@/lib/api/client";
 import { useBootstrap } from "@/lib/bootstrap";
 import { useBranchStore } from "@/lib/branch-store";
@@ -207,6 +217,10 @@ export default function RetailPosWorkstation({
   const [closingCash, setClosingCash] = useState("");
   const [showCloseRegister, setShowCloseRegister] = useState(false);
   const [payMethod, setPayMethod] = useState<PayMethod>("cash");
+  /** Counter QR: optional override when Settings UPI ID is empty */
+  const [qrPhone, setQrPhone] = useState("");
+  const [qrPsp, setQrPsp] = useState<UpiPspSuffix>("@ybl");
+  const [qrCustomVpa, setQrCustomVpa] = useState("");
   const [splitPay, setSplitPay] = useState(false);
   const [splitCashAmount, setSplitCashAmount] = useState("");
   const [splitBillOpen, setSplitBillOpen] = useState(false);
@@ -300,17 +314,16 @@ export default function RetailPosWorkstation({
   });
 
   const locations = useQuery({
-    queryKey: ["locations"],
+    queryKey: ["locations", actingUser?.tenantId],
     queryFn: () => tenantsApi.listLocations(),
+    enabled: Boolean(actingUser?.tenantId),
   });
   const branchLocationId = useBranchStore((s) => s.currentLocationId);
+  /** Shell branch is SSOT — don't fall back to MAIN when list is still loading/stale. */
   const locationId =
-    (branchLocationId &&
-    locations.data?.some((l) => l.id === branchLocationId && l.isActive !== false)
-      ? branchLocationId
-      : null) ??
-    locations.data?.find((l) => l.code === "MAIN" && l.isActive !== false)?.id ??
-    locations.data?.find((l) => l.isActive !== false)?.id ??
+    branchLocationId ||
+    locations.data?.find((l) => l.code === "MAIN" && l.isActive !== false)?.id ||
+    locations.data?.find((l) => l.isActive !== false)?.id ||
     locations.data?.[0]?.id;
   const resourceType = hasCapability("TABLE") ? "table" : undefined;
   const resources = useQuery({
@@ -418,7 +431,6 @@ export default function RetailPosWorkstation({
     enabled: Boolean(locationId),
     staleTime: 30_000,
     refetchOnWindowFocus: false,
-    placeholderData: (prev) => prev,
   });
 
   useEffect(() => {
@@ -587,6 +599,30 @@ export default function RetailPosWorkstation({
     if (entered <= 0) return totalDue;
     return Math.min(totalDue, entered);
   })();
+
+  const settingsRoot =
+    boot?.tenant?.settings && typeof boot.tenant.settings === "object"
+      ? (boot.tenant.settings as Record<string, unknown>)
+      : null;
+  const configuredUpi = shopUpiFromPosSettings(settingsRoot);
+  const shopMobile = shopPhoneFromTenantSettings(settingsRoot);
+
+  useEffect(() => {
+    if (!qrPhone && shopMobile) setQrPhone(shopMobile);
+  }, [shopMobile, qrPhone]);
+
+  const activeQrVpa = useMemo(() => {
+    if (configuredUpi?.vpa) return configuredUpi.vpa;
+    const custom = qrCustomVpa.trim();
+    if (custom && isValidUpiVpa(custom)) return custom;
+    const mobile = normalizeInMobile(qrPhone) ?? shopMobile;
+    if (mobile) return vpaFromMobile(mobile, qrPsp);
+    return "";
+  }, [configuredUpi?.vpa, qrCustomVpa, qrPhone, qrPsp, shopMobile]);
+
+  const activeQrPayee =
+    configuredUpi?.payeeName || productName || "Universal POS";
+
   const tenderedNum = moneyNumber(cashTendered || 0);
   const changeDue =
     payMethod === "cash" && tenderedNum > 0
@@ -946,6 +982,60 @@ export default function RetailPosWorkstation({
     return payMethod === "wallet" ? "store_credit" : payMethod;
   }
 
+  /** Create GST invoice for a completed split part and open the receipt. */
+  async function showSplitPartInvoice(
+    orderId: string,
+    orderNumber: string,
+    part: SplitBillPart,
+    partIndex: number,
+    opts?: {
+      change?: string | number | null;
+      cashTendered?: string | number | null;
+      invoiceFromCheckout?: {
+        invoiceNumber?: string;
+        id?: string;
+      } | null;
+      done?: boolean;
+    },
+  ) {
+    let invoiceNumber = opts?.invoiceFromCheckout?.invoiceNumber ?? null;
+    try {
+      if (!invoiceNumber) {
+        const inv = await billingApi.createInvoice(orderId, {
+          amount: part.amount,
+          splitPartIndex: partIndex,
+          splitPartLabel: part.label,
+        });
+        invoiceNumber = inv.invoiceNumber;
+      }
+    } catch {
+      /* checkout may have already minted this part */
+    }
+    const receiptData = (await posApi.receipt(orderId)) as ReceiptData;
+    setReceipt({
+      data: {
+        ...receiptData,
+        activeInvoiceNumber:
+          invoiceNumber ||
+          receiptData.invoices?.find((i) => {
+            const b = i.taxBreakdown ?? {};
+            return Number(b.splitPartIndex) === partIndex;
+          })?.invoiceNumber ||
+          receiptData.invoices?.[receiptData.invoices.length - 1]
+            ?.invoiceNumber ||
+          null,
+        activeInvoiceLabel: part.label,
+      },
+      change: opts?.change ?? 0,
+      cashTendered: opts?.cashTendered ?? null,
+    });
+    toast.success(
+      opts?.done
+        ? `${orderNumber} · ${part.label} invoice · all parts done`
+        : `${orderNumber} · ${part.label} invoice created`,
+    );
+  }
+
   async function collectFollowUpSplitPart() {
     if (!splitSession?.orderId || !splitPart) return;
     if (chargeLock.current || busy || stripeBusy) return;
@@ -1019,16 +1109,18 @@ export default function RetailPosWorkstation({
       const last = next >= splitSession.parts.length || due - payAmt <= 0.009;
       setCashTendered("");
       if (last) {
-        const receiptData = await posApi.receipt(splitSession.orderId);
-        resetAfterFullSale();
-        setReceipt({
-          data: receiptData as ReceiptData,
-          change: changeDue,
-          cashTendered: tenderedNum > 0 ? tenderedNum : null,
-        });
-        toast.success(
-          `Sale ${splitSession.orderNumber} · all parts collected`,
+        await showSplitPartInvoice(
+          splitSession.orderId,
+          splitSession.orderNumber || "",
+          splitPart,
+          splitSession.index,
+          {
+            change: changeDue,
+            cashTendered: tenderedNum > 0 ? tenderedNum : null,
+            done: true,
+          },
         );
+        resetAfterFullSale();
       } else if (!partFullyPaid) {
         const updatedParts = [...splitSession.parts];
         updatedParts[splitSession.index] = {
@@ -1043,6 +1135,12 @@ export default function RetailPosWorkstation({
           `Collected ${money(payAmt)} · Part ${splitSession.index + 1} remaining: ${money(currentPartRemaining)}`,
         );
       } else {
+        await showSplitPartInvoice(
+          splitSession.orderId,
+          splitSession.orderNumber || "",
+          splitPart,
+          splitSession.index,
+        );
         const leftover = scalePartsToTotal(
           splitSession.parts.slice(next),
           Math.max(0, due - payAmt),
@@ -1052,9 +1150,6 @@ export default function RetailPosWorkstation({
           index: next,
           parts: [...splitSession.parts.slice(0, next), ...leftover],
         });
-        toast.success(
-          `Part ${splitSession.index + 1} of ${splitSession.parts.length} collected`,
-        );
       }
       clearPaymentAttemptKey();
     } catch (e) {
@@ -1162,6 +1257,12 @@ export default function RetailPosWorkstation({
         toast.error("Enter EMI provider / bank");
         return;
       }
+    }
+    if (payMethod === "qr" && !activeQrVpa) {
+      toast.error(
+        "Enter shop mobile or UPI ID for QR — or set UPI ID in Settings → Counter",
+      );
+      return;
     }
     if (loyaltyPointsInput && !customerId) {
       toast.error("Select a customer to redeem loyalty points");
@@ -1400,7 +1501,7 @@ export default function RetailPosWorkstation({
             amount: stripeAmount,
             description: session.description,
             method: payMethod,
-            splitContinue: Boolean(splitSession && splitRemaining > 1),
+            splitContinue: Boolean(splitSession),
             keepOrder: Boolean(splitSession && splitRemaining > 1),
           });
           setStripeBusy(true);
@@ -1450,17 +1551,46 @@ export default function RetailPosWorkstation({
         const remaining = moneyNumber(
           result.balanceDue ?? result.order.balanceDue,
         );
+        const part = splitSession.parts[splitSession.index];
+        const inv = (
+          result as {
+            invoice?: { invoiceNumber?: string; id?: string } | null;
+          }
+        ).invoice;
         if (remaining <= 0.009) {
+          if (part) {
+            await showSplitPartInvoice(
+              result.order.id,
+              result.order.orderNumber,
+              part,
+              splitSession.index,
+              {
+                change: result.change,
+                cashTendered: result.cashTendered,
+                invoiceFromCheckout: inv,
+                done: true,
+              },
+            );
+          } else {
+            setReceipt({
+              data: result.receipt as ReceiptData,
+              change: result.change,
+              cashTendered: result.cashTendered,
+            });
+          }
           resetAfterFullSale();
-          setReceipt({
-            data: result.receipt as ReceiptData,
-            change: result.change,
-            cashTendered: result.cashTendered,
-          });
-          toast.success(`Sale ${result.order.orderNumber} complete`);
           clearPaymentAttemptKey();
           void qc.invalidateQueries({ queryKey: ["pos-sale-catalog"] });
           return;
+        }
+        if (part) {
+          await showSplitPartInvoice(
+            result.order.id,
+            result.order.orderNumber,
+            part,
+            splitSession.index,
+            { invoiceFromCheckout: inv },
+          );
         }
         const nextIndex = splitSession.index + 1;
         const leftover = scalePartsToTotal(
@@ -1475,9 +1605,6 @@ export default function RetailPosWorkstation({
           parts: [...splitSession.parts.slice(0, nextIndex), ...leftover],
         });
         setCashTendered("");
-        toast.success(
-          `Part ${splitSession.index + 1} of ${splitSession.parts.length} collected · next ${money(leftover[0]?.amount ?? remaining)}`,
-        );
         clearPaymentAttemptKey();
         // Keep ticket lines visible while collecting remaining split parts
         void qc.invalidateQueries({ queryKey: ["pos-sale-catalog"] });
@@ -1637,7 +1764,7 @@ export default function RetailPosWorkstation({
     if (!rateEdit) return;
     const next = moneyNumber(rateEdit.amount || 0);
     if (!Number.isFinite(next) || next < 0) {
-      toast.error("Enter a valid rate");
+      toast.error("Enter a valid price");
       return;
     }
     setCart((prev) =>
@@ -1666,26 +1793,55 @@ export default function RetailPosWorkstation({
     setStripeBusy(false);
     setCashTendered("");
     if (splitContinue && splitSession) {
-      const next = splitSession.index + 1;
-      const last = next >= splitSession.parts.length;
-      if (last) {
+      const part = splitSession.parts[splitSession.index];
+      if (!part) {
         resetAfterFullSale();
-        setReceipt({
-          data: receiptData as ReceiptData,
-          change: 0,
-          cashTendered: null,
-        });
-        toast.success(`Sale ${orderNumber} · all parts collected`);
       } else {
-        setSplitSession({
-          ...splitSession,
-          index: next,
-          orderId,
-          orderNumber,
-        });
-        toast.success(
-          `Part ${next} of ${splitSession.parts.length} collected`,
-        );
+        const currentPartRemaining = Math.max(0, part.amount - amount);
+        const partFullyPaid = currentPartRemaining <= 0.009;
+        const next = partFullyPaid ? splitSession.index + 1 : splitSession.index;
+        const last =
+          partFullyPaid &&
+          (next >= splitSession.parts.length || amount + 0.001 >= totalDue);
+        if (!partFullyPaid) {
+          const updatedParts = [...splitSession.parts];
+          updatedParts[splitSession.index] = {
+            ...part,
+            amount: roundMoney(currentPartRemaining),
+          };
+          setSplitSession({
+            ...splitSession,
+            parts: updatedParts,
+            orderId,
+            orderNumber,
+          });
+          toast.success(
+            `Collected ${money(amount)} · Part ${splitSession.index + 1} remaining: ${money(currentPartRemaining)}`,
+          );
+        } else {
+          await showSplitPartInvoice(
+            orderId,
+            orderNumber,
+            part,
+            splitSession.index,
+            { done: last },
+          );
+          if (last) {
+            resetAfterFullSale();
+          } else {
+            const leftover = scalePartsToTotal(
+              splitSession.parts.slice(next),
+              Math.max(0, totalDue - amount),
+            );
+            setSplitSession({
+              ...splitSession,
+              index: next,
+              orderId,
+              orderNumber,
+              parts: [...splitSession.parts.slice(0, next), ...leftover],
+            });
+          }
+        }
       }
     } else {
       resetAfterFullSale();
@@ -2301,17 +2457,27 @@ export default function RetailPosWorkstation({
                     <button
                       type="button"
                       className={cn(
-                        "rounded-lg border px-2 py-1 text-[0.65rem] font-semibold",
+                        "inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-[0.7rem] font-semibold",
                         rateChanged
                           ? "border-[#fdba74] bg-[#fff7ed] text-[#c2410c]"
                           : "border-[#e2e8f0] bg-[#f8fafc] text-[#475569] hover:border-[#1a56db] hover:text-[#1a56db]",
                       )}
-                      title="Urgent / extra % for this item"
+                      title="Change this item’s price (urgent / special)"
                       onClick={() => openRateEdit(l)}
                     >
-                      {rateChanged
-                        ? `${ratePct > 0 ? "+" : ""}${ratePct}%`
-                        : "Rate"}
+                      {rateChanged ? (
+                        <>
+                          <span className="tabular-nums">
+                            {money(l.unitPrice)}
+                          </span>
+                          <span className="text-[0.6rem] font-medium opacity-80">
+                            ({ratePct > 0 ? "+" : ""}
+                            {ratePct}%)
+                          </span>
+                        </>
+                      ) : (
+                        "Change price"
+                      )}
                     </button>
                   </div>
                   {(l.requiresVariant || l.requiresBatch || l.requiresSerial) && (
@@ -2671,45 +2837,84 @@ export default function RetailPosWorkstation({
               </button>
             ) : null}
             {payMethod === "qr" ? (
-              <div className="rounded-lg border border-[#d9e0ea] bg-white p-2">
+              <div className="space-y-2 rounded-lg border border-[#d9e0ea] bg-white p-2">
                 {(() => {
-                  const posSettings =
-                    boot?.tenant?.settings &&
-                    typeof boot.tenant.settings === "object"
-                      ? (boot.tenant.settings as Record<string, unknown>).pos
-                      : undefined;
-                  const pos =
-                    posSettings && typeof posSettings === "object"
-                      ? (posSettings as Record<string, unknown>)
-                      : {};
-                  const vpa =
-                    typeof pos.upiVpa === "string" ? pos.upiVpa.trim() : "";
-                  const payee =
-                    (typeof pos.upiPayeeName === "string" &&
-                      pos.upiPayeeName.trim()) ||
-                    productName ||
-                    "Universal POS";
-                  if (!vpa) {
+                  if (activeQrVpa && isValidUpiVpa(activeQrVpa)) {
+                    const upiUri = buildUpiPayUri({
+                      vpa: activeQrVpa,
+                      payeeName: activeQrPayee,
+                      amount: chargeAmount,
+                      note: productName || "Universal POS",
+                    });
                     return (
-                      <p className="text-[0.7rem] text-amber-800">
-                        Set UPI ID in Settings → Counter first.
-                      </p>
+                      <div className="flex items-center gap-2">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          alt="Pay QR"
+                          className="h-20 w-20 shrink-0 rounded border border-[#eef2f8] bg-white"
+                          src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(upiUri)}`}
+                        />
+                        <p className="text-[0.65rem] leading-snug text-[#5a6b7d]">
+                          Customer scans in GPay / PhonePe / Paytm, then Charge.
+                          <br />
+                          <span className="font-medium text-[#0b1f33]">
+                            {activeQrVpa}
+                          </span>
+                          {!configuredUpi?.vpa ? (
+                            <span className="mt-1 block text-[0.6rem] text-amber-800">
+                              From shop mobile · set a permanent UPI ID in
+                              Settings → Counter when ready.
+                            </span>
+                          ) : null}
+                        </p>
+                      </div>
                     );
                   }
-                  const upiUri = `upi://pay?pa=${encodeURIComponent(vpa)}&pn=${encodeURIComponent(payee)}&am=${chargeAmount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(productName || "Universal POS")}`;
+
                   return (
-                    <div className="flex items-center gap-2">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        alt="Pay QR"
-                        className="h-20 w-20 shrink-0 rounded border border-[#eef2f8] bg-white"
-                        src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(upiUri)}`}
-                      />
-                      <p className="text-[0.65rem] leading-snug text-[#5a6b7d]">
-                        Customer scans, then Charge.
-                        <br />
-                        <span className="font-medium text-[#0b1f33]">{vpa}</span>
+                    <div className="space-y-2">
+                      <p className="text-[0.7rem] font-medium text-[#0b1f33]">
+                        Collect via UPI QR
                       </p>
+                      <p className="text-[0.65rem] text-[#5a6b7d]">
+                        No UPI ID in settings — use the shop mobile number
+                        (same pattern many POS apps use with PhonePe / Paytm).
+                      </p>
+                      <div className="flex gap-1.5">
+                        <Input
+                          className="h-8 flex-1 text-sm tabular-nums"
+                          inputMode="tel"
+                          placeholder="10-digit mobile"
+                          value={qrPhone}
+                          onChange={(e) => setQrPhone(e.target.value)}
+                        />
+                        <select
+                          className="h-8 max-w-[7.5rem] rounded-md border border-[#d9e0ea] bg-white px-1 text-[0.65rem] font-medium text-[#0b1f33]"
+                          value={qrPsp}
+                          onChange={(e) =>
+                            setQrPsp(e.target.value as UpiPspSuffix)
+                          }
+                        >
+                          {UPI_PSP_OPTIONS.map((o) => (
+                            <option key={o.id} value={o.id}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <Input
+                        className="h-8 text-sm"
+                        placeholder="Or full UPI ID · shop@okaxis"
+                        value={qrCustomVpa}
+                        onChange={(e) => setQrCustomVpa(e.target.value)}
+                        autoComplete="off"
+                      />
+                      <Link
+                        href="/settings/counter"
+                        className="block text-[0.65rem] font-semibold text-[#1a56db] hover:underline"
+                      >
+                        Save permanent UPI ID in Settings → Counter
+                      </Link>
                     </div>
                   );
                 })()}
@@ -2792,18 +2997,19 @@ export default function RetailPosWorkstation({
                 (!online &&
                   payMethod !== "cash" &&
                   payMethod !== "qr" &&
-                  payMethod !== "wallet") ||
+                  payMethod !== "wallet" &&
+                  payMethod !== "store_credit" &&
+                  payMethod !== "gift_card") ||
                 ((payMethod === "card" || payMethod === "upi") &&
                   !stripeConfig.data?.enabled) ||
                 (payMethod === "emi" &&
-                  (!customerId || !emiProvider.trim()))
+                  (!customerId || !emiProvider.trim())) ||
+                (payMethod === "qr" && !activeQrVpa)
               }
               onClick={() => void checkout()}
             >
               {busy || stripeBusy
-                ? payMethod === "card" || payMethod === "upi"
-                  ? "Opening…"
-                  : "Processing…"
+                ? "Processing…"
                 : splitPart
                   ? `Collect ${splitPart.label} · ${money(chargeAmount)}`
                   : allowPartial && chargeAmount < totalDue - 0.001
@@ -2959,8 +3165,8 @@ export default function RetailPosWorkstation({
 
       {rateEdit ? (
         <ModalFrame
-          title="Change rate"
-          subtitle="Urgent extra or a % on this item only. Then tap Apply."
+          title="Change price"
+          subtitle="Type a new price, or add urgent extra % on this item only."
           onClose={() => setRateEdit(null)}
           footer={
             <div className="flex gap-2">
@@ -2972,7 +3178,7 @@ export default function RetailPosWorkstation({
                 Cancel
               </Button>
               <Button className="flex-1" onClick={applyRateEdit}>
-                Apply
+                Apply price
               </Button>
             </div>
           }
@@ -2998,11 +3204,11 @@ export default function RetailPosWorkstation({
                   {line.name}
                 </p>
                 <p className="text-xs text-[#8b9bb0]">
-                  Catalog rate {money(base)} {priceUnitLabel(line.sellUnit)}
+                  List price {money(base)} {priceUnitLabel(line.sellUnit)}
                   {" · "}qty {line.qty}
                 </p>
                 <div className="field-shell">
-                  <Label>New rate</Label>
+                  <Label>New price</Label>
                   <Input
                     className="mt-1 text-lg tabular-nums"
                     inputMode="decimal"
@@ -3024,7 +3230,7 @@ export default function RetailPosWorkstation({
                   />
                 </div>
                 <div className="field-shell">
-                  <Label>Extra % (urgent)</Label>
+                  <Label>Extra % (optional)</Label>
                   <Input
                     className="mt-1 text-lg tabular-nums"
                     inputMode="decimal"
@@ -3043,7 +3249,7 @@ export default function RetailPosWorkstation({
                     }}
                   />
                   <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
-                    20 means 20% more than catalog. Use minus for less, e.g. −10.
+                    20 = 20% more than list price. Use minus for less, e.g. −10.
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
@@ -3054,7 +3260,7 @@ export default function RetailPosWorkstation({
                       className="rounded-lg border border-[#e2e8f0] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#475569] hover:border-[#1a56db] hover:text-[#1a56db]"
                       onClick={() => applyPct(pct)}
                     >
-                      Urgent +{pct}%
+                      +{pct}%
                     </button>
                   ))}
                   <button
@@ -3072,7 +3278,7 @@ export default function RetailPosWorkstation({
                   </button>
                 </div>
                 <p className="text-sm font-semibold text-[#1a56db]">
-                  This line: {money(Math.max(0, draft) * line.qty)}
+                  Line total: {money(Math.max(0, draft) * line.qty)}
                 </p>
               </div>
             );

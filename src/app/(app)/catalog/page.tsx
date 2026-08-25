@@ -234,7 +234,6 @@ function ProductsPanel() {
       }),
     enabled: Boolean(tenantId),
     refetchOnMount: "always",
-    placeholderData: (prev) => prev,
   });
 
   useEffect(() => {
@@ -504,7 +503,7 @@ function ProductsPanel() {
                   <td className="px-3 py-2 text-right tabular-nums">
                     {Number(p.basePrice).toFixed(2)}
                   </td>
-                  <td className="px-3 py-2 text-right text-[#5a6b7d]">
+                  <td className="px-3 py-2 text-right font-semibold tabular-nums text-[#0b1f33]">
                     {catalogStockOnHandLabel({
                       kind: p.kind,
                       trackInventory: p.trackInventory,

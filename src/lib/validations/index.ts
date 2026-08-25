@@ -452,15 +452,8 @@ export const addSaleProductSchema = z
     trackInventory: z.boolean().default(true),
   })
   .superRefine((v, ctx) => {
-    if (v.trackInventory && !(v.qty >= 1)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["qty"],
-        message: "Opening quantity must be at least 1 (not 0, 0.1, or 0.2)",
-      });
-      return;
-    }
     if (!v.trackInventory) return;
+    // Opening stock may be 0; only reject negatives (handled by .min(0)) and unit rules.
     const whole =
       v.sellUnit === "pcs" ||
       v.sellUnit === "pack" ||
@@ -812,25 +805,14 @@ export const createCatalogProductSchema = z
   .superRefine((v, ctx) => {
     if (v.trackInventory) {
       const raw = (v.openingQty ?? "").trim();
-      if (raw === "") {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["openingQty"],
-          message: "Enter opening stock (0 or more)",
-        });
-      } else {
+      // Empty allowed — create treats blank as 0 Stock on Hand.
+      if (raw !== "") {
         const q = Number(raw);
         if (!Number.isFinite(q) || q < 0) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
             path: ["openingQty"],
             message: "Opening quantity cannot be negative",
-          });
-        } else if (!Number.isInteger(q)) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ["openingQty"],
-            message: "Opening quantity must be a whole number",
           });
         }
       }

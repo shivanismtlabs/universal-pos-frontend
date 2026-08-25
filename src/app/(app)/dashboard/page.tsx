@@ -1,7 +1,6 @@
 "use client";
 
-import { Suspense, startTransition, useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { Suspense, startTransition, useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useBootstrap } from "@/lib/bootstrap";
 import { EmptyState, PageSkeleton } from "@/components/page-header";
@@ -12,10 +11,7 @@ import { SaleDashboard } from "./sale-dashboard";
 import { RentalDashboard } from "./rental-dashboard";
 import { SubscriptionDashboard } from "./subscription-dashboard";
 import { ServiceDashboard } from "./service-dashboard";
-import { posApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
-import { Lock } from "lucide-react";
 
 type HomeTab = "dashboard" | "getting-started" | "floors";
 type FloorView = "sale" | "rent" | "service" | "subscription";
@@ -29,8 +25,7 @@ function parseHomeTab(raw: string | null): HomeTab | null {
 
 /**
  * Home after login — Zoho-style Dashboard / Getting Started, plus mode floors.
- * Tabs unlock in order as setup progress completes.
- * URL `?tab=getting-started` keeps users on the checklist after setup actions.
+ * Tabs stay freely switchable; URL `?tab=` syncs selection.
  */
 export default function DashboardPage() {
   return (
@@ -41,7 +36,7 @@ export default function DashboardPage() {
 }
 
 function DashboardPageInner() {
-  const { isLoading, hasMode, data: boot } = useBootstrap();
+  const { isLoading, hasMode } = useBootstrap();
   const router = useRouter();
   const pathname = usePathname();
   const search = useSearchParams();
@@ -57,35 +52,6 @@ function DashboardPageInner() {
   const hasSub = hasMode("subscription");
   const hasAnyMode = hasSale || hasRent || hasService || hasSub;
 
-  const floorQ = useQuery({
-    queryKey: ["pos-sale-floor"],
-    queryFn: () => posApi.saleFloor(),
-    enabled: hasSale,
-  });
-
-  const taxConfigured = useMemo(() => {
-    const t = boot?.tenant;
-    if (!t) return false;
-    if (t.taxId || t.gstin) return true;
-    const settings =
-      t.settings && typeof t.settings === "object"
-        ? (t.settings as Record<string, unknown>)
-        : {};
-    const tax =
-      settings.tax && typeof settings.tax === "object"
-        ? (settings.tax as Record<string, unknown>)
-        : {};
-    if (t.taxMode === "none") return true;
-    return (
-      typeof tax.ratePercent === "number" ||
-      (typeof tax.ratePercent === "string" && tax.ratePercent.trim() !== "")
-    );
-  }, [boot?.tenant]);
-
-  const products = floorQ.data?.counts?.products ?? 0;
-  const dashboardUnlocked = taxConfigured;
-  const floorsUnlocked = !hasSale || products > 0;
-
   useEffect(() => {
     if (tabFromUrl) {
       setHomeTab(tabFromUrl);
@@ -93,7 +59,7 @@ function DashboardPageInner() {
     }
     try {
       const seen = localStorage.getItem("upos-home-setup-seen");
-      if (seen === "1" && dashboardUnlocked) {
+      if (seen === "1") {
         setHomeTab("dashboard");
         if (search.get("tab") !== "dashboard") {
           const qs = new URLSearchParams(search.toString());
@@ -104,26 +70,17 @@ function DashboardPageInner() {
     } catch {
       /* ignore */
     }
-  }, [tabFromUrl, dashboardUnlocked, pathname, router, search]);
+  }, [tabFromUrl, pathname, router, search]);
 
   useEffect(() => {
-    if (homeTab === "dashboard" && dashboardUnlocked) {
+    if (homeTab === "dashboard") {
       try {
         localStorage.setItem("upos-home-setup-seen", "1");
       } catch {
         /* ignore */
       }
     }
-  }, [homeTab, dashboardUnlocked]);
-
-  useEffect(() => {
-    if (homeTab === "dashboard" && !dashboardUnlocked) {
-      setHomeTab("getting-started");
-    }
-    if (homeTab === "floors" && !floorsUnlocked) {
-      setHomeTab("getting-started");
-    }
-  }, [homeTab, dashboardUnlocked, floorsUnlocked]);
+  }, [homeTab]);
 
   function syncTabUrl(id: HomeTab) {
     const qs = new URLSearchParams(search.toString());
@@ -155,18 +112,6 @@ function DashboardPageInner() {
     [hasSale, hasRent, hasService, hasSub].filter(Boolean).length > 0;
 
   function selectTab(id: HomeTab) {
-    if (id === "dashboard" && !dashboardUnlocked) {
-      toast.message("Finish tax settings in Getting Started first");
-      setHomeTab("getting-started");
-      syncTabUrl("getting-started");
-      return;
-    }
-    if (id === "floors" && !floorsUnlocked) {
-      toast.message("Add at least one item in Getting Started first");
-      setHomeTab("getting-started");
-      syncTabUrl("getting-started");
-      return;
-    }
     startTransition(() => {
       setHomeTab(id);
       syncTabUrl(id);
@@ -187,19 +132,16 @@ function DashboardPageInner() {
               {
                 id: "getting-started" as const,
                 label: "Getting Started",
-                locked: false,
               },
               {
                 id: "dashboard" as const,
                 label: "Dashboard",
-                locked: !dashboardUnlocked,
               },
               ...(showFloors
                 ? [
                     {
                       id: "floors" as const,
                       label: "Shop floors",
-                      locked: !floorsUnlocked,
                     },
                   ]
                 : []),
@@ -212,26 +154,15 @@ function DashboardPageInner() {
                 type="button"
                 role="tab"
                 aria-selected={active}
-                aria-disabled={t.locked}
-                title={
-                  t.locked
-                    ? t.id === "dashboard"
-                      ? "Complete tax settings first"
-                      : "Add inventory items first"
-                    : undefined
-                }
                 onClick={() => selectTab(t.id)}
                 className={cn(
                   "-mb-px inline-flex items-center gap-1.5 border-b-2 px-1 pb-2.5 pt-1 text-[0.9rem] font-medium transition sm:mr-6 sm:px-0",
                   active
                     ? "border-[#1a56db] font-semibold text-[#1a56db]"
-                    : t.locked
-                      ? "border-transparent text-[#b0bac8]"
-                      : "border-transparent text-[#5a6b7d] hover:text-[#0b1f33]",
+                    : "border-transparent text-[#5a6b7d] hover:text-[#0b1f33]",
                 )}
               >
                 {t.label}
-                {t.locked ? <Lock className="h-3 w-3 opacity-70" /> : null}
               </button>
             );
           })}

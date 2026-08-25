@@ -98,8 +98,8 @@ function InventoryPageInner() {
   const router = useRouter();
   /** URL is source of truth — avoids stale state when opening /inventory?tab=alerts */
   const tab = parseTab(search.get("tab"));
-  const [locationId, setLocationId] = useState("");
   const [importOpen, setImportOpen] = useState(false);
+  const tenantId = useAuthStore((s) => s.user?.tenantId);
   const branchId = useBranchStore((s) => s.currentLocationId);
   const setBranchId = useBranchStore((s) => s.setCurrentLocationId);
 
@@ -113,15 +113,14 @@ function InventoryPageInner() {
   }
 
   const locations = useQuery({
-    queryKey: ["locations"],
+    queryKey: ["locations", tenantId],
     queryFn: () => tenantsApi.listLocations(),
+    enabled: Boolean(tenantId),
   });
 
+  /** Shell branch is SSOT — do not keep a local location that ignores header switches. */
   const activeLoc =
-    locationId ||
-    (branchId && locations.data?.some((l) => l.id === branchId)
-      ? branchId
-      : "") ||
+    branchId ||
     locations.data?.find((l) => l.isActive !== false)?.id ||
     locations.data?.[0]?.id ||
     "";
@@ -195,8 +194,7 @@ function InventoryPageInner() {
               className={fieldSelect}
               value={activeLoc}
               onChange={(e) => {
-                setLocationId(e.target.value);
-                setBranchId(e.target.value);
+                setBranchId(e.target.value || null);
               }}
             >
               {(locations.data ?? []).map((l) => (
@@ -294,7 +292,8 @@ function LevelsTab({
         page,
         limit: pageSize,
       }),
-    placeholderData: (prev) => prev,
+    // Do not keepPreviousData across location switches — looks like filter is broken
+    enabled: Boolean(locationId),
   });
 
   const levelRows = levels.data?.items ?? [];
@@ -394,7 +393,16 @@ function LevelsTab({
                 </td>
               </tr>
             ))}
-            {!levels.data?.items?.length ? (
+            {levels.isLoading ? (
+              <tr>
+                <td
+                  colSpan={8}
+                  className="px-3 py-8 text-center text-[#5a6b7d]"
+                >
+                  Loading stock for this location…
+                </td>
+              </tr>
+            ) : !levelRows.length ? (
               <tr>
                 <td
                   colSpan={8}
@@ -1035,7 +1043,6 @@ function LedgerTab({ locationId }: { locationId: string }) {
         page,
         limit: pageSize,
       }),
-    placeholderData: (prev) => prev,
   });
   const rows = ledger.data?.items ?? [];
   const meta = ledger.data?.meta;
@@ -1156,9 +1163,11 @@ function LedgerTab({ locationId }: { locationId: string }) {
 
 function WarehousesTab({ canWrite }: { canWrite: boolean }) {
   const qc = useQueryClient();
+  const tenantId = useAuthStore((s) => s.user?.tenantId);
   const locations = useQuery({
-    queryKey: ["locations"],
+    queryKey: ["locations", tenantId],
     queryFn: () => tenantsApi.listLocations(),
+    enabled: Boolean(tenantId),
   });
   const [name, setName] = useState("");
   const [code, setCode] = useState("");

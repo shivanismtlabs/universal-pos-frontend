@@ -117,7 +117,8 @@ function mapHeader(h: string): string | null {
     hsnorsac: "hsnOrSac",
     description: "description",
     track_inventory: "trackInventory",
-    track: "trackInventory",
+    track_stock: "trackInventory",
+    inventory_tracked: "trackInventory",
     reorder_point: "reorderPoint",
     reorder: "reorderPoint",
     image_url: "image",
@@ -162,8 +163,16 @@ export function rowsFromTable(table: string[][]): ImportableRow[] {
       litre: "L",
       ml: "ml",
     };
-    const trackRaw = (obj.trackInventory || "true").toLowerCase();
-    const trackInventory = !["0", "false", "no", "n"].includes(trackRaw);
+    const qty =
+      obj.qty !== undefined && obj.qty !== "" ? Number(obj.qty) : 0;
+    const trackRaw = (obj.trackInventory ?? "").trim().toLowerCase();
+    // CSV goods default to tracking ON. Only explicit false/no/off/0 turns it off.
+    // Do not treat single-letter "n" as off (misaligned cells caused "Not counted").
+    let trackInventory = !["false", "no", "off", "0"].includes(trackRaw);
+    // Any opening stock value (including 0 in the opening_stock column) ⇒ count stock.
+    if (obj.qty !== undefined && obj.qty !== "" && Number.isFinite(qty) && qty >= 0) {
+      trackInventory = true;
+    }
     const price = Number(obj.price);
     if (!(price > 0)) {
       throw new Error(`Row ${r + 1}: selling_price must be > 0`);
@@ -174,7 +183,7 @@ export function rowsFromTable(table: string[][]): ImportableRow[] {
       categoryName: obj.categoryName?.trim() || undefined,
       sellUnit: unitMap[unitRaw] ?? "pcs",
       price,
-      qty: obj.qty !== undefined && obj.qty !== "" ? Number(obj.qty) : 0,
+      qty: Number.isFinite(qty) ? qty : 0,
       description: obj.description?.trim() || undefined,
       manufacturer: obj.manufacturer?.trim() || undefined,
       barcode: obj.barcode?.trim() || undefined,
@@ -206,10 +215,18 @@ async function rowsFromExcelFile(file: File): Promise<ImportableRow[]> {
   const ws = wb.worksheets[0];
   if (!ws) throw new Error("Excel file has no sheet");
   const table: string[][] = [];
-  ws.eachRow({ includeEmpty: false }, (row) => {
+    ws.eachRow({ includeEmpty: false }, (row) => {
     const cells: string[] = [];
     row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-      cells[colNumber - 1] = String(cell.text ?? cell.value ?? "").trim();
+      const raw = cell.value;
+      let text = "";
+      if (raw == null) text = "";
+      else if (typeof raw === "boolean") text = raw ? "true" : "false";
+      else if (typeof raw === "number") text = String(raw);
+      else if (typeof raw === "object" && "text" in (raw as object))
+        text = String((raw as { text?: string }).text ?? "");
+      else text = String(cell.text ?? raw ?? "");
+      cells[colNumber - 1] = text.trim();
     });
     table.push(cells);
   });

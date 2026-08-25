@@ -389,6 +389,7 @@ function TransferComposer({
                 onChange={(e) => {
                   setFromId(e.target.value);
                   setLines([]);
+                  setQ("");
                   setFieldErrors((f) => ({
                     ...f,
                     fromLocationId: "",

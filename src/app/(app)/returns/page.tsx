@@ -1,11 +1,19 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { ordersApi, posApi, returnsApi, subscriptionsApi } from "@/lib/api";
+import { Settings } from "lucide-react";
+import {
+  ordersApi,
+  paymentsApi,
+  posApi,
+  returnsApi,
+  subscriptionsApi,
+} from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import {
   createReturnSchema,
@@ -18,11 +26,121 @@ import { FieldError } from "@/components/ui/form";
 import { Select } from "@/components/ui/select";
 import { formatDate, newIdempotencyKey, cn } from "@/lib/utils";
 import { useBootstrap } from "@/lib/bootstrap";
+import {
+  EmptyState,
+  PageHeader,
+  PageSkeleton,
+} from "@/components/page-header";
 import { TablePager } from "@/components/table-pager";
 import { usePagedList } from "@/lib/use-paged-list";
 import { SaleReturnDialog } from "@/components/sale-return-dialog";
 import { canApproveRefund } from "@/lib/roles";
 import { useAuthStore } from "@/lib/auth-store";
+import { useBranchStore } from "@/lib/branch-store";
+
+const formCard =
+  "rounded-xl border border-[#e4e9f0] bg-white p-4 shadow-sm sm:p-5";
+const fieldSelect =
+  "mt-1.5 h-10 w-full rounded-lg border border-[#e4e9f0] bg-white px-3 text-sm";
+
+type ReturnTab = "sale" | "rental" | "service" | "subscription";
+type SaleDeskTab = "new" | "pending" | "history";
+
+function statusPill(status: string) {
+  const s = status.toLowerCase();
+  if (s === "completed" || s === "approved")
+    return "bg-[#dcfce7] text-[#15803d]";
+  if (s === "pending" || s === "requested" || s === "processing")
+    return "bg-[#fef3c7] text-[#b45309]";
+  if (s === "rejected" || s === "cancelled" || s === "damaged")
+    return "bg-[#fee2e2] text-[#b91c1c]";
+  if (s === "needs_cleaning" || s === "clean_ready")
+    return "bg-[#e0e7ff] text-[#3730a3]";
+  return "bg-[#f1f5f9] text-[#5a6b7d]";
+}
+
+function statusLabel(status: string) {
+  switch (status) {
+    case "completed":
+      return "Completed";
+    case "pending":
+    case "requested":
+      return "Pending";
+    case "processing":
+      return "Processing";
+    case "rejected":
+      return "Rejected";
+    case "clean_ready":
+      return "OK";
+    case "needs_cleaning":
+      return "Needs cleaning";
+    case "damaged":
+      return "Damaged";
+    default:
+      return status.replace(/_/g, " ");
+  }
+}
+
+function ModeTabs({
+  tabs,
+  active,
+  onChange,
+}: {
+  tabs: Array<{ id: ReturnTab; label: string }>;
+  active: ReturnTab;
+  onChange: (id: ReturnTab) => void;
+}) {
+  if (tabs.length <= 1) return null;
+  return (
+    <div className="flex flex-wrap gap-1 border-b border-[#e5e7eb]">
+      {tabs.map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          onClick={() => onChange(t.id)}
+          className={cn(
+            "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
+            active === t.id
+              ? "border-[#1a56db] text-[#1a56db]"
+              : "border-transparent text-[#6b7280] hover:text-[#0b1f33]",
+          )}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function ChipTabs<T extends string>({
+  tabs,
+  active,
+  onChange,
+}: {
+  tabs: Array<{ id: T; label: string }>;
+  active: T;
+  onChange: (id: T) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-1 rounded-lg bg-[#f1f5f9] p-1 text-xs">
+      {tabs.map((tab) => (
+        <button
+          key={tab.id}
+          type="button"
+          className={cn(
+            "rounded-md px-3 py-1.5 font-medium transition",
+            active === tab.id
+              ? "bg-white font-semibold text-[#0b1f33] shadow-sm"
+              : "text-[#5a6b7d] hover:text-[#0b1f33]",
+          )}
+          onClick={() => onChange(tab.id)}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 function RentalReturnsDesk() {
   const qc = useQueryClient();
@@ -144,131 +262,166 @@ function RentalReturnsDesk() {
   const returns = list.data?.items ?? [];
   const pagedReturns = usePagedList(returns, 12);
 
+  if (list.isLoading && !list.data) return <PageSkeleton rows={6} />;
+
   return (
-    <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-      <section className="overflow-hidden rounded-2xl border border-[#e5e7eb] bg-white">
-        <div className="border-b border-[#e5e7eb] px-5 py-4">
-          <h2 className="display text-2xl text-[#111827]">Return queue</h2>
-          <p className="mt-1 text-sm text-[#6b7280]">
-            {list.isLoading ? "Loading…" : `${returns.length} recorded`}
-          </p>
+    <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
+      <section className={formCard}>
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-semibold text-[#0b1f33]">
+              Return queue
+            </h2>
+            <p className="mt-0.5 text-[0.75rem] text-[#5a6b7d]">
+              {returns.length} recorded · inspect &amp; clean
+            </p>
+          </div>
         </div>
 
-        {!list.isLoading && !returns.length ? (
-          <div className="px-5 py-10 text-center text-sm text-[#6b7280]">
-            No returns yet. Record a return on the right.
-          </div>
+        {!returns.length ? (
+          <EmptyState
+            title="No rental returns yet"
+            detail="Record a unit return on the right when gear comes back."
+          />
         ) : (
           <>
-          <ul className="scroll-soft max-h-[32rem] divide-y divide-[#f3f4f6] overflow-y-auto">
-            {pagedReturns.slice.map((r) => {
-              const unit = r.stockUnit ?? r.inventoryUnit;
-              return (
-                <li key={r.id} className="px-5 py-4">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
-                      <p className="font-semibold text-[#111827]">
-                        {r.order?.orderNumber ?? "Order"} ·{" "}
-                        {unit?.barcodeSku ?? "unit"}
-                      </p>
-                      <p className="text-xs text-[#9ca3af]">
-                        {formatDate(
-                          (r as { createdAt?: string }).createdAt ?? "",
-                        )}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {!r.inspectStatus ? (
-                        <>
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            onClick={() =>
-                              inspect.mutate({
-                                id: r.id,
-                                status: "clean_ready",
-                              })
-                            }
-                          >
-                            OK
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            onClick={() =>
-                              inspect.mutate({
-                                id: r.id,
-                                status: "needs_cleaning",
-                              })
-                            }
-                          >
-                            Clean
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="danger"
-                            size="sm"
-                            onClick={() =>
-                              inspect.mutate({ id: r.id, status: "damaged" })
-                            }
-                          >
-                            Damaged
-                          </Button>
-                        </>
-                      ) : (
-                        <span
-                          className={cn(
-                            "rounded-full px-2.5 py-0.5 text-[0.7rem] font-semibold uppercase",
-                            "bg-[#e8eefb] text-[#0b1f33]",
+            <div className="overflow-x-auto rounded-lg border border-[#e5e7eb]">
+              <table className="w-full min-w-[560px] text-left text-sm">
+                <thead className="bg-[#f7f9fb] text-[0.7rem] tracking-wide text-[#5a6b7d] uppercase">
+                  <tr>
+                    <th className="px-3 py-2 font-semibold">Order / unit</th>
+                    <th className="px-3 py-2 font-semibold">Date</th>
+                    <th className="px-3 py-2 font-semibold">Status</th>
+                    <th className="px-3 py-2 font-semibold" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {pagedReturns.slice.map((r) => {
+                    const unit = r.stockUnit ?? r.inventoryUnit;
+                    return (
+                      <tr
+                        key={r.id}
+                        className="border-t border-[#f0f3f7] align-top"
+                      >
+                        <td className="px-3 py-2.5">
+                          <p className="font-medium text-[#0b1f33]">
+                            {r.order?.orderNumber ?? "Order"}
+                          </p>
+                          <p className="font-mono text-[0.7rem] text-[#5a6b7d]">
+                            {unit?.barcodeSku ?? "—"}
+                          </p>
+                        </td>
+                        <td className="px-3 py-2.5 text-[0.75rem] text-[#5a6b7d]">
+                          {formatDate(
+                            (r as { createdAt?: string }).createdAt ?? "",
                           )}
-                        >
-                          {r.inspectStatus}
-                        </span>
-                      )}
-                      {r.cleaningRequired && !r.cleaningCompletedAt ? (
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => cleaningDone.mutate(r.id)}
-                        >
-                          Cleaning done
-                        </Button>
-                      ) : null}
-                    </div>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-          <TablePager {...pagedReturns.pagerProps} />
+                        </td>
+                        <td className="px-3 py-2.5">
+                          {r.inspectStatus ? (
+                            <span
+                              className={cn(
+                                "inline-flex rounded-md px-2 py-0.5 text-[0.7rem] font-semibold",
+                                statusPill(r.inspectStatus),
+                              )}
+                            >
+                              {statusLabel(r.inspectStatus)}
+                            </span>
+                          ) : (
+                            <span className="text-[0.75rem] text-[#8a9bb0]">
+                              Awaiting inspect
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5 text-right">
+                          <div className="flex flex-wrap justify-end gap-1.5">
+                            {!r.inspectStatus ? (
+                              <>
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={() =>
+                                    inspect.mutate({
+                                      id: r.id,
+                                      status: "clean_ready",
+                                    })
+                                  }
+                                >
+                                  OK
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={() =>
+                                    inspect.mutate({
+                                      id: r.id,
+                                      status: "needs_cleaning",
+                                    })
+                                  }
+                                >
+                                  Clean
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="danger"
+                                  size="sm"
+                                  onClick={() =>
+                                    inspect.mutate({
+                                      id: r.id,
+                                      status: "damaged",
+                                    })
+                                  }
+                                >
+                                  Damaged
+                                </Button>
+                              </>
+                            ) : null}
+                            {r.cleaningRequired && !r.cleaningCompletedAt ? (
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => cleaningDone.mutate(r.id)}
+                              >
+                                Cleaning done
+                              </Button>
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <TablePager {...pagedReturns.pagerProps} />
           </>
         )}
       </section>
 
       <div className="space-y-4">
         <form
-          className="rounded-2xl border border-[#e5e7eb] bg-white p-5 sm:p-6"
+          className={formCard}
           onSubmit={form.handleSubmit((v) => create.mutate(v))}
           noValidate
         >
-          <h2 className="display text-2xl text-[#111827]">Record return</h2>
-          <p className="mt-1 text-sm text-[#6b7280]">
-            Partial returns: one unit at a time. Ticket stays open until all
-            units are back.
+          <h2 className="text-sm font-semibold text-[#0b1f33]">
+            Record return
+          </h2>
+          <p className="mt-0.5 text-[0.75rem] text-[#5a6b7d]">
+            One unit at a time. Ticket stays open until all units are back.
           </p>
-          <div className="mt-5 space-y-4">
+          <div className="mt-4 space-y-3">
             <div>
               <Label>Order (units out)</Label>
               <Select
-                className="mt-1.5 select-field"
+                className={fieldSelect}
                 {...form.register("orderId", {
                   onChange: () => form.setValue("inventoryUnitId", ""),
                 })}
               >
-                <option value="">Select</option>
+                <option value="">Select…</option>
                 {outOrders.map((o) => (
                   <option key={o.id} value={o.id}>
                     {o.orderNumber} · {o.customerName} ({o.unitsOut.length} out)
@@ -280,7 +433,7 @@ function RentalReturnsDesk() {
             <div>
               <Label>Unit</Label>
               <Select
-                className="mt-1.5 select-field"
+                className={fieldSelect}
                 disabled={!orderId}
                 {...form.register("inventoryUnitId")}
               >
@@ -298,7 +451,11 @@ function RentalReturnsDesk() {
               />
             </div>
             <label className="flex items-center gap-2 text-sm text-[#374151]">
-              <input type="checkbox" {...form.register("cleaningRequired")} />
+              <input
+                type="checkbox"
+                className="accent-[#1a56db]"
+                {...form.register("cleaningRequired")}
+              />
               Needs cleaning / service
             </label>
             <div>
@@ -307,7 +464,7 @@ function RentalReturnsDesk() {
             </div>
             <Button
               type="submit"
-              className="w-full"
+              className="w-full bg-[#1a56db] hover:bg-[#1546b3]"
               disabled={create.isPending}
             >
               {create.isPending ? "Saving…" : "Record return"}
@@ -315,9 +472,11 @@ function RentalReturnsDesk() {
           </div>
         </form>
 
-        <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5 sm:p-6">
-          <h2 className="display text-2xl text-[#111827]">Settle deposit</h2>
-          <p className="mt-1 text-sm text-[#6b7280]">
+        <section className={formCard}>
+          <h2 className="text-sm font-semibold text-[#0b1f33]">
+            Settle deposit
+          </h2>
+          <p className="mt-0.5 text-[0.75rem] text-[#5a6b7d]">
             Refund part or all of held deposit. Remainder forfeited. Once per
             order.
           </p>
@@ -325,7 +484,7 @@ function RentalReturnsDesk() {
             <div>
               <Label>Order</Label>
               <Select
-                className="mt-1.5 select-field"
+                className={fieldSelect}
                 value={settleOrderId}
                 onChange={(e) => setSettleOrderId(e.target.value)}
               >
@@ -359,6 +518,7 @@ function RentalReturnsDesk() {
             <Button
               type="button"
               className="w-full"
+              variant="secondary"
               disabled={!settleOrderId || settle.isPending}
               onClick={() => settle.mutate()}
             >
@@ -376,7 +536,7 @@ function SaleReturnsDesk() {
   const qc = useQueryClient();
   const roles = useAuthStore((s) => s.user?.roles);
   const canApprove = canApproveRefund(roles);
-  const [deskTab, setDeskTab] = useState<"new" | "pending" | "history">("new");
+  const [deskTab, setDeskTab] = useState<SaleDeskTab>("new");
   const [q, setQ] = useState("");
   const [active, setActive] = useState<{
     id: string;
@@ -409,7 +569,7 @@ function SaleReturnsDesk() {
       toast.success(
         row?.message ||
           (row?.status === "completed"
-            ? "✓ Return Completed"
+            ? "Return completed"
             : "Return approved"),
       );
       void qc.invalidateQueries({ queryKey: ["sale-returns-list"] });
@@ -442,248 +602,325 @@ function SaleReturnsDesk() {
     (r) => r.status !== "pending" && r.status !== "requested",
   );
 
+  const loading =
+    (deskTab === "new" && recent.isLoading && !recent.data) ||
+    (deskTab === "pending" && pending.isLoading && !pending.data) ||
+    (deskTab === "history" && history.isLoading && !history.data);
+
   return (
     <div className="space-y-4">
-      <div className="flex gap-1 rounded-[12px] bg-[#eef2f8] p-1 sm:w-fit">
-        {(
-          [
-            ["new", "New return"],
-            ["pending", "Pending approval"],
-            ["history", "History"],
-          ] as const
-        ).map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setDeskTab(id)}
-            className={cn(
-              "rounded-[9px] px-4 py-2 text-sm font-semibold transition",
-              deskTab === id
-                ? "bg-white text-[#0b1f33] shadow-sm"
-                : "text-[#5a6b7d]",
-            )}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {deskTab === "new" ? (
-        <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5">
-          <h2 className="text-lg font-semibold text-[#111827]">
-            Closed sales — refund, restock, or exchange
-          </h2>
-          <p className="mt-1 text-sm text-[#6b7280]">
-            Cashiers can request returns; managers approve. Exchange settles the
-            net difference.
-          </p>
-          <div className="mt-4 max-w-sm">
-            <Label>Search order # / customer</Label>
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#e4e9f0] bg-white p-3 shadow-sm">
+        <ChipTabs
+          tabs={[
+            { id: "new" as const, label: "New return" },
+            { id: "pending" as const, label: "Pending approval" },
+            { id: "history" as const, label: "History" },
+          ]}
+          active={deskTab}
+          onChange={setDeskTab}
+        />
+        {deskTab === "new" ? (
+          <div className="min-w-[12rem] flex-1 sm:max-w-xs">
             <Input
-              className="mt-1.5"
+              className="h-9"
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="ORD-…"
+              placeholder="Search order # / customer…"
             />
           </div>
-          <ul className="mt-4 max-h-[28rem] divide-y divide-[#f3f4f6] overflow-y-auto text-sm">
-            {items.map((o) => (
-              <li
-                key={o.id}
-                className="flex items-center justify-between gap-3 py-3"
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="font-semibold text-[#111827]">{o.orderNumber}</p>
-                  <p className="truncate text-xs text-[#6b7280]">
-                    {o.customerName || "Walk-in"}
-                    {o.total != null || o.subtotal != null
-                      ? ` · ${money(o.total ?? o.subtotal)}`
-                      : ""}
-                  </p>
-                  {o.productSummary ? (
-                    <p className="mt-0.5 truncate text-xs text-[#334155]">
-                      {o.productSummary}
-                    </p>
-                  ) : null}
-                </div>
-                <div className="flex shrink-0 gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    onClick={() =>
-                      setActive({
-                        id: o.id,
-                        orderNumber: o.orderNumber,
-                        mode: "return",
-                      })
-                    }
-                  >
-                    Return
-                  </Button>
-                  {canApprove ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={() =>
-                        setActive({
-                          id: o.id,
-                          orderNumber: o.orderNumber,
-                          mode: "exchange",
-                        })
-                      }
+        ) : null}
+      </div>
+
+      {loading ? <PageSkeleton rows={6} /> : null}
+
+      {deskTab === "new" && !loading ? (
+        <section className={formCard}>
+          <h2 className="text-sm font-semibold text-[#0b1f33]">
+            Closed sales
+          </h2>
+          <p className="mt-0.5 text-[0.75rem] text-[#5a6b7d]">
+            Refund / restock, or exchange (manager). Cashiers can request;
+            managers approve.
+          </p>
+          <div className="mt-4 overflow-x-auto rounded-lg border border-[#e5e7eb]">
+            <table className="w-full min-w-[640px] text-left text-sm">
+              <thead className="bg-[#f7f9fb] text-[0.7rem] tracking-wide text-[#5a6b7d] uppercase">
+                <tr>
+                  <th className="px-3 py-2 font-semibold">Order</th>
+                  <th className="px-3 py-2 font-semibold">Customer</th>
+                  <th className="px-3 py-2 font-semibold">Items</th>
+                  <th className="px-3 py-2 text-right font-semibold">Total</th>
+                  <th className="px-3 py-2 font-semibold" />
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((o) => (
+                  <tr key={o.id} className="border-t border-[#f0f3f7]">
+                    <td className="px-3 py-2.5 font-medium text-[#0b1f33]">
+                      {o.orderNumber}
+                    </td>
+                    <td className="px-3 py-2.5 text-[#5a6b7d]">
+                      {o.customerName || "Walk-in"}
+                    </td>
+                    <td className="max-w-[14rem] truncate px-3 py-2.5 text-[#334155]">
+                      {o.productSummary || "—"}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">
+                      {o.total != null || o.subtotal != null
+                        ? money(o.total ?? o.subtotal)
+                        : "—"}
+                    </td>
+                    <td className="px-3 py-2.5 text-right">
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          onClick={() =>
+                            setActive({
+                              id: o.id,
+                              orderNumber: o.orderNumber,
+                              mode: "return",
+                            })
+                          }
+                        >
+                          Return
+                        </Button>
+                        {canApprove ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="bg-[#1a56db] hover:bg-[#1546b3]"
+                            onClick={() =>
+                              setActive({
+                                id: o.id,
+                                orderNumber: o.orderNumber,
+                                mode: "exchange",
+                              })
+                            }
+                          >
+                            Exchange
+                          </Button>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {!items.length ? (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="px-3 py-10 text-center text-[#5a6b7d]"
                     >
-                      Exchange
-                    </Button>
-                  ) : null}
-                </div>
-              </li>
-            ))}
-            {!items.length && !recent.isLoading ? (
-              <li className="py-8 text-center text-[#6b7280]">
-                No closed sales found
-              </li>
-            ) : null}
-          </ul>
+                      No closed sales found
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
         </section>
       ) : null}
 
-      {deskTab === "pending" ? (
-        <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5">
-          <h2 className="text-lg font-semibold text-[#111827]">
+      {deskTab === "pending" && !loading ? (
+        <section className={formCard}>
+          <h2 className="text-sm font-semibold text-[#0b1f33]">
             Pending approval
           </h2>
-          <ul className="mt-4 divide-y divide-[#f3f4f6] text-sm">
-            {pendingItems.map((r) => (
-              <li
-                key={r.id}
-                className="flex flex-wrap items-center justify-between gap-3 py-3"
-              >
-                <div>
-                  <p className="font-semibold text-[#111827]">
-                    {r.orderNumber ?? r.orderId.slice(0, 8)}
-                  </p>
-                  <p className="text-xs text-[#6b7280]">
-                    {r.customerName ?? "—"} · Refund {money(r.refundAmount ?? 0)}{" "}
-                    · Reason: {r.reasonCode ?? "—"} · Staff:{" "}
-                    {r.receivedBy ?? "—"}
-                  </p>
-                  {Array.isArray(r.items) && r.items.length ? (
-                    <ul className="mt-1 list-disc pl-4 text-xs text-[#334155]">
-                      {(r.items as Array<Record<string, unknown>>).map(
-                        (it, i) => (
-                          <li key={i}>
-                            {String(it.name ?? it.sku ?? "Item")}
-                            {it.quantity != null
-                              ? ` × ${String(it.quantity)}`
-                              : ""}
-                          </li>
-                        ),
+          <div className="mt-4 overflow-x-auto rounded-lg border border-[#e5e7eb]">
+            <table className="w-full min-w-[680px] text-left text-sm">
+              <thead className="bg-[#f7f9fb] text-[0.7rem] tracking-wide text-[#5a6b7d] uppercase">
+                <tr>
+                  <th className="px-3 py-2 font-semibold">Order</th>
+                  <th className="px-3 py-2 font-semibold">Customer / lines</th>
+                  <th className="px-3 py-2 text-right font-semibold">Refund</th>
+                  <th className="px-3 py-2 font-semibold">Staff</th>
+                  <th className="px-3 py-2 font-semibold" />
+                </tr>
+              </thead>
+              <tbody>
+                {pendingItems.map((r) => (
+                  <tr key={r.id} className="border-t border-[#f0f3f7] align-top">
+                    <td className="px-3 py-2.5">
+                      <p className="font-medium text-[#0b1f33]">
+                        {r.orderNumber ?? r.orderId.slice(0, 8)}
+                      </p>
+                      <p className="text-[0.7rem] text-[#5a6b7d]">
+                        {r.reasonCode ?? "—"}
+                      </p>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <p className="text-[#0b1f33]">
+                        {r.customerName ?? "—"}
+                      </p>
+                      {Array.isArray(r.items) && r.items.length ? (
+                        <ul className="mt-1 space-y-0.5 text-[0.7rem] text-[#5a6b7d]">
+                          {(r.items as Array<Record<string, unknown>>)
+                            .slice(0, 4)
+                            .map((it, i) => (
+                              <li key={i}>
+                                {String(it.name ?? it.sku ?? "Item")}
+                                {it.quantity != null
+                                  ? ` × ${String(it.quantity)}`
+                                  : ""}
+                              </li>
+                            ))}
+                        </ul>
+                      ) : null}
+                      {r.notes ? (
+                        <p className="mt-1 text-[0.7rem] text-[#8a9bb0]">
+                          {r.notes}
+                        </p>
+                      ) : null}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums font-medium">
+                      {money(r.refundAmount ?? 0)}
+                    </td>
+                    <td className="px-3 py-2.5 text-[0.75rem] text-[#5a6b7d]">
+                      {r.receivedBy ?? "—"}
+                    </td>
+                    <td className="px-3 py-2.5 text-right">
+                      {canApprove ? (
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="bg-[#1a56db] hover:bg-[#1546b3]"
+                            disabled={approve.isPending}
+                            onClick={() => approve.mutate(r.id)}
+                          >
+                            Approve
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            disabled={reject.isPending}
+                            onClick={() => reject.mutate(r.id)}
+                          >
+                            Reject
+                          </Button>
+                        </div>
+                      ) : (
+                        <span className="text-xs font-medium text-amber-700">
+                          Awaiting manager
+                        </span>
                       )}
-                    </ul>
-                  ) : null}
-                  {r.notes ? (
-                    <p className="mt-0.5 text-xs text-[#5a6b7d]">{r.notes}</p>
-                  ) : null}
-                </div>
-                {canApprove ? (
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      disabled={approve.isPending}
-                      onClick={() => approve.mutate(r.id)}
+                    </td>
+                  </tr>
+                ))}
+                {!pendingItems.length ? (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="px-3 py-10 text-center text-[#5a6b7d]"
                     >
-                      Approve
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="secondary"
-                      disabled={reject.isPending}
-                      onClick={() => reject.mutate(r.id)}
-                    >
-                      Reject
-                    </Button>
-                  </div>
-                ) : (
-                  <span className="text-xs font-medium text-amber-700">
-                    Awaiting manager
-                  </span>
-                )}
-              </li>
-            ))}
-            {!pendingItems.length && !pending.isLoading ? (
-              <li className="py-8 text-center text-[#6b7280]">
-                No pending returns
-              </li>
-            ) : null}
-          </ul>
+                      No pending returns
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
         </section>
       ) : null}
 
-      {deskTab === "history" ? (
-        <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5">
-          <h2 className="text-lg font-semibold text-[#111827]">History</h2>
-          <ul className="mt-4 divide-y divide-[#f3f4f6] text-sm">
-            {historyItems.map((r) => (
-              <li key={r.id} className="py-3">
-                <div className="flex justify-between gap-3">
-                  <div>
-                    <p className="font-semibold text-[#111827]">
-                      {r.orderNumber ?? r.orderId.slice(0, 8)} ·{" "}
-                      {r.statusLabel ??
-                        (r.status === "completed"
-                          ? "✓ Return Completed"
-                          : r.status)}
-                    </p>
-                    <p className="text-xs text-[#6b7280]">
-                      Refund {money(r.refundAmount ?? 0)}
-                      {r.refundMethod ? ` via ${r.refundMethod}` : ""} · Reason:{" "}
-                      {r.reasonCode ?? "—"} · {formatDate(r.createdAt)}
-                    </p>
-                    {r.customerName ? (
-                      <p className="text-xs text-[#6b7280]">
-                        Customer: {r.customerName}
+      {deskTab === "history" && !loading ? (
+        <section className={formCard}>
+          <h2 className="text-sm font-semibold text-[#0b1f33]">History</h2>
+          <div className="mt-4 overflow-x-auto rounded-lg border border-[#e5e7eb]">
+            <table className="w-full min-w-[720px] text-left text-sm">
+              <thead className="bg-[#f7f9fb] text-[0.7rem] tracking-wide text-[#5a6b7d] uppercase">
+                <tr>
+                  <th className="px-3 py-2 font-semibold">Order</th>
+                  <th className="px-3 py-2 font-semibold">Status</th>
+                  <th className="px-3 py-2 text-right font-semibold">Refund</th>
+                  <th className="px-3 py-2 font-semibold">Details</th>
+                  <th className="px-3 py-2 font-semibold">Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {historyItems.map((r) => (
+                  <tr key={r.id} className="border-t border-[#f0f3f7] align-top">
+                    <td className="px-3 py-2.5">
+                      <p className="font-medium text-[#0b1f33]">
+                        {r.orderNumber ?? r.orderId.slice(0, 8)}
                       </p>
-                    ) : null}
-                    {r.notes ? (
-                      <p className="mt-0.5 text-xs text-[#5a6b7d]">{r.notes}</p>
-                    ) : null}
-                    {r.exchangeOrderNumber || r.invoiceNumber ? (
-                      <p className="mt-0.5 text-xs text-[#1a56db]">
-                        {r.exchangeOrderNumber
-                          ? `Exchange ${r.exchangeOrderNumber}`
-                          : null}
-                        {r.exchangeOrderNumber && r.invoiceNumber ? " · " : null}
-                        {r.invoiceNumber ? `Invoice ${r.invoiceNumber}` : null}
-                      </p>
-                    ) : null}
-                    {Array.isArray(r.items) && r.items.length ? (
-                      <ul className="mt-1 list-disc pl-4 text-xs text-[#334155]">
-                        {(r.items as Array<Record<string, unknown>>).map(
-                          (it, i) => (
-                            <li key={i}>
-                              {String(it.name ?? it.sku ?? "Item")}
-                              {it.quantity != null
-                                ? ` × ${String(it.quantity)}`
-                                : ""}
-                              {it.condition
-                                ? ` (${String(it.condition)})`
-                                : ""}
-                            </li>
-                          ),
+                      {r.customerName ? (
+                        <p className="text-[0.7rem] text-[#5a6b7d]">
+                          {r.customerName}
+                        </p>
+                      ) : null}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <span
+                        className={cn(
+                          "inline-flex rounded-md px-2 py-0.5 text-[0.7rem] font-semibold",
+                          statusPill(r.status),
                         )}
-                      </ul>
-                    ) : null}
-                  </div>
-                </div>
-              </li>
-            ))}
-            {!historyItems.length && !history.isLoading ? (
-              <li className="py-8 text-center text-[#6b7280]">No history yet</li>
-            ) : null}
-          </ul>
+                      >
+                        {r.statusLabel ?? statusLabel(r.status)}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">
+                      {money(r.refundAmount ?? 0)}
+                      {r.refundMethod ? (
+                        <span className="mt-0.5 block text-[0.65rem] text-[#8a9bb0]">
+                          via {r.refundMethod}
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="px-3 py-2.5 text-[0.75rem] text-[#5a6b7d]">
+                      <p>Reason: {r.reasonCode ?? "—"}</p>
+                      {r.exchangeOrderNumber || r.invoiceNumber ? (
+                        <p className="mt-0.5 text-[#1a56db]">
+                          {r.exchangeOrderNumber
+                            ? `Exchange ${r.exchangeOrderNumber}`
+                            : null}
+                          {r.exchangeOrderNumber && r.invoiceNumber
+                            ? " · "
+                            : null}
+                          {r.invoiceNumber
+                            ? `Invoice ${r.invoiceNumber}`
+                            : null}
+                        </p>
+                      ) : null}
+                      {Array.isArray(r.items) && r.items.length ? (
+                        <ul className="mt-1 space-y-0.5">
+                          {(r.items as Array<Record<string, unknown>>)
+                            .slice(0, 3)
+                            .map((it, i) => (
+                              <li key={i}>
+                                {String(it.name ?? it.sku ?? "Item")}
+                                {it.quantity != null
+                                  ? ` × ${String(it.quantity)}`
+                                  : ""}
+                                {it.condition
+                                  ? ` (${String(it.condition)})`
+                                  : ""}
+                              </li>
+                            ))}
+                        </ul>
+                      ) : null}
+                    </td>
+                    <td className="px-3 py-2.5 text-[0.75rem] text-[#5a6b7d]">
+                      {formatDate(r.createdAt)}
+                    </td>
+                  </tr>
+                ))}
+                {!historyItems.length ? (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="px-3 py-10 text-center text-[#5a6b7d]"
+                    >
+                      No history yet
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
         </section>
       ) : null}
 
@@ -700,7 +937,6 @@ function SaleReturnsDesk() {
   );
 }
 
-/** Subscription cancellation panel — inside unified returns desk */
 function SubscriptionCancelDesk() {
   const qc = useQueryClient();
   const { money } = useBootstrap();
@@ -728,145 +964,242 @@ function SubscriptionCancelDesk() {
     },
     onError: (e: unknown) =>
       toast.error(
-        e instanceof Error ? e.message : "Could not cancel subscription",
+        e instanceof ApiError
+          ? e.messages.join(", ")
+          : e instanceof Error
+            ? e.message
+            : "Could not cancel subscription",
       ),
   });
 
   const items = subs.data?.items ?? [];
 
+  if (subs.isLoading && !subs.data) return <PageSkeleton rows={5} />;
+
   return (
-    <div className="space-y-4">
-      <p className="text-sm text-[#6b7280]">
-        Cancel an active subscription / membership. The subscription will
-        remain active until its current period ends.
+    <section className={formCard}>
+      <h2 className="text-sm font-semibold text-[#0b1f33]">
+        Active subscriptions
+      </h2>
+      <p className="mt-0.5 text-[0.75rem] text-[#5a6b7d]">
+        Cancel stays active until the current period ends.
       </p>
-      {subs.isLoading ? (
-        <p className="text-sm text-[#6b7280]">Loading…</p>
-      ) : items.length === 0 ? (
-        <p className="py-8 text-center text-sm text-[#6b7280]">
-          No active subscriptions found.
-        </p>
+      {!items.length ? (
+        <div className="mt-4">
+          <EmptyState
+            title="No active subscriptions"
+            detail="Nothing to cancel right now."
+          />
+        </div>
       ) : (
-        <ul className="divide-y divide-[#eef2f8] rounded-xl border border-[#e5e7eb] bg-white">
-          {items.map((s) => (
-            <li key={s.id} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
-              <div className="min-w-0">
-                <p className="font-semibold text-[#0b1f33]">
-                  {s.customer.fullName}
-                </p>
-                <p className="text-[0.75rem] text-[#5a6b7d]">
-                  {s.plan.title} · {money(Number(s.price))} ·{" "}
-                  renews {new Date(s.currentPeriodEnd).toLocaleDateString()}
-                </p>
-              </div>
-              <button
-                type="button"
-                className="shrink-0 rounded-lg bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100"
-                onClick={() => cancel.mutate(s.id)}
-                disabled={cancel.isPending}
-              >
-                Cancel
-              </button>
-            </li>
-          ))}
-        </ul>
+        <div className="mt-4 overflow-x-auto rounded-lg border border-[#e5e7eb]">
+          <table className="w-full min-w-[560px] text-left text-sm">
+            <thead className="bg-[#f7f9fb] text-[0.7rem] tracking-wide text-[#5a6b7d] uppercase">
+              <tr>
+                <th className="px-3 py-2 font-semibold">Customer</th>
+                <th className="px-3 py-2 font-semibold">Plan</th>
+                <th className="px-3 py-2 text-right font-semibold">Price</th>
+                <th className="px-3 py-2 font-semibold">Period end</th>
+                <th className="px-3 py-2 font-semibold" />
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((s) => (
+                <tr key={s.id} className="border-t border-[#f0f3f7]">
+                  <td className="px-3 py-2.5 font-medium text-[#0b1f33]">
+                    {s.customer.fullName}
+                  </td>
+                  <td className="px-3 py-2.5 text-[#5a6b7d]">{s.plan.title}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">
+                    {money(Number(s.price))}
+                  </td>
+                  <td className="px-3 py-2.5 text-[0.75rem] text-[#5a6b7d]">
+                    {new Date(s.currentPeriodEnd).toLocaleDateString()}
+                  </td>
+                  <td className="px-3 py-2.5 text-right">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="danger"
+                      disabled={cancel.isPending}
+                      onClick={() => cancel.mutate(s.id)}
+                    >
+                      Cancel
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
-    </div>
+    </section>
   );
 }
 
-/** Service order refund panel — inside unified returns desk */
+/** Refund a completed service job via payment refund (not sale-return API). */
 function ServiceRefundDesk() {
   const qc = useQueryClient();
   const { money } = useBootstrap();
-
-  const orders = useQuery({
-    queryKey: ["returns-service-orders"],
-    queryFn: () =>
-      ordersApi.list({ kind: "service_order", status: "completed", limit: 50 }),
-  });
+  const locationId = useBranchStore((s) => s.currentLocationId);
 
   const [selectedId, setSelectedId] = useState("");
   const [reason, setReason] = useState("");
+  const [amount, setAmount] = useState("");
+
+  const orders = useQuery({
+    queryKey: ["returns-service-orders", locationId],
+    queryFn: () =>
+      ordersApi.list({
+        kind: "service_order",
+        status: "completed",
+        limit: 50,
+        locationId: locationId || undefined,
+      }),
+  });
+
+  const detail = useQuery({
+    queryKey: ["order", selectedId],
+    queryFn: () => ordersApi.get(selectedId),
+    enabled: Boolean(selectedId),
+  });
+
+  const refundablePayment = useMemo(() => {
+    const pays = detail.data?.payments ?? [];
+    return (
+      pays.find(
+        (p) =>
+          p.status === "succeeded" &&
+          (p.type === "payment" || p.type === "deposit" || !p.type),
+      ) ?? pays.find((p) => p.status === "succeeded")
+    );
+  }, [detail.data]);
+
+  useEffect(() => {
+    if (!refundablePayment) {
+      setAmount("");
+      return;
+    }
+    setAmount(String(Number(refundablePayment.amount) || ""));
+  }, [refundablePayment]);
 
   const doRefund = useMutation({
     mutationFn: async () => {
       if (!selectedId) throw new Error("Select an order to refund");
-      return posApi.saleReturn({
-        orderId: selectedId,
-        items: [],
-        refundMethod: "store_credit",
-        reasonCode: "service_refund",
-        reason: reason.trim() || "service_refund",
-        idempotencyKey: `svcref-${selectedId}-${Date.now()}`,
+      if (!refundablePayment?.id) {
+        throw new Error("No succeeded payment found on this order");
+      }
+      const n = Number(amount);
+      if (!Number.isFinite(n) || n <= 0) {
+        throw new Error("Enter a valid refund amount");
+      }
+      return paymentsApi.refund(refundablePayment.id, {
+        amount: n,
+        idempotencyKey: newIdempotencyKey(`svcref-${selectedId}`),
+        reason: reason.trim() || "Service refund",
       });
     },
     onSuccess: () => {
-      toast.success("Service refund recorded as store credit");
+      toast.success("Service refund recorded");
       setSelectedId("");
       setReason("");
+      setAmount("");
       void qc.invalidateQueries({ queryKey: ["returns-service-orders"] });
+      void qc.invalidateQueries({ queryKey: ["order"] });
     },
     onError: (e: unknown) =>
-      toast.error(e instanceof Error ? e.message : "Refund failed"),
+      toast.error(
+        e instanceof ApiError
+          ? e.messages.join(", ")
+          : e instanceof Error
+            ? e.message
+            : "Refund failed",
+      ),
   });
 
   const items = orders.data?.items ?? [];
 
+  if (orders.isLoading && !orders.data) return <PageSkeleton rows={5} />;
+
   return (
-    <div className="space-y-4">
-      <p className="text-sm text-[#6b7280]">
-        Issue a refund or store credit for a completed service order.
+    <section className={formCard}>
+      <h2 className="text-sm font-semibold text-[#0b1f33]">
+        Service order refund
+      </h2>
+      <p className="mt-0.5 text-[0.75rem] text-[#5a6b7d]">
+        Refund against the original payment on a completed service job.
       </p>
-      {orders.isLoading ? (
-        <p className="text-sm text-[#6b7280]">Loading…</p>
+
+      {!items.length ? (
+        <div className="mt-4">
+          <EmptyState
+            title="No completed service orders"
+            detail="Finish a service job first, then refund from here."
+          />
+        </div>
       ) : (
-        <div className="space-y-3">
-          <div>
-            <label className="block text-xs font-semibold text-[#5a6b7d] uppercase tracking-wide mb-1">
-              Select service order
-            </label>
-            <Select
-              className="h-10 w-full rounded-lg border border-[#e5e7eb] bg-white px-3 text-sm"
-              value={selectedId}
-              onChange={(e) => setSelectedId(e.target.value)}
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <div className="space-y-3 sm:col-span-2 sm:max-w-xl">
+            <div>
+              <Label>Service order</Label>
+              <Select
+                className={fieldSelect}
+                value={selectedId}
+                onChange={(e) => setSelectedId(e.target.value)}
+              >
+                <option value="">Select…</option>
+                {items.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.orderNumber} · {o.customer?.fullName ?? "Walk-in"} ·{" "}
+                    {money(Number(o.subtotal))}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            {selectedId && detail.isLoading ? (
+              <p className="text-sm text-[#5a6b7d]">Loading payment…</p>
+            ) : null}
+            {selectedId && detail.data && !refundablePayment ? (
+              <p className="text-sm text-amber-700">
+                No refundable payment on this order.
+              </p>
+            ) : null}
+            <div>
+              <Label>Refund amount</Label>
+              <Input
+                className="mt-1.5"
+                inputMode="decimal"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                disabled={!refundablePayment}
+                placeholder="0.00"
+              />
+            </div>
+            <div>
+              <Label>Reason (optional)</Label>
+              <Input
+                className="mt-1.5"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="Cancellation / quality / other"
+              />
+            </div>
+            <Button
+              type="button"
+              className="bg-[#1a56db] hover:bg-[#1546b3]"
+              disabled={
+                !selectedId || !refundablePayment || doRefund.isPending
+              }
+              onClick={() => doRefund.mutate()}
             >
-              <option value="">— choose order —</option>
-              {items.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.orderNumber} · {o.customer?.fullName ?? "Walk-in"} ·{" "}
-                  {money(Number(o.subtotal))}
-                </option>
-              ))}
-            </Select>
+              {doRefund.isPending ? "Processing…" : "Refund payment"}
+            </Button>
           </div>
-          <div>
-            <label className="block text-xs font-semibold text-[#5a6b7d] uppercase tracking-wide mb-1">
-              Reason (optional)
-            </label>
-            <input
-              type="text"
-              className="h-10 w-full rounded-lg border border-[#e5e7eb] bg-white px-3 text-sm"
-              placeholder="Cancellation reason"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-            />
-          </div>
-          <button
-            type="button"
-            className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
-            disabled={!selectedId || doRefund.isPending}
-            onClick={() => doRefund.mutate()}
-          >
-            {doRefund.isPending ? "Processing…" : "Refund as store credit"}
-          </button>
         </div>
       )}
-    </div>
+    </section>
   );
 }
-
-type ReturnTab = "sale" | "rental" | "service" | "subscription";
 
 export default function ReturnsPage() {
   const { hasMode, isLoading } = useBootstrap();
@@ -875,78 +1208,74 @@ export default function ReturnsPage() {
   const hasSvc = hasMode("service");
   const hasSub = hasMode("subscription");
 
-  const [tab, setTab] = useState<ReturnTab>(() => {
-    if (hasSale) return "sale";
-    if (hasRental) return "rental";
-    if (hasSvc) return "service";
-    return "subscription";
-  });
+  const availableTabs = useMemo(
+    () =>
+      (
+        [
+          { id: "sale" as const, label: "Sale refunds", show: hasSale },
+          { id: "rental" as const, label: "Rental receive", show: hasRental },
+          { id: "service" as const, label: "Service refunds", show: hasSvc },
+          {
+            id: "subscription" as const,
+            label: "Cancel subscription",
+            show: hasSub,
+          },
+        ] as const
+      ).filter((t) => t.show),
+    [hasSale, hasRental, hasSvc, hasSub],
+  );
 
-  if (isLoading) {
-    return (
-      <p className="py-16 text-center text-sm text-[#5a6b7d]">Loading…</p>
-    );
-  }
+  const [tab, setTab] = useState<ReturnTab | null>(null);
 
-  const availableTabs = [
-      { id: "sale" as const, label: "Sale refunds", show: hasSale },
-      { id: "rental" as const, label: "Rental receive", show: hasRental },
-      { id: "service" as const, label: "Service refunds", show: hasSvc },
-      { id: "subscription" as const, label: "Cancel subscription", show: hasSub },
-    ].filter((t) => t.show);
+  useEffect(() => {
+    if (!availableTabs.length) return;
+    if (tab && availableTabs.some((t) => t.id === tab)) return;
+    setTab(availableTabs[0]!.id);
+  }, [availableTabs, tab]);
+
+  if (isLoading) return <PageSkeleton rows={8} />;
 
   if (!availableTabs.length) {
     return (
-      <div className="rounded-xl border border-[#d9e0ea] bg-white p-8 text-center">
-        <p className="text-sm font-semibold text-[#0b1f33]">
-          No commerce modes enabled
-        </p>
-        <p className="mt-1.5 text-sm text-[#5a6b7d]">
-          Enable commerce modes in shop setup.
-        </p>
+      <div className="space-y-4 px-3 sm:px-4">
+        <PageHeader
+          eyebrow="Sales"
+          title="Returns desk"
+          subtitle="Refunds, rental returns, and cancellations."
+        />
+        <EmptyState
+          title="No commerce modes enabled"
+          detail="Enable sale, rental, service, or subscription in shop setup."
+        />
       </div>
     );
   }
 
-  const activeTab = availableTabs.some((t) => t.id === tab)
+  const activeTab = (tab && availableTabs.some((t) => t.id === tab)
     ? tab
-    : (availableTabs[0]?.id ?? "sale");
-
-  const showTabs = availableTabs.length > 1;
+    : availableTabs[0]!.id) as ReturnTab;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 sm:space-y-8">
-      <header>
-        <p className="text-sm tracking-[0.2em] text-[#0b1f33] uppercase">
-          Returns &amp; Cancellations
-        </p>
-        <h1 className="display mt-2 text-3xl text-[#111827] sm:text-4xl">
-          Returns desk
-        </h1>
-        <p className="mt-2 max-w-xl text-sm leading-relaxed text-[#6b7280]">
-          Sale refunds · rental returns · service refunds · subscription
-          cancellations — all in one place.
-        </p>
-        {showTabs ? (
-          <div className="mt-4 flex flex-wrap gap-1 rounded-[12px] bg-[#eef2f8] p-1 sm:w-fit">
-            {availableTabs.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setTab(t.id)}
-                className={cn(
-                  "rounded-[9px] px-4 py-2 text-sm font-semibold transition",
-                  activeTab === t.id
-                    ? "bg-white text-[#0b1f33] shadow-sm"
-                    : "text-[#5a6b7d]",
-                )}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-        ) : null}
-      </header>
+    <div className="space-y-5 px-3 sm:px-4 pb-10">
+      <PageHeader
+        eyebrow="Sales"
+        title="Returns desk"
+        subtitle="Sale refunds, rental receive, service refunds, and subscription cancellations — one desk."
+        action={
+          <Button asChild size="sm" variant="secondary">
+            <Link href="/settings/returns">
+              <Settings className="mr-1.5 size-4" />
+              Return settings
+            </Link>
+          </Button>
+        }
+      />
+
+      <ModeTabs
+        tabs={availableTabs.map((t) => ({ id: t.id, label: t.label }))}
+        active={activeTab}
+        onChange={setTab}
+      />
 
       {activeTab === "sale" ? <SaleReturnsDesk /> : null}
       {activeTab === "rental" ? <RentalReturnsDesk /> : null}

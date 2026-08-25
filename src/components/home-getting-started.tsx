@@ -91,6 +91,7 @@ export function HomeGettingStarted() {
     const t = boot?.tenant;
     if (!t) return false;
     if (t.taxId || t.gstin) return true;
+    if (t.taxMode === "none") return true;
     const settings =
       t.settings && typeof t.settings === "object"
         ? (t.settings as Record<string, unknown>)
@@ -99,11 +100,14 @@ export function HomeGettingStarted() {
       settings.tax && typeof settings.tax === "object"
         ? (settings.tax as Record<string, unknown>)
         : {};
-    if (t.taxMode === "none") return true;
-    return (
+    if (
       typeof tax.ratePercent === "number" ||
       (typeof tax.ratePercent === "string" && tax.ratePercent.trim() !== "")
-    );
+    ) {
+      return true;
+    }
+    // Tenant already has a tax mode from signup/settings — treat as configured
+    return Boolean(t.taxMode);
   }, [boot?.tenant]);
 
   const prefsConfigured = useMemo(() => {
@@ -269,44 +273,20 @@ export function HomeGettingStarted() {
     return list.map((s, i) => ({ ...s, n: i + 1 }));
   }, [hasSale, hasRental, hasPlans, products, inStock, taxConfigured, prefsConfigured]);
 
-  const unlockedIds = useMemo(() => {
-    const ids = new Set<StepId>();
-    let lockedRest = false;
-    for (const step of steps) {
-      if (lockedRest) break;
-      ids.add(step.id);
-      if (!step.done) lockedRest = true;
-    }
-    return ids;
-  }, [steps]);
-
   const firstOpen =
-    steps.find((s) => unlockedIds.has(s.id) && !s.done)?.id ??
-    steps.find((s) => unlockedIds.has(s.id))?.id ??
-    steps[0]?.id ??
-    "store";
+    steps.find((s) => !s.done)?.id ?? steps[0]?.id ?? "store";
   const [activeId, setActiveId] = useState<StepId>(() => {
-    if (
-      stepFromUrl &&
-      steps.some((s) => s.id === stepFromUrl)
-    ) {
+    if (stepFromUrl && steps.some((s) => s.id === stepFromUrl)) {
       return stepFromUrl as StepId;
     }
     return firstOpen;
   });
 
   useEffect(() => {
-    if (
-      stepFromUrl &&
-      steps.some((s) => s.id === stepFromUrl)
-    ) {
+    if (stepFromUrl && steps.some((s) => s.id === stepFromUrl)) {
       setActiveId(stepFromUrl as StepId);
-      return;
     }
-    if (!unlockedIds.has(activeId)) {
-      setActiveId(firstOpen);
-    }
-  }, [stepFromUrl, steps, activeId, firstOpen, unlockedIds]);
+  }, [stepFromUrl, steps]);
 
   const active = steps.find((s) => s.id === activeId) ?? steps[0];
   const doneCount = steps.filter((s) => s.done).length;
@@ -342,27 +322,16 @@ export function HomeGettingStarted() {
         <ol className="divide-y divide-[#eef1f4] border-b border-[#eef1f4] lg:border-r lg:border-b-0">
           {steps.map((s) => {
             const selected = s.id === active?.id;
-            const locked = !unlockedIds.has(s.id);
             return (
               <li key={s.id}>
                 <button
                   type="button"
-                  disabled={locked}
-                  title={
-                    locked
-                      ? "Complete the previous step first"
-                      : undefined
-                  }
-                  onClick={() => {
-                    if (!locked) setActiveId(s.id);
-                  }}
+                  onClick={() => setActiveId(s.id)}
                   className={cn(
                     "flex w-full items-center gap-3 px-4 py-3.5 text-left transition sm:px-5",
-                    locked
-                      ? "cursor-not-allowed bg-[#f8fafc] opacity-55"
-                      : selected
-                        ? "bg-[#eef4ff]"
-                        : "bg-white hover:bg-[#f8fafc]",
+                    selected
+                      ? "bg-[#eef4ff]"
+                      : "bg-white hover:bg-[#f8fafc]",
                   )}
                 >
                   <span
@@ -370,11 +339,9 @@ export function HomeGettingStarted() {
                       "grid h-7 w-7 shrink-0 place-items-center rounded-full text-[0.75rem] font-semibold",
                       s.done
                         ? "bg-[#1a56db] text-white"
-                        : locked
-                          ? "border border-[#d9e0ea] text-[#9aa8b8]"
-                          : selected
-                            ? "border-2 border-[#1a56db] text-[#1a56db]"
-                            : "border border-[#cfd8e6] text-[#5a6b7d]",
+                        : selected
+                          ? "border-2 border-[#1a56db] text-[#1a56db]"
+                          : "border border-[#cfd8e6] text-[#5a6b7d]",
                     )}
                   >
                     {s.done ? (
@@ -386,28 +353,17 @@ export function HomeGettingStarted() {
                   <span
                     className={cn(
                       "min-w-0 flex-1 text-[0.9rem]",
-                      locked
-                        ? "font-medium text-[#8b9bb0]"
-                        : selected
-                          ? "font-semibold text-[#0b1f33]"
-                          : "font-medium text-[#2c3e50]",
+                      selected
+                        ? "font-semibold text-[#0b1f33]"
+                        : "font-medium text-[#2c3e50]",
                     )}
                   >
                     {s.title}
-                    {locked ? (
-                      <span className="mt-0.5 block text-[0.7rem] font-normal text-[#9aa8b8]">
-                        Complete previous step to unlock
-                      </span>
-                    ) : null}
                   </span>
                   <ChevronRight
                     className={cn(
                       "h-4 w-4 shrink-0",
-                      locked
-                        ? "text-[#d9e0ea]"
-                        : selected
-                          ? "text-[#1a56db]"
-                          : "text-[#cfd8e6]",
+                      selected ? "text-[#1a56db]" : "text-[#cfd8e6]",
                     )}
                   />
                 </button>

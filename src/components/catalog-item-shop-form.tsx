@@ -213,6 +213,7 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
   photosExtra,
   stockReadOnly,
   stockOnHandDisplay,
+  stockLocationName,
 }: {
   title: string;
   subtitle: string;
@@ -240,6 +241,8 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
   /** Edit: show current SOH, do not write opening qty. */
   stockReadOnly?: boolean;
   stockOnHandDisplay?: string | null;
+  /** Branch name where create Stock on Hand is applied */
+  stockLocationName?: string;
 }) {
   const [showMore, setShowMore] = useState(false);
   const foodTypeField = productFormFields.find((f) => f.key === "foodType");
@@ -250,26 +253,18 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
       className="mx-auto max-w-5xl pb-10"
       data-catalog-shop-form={title}
     >
-      <div className="overflow-hidden rounded-md border border-[#d9e0ea] bg-white shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
-        <div className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 border-b border-[#eef1f4] bg-white px-4 py-3 sm:px-6">
-          <div className="min-w-0">
-            <h1 className="text-[1.15rem] font-semibold tracking-tight text-[#21263c]">
-              {title}
-            </h1>
-            <p className="mt-0.5 text-[0.75rem] text-[#6b7c93]">{subtitle}</p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              disabled={
-                form.name.trim().length < 2 || Boolean(barcodeError) || savePending
-              }
-              onClick={onSave}
-            >
-              {savePending ? "Saving…" : "Save"}
-            </Button>
-          </div>
-        </div>
+      <div className="overflow-hidden rounded-xl border border-[#d9e0ea] bg-white shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
+        <header className="border-b border-[#eef1f4] px-4 py-4 sm:px-6">
+          <p className="text-[0.7rem] font-semibold tracking-wide text-[#8b9bb0] uppercase">
+            Inventory
+          </p>
+          <h1 className="mt-1 text-[1.25rem] font-semibold tracking-tight text-[#0b1f33]">
+            {title}
+          </h1>
+          <p className="mt-1 max-w-2xl text-[0.8125rem] leading-relaxed text-[#5a6b7d]">
+            {subtitle}
+          </p>
+        </header>
 
         <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_300px]">
           <div className="divide-y divide-[#eef1f4] px-4 py-5 sm:px-6">
@@ -502,15 +497,16 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                       <FieldError message={fieldErrors.openingQty} />
                     ) : stockReadOnly ? (
                       <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
-                        Current location qty — change from{" "}
+                        Current qty at {stockLocationName ?? "this branch"} —
+                        change in{" "}
                         <Link href="/inventory" className="text-[#1a56db]">
                           Inventory
                         </Link>
                       </p>
                     ) : (
                       <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
-                        Opening qty at this location (0 allowed — shows as Stock
-                        on Hand on Items)
+                        Quantity at {stockLocationName ?? "this branch"} — same
+                        value appears on the Items list.
                       </p>
                     )
                   }
@@ -520,7 +516,8 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                     className={stockReadOnly ? "bg-[#f4f6fa]" : undefined}
                     type={stockReadOnly ? "text" : "number"}
                     min={stockReadOnly ? undefined : 0}
-                    step={stockReadOnly ? undefined : 1}
+                    step={stockReadOnly ? undefined : "any"}
+                    placeholder={stockReadOnly ? undefined : "e.g. 50"}
                     value={
                       stockReadOnly
                         ? (stockOnHandDisplay ?? "—")
@@ -860,11 +857,22 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
           </aside>
         </div>
 
-        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-[#eef1f4] bg-[#fafbfc] px-4 py-3.5 sm:px-6">
+        <footer className="sticky bottom-0 z-10 flex flex-wrap items-center justify-end gap-2 border-t border-[#eef1f4] bg-white/95 px-4 py-3.5 backdrop-blur-sm sm:px-6">
           <Button variant="secondary" size="sm" asChild>
             <Link href={cancelHref}>Cancel</Link>
           </Button>
-        </div>
+          <Button
+            size="sm"
+            disabled={
+              form.name.trim().length < 2 ||
+              Boolean(barcodeError) ||
+              savePending
+            }
+            onClick={onSave}
+          >
+            {savePending ? "Saving…" : "Save"}
+          </Button>
+        </footer>
       </div>
     </div>
   );

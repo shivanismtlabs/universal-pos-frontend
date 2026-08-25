@@ -18,6 +18,7 @@ import {
 } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useBootstrap } from "@/lib/bootstrap";
+import { useAuthStore } from "@/lib/auth-store";
 import { useBranchStore } from "@/lib/branch-store";
 import { resolveOperatingLocationId } from "@/lib/operating-location";
 import {
@@ -72,7 +73,7 @@ export function emptyCatalogItemForm(): CatalogItemShopValues {
     canSell: true,
     canPurchase: true,
     availableInPos: true,
-    openingQty: "1",
+    openingQty: "0",
     reorderPoint: "",
   };
 }
@@ -151,10 +152,14 @@ export function CatalogItemEditor() {
   const imagePickerRef = useRef<ProductImagePickerHandle>(null);
   const { data: boot, itemMetaFields } = useBootstrap();
   const currentLocationId = useBranchStore((s) => s.currentLocationId);
+  const authStoreId = useAuthStore((s) => s.user?.storeId);
   const defaultLocationId = resolveOperatingLocationId({
     currentLocationId,
     locations: boot?.locations,
+    authStoreId,
   });
+  const stockLocationName =
+    boot?.locations?.find((l) => l.id === defaultLocationId)?.name ?? "this branch";
 
   const customFieldsQ = useQuery({
     queryKey: ["custom-fields", "product"],
@@ -498,7 +503,9 @@ export function CatalogItemEditor() {
       toast.success(
         returnTo
           ? "Product created — back to Getting Started"
-          : "Product created",
+          : form.trackInventory && Number(form.openingQty) > 0
+            ? `Product created · Stock on Hand ${Number(form.openingQty)}`
+            : "Product created",
       );
       if (returnTo) {
         router.push(afterSaveHref);
@@ -596,6 +603,7 @@ export function CatalogItemEditor() {
         onSave={() => save.mutate()}
         savePending={save.isPending}
         stockReadOnly={isEdit}
+        stockLocationName={stockLocationName}
         stockOnHandDisplay={
           isEdit ? (stockOnHand == null ? "—" : String(stockOnHand)) : undefined
         }

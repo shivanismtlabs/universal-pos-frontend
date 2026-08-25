@@ -1371,6 +1371,7 @@ export const ordersApi = {
     kind?: string;
     q?: string;
     customerId?: string;
+    locationId?: string;
   }) {
     const qs = new URLSearchParams();
     if (params?.page) qs.set("page", String(params.page));
@@ -1379,6 +1380,7 @@ export const ordersApi = {
     if (params?.kind) qs.set("kind", params.kind);
     if (params?.q) qs.set("q", params.q);
     if (params?.customerId) qs.set("customerId", params.customerId);
+    if (params?.locationId) qs.set("locationId", params.locationId);
     const q = qs.toString();
     return apiRequest<{
       items: Array<{
@@ -1389,6 +1391,8 @@ export const ordersApi = {
         meta?: Record<string, unknown> | null;
         balanceDue: string | number;
         subtotal: string | number;
+        taxTotal?: string | number;
+        discountTotal?: string | number;
         depositTotal?: string | number;
         customer?: { id?: string; fullName: string; phone: string };
         productSummary?: string;
@@ -1427,6 +1431,7 @@ export const ordersApi = {
       subtotal: string | number;
       taxTotal: string | number;
       depositTotal: string | number;
+      discountTotal?: string | number;
       balanceDue: string | number;
       eventDate?: string | null;
       pickupDate?: string | null;
@@ -1729,6 +1734,11 @@ export const restaurantApi = {
         status: string;
         currentOrderId: string | null;
         orderNumber: string | null;
+        orderCreatedAt?: string | null;
+        runningTotal?: number | null;
+        balanceDue?: number | null;
+        kitchenPhase?: string | null;
+        billedAt?: string | null;
         diningMode: string | null;
         covers: number | null;
         guestName: string | null;
@@ -3188,6 +3198,12 @@ export const posApi = {
       change: string | number;
       cashTendered: string | number | null;
       receipt: ReceiptPayload;
+      invoice?: {
+        id: string;
+        invoiceNumber: string;
+        grandTotal?: number;
+        taxBreakdown?: Record<string, unknown> | null;
+      } | null;
       replayed?: boolean;
       partial?: boolean;
       balanceDue?: string | number;
@@ -6984,9 +7000,23 @@ export const billingApi = {
   },
   createInvoice(
     orderId: string,
-    body?: { gstin?: string; placeOfSupply?: string; useIgst?: boolean },
+    body?: {
+      gstin?: string;
+      placeOfSupply?: string;
+      useIgst?: boolean;
+      /** Split-bill part total (tax-inclusive) */
+      amount?: number;
+      splitPartIndex?: number;
+      splitPartLabel?: string;
+      paymentId?: string;
+    },
   ) {
-    return apiRequest(`/orders/${orderId}/invoices`, {
+    return apiRequest<{
+      id: string;
+      invoiceNumber: string;
+      grandTotal: string | number;
+      taxBreakdown?: Record<string, unknown> | null;
+    }>(`/orders/${orderId}/invoices`, {
       method: "POST",
       body: body ?? {},
       token: token(),

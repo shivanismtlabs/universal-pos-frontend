@@ -20,7 +20,9 @@ export function biometricBlockReason(): string | null {
       const host = window.location.hostname;
       const isLoopback = host === "localhost" || host === "127.0.0.1";
       if (!isLoopback) {
-        return `Biometrics need HTTPS. This page is ${window.location.origin} (HTTP / IP is blocked by the browser). Open via https://your-domain or http://localhost:3000.`;
+        // Don't surface long HTTPS/IP copy on login/signup UI.
+        // return `Biometrics need HTTPS. This page is ${window.location.origin} (HTTP / IP is blocked by the browser). Open via https://your-domain or http://localhost:3000.`;
+        return "Biometrics unavailable on this connection";
       }
       return "Biometrics need a secure context on this browser";
     }

@@ -309,6 +309,48 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    id: "subscription",
+    label: "Subscription",
+    railLabel: "Plans",
+    icon: TicketPercent,
+    section: "Commerce",
+    commerce: "subscription",
+    children: [
+      {
+        href: "/customers?tab=memberships",
+        label: "Memberships",
+        icon: TicketPercent,
+        commerce: "subscription",
+        capability: "MEMBERSHIP",
+      },
+      {
+        href: "/check-in",
+        label: "Check-in",
+        icon: CalendarDays,
+        commerce: "subscription",
+        capability: "CHECK_IN",
+      },
+      {
+        href: "/reports/subscriptions",
+        label: "Plans report",
+        icon: FileLineChart,
+        commerce: "subscription",
+      },
+      {
+        href: "/returns?tab=subscription",
+        label: "Cancel membership",
+        icon: PackageCheck,
+        commerce: "subscription",
+      },
+      {
+        href: "/dashboard?tab=floors",
+        label: "Membership floor",
+        icon: LayoutGrid,
+        commerce: "subscription",
+      },
+    ],
+  },
+  {
     id: "customers",
     label: "Customers",
     icon: Users,
@@ -357,18 +399,6 @@ const NAV_GROUPS: NavGroup[] = [
         icon: ClipboardList,
         module: "jobs",
         capability: "REPAIR_JOB",
-      },
-      {
-        href: "/customers?tab=memberships",
-        label: "Memberships",
-        icon: TicketPercent,
-        capability: "MEMBERSHIP",
-      },
-      {
-        href: "/check-in",
-        label: "Check-in",
-        icon: CalendarDays,
-        capability: "CHECK_IN",
       },
     ],
   },
@@ -635,12 +665,6 @@ const NAV_GROUPS: NavGroup[] = [
         href: "/settings/accounting",
         label: "Accounting",
         icon: BookOpen,
-        folder: "Business",
-      },
-      {
-        href: "/plan",
-        label: "Subscription",
-        icon: CreditCard,
         folder: "Business",
       },
       {
@@ -1151,28 +1175,6 @@ function SidebarBody({
 
         {accountOpen ? (
           <div className="space-y-2 border-t border-[#eef1f4] px-3 pt-2 pb-3">
-            <div className="rounded-lg border border-[#e2e8f0] bg-[#f8fafc] px-2.5 py-2">
-              <p className="text-[0.7rem] leading-snug text-[#475569]">
-                Premium trial — upgrade when you are ready.
-              </p>
-              <div className="mt-1.5 flex gap-3 text-[0.7rem] font-semibold text-[#1a56db]">
-                <Link
-                  href="/plan"
-                  onClick={onNavigate}
-                  className="hover:underline"
-                >
-                  Upgrade
-                </Link>
-                <Link
-                  href="/plan"
-                  onClick={onNavigate}
-                  className="hover:underline"
-                >
-                  Switch trial
-                </Link>
-              </div>
-            </div>
-
             {userEmail ? (
               <p className="truncate px-0.5 text-[0.68rem] text-[#94a3b8]">
                 {userEmail}

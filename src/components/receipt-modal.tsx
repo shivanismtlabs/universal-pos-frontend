@@ -108,6 +108,16 @@ export type ReceiptData = {
   amountPaid?: string | number | null;
   change?: string | number | null;
   cashTendered?: string | number | null;
+  invoices?: Array<{
+    id: string;
+    invoiceNumber: string;
+    grandTotal?: string | number;
+    taxBreakdown?: Record<string, unknown> | null;
+    createdAt?: string;
+  }>;
+  /** Highlighted part invoice (split bill) */
+  activeInvoiceNumber?: string | null;
+  activeInvoiceLabel?: string | null;
   fulfillment?: {
     orderType?: string;
     resourceId?: string;
@@ -381,7 +391,22 @@ export function ReceiptModal({
               </header>
               {dash}
               <section>
-                <p>Invoice No: {data.orderNumber}</p>
+                <p>
+                  Invoice No:{" "}
+                  {data.activeInvoiceNumber ||
+                    data.invoices?.[data.invoices.length - 1]?.invoiceNumber ||
+                    data.orderNumber}
+                </p>
+                {data.activeInvoiceLabel ? (
+                  <p>Split: {data.activeInvoiceLabel}</p>
+                ) : null}
+                {data.invoices && data.invoices.length > 1 ? (
+                  <p>
+                    All parts:{" "}
+                    {data.invoices.map((i) => i.invoiceNumber).join(", ")}
+                  </p>
+                ) : null}
+                <p>Order: {data.orderNumber}</p>
                 <p>Date & Time: {whenLabel}</p>
                 {data.cashier ? <p>Cashier: {data.cashier}</p> : null}
                 <p>Bill To: {data.customer ? "Customer" : "Walk-in"}</p>

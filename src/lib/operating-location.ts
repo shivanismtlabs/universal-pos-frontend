@@ -3,6 +3,9 @@ type Loc = { id: string; code?: string | null; isActive?: boolean };
 /**
  * Prefer the shell’s current branch, else MAIN, else first active location.
  * Keeps opening stock on New Item aligned with Stock on Hand on Items list.
+ *
+ * Shell branch wins even if the locations list is stale/incomplete (e.g. bootstrap
+ * not yet refreshed after adding a store) — otherwise SOH stays stuck on MAIN.
  */
 export function resolveOperatingLocationId(opts: {
   currentLocationId?: string | null;
@@ -10,10 +13,8 @@ export function resolveOperatingLocationId(opts: {
   authStoreId?: string | null;
 }): string | undefined {
   const active = (opts.locations ?? []).filter((l) => l.isActive !== false);
-  if (
-    opts.currentLocationId &&
-    active.some((l) => l.id === opts.currentLocationId)
-  ) {
+  if (opts.currentLocationId) {
+    // Shell branch wins even if locations list is stale/incomplete after adding a store.
     return opts.currentLocationId;
   }
   if (opts.authStoreId && active.some((l) => l.id === opts.authStoreId)) {

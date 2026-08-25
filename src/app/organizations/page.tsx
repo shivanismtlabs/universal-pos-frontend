@@ -389,6 +389,7 @@ function OrganizationsPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const completeSetup = searchParams.get("setup") === "1";
+  const openCreate = searchParams.get("create") === "1";
   const qc = useQueryClient();
   const identityToken = useAuthStore((s) => s.identityToken);
   const identity = useAuthStore((s) => s.identity);
@@ -403,7 +404,11 @@ function OrganizationsPageInner() {
   >([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
-  const [showCreate, setShowCreate] = useState(false);
+  const [showCreate, setShowCreate] = useState(openCreate);
+
+  useEffect(() => {
+    if (openCreate) setShowCreate(true);
+  }, [openCreate]);
   const [entering, setEntering] = useState<string | null>(null);
   const [totpToken, setTotpToken] = useState<string | null>(null);
   const [showCustomFields, setShowCustomFields] = useState(false);

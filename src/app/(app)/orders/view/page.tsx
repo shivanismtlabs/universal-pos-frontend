@@ -509,13 +509,32 @@ function OrderDetailInner() {
           >
             {sendInvoice.isPending ? "Sending…" : "Email / SMS invoice"}
           </Button>
-          <div className="ml-1 rounded-xl border border-[#e2e8f0] bg-white px-3 py-2 text-right shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
-            <p className="text-[0.65rem] font-bold tracking-[0.1em] text-[#94a3b8] uppercase">
-              Balance due
-            </p>
-            <p className="text-xl font-extrabold tabular-nums text-[#0b1f33]">
-              {formatInr(data.balanceDue)}
-            </p>
+          <div className="ml-1 flex flex-wrap gap-2">
+            <div className="rounded-xl border border-[#e2e8f0] bg-white px-3 py-2 text-right shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+              <p className="text-[0.65rem] font-bold tracking-[0.1em] text-[#94a3b8] uppercase">
+                Total
+              </p>
+              <p className="text-xl font-extrabold tabular-nums text-[#0b1f33]">
+                {formatInr(
+                  Math.max(
+                    0,
+                    moneyNumber(data.subtotal) +
+                      moneyNumber(data.taxTotal) -
+                      moneyNumber(data.discountTotal ?? 0),
+                  ),
+                )}
+              </p>
+            </div>
+            <div className="rounded-xl border border-[#e2e8f0] bg-white px-3 py-2 text-right shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+              <p className="text-[0.65rem] font-bold tracking-[0.1em] text-[#94a3b8] uppercase">
+                Balance due
+              </p>
+              <p className="text-xl font-extrabold tabular-nums text-[#0b1f33]">
+                {Number(data.balanceDue) > 0.009
+                  ? formatInr(data.balanceDue)
+                  : "Paid"}
+              </p>
+            </div>
           </div>
         </div>
       </header>

@@ -1,30 +1,18 @@
 "use client";
 
-import { Suspense, useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense } from "react";
+import { CatalogItemEditor } from "@/components/catalog-item-editor";
 
-/** Edit Item uses the same page as New Item (`/catalog/new?id=`). */
-function EditRedirect() {
-  const router = useRouter();
-  const search = useSearchParams();
-  const id = search.get("id")?.trim() || "";
-
-  useEffect(() => {
-    const qs = new URLSearchParams(search.toString());
-    if (id) qs.set("id", id);
-    const s = qs.toString();
-    router.replace(s ? `/catalog/new?${s}` : "/catalog/new");
-  }, [id, router, search]);
-
-  return <p className="p-8 text-sm text-[#5a6b7d]">Opening item editor…</p>;
-}
-
+/**
+ * Edit Item — same form as New Item (`CatalogItemEditor` + `?id=`).
+ * Prefer linking to `/catalog/new?id=` elsewhere; this route stays for bookmarks.
+ */
 export default function EditCatalogProductRoute() {
   return (
     <Suspense
       fallback={<p className="p-8 text-sm text-[#5a6b7d]">Loading item…</p>}
     >
-      <EditRedirect />
+      <CatalogItemEditor />
     </Suspense>
   );
 }

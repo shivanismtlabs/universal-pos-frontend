@@ -762,7 +762,41 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
                 ? `${meta.subtitle} · ${productName}`
                 : meta.subtitle
           }
+          action={
+            tab === "branding" ? (
+              <div className="flex flex-wrap gap-2">
+                <Button asChild size="sm" variant="secondary">
+                  <Link href="/organizations">Your organizations</Link>
+                </Button>
+                <Button asChild size="sm">
+                  <Link href="/organizations?create=1">Create organization</Link>
+                </Button>
+              </div>
+            ) : undefined
+          }
         />
+
+      {tab === "branding" ? (
+        <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#d9e0ea] bg-[#f8fafc] px-4 py-3.5">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-[#0b1f33]">
+              Organizations
+            </p>
+            <p className="mt-0.5 text-[0.8rem] text-[#5a6b7d]">
+              Create another shop or switch between organizations under the same
+              login.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild size="sm" variant="secondary">
+              <Link href="/organizations">Manage</Link>
+            </Button>
+            <Button asChild size="sm">
+              <Link href="/organizations?create=1">+ Create organization</Link>
+            </Button>
+          </div>
+        </section>
+      ) : null}
 
       {tab === "branding" ? (
         <section className="space-y-5 rounded-2xl border border-[#e5e7eb] bg-white p-5">
@@ -1337,8 +1371,9 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
             />
             <FieldError message={counterErrors.upiVpa} />
             <p className="mt-1 text-xs text-[#6b7280]">
-              Required for Counter → QR. Without this, PhonePe/GPay show a
-              technical glitch when customers scan.
+              Used for Counter → QR (GPay / PhonePe / Paytm). If empty, Counter
+              can build a QR from the Business Profile mobile number (e.g.
+              98xxxxxxxx@ybl). A saved UPI ID is still best for merchants.
             </p>
           </div>
           <div>

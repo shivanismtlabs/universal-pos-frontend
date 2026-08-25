@@ -106,7 +106,7 @@ export default function SignupClient() {
     <AuthShell
       wide
       title="Create your workspace"
-      subtitle="Start a 15-day trial. You’ll set up the company next — no card required."
+      subtitle="Create your account, then set up your company and store."
     >
       <form
         onSubmit={handleSubmit(onSubmit, () =>
@@ -256,7 +256,7 @@ export default function SignupClient() {
 
         <p className="text-[0.75rem] leading-relaxed text-[#8b9bb0]">
           By creating an account you agree to our Terms of Service and Privacy
-          Policy. 15-day free trial · no card required.
+          Policy.
         </p>
 
         <Button

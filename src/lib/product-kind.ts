@@ -63,7 +63,9 @@ export function catalogStockOnHandLabel(opts: {
     if (kind === "bundle") return "From items inside";
     if (kind === "service") return "No stock (service)";
     if (kind === "digital") return "No stock (digital)";
-    return "Not counted";
+    // Prefer a real On Hand figure when a stock row exists (e.g. CSV set track off by mistake).
+    if (opts.stockOnHand != null) return String(opts.stockOnHand);
+    return "Stock off";
   }
   if (opts.stockOnHand == null) return "—";
   return String(opts.stockOnHand);

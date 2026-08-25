@@ -10,7 +10,6 @@ import { useBranchStore } from "@/lib/branch-store";
 import {
   DiningEmpty,
   DiningShell,
-  DiningStatusBadge,
   diningSelectClass,
 } from "@/components/dining-chrome";
 import { Button } from "@/components/ui/button";
@@ -18,18 +17,62 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { LayoutGrid, Map as MapIcon, Pencil } from "lucide-react";
+import {
+  ArrowRightLeft,
+  LayoutGrid,
+  Map as MapIcon,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Users,
+} from "lucide-react";
 import { ModalFrame } from "@/components/modal-frame";
 
-const TILE: Record<string, string> = {
-  available:
-    "border-[#bbf7d0] bg-white hover:border-[#86efac] hover:shadow-[0_1px_8px_rgba(22,101,52,0.08)]",
-  occupied:
-    "border-[#93c5fd] bg-[#f8fbff] hover:border-[#60a5fa] hover:shadow-[0_1px_8px_rgba(30,64,175,0.08)]",
-  reserved:
-    "border-[#fdba74] bg-[#fffaf5] hover:border-[#fb923c]",
-  cleaning: "border-[#fde68a] bg-[#fffbeb]",
-  blocked: "border-[#e2e8f0] bg-[#f8fafc] opacity-80",
+/**
+ * Petpooja-style live floor colours — Universal POS dining module
+ * (TABLE capability), not a restaurant-only product.
+ */
+const FLOOR_TILE: Record<
+  string,
+  { tile: string; ink: string; label: string; dot: string }
+> = {
+  available: {
+    tile: "border-[#86efac] bg-[#22c55e] text-white shadow-[0_2px_0_#15803d]",
+    ink: "text-white",
+    label: "Free",
+    dot: "bg-[#22c55e]",
+  },
+  occupied: {
+    tile: "border-[#f87171] bg-[#ef4444] text-white shadow-[0_2px_0_#b91c1c]",
+    ink: "text-white",
+    label: "Running",
+    dot: "bg-[#ef4444]",
+  },
+  billed: {
+    tile: "border-[#c084fc] bg-[#9333ea] text-white shadow-[0_2px_0_#6b21a8]",
+    ink: "text-white",
+    label: "Billed",
+    dot: "bg-[#9333ea]",
+  },
+  reserved: {
+    tile: "border-[#fdba74] bg-[#f97316] text-white shadow-[0_2px_0_#c2410c]",
+    ink: "text-white",
+    label: "Reserved",
+    dot: "bg-[#f97316]",
+  },
+  cleaning: {
+    tile: "border-[#fde047] bg-[#eab308] text-[#422006] shadow-[0_2px_0_#a16207]",
+    ink: "text-[#422006]",
+    label: "Cleaning",
+    dot: "bg-[#eab308]",
+  },
+  blocked: {
+    tile: "border-[#94a3b8] bg-[#64748b] text-white shadow-[0_2px_0_#334155]",
+    ink: "text-white",
+    label: "Blocked",
+    dot: "bg-[#64748b]",
+  },
 };
 
 const TABLE_STATUSES = [
@@ -116,9 +159,34 @@ function bookingWhen(iso: string) {
   });
 }
 
+/** Petpooja-style display status (billed ≠ still running). */
+function floorStatus(t: DiningTable): keyof typeof FLOOR_TILE {
+  if (t.billedAt || t.kitchenPhase === "billed") return "billed";
+  if (t.status === "occupied" && t.currentOrderId) return "occupied";
+  if (FLOOR_TILE[t.status]) return t.status as keyof typeof FLOOR_TILE;
+  return "available";
+}
+
+function elapsedLabel(iso?: string | null) {
+  if (!iso) return null;
+  const mins = Math.max(
+    0,
+    Math.floor((Date.now() - new Date(iso).getTime()) / 60_000),
+  );
+  if (mins < 60) return `${mins}m`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return `${h}h ${m}m`;
+}
+
+function moneyShort(n: number | null | undefined) {
+  if (n == null || !Number.isFinite(n)) return null;
+  return `₹${Math.round(n).toLocaleString("en-IN")}`;
+}
+
 export default function RestaurantTablesPage() {
   const qc = useQueryClient();
-  const { hasCapability, data: boot } = useBootstrap();
+  const { hasCapability, data: boot, money } = useBootstrap();
   const locationId =
     useBranchStore((s) => s.currentLocationId) || boot?.locations?.[0]?.id;
   const allowed = hasCapability("TABLE") || hasCapability("CAPTAIN");
@@ -127,8 +195,15 @@ export default function RestaurantTablesPage() {
 
   const [floorFilter, setFloorFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [viewMode, setViewMode] = useState<"grid" | "layout">("grid");
+  const [viewMode, setViewMode] = useState<"grid" | "layout">("layout");
   const [modal, setModal] = useState<Modal | null>(null);
+  const [menuTableId, setMenuTableId] = useState<string | null>(null);
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setTick((n) => n + 1), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   const floors = useQuery({
     queryKey: ["restaurant-floors", locationId],
@@ -168,21 +243,42 @@ export default function RestaurantTablesPage() {
 
   const allTables = tables.data ?? [];
   const allFloors = floors.data ?? [];
+
+  useEffect(() => {
+    if (floorFilter !== "all") return;
+    if (allFloors.length === 1) setFloorFilter(allFloors[0]!.id);
+  }, [allFloors, floorFilter]);
+
   const counts = useMemo(() => {
-    const c: Record<string, number> = { all: allTables.length };
-    for (const t of allTables) c[t.status] = (c[t.status] ?? 0) + 1;
+    const c: Record<string, number> = {
+      all: allTables.length,
+      available: 0,
+      occupied: 0,
+      billed: 0,
+      reserved: 0,
+      cleaning: 0,
+      blocked: 0,
+    };
+    for (const t of allTables) {
+      const s = floorStatus(t);
+      c[s] = (c[s] ?? 0) + 1;
+    }
     return c;
   }, [allTables]);
 
-  const grouped = useMemo(() => {
-    const list = allTables.filter((t) => {
+  const filteredTables = useMemo(() => {
+    return allTables.filter((t) => {
       if (floorFilter !== "all" && (t.floorId || "unassigned") !== floorFilter)
         return false;
-      if (statusFilter !== "all" && t.status !== statusFilter) return false;
+      if (statusFilter !== "all" && floorStatus(t) !== statusFilter)
+        return false;
       return true;
     });
-    const map = new Map<string, typeof list>();
-    for (const t of list) {
+  }, [allTables, floorFilter, statusFilter]);
+
+  const grouped = useMemo(() => {
+    const map = new Map<string, DiningTable[]>();
+    for (const t of filteredTables) {
       const key = t.floorId || "unassigned";
       map.set(key, [...(map.get(key) ?? []), t]);
     }
@@ -193,9 +289,10 @@ export default function RestaurantTablesPage() {
     return keys
       .filter((k) => map.has(k))
       .map((k) => [k, map.get(k)!] as const);
-  }, [allTables, allFloors, floorFilter, statusFilter]);
+  }, [filteredTables, allFloors]);
 
   function onTableActivate(t: DiningTable) {
+    setMenuTableId(null);
     if (t.currentOrderId) {
       setModal({ kind: "order", orderId: t.currentOrderId });
       return;
@@ -204,39 +301,65 @@ export default function RestaurantTablesPage() {
       setModal({ kind: "table", id: t.id });
       return;
     }
+    if (t.status === "cleaning") {
+      void restaurantApi
+        .updateTable(t.id, { status: "available" })
+        .then(() => {
+          toast.success(`${t.name} marked free`);
+          refreshFloor();
+        })
+        .catch((e: Error) => toast.error(e.message));
+      return;
+    }
     setModal({ kind: "open", tableId: t.id });
   }
 
   if (!allowed) {
     return (
       <DiningShell
-        title="Tables"
+        title="Floor"
         subtitle="Enable the Tables capability to use the dining floor."
       >
         <DiningEmpty
           title="Dining floor is off"
-          detail="Turn on Tables in Settings → Capabilities. Retail, rental, and service shops stay unchanged."
+          detail="Turn on Tables in Settings → Capabilities. Other commerce modes stay unchanged."
         />
       </DiningShell>
     );
   }
 
+  const activeFloor =
+    floorFilter !== "all"
+      ? allFloors.find((f) => f.id === floorFilter)
+      : null;
+
   return (
     <DiningShell
-      title="Tables"
-      subtitle="Tap a table to seat guests, take a request, or send food to kitchen."
+      title="Floor"
+      subtitle="Live table map — seat guests, run tickets, move / merge, bill. Works with any Universal POS branch that has Tables on."
       action={
         <div className="flex flex-wrap justify-end gap-2">
           <Button
             type="button"
             variant="secondary"
-            onClick={() => setModal({ kind: "floor" })}
+            size="sm"
+            onClick={() => refreshFloor()}
           >
-            New floor
+            <RefreshCw className="mr-1 size-3.5" />
+            Refresh
           </Button>
           <Button
             type="button"
             variant="secondary"
+            size="sm"
+            onClick={() => setModal({ kind: "floor" })}
+          >
+            New area
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            className="bg-[#1a56db] hover:bg-[#1546b3]"
             onClick={() =>
               setModal({
                 kind: "table",
@@ -244,29 +367,30 @@ export default function RestaurantTablesPage() {
               })
             }
           >
-            + New table
+            <Plus className="mr-1 size-3.5" />
+            Table
           </Button>
           <Button
             type="button"
             variant="secondary"
+            size="sm"
             onClick={() => {
               const floorId =
-                floorFilter !== "all"
-                  ? floorFilter
-                  : allFloors[0]?.id;
+                floorFilter !== "all" ? floorFilter : allFloors[0]?.id;
               if (!floorId) {
-                toast.error("Add a floor first");
+                toast.error("Add a dining area first");
                 return;
               }
               setModal({ kind: "layout", floorId });
             }}
           >
-            Seating layout
+            Arrange
           </Button>
           {canReserve ? (
             <Button
               type="button"
               variant="secondary"
+              size="sm"
               onClick={() => setModal({ kind: "reserve" })}
             >
               Reserve
@@ -275,240 +399,256 @@ export default function RestaurantTablesPage() {
           <Button
             type="button"
             variant="secondary"
+            size="sm"
             onClick={() => setModal({ kind: "move" })}
           >
+            <ArrowRightLeft className="mr-1 size-3.5" />
             Move / merge
           </Button>
-          <Button asChild variant="secondary">
+          <Button asChild variant="secondary" size="sm">
             <Link href="/restaurant/setup">Setup</Link>
           </Button>
         </div>
       }
     >
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
         {(
           [
-            ["all", "All"],
-            ["available", "Available"],
-            ["occupied", "Occupied"],
+            ["available", "Free"],
+            ["occupied", "Running"],
+            ["billed", "Billed"],
             ["reserved", "Reserved"],
             ["cleaning", "Cleaning"],
+            ["all", "Total"],
           ] as const
-        ).map(([id, label]) => (
+        ).map(([id, label]) => {
+          const style = id === "all" ? null : FLOOR_TILE[id];
+          return (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setStatusFilter(id === "all" ? "all" : id)}
+              className={cn(
+                "rounded-xl border px-3 py-2.5 text-left transition",
+                statusFilter === (id === "all" ? "all" : id)
+                  ? "border-[#1a56db] bg-[#eff6ff] ring-1 ring-[#bfdbfe]"
+                  : "border-[#e4e9f0] bg-white hover:border-[#c5d0e0]",
+              )}
+            >
+              <div className="flex items-center gap-2">
+                {style ? (
+                  <span className={cn("size-2.5 rounded-full", style.dot)} />
+                ) : (
+                  <span className="size-2.5 rounded-full bg-[#1a56db]" />
+                )}
+                <span className="text-[0.65rem] font-semibold tracking-wide text-[#8b9bb0] uppercase">
+                  {label}
+                </span>
+              </div>
+              <p className="mt-1 text-xl font-semibold tabular-nums text-[#0b1f33]">
+                {counts[id] ?? 0}
+              </p>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#e4e9f0] bg-white p-2 shadow-sm">
+        <div className="flex flex-wrap gap-1">
           <button
-            key={id}
             type="button"
-            onClick={() => setStatusFilter(id)}
+            onClick={() => setFloorFilter("all")}
             className={cn(
-              "rounded-full px-3 py-1 text-xs font-semibold ring-1 transition",
-              statusFilter === id
-                ? "bg-[#1a56db] text-white ring-[#1a56db]"
-                : "bg-white text-[#5a6b7d] ring-[#e2e8f0] hover:text-[#0b1f33]",
+              "rounded-lg px-3 py-1.5 text-sm font-semibold",
+              floorFilter === "all"
+                ? "bg-[#1a56db] text-white"
+                : "text-[#5a6b7d] hover:bg-[#f1f5f9]",
             )}
           >
-            {label}
-            <span className="ml-1 tabular-nums opacity-80">
-              {counts[id] ?? 0}
-            </span>
+            All areas
           </button>
-        ))}
-        <span className="mx-1 h-4 w-px bg-[#e2e8f0]" />
-        <button
-          type="button"
-          onClick={() => setFloorFilter("all")}
-          className={cn(
-            "rounded-full px-3 py-1 text-xs font-semibold ring-1",
-            floorFilter === "all"
-              ? "bg-[#eff6ff] text-[#1a56db] ring-[#bfdbfe]"
-              : "bg-white text-[#5a6b7d] ring-[#e2e8f0]",
-          )}
-        >
-          All floors
-        </button>
-        {allFloors.map((f) => (
+          {allFloors.map((f) => (
+            <button
+              key={f.id}
+              type="button"
+              onClick={() => setFloorFilter(f.id)}
+              className={cn(
+                "rounded-lg px-3 py-1.5 text-sm font-semibold",
+                floorFilter === f.id
+                  ? "bg-[#1a56db] text-white"
+                  : "text-[#5a6b7d] hover:bg-[#f1f5f9]",
+              )}
+            >
+              {f.name}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-1 rounded-lg bg-[#f1f5f9] p-0.5">
           <button
-            key={f.id}
             type="button"
-            onClick={() => setFloorFilter(f.id)}
+            onClick={() => setViewMode("layout")}
             className={cn(
-              "rounded-full px-3 py-1 text-xs font-semibold ring-1",
-              floorFilter === f.id
-                ? "bg-[#eff6ff] text-[#1a56db] ring-[#bfdbfe]"
-                : "bg-white text-[#5a6b7d] ring-[#e2e8f0]",
+              "inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-semibold",
+              viewMode === "layout"
+                ? "bg-white text-[#0b1f33] shadow-sm"
+                : "text-[#5a6b7d]",
             )}
           >
-            {f.name}
+            <MapIcon className="size-3.5" />
+            Floor map
           </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("grid")}
+            className={cn(
+              "inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-semibold",
+              viewMode === "grid"
+                ? "bg-white text-[#0b1f33] shadow-sm"
+                : "text-[#5a6b7d]",
+            )}
+          >
+            <LayoutGrid className="size-3.5" />
+            Grid
+          </button>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3 text-[0.7rem] text-[#5a6b7d]">
+        <span className="font-semibold text-[#8b9bb0]">Legend</span>
+        {Object.entries(FLOOR_TILE).map(([id, s]) => (
+          <span key={id} className="inline-flex items-center gap-1.5">
+            <span className={cn("size-2.5 rounded-sm", s.dot)} />
+            {s.label}
+          </span>
         ))}
-        <span className="mx-1 h-4 w-px bg-[#e2e8f0]" />
-        <button
-          type="button"
-          onClick={() => setViewMode("grid")}
-          className={cn(
-            "inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold ring-1",
-            viewMode === "grid"
-              ? "bg-[#1a56db] text-white ring-[#1a56db]"
-              : "bg-white text-[#5a6b7d] ring-[#e2e8f0]",
-          )}
-        >
-          <LayoutGrid className="h-3.5 w-3.5" />
-          Grid
-        </button>
-        <button
-          type="button"
-          onClick={() => setViewMode("layout")}
-          className={cn(
-            "inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold ring-1",
-            viewMode === "layout"
-              ? "bg-[#1a56db] text-white ring-[#1a56db]"
-              : "bg-white text-[#5a6b7d] ring-[#e2e8f0]",
-          )}
-        >
-          <MapIcon className="h-3.5 w-3.5" />
-          Layout
-        </button>
+        <span className="text-[#8b9bb0]">
+          Tap free → seat · running → ticket · cleaning → mark free
+        </span>
       </div>
 
       {!allTables.length ? (
         <DiningEmpty
           title="No tables yet"
-          detail="Use New floor and New table. Then tap a table to open a dining ticket."
+          detail="Add a dining area, then tables. Tap a free table to open a ticket."
         />
+      ) : viewMode === "layout" && floorFilter !== "all" ? (
+        <section className="overflow-hidden rounded-xl border border-[#d9e0ea] bg-[#e8eef5]">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#d9e0ea] bg-white/80 px-4 py-2.5">
+            <div>
+              <h2 className="text-sm font-semibold text-[#0b1f33]">
+                {activeFloor?.name ?? "Floor"}
+              </h2>
+              <p className="text-[0.7rem] text-[#8b9bb0]">
+                {filteredTables.length} tables
+                {activeFloor?.taxRatePercent != null
+                  ? ` · tax ${activeFloor.taxRatePercent}%`
+                  : ""}
+                {activeFloor?.serviceChargePercent != null
+                  ? ` · service ${activeFloor.serviceChargePercent}%`
+                  : ""}
+              </p>
+            </div>
+            {activeFloor ? (
+              <button
+                type="button"
+                className="rounded-lg p-1.5 text-[#8b9bb0] hover:bg-[#f1f5f9] hover:text-[#0b1f33]"
+                aria-label="Edit area"
+                onClick={() => setModal({ kind: "floor", id: activeFloor.id })}
+              >
+                <Pencil className="size-4" />
+              </button>
+            ) : null}
+          </div>
+          <FloorLayoutPreview
+            tables={filteredTables}
+            money={money}
+            menuTableId={menuTableId}
+            setMenuTableId={setMenuTableId}
+            onActivate={onTableActivate}
+            onEdit={(t) => setModal({ kind: "table", id: t.id })}
+            onMove={(t) => setModal({ kind: "move", fromTableId: t.id })}
+            onMerge={(t) => setModal({ kind: "merge", fromTableId: t.id })}
+            onReserve={
+              canReserve
+                ? (t) => setModal({ kind: "reserve", tableId: t.id })
+                : undefined
+            }
+            reservations={reservations.data ?? []}
+          />
+        </section>
       ) : (
         grouped.map(([floorKey, list]) => {
           const floor = allFloors.find((f) => f.id === floorKey);
           const title = floor?.name ?? "Unassigned";
-          const bits = [
-            floor?.categoryIds?.length
-              ? `${floor.categoryIds.length} menu ${floor.categoryIds.length === 1 ? "category" : "categories"}`
-              : null,
-            floor?.taxRatePercent != null
-              ? `Tax ${floor.taxRatePercent}%`
-              : null,
-            floor?.serviceChargePercent != null
-              ? `Service ${floor.serviceChargePercent}%`
-              : null,
-          ].filter(Boolean);
           return (
-            <section key={floorKey}>
-              <div className="mb-2 flex items-baseline justify-between gap-2">
-                <div>
-                  <h2 className="text-sm font-semibold text-[#0b1f33]">
-                    {title}
-                  </h2>
-                  {bits.length ? (
-                    <p className="text-[0.7rem] text-[#8b9bb0]">
-                      {bits.join(" · ")}
-                    </p>
-                  ) : null}
-                </div>
-                <div className="flex items-center gap-2">
-                  <p className="text-xs text-[#8b9bb0]">{list.length} tables</p>
-                  {floor ? (
-                    <button
-                      type="button"
-                      className="rounded p-1 text-[#8b9bb0] hover:bg-black/5 hover:text-[#0b1f33]"
-                      aria-label="Edit floor"
-                      onClick={() => setModal({ kind: "floor", id: floor.id })}
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
-                  ) : null}
-                </div>
+            <section key={floorKey} className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-sm font-semibold text-[#0b1f33]">
+                  {title}
+                  <span className="ml-2 text-xs font-normal text-[#8b9bb0]">
+                    {list.length} tables
+                  </span>
+                </h2>
+                {floor ? (
+                  <button
+                    type="button"
+                    className="rounded p-1 text-[#8b9bb0] hover:bg-black/5 hover:text-[#0b1f33]"
+                    aria-label="Edit floor"
+                    onClick={() => setModal({ kind: "floor", id: floor.id })}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                ) : null}
               </div>
               {viewMode === "layout" ? (
                 <FloorLayoutPreview
                   tables={list}
+                  money={money}
+                  menuTableId={menuTableId}
+                  setMenuTableId={setMenuTableId}
                   onActivate={onTableActivate}
                   onEdit={(t) => setModal({ kind: "table", id: t.id })}
+                  onMove={(t) => setModal({ kind: "move", fromTableId: t.id })}
+                  onMerge={(t) =>
+                    setModal({ kind: "merge", fromTableId: t.id })
+                  }
+                  onReserve={
+                    canReserve
+                      ? (t) => setModal({ kind: "reserve", tableId: t.id })
+                      : undefined
+                  }
+                  reservations={reservations.data ?? []}
                 />
               ) : (
                 <ul className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
                   {list.map((t) => (
-                    <li key={t.id} className="relative group">
-                      <button
-                        type="button"
-                        onClick={() => onTableActivate(t)}
-                        className={cn(
-                          "flex min-h-[7.5rem] w-full flex-col rounded-xl border px-3 py-3 text-left transition",
-                          TILE[t.status] ?? TILE.available,
+                    <li key={t.id}>
+                      <TableTile
+                        table={t}
+                        money={money}
+                        next={nextBookedFor(reservations.data ?? [], t.id)}
+                        menuOpen={menuTableId === t.id}
+                        onMenuToggle={() =>
+                          setMenuTableId((id) => (id === t.id ? null : t.id))
+                        }
+                        onActivate={() => onTableActivate(t)}
+                        onEdit={() => setModal({ kind: "table", id: t.id })}
+                        onMove={() =>
+                          setModal({ kind: "move", fromTableId: t.id })
+                        }
+                        onMerge={() =>
+                          setModal({ kind: "merge", fromTableId: t.id })
+                        }
+                        onReserve={
+                          canReserve
+                            ? () =>
+                                setModal({ kind: "reserve", tableId: t.id })
+                            : undefined
+                        }
+                        canQr={Boolean(
+                          hasCapability("QR_ORDER") && t.qrToken,
                         )}
-                      >
-                        <div className="flex items-start justify-between gap-2 pr-6">
-                          <p className="text-[0.95rem] font-semibold text-[#0b1f33]">
-                            {t.name}
-                          </p>
-                          <DiningStatusBadge value={t.status} />
-                        </div>
-                        <p className="mt-1 text-xs text-[#5a6b7d]">
-                          {t.capacity} seats
-                          {t.covers ? ` · ${t.covers} covers` : ""}
-                        </p>
-                        <div className="mt-auto pt-2">
-                          {t.orderNumber ? (
-                            <p className="text-[0.7rem] font-semibold text-[#1a56db]">
-                              Open bill
-                            </p>
-                          ) : t.status === "reserved" ? (
-                            <p className="text-[0.7rem] text-[#9a3412]">
-                              Seat guest
-                            </p>
-                          ) : t.status === "available" ? (
-                            <p className="text-[0.7rem] text-[#8b9bb0]">
-                              Seat guests
-                            </p>
-                          ) : (
-                            <p className="text-[0.7rem] text-[#8b9bb0]">
-                              {t.status}
-                            </p>
-                          )}
-                          {t.guestOccasion ? (
-                            <p className="truncate text-[0.65rem] font-semibold capitalize text-[#1a56db]">
-                              {t.guestOccasion}
-                            </p>
-                          ) : null}
-                          {t.guestName ? (
-                            <p className="truncate text-xs text-[#0b1f33]">
-                              {t.guestName}
-                            </p>
-                          ) : null}
-                          {(() => {
-                            const next = nextBookedFor(
-                              reservations.data ?? [],
-                              t.id,
-                            );
-                            return next ? (
-                              <p className="truncate text-[0.65rem] text-[#9a3412]">
-                                Next: {next.guestName} · {bookingWhen(next.startAt)}
-                              </p>
-                            ) : null;
-                          })()}
-                        </div>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setModal({ kind: "table", id: t.id });
-                        }}
-                        className="absolute right-2 top-2 rounded p-1 text-[#8b9bb0] opacity-0 hover:bg-black/5 hover:text-[#0b1f33] focus:opacity-100 group-hover:opacity-100 transition-opacity"
-                        aria-label="Edit table"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </button>
-                      {hasCapability("QR_ORDER") && t.qrToken ? (
-                        <button
-                          type="button"
-                          className="mt-1 text-[0.65rem] font-semibold text-[#1a56db] hover:underline"
-                          onClick={() => {
-                            const url = `${window.location.origin}/order/${t.qrToken}`;
-                            void navigator.clipboard.writeText(url);
-                            toast.success("Guest QR link copied");
-                          }}
-                        >
-                          Copy guest QR
-                        </button>
-                      ) : null}
+                      />
                     </li>
                   ))}
                 </ul>
@@ -670,48 +810,302 @@ export default function RestaurantTablesPage() {
   );
 }
 
-function FloorLayoutPreview({
-  tables,
+function TableTile({
+  table: t,
+  money,
+  next,
+  menuOpen,
+  onMenuToggle,
   onActivate,
   onEdit,
+  onMove,
+  onMerge,
+  onReserve,
+  canQr,
+}: {
+  table: DiningTable;
+  money: (n: string | number) => string;
+  next?: { guestName: string; startAt: string };
+  menuOpen: boolean;
+  onMenuToggle: () => void;
+  onActivate: () => void;
+  onEdit: () => void;
+  onMove: () => void;
+  onMerge: () => void;
+  onReserve?: () => void;
+  canQr: boolean;
+}) {
+  const st = floorStatus(t);
+  const style = FLOOR_TILE[st] ?? FLOOR_TILE.available;
+  const elapsed = elapsedLabel(t.orderCreatedAt);
+  const amt = moneyShort(t.runningTotal ?? t.balanceDue);
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={onActivate}
+        className={cn(
+          "flex min-h-[7.75rem] w-full flex-col rounded-2xl border-2 px-3 py-3 text-left transition hover:brightness-105",
+          style.tile,
+        )}
+      >
+        <div className="flex items-start justify-between gap-2 pr-7">
+          <p className={cn("text-base font-bold tracking-tight", style.ink)}>
+            {t.name}
+          </p>
+          <span
+            className={cn(
+              "rounded-full bg-black/15 px-2 py-0.5 text-[0.65rem] font-bold uppercase",
+              style.ink,
+            )}
+          >
+            {style.label}
+          </span>
+        </div>
+        <p
+          className={cn(
+            "mt-1 flex items-center gap-1 text-xs opacity-90",
+            style.ink,
+          )}
+        >
+          <Users className="size-3" />
+          {t.covers ? `${t.covers}/${t.capacity}` : `${t.capacity} seats`}
+          {elapsed ? ` · ${elapsed}` : ""}
+        </p>
+        <div className="mt-auto space-y-0.5 pt-2">
+          {amt ? (
+            <p className={cn("text-sm font-bold tabular-nums", style.ink)}>
+              {money(t.runningTotal ?? t.balanceDue ?? 0)}
+            </p>
+          ) : null}
+          {t.orderNumber ? (
+            <p className={cn("text-[0.65rem] font-semibold opacity-90", style.ink)}>
+              {t.orderNumber}
+            </p>
+          ) : null}
+          {t.guestName ? (
+            <p className={cn("truncate text-xs opacity-90", style.ink)}>
+              {t.guestName}
+            </p>
+          ) : null}
+          {next ? (
+            <p className={cn("truncate text-[0.65rem] opacity-80", style.ink)}>
+              Next: {next.guestName} · {bookingWhen(next.startAt)}
+            </p>
+          ) : null}
+        </div>
+      </button>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onMenuToggle();
+        }}
+        className="absolute right-2 top-2 rounded-lg bg-black/20 p-1 text-white hover:bg-black/35"
+        aria-label="Table actions"
+      >
+        <MoreHorizontal className="size-4" />
+      </button>
+      {menuOpen ? (
+        <div className="absolute right-2 top-10 z-20 min-w-[9rem] overflow-hidden rounded-lg border border-[#e2e8f0] bg-white py-1 text-sm shadow-lg">
+          <button
+            type="button"
+            className="block w-full px-3 py-1.5 text-left hover:bg-[#f8fafc]"
+            onClick={onEdit}
+          >
+            Edit table
+          </button>
+          {t.currentOrderId ? (
+            <>
+              <button
+                type="button"
+                className="block w-full px-3 py-1.5 text-left hover:bg-[#f8fafc]"
+                onClick={onMove}
+              >
+                Move order
+              </button>
+              <button
+                type="button"
+                className="block w-full px-3 py-1.5 text-left hover:bg-[#f8fafc]"
+                onClick={onMerge}
+              >
+                Merge tables
+              </button>
+            </>
+          ) : null}
+          {onReserve ? (
+            <button
+              type="button"
+              className="block w-full px-3 py-1.5 text-left hover:bg-[#f8fafc]"
+              onClick={onReserve}
+            >
+              Reserve
+            </button>
+          ) : null}
+          {canQr && t.qrToken ? (
+            <button
+              type="button"
+              className="block w-full px-3 py-1.5 text-left hover:bg-[#f8fafc]"
+              onClick={() => {
+                const url = `${window.location.origin}/order/${t.qrToken}`;
+                void navigator.clipboard.writeText(url);
+                toast.success("Guest QR link copied");
+              }}
+            >
+              Copy guest QR
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function FloorLayoutPreview({
+  tables,
+  money,
+  menuTableId,
+  setMenuTableId,
+  onActivate,
+  onEdit,
+  onMove,
+  onMerge,
+  onReserve,
+  reservations,
 }: {
   tables: DiningTable[];
+  money: (n: string | number) => string;
+  menuTableId: string | null;
+  setMenuTableId: (id: string | null) => void;
   onActivate: (t: DiningTable) => void;
   onEdit: (t: DiningTable) => void;
+  onMove: (t: DiningTable) => void;
+  onMerge: (t: DiningTable) => void;
+  onReserve?: (t: DiningTable) => void;
+  reservations: Array<{
+    table: { id: string } | null;
+    status: string;
+    guestName: string;
+    startAt: string;
+  }>;
 }) {
   return (
-    <div className="relative h-[22rem] overflow-hidden rounded-xl border border-[#d9e0ea] bg-[#f4f7fb]">
+    <div className="relative h-[min(70vh,32rem)] overflow-hidden bg-[radial-gradient(circle_at_1px_1px,#cbd5e1_1px,transparent_0)] [background-size:18px_18px]">
       {tables.map((t, i) => {
         const slot = layoutSlot(i);
         const x = t.layoutX ?? slot.layoutX;
         const y = t.layoutY ?? slot.layoutY;
+        const st = floorStatus(t);
+        const style = FLOOR_TILE[st] ?? FLOOR_TILE.available;
+        const elapsed = elapsedLabel(t.orderCreatedAt);
+        const amt = moneyShort(t.runningTotal ?? t.balanceDue);
         return (
-          <button
+          <div
             key={t.id}
-            type="button"
-            onClick={() => onActivate(t)}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              onEdit(t);
-            }}
             style={{ left: `${x}%`, top: `${y}%` }}
-            className={cn(
-              "absolute w-[14%] min-w-[4.5rem] rounded-lg border px-2 py-2 text-left shadow-sm",
-              TILE[t.status] ?? TILE.available,
-            )}
+            className="absolute z-10 w-[13%] min-w-[5.25rem]"
           >
-            <p className="truncate text-xs font-semibold text-[#0b1f33]">
-              {t.name}
-            </p>
-            <p className="text-[0.65rem] text-[#5a6b7d]">
-              {t.capacity} · {t.status}
-            </p>
-          </button>
+            <button
+              type="button"
+              onClick={() => onActivate(t)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                onEdit(t);
+              }}
+              className={cn(
+                "w-full rounded-xl border-2 px-2 py-2 text-left shadow-md transition hover:brightness-105",
+                style.tile,
+              )}
+            >
+              <p className={cn("truncate text-sm font-bold", style.ink)}>
+                {t.name}
+              </p>
+              <p className={cn("text-[0.65rem] opacity-90", style.ink)}>
+                {t.covers ? `${t.covers}p` : `${t.capacity}s`}
+                {elapsed ? ` · ${elapsed}` : ""}
+              </p>
+              {amt ? (
+                <p className={cn("text-xs font-bold tabular-nums", style.ink)}>
+                  {money(t.runningTotal ?? t.balanceDue ?? 0)}
+                </p>
+              ) : (
+                <p
+                  className={cn(
+                    "text-[0.65rem] font-semibold opacity-90",
+                    style.ink,
+                  )}
+                >
+                  {style.label}
+                </p>
+              )}
+            </button>
+            <button
+              type="button"
+              className="absolute -right-1 -top-1 rounded-full bg-white p-0.5 text-[#5a6b7d] shadow ring-1 ring-[#e2e8f0]"
+              onClick={(e) => {
+                e.stopPropagation();
+                setMenuTableId(menuTableId === t.id ? null : t.id);
+              }}
+              aria-label="Actions"
+            >
+              <MoreHorizontal className="size-3.5" />
+            </button>
+            {menuTableId === t.id ? (
+              <div className="absolute left-0 top-full z-30 mt-1 min-w-[8.5rem] overflow-hidden rounded-lg border border-[#e2e8f0] bg-white py-1 text-xs shadow-lg">
+                <button
+                  type="button"
+                  className="block w-full px-3 py-1.5 text-left hover:bg-[#f8fafc]"
+                  onClick={() => onEdit(t)}
+                >
+                  Edit
+                </button>
+                {t.currentOrderId ? (
+                  <>
+                    <button
+                      type="button"
+                      className="block w-full px-3 py-1.5 text-left hover:bg-[#f8fafc]"
+                      onClick={() => onMove(t)}
+                    >
+                      Move
+                    </button>
+                    <button
+                      type="button"
+                      className="block w-full px-3 py-1.5 text-left hover:bg-[#f8fafc]"
+                      onClick={() => onMerge(t)}
+                    >
+                      Merge
+                    </button>
+                  </>
+                ) : null}
+                {onReserve ? (
+                  <button
+                    type="button"
+                    className="block w-full px-3 py-1.5 text-left hover:bg-[#f8fafc]"
+                    onClick={() => onReserve(t)}
+                  >
+                    Reserve
+                  </button>
+                ) : null}
+                {nextBookedFor(reservations, t.id) ? (
+                  <p className="border-t border-[#f1f5f9] px-3 py-1.5 text-[0.65rem] text-[#9a3412]">
+                    Next: {nextBookedFor(reservations, t.id)!.guestName}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
         );
       })}
+      {!tables.length ? (
+        <p className="absolute inset-0 flex items-center justify-center text-sm text-[#64748b]">
+          No tables in this filter
+        </p>
+      ) : null}
     </div>
   );
 }
+
 
 function FloorModal({
   floor,
@@ -1874,14 +2268,15 @@ function LayoutModal({
       >
         {tables.map((t) => {
           const p = pos[t.id] ?? { x: 8, y: 8 };
+          const st = FLOOR_TILE[floorStatus(t)] ?? FLOOR_TILE.available;
           return (
             <button
               key={t.id}
               type="button"
               style={{ left: `${p.x}%`, top: `${p.y}%` }}
               className={cn(
-                "absolute w-[14%] min-w-[4.5rem] cursor-grab rounded-lg border px-2 py-2 text-left shadow-sm active:cursor-grabbing",
-                TILE[t.status] ?? TILE.available,
+                "absolute w-[14%] min-w-[4.5rem] cursor-grab rounded-lg border-2 px-2 py-2 text-left shadow-sm active:cursor-grabbing",
+                st.tile,
               )}
               onPointerDown={(e) => {
                 e.preventDefault();
@@ -1898,10 +2293,10 @@ function LayoutModal({
                 drag.current = null;
               }}
             >
-              <p className="truncate text-xs font-semibold text-[#0b1f33]">
+              <p className={cn("truncate text-xs font-semibold", st.ink)}>
                 {t.name}
               </p>
-              <p className="text-[0.65rem] text-[#5a6b7d]">
+              <p className={cn("text-[0.65rem] opacity-90", st.ink)}>
                 {t.capacity} seats
               </p>
             </button>
