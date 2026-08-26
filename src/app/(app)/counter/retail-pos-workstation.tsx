@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { customersApi, loyaltyApi, ordersApi, paymentsApi, posApi, resourcesApi, restaurantApi, tenantsApi, billingApi } from "@/lib/api";
@@ -284,7 +284,6 @@ export default function RetailPosWorkstation({
     label: string;
   } | null>(null);
   const [touchMode, setTouchMode] = useState(false);
-  const [showBillDetails, setShowBillDetails] = useState(false);
   const [busy, setBusy] = useState(false);
   const [offlinePending, setOfflinePending] = useState(0);
   const [online, setOnline] = useState(true);
@@ -2785,140 +2784,88 @@ export default function RetailPosWorkstation({
           </ul>
 
           <div className="mt-auto space-y-2.5 border-t border-[#eef2f8] bg-[#fafbfc] p-3">
-            <div className="space-y-1 rounded-xl border border-[#e2e8f0] bg-white px-3 py-2.5 shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
-              <div className="flex justify-between text-[0.8125rem] text-[#5a6b7d]">
+            <div className="space-y-2 rounded-xl border border-[#e2e8f0] bg-white px-3 py-3 shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
+              <div className="flex justify-between text-sm text-[#0b1f33]">
                 <span>Subtotal</span>
-                <span className="tabular-nums text-[#0b1f33]">
+                <span className="tabular-nums">
                   {money(billSummary.itemsSubtotal)}
                 </span>
               </div>
-              <div className="flex justify-between text-[0.8125rem] text-[#5a6b7d]">
+              <div className="flex justify-between text-sm text-[#0b1f33]">
                 <span>Discount</span>
-                <span
-                  className={cn(
-                    "tabular-nums",
-                    discountNum > 0
-                      ? "font-semibold text-[#15803d]"
-                      : "text-[#0b1f33]",
-                  )}
-                >
+                <span className="tabular-nums">
                   {discountNum > 0 ? `−${money(discountNum)}` : money(0)}
                 </span>
               </div>
               {loyaltyOff > 0 ? (
-                <div className="flex justify-between text-[0.8125rem] text-[#5a6b7d]">
+                <div className="flex justify-between text-sm text-[#0b1f33]">
                   <span>Points</span>
-                  <span className="tabular-nums font-semibold text-[#15803d]">
-                    −{money(loyaltyOff)}
-                  </span>
+                  <span className="tabular-nums">−{money(loyaltyOff)}</span>
                 </div>
               ) : null}
               {diningFeeLines.map((f) => (
                 <div
                   key={f.feeCode}
-                  className="flex justify-between text-[0.8125rem] text-[#5a6b7d]"
+                  className="flex justify-between text-sm text-[#0b1f33]"
                 >
                   <span>{f.reason}</span>
-                  <span className="tabular-nums text-[#0b1f33]">
-                    {money(f.amount)}
-                  </span>
+                  <span className="tabular-nums">{money(f.amount)}</span>
                 </div>
               ))}
-              <div className="flex justify-between text-[0.8125rem] text-[#5a6b7d]">
-                <span>
-                  Tax
-                  {billSummary.taxTotal > 0 && taxSettings.rate > 0
-                    ? ` (${Math.round(taxSettings.rate * 1000) / 10}%)`
-                    : ""}
-                </span>
-                <span className="tabular-nums text-[#0b1f33]">
-                  {money(billSummary.taxTotal)}
-                </span>
-              </div>
-              <div className="flex items-baseline justify-between gap-2 border-t border-[#e8edf4] pt-2">
-                <span className="text-sm font-bold text-[#0b1f33]">Total</span>
-                <span className="text-xl font-bold tabular-nums text-[#0b1f33]">
+              {billSummary.taxTotal > 0 ? (
+                <>
+                  <div className="flex justify-between text-sm text-[#0b1f33]">
+                    <span>Taxable value</span>
+                    <span className="tabular-nums">
+                      {money(billSummary.taxableValue)}
+                    </span>
+                  </div>
+                  {billSummary.taxSlabs.map((s) =>
+                    s.rate <= 0 ? (
+                      <div
+                        key="tax"
+                        className="flex justify-between text-sm text-[#0b1f33]"
+                      >
+                        <span>Tax</span>
+                        <span className="tabular-nums">{money(s.tax)}</span>
+                      </div>
+                    ) : (
+                      <Fragment key={s.rate}>
+                        <div className="flex justify-between text-sm text-[#0b1f33]">
+                          <span>CGST {s.halfRate}%</span>
+                          <span className="tabular-nums">{money(s.cgst)}</span>
+                        </div>
+                        <div className="flex justify-between text-sm text-[#0b1f33]">
+                          <span>SGST {s.halfRate}%</span>
+                          <span className="tabular-nums">{money(s.sgst)}</span>
+                        </div>
+                      </Fragment>
+                    ),
+                  )}
+                </>
+              ) : (
+                <div className="flex justify-between text-sm text-[#0b1f33]">
+                  <span>Tax</span>
+                  <span className="tabular-nums">{money(0)}</span>
+                </div>
+              )}
+              {billSummary.showRoundOff ? (
+                <div className="flex justify-between text-sm text-[#0b1f33]">
+                  <span>Round off</span>
+                  <span className="tabular-nums">
+                    {billSummary.roundOff > 0 ? "+" : ""}
+                    {money(billSummary.roundOff)}
+                  </span>
+                </div>
+              ) : null}
+              <div className="flex items-baseline justify-between border-t border-[#e8edf4] pt-2 text-[#0b1f33]">
+                <span className="text-base font-bold">Total</span>
+                <span className="text-lg font-bold tabular-nums">
                   {money(splitPart ? chargeAmount : totalDue)}
                 </span>
               </div>
-              {(billSummary.taxTotal > 0 ||
-                billSummary.showRoundOff ||
-                discountNum > 0 ||
-                loyaltyOff > 0) && (
-                <button
-                  type="button"
-                  className="mt-0.5 text-[0.8125rem] font-medium text-[#1a56db] hover:underline"
-                  onClick={() => setShowBillDetails((v) => !v)}
-                >
-                  {showBillDetails ? "Hide details" : "Show details"}
-                </button>
-              )}
-              {showBillDetails ? (
-                <div className="mt-2 space-y-1 border-t border-[#e8edf4] pt-2">
-                  {billSummary.taxTotal > 0 ? (
-                    <>
-                      <div className="flex justify-between text-[0.8125rem] text-[#5a6b7d]">
-                        <span>Taxable value</span>
-                        <span className="tabular-nums text-[#0b1f33]">
-                          {money(billSummary.taxableValue)}
-                        </span>
-                      </div>
-                      <div className="my-1 space-y-1 rounded-md border border-[#e8edf4] bg-[#f8fafc] px-2.5 py-2">
-                        {billSummary.taxSlabs.map((s) =>
-                          s.rate <= 0 ? (
-                            <div
-                              key="tax"
-                              className="flex justify-between text-[0.8125rem] text-[#5a6b7d]"
-                            >
-                              <span>Tax</span>
-                              <span className="tabular-nums text-[#0b1f33]">
-                                {money(s.tax)}
-                              </span>
-                            </div>
-                          ) : (
-                            <div key={s.rate} className="space-y-1">
-                              <div className="flex justify-between text-[0.8125rem] text-[#5a6b7d]">
-                                <span>CGST {s.halfRate}%</span>
-                                <span className="tabular-nums text-[#0b1f33]">
-                                  {money(s.cgst)}
-                                </span>
-                              </div>
-                              <div className="flex justify-between text-[0.8125rem] text-[#5a6b7d]">
-                                <span>SGST {s.halfRate}%</span>
-                                <span className="tabular-nums text-[#0b1f33]">
-                                  {money(s.sgst)}
-                                </span>
-                              </div>
-                            </div>
-                          ),
-                        )}
-                      </div>
-                      <p className="text-[0.8125rem] text-[#5a6b7d]">
-                        {billSummary.taxInclusive
-                          ? "Prices include tax"
-                          : "Tax added on top of taxable value"}
-                      </p>
-                    </>
-                  ) : null}
-                  {billSummary.showRoundOff ? (
-                    <div className="flex justify-between text-[0.8125rem] text-[#5a6b7d]">
-                      <span>Round off</span>
-                      <span className="tabular-nums text-[#0b1f33]">
-                        {billSummary.roundOff > 0 ? "+" : ""}
-                        {money(billSummary.roundOff)}
-                      </span>
-                    </div>
-                  ) : null}
-                  <div className="flex justify-between border-t border-[#e8edf4] pt-1.5 text-[0.8125rem] font-bold text-[#0b1f33]">
-                    <span>Grand total</span>
-                    <span className="tabular-nums">
-                      {money(billSummary.grand)}
-                    </span>
-                  </div>
-                </div>
-              ) : null}
               {splitPart || stillDueAfter > 0.001 ? (
-                <p className="mt-1 text-[0.7rem] text-[#1341a8]">
+                <p className="text-sm text-[#1341a8]">
                   Collecting {money(chargeAmount)}
                   {stillDueAfter > 0.001
                     ? ` · still due ${money(stillDueAfter)}`

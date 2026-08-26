@@ -384,11 +384,20 @@ export function CatalogItemEditor() {
     mutationFn: async () => {
       if (barcodeError) throw new Error(barcodeError);
 
-      // Serial / batch always imply inventory tracking
-      const trackInventory =
-        form.trackInventory || form.trackSerial || form.trackBatch;
-      const trackSerial = form.trackSerial && trackInventory;
-      const trackBatch = form.trackBatch && trackInventory;
+      // Serial / batch always imply inventory tracking; non-stock kinds never track
+      const nonStock =
+        form.kind === "service" ||
+        form.kind === "digital" ||
+        form.kind === "bundle";
+      const trackInventory = nonStock
+        ? false
+        : form.trackInventory || form.trackSerial || form.trackBatch;
+      const trackSerial = !nonStock && form.trackSerial && trackInventory;
+      const trackBatch = !nonStock && form.trackBatch && trackInventory;
+      const canPurchase =
+        form.kind === "service" || form.kind === "digital"
+          ? false
+          : form.canPurchase;
 
       const parsed = createCatalogProductSchema.safeParse({
         name: form.name,
@@ -486,7 +495,7 @@ export function CatalogItemEditor() {
         trackSerial,
         trackBatch,
         canSell: form.canSell,
-        canPurchase: form.canPurchase,
+        canPurchase,
         availableInPos: form.availableInPos,
         extraFields: buildExtraFieldsPayload(
           { ...form, trackInventory, trackSerial, trackBatch },

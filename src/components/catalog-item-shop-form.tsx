@@ -35,6 +35,82 @@ import {
   FoodTypeBadge,
   type FoodType,
 } from "@/components/food-type-badge";
+import { Info } from "lucide-react";
+
+const TRACKING_FLAG_HELP_BASE: Record<
+  "trackInventory" | "canSell" | "canPurchase" | "availableInPos",
+  string
+> = {
+  trackInventory:
+    "On: count Stock on Hand when you sell or stock in. Off: no quantity — stock not counted.",
+  canSell: "On: this item can be sold on bills. Off: buy/use only (not sold to customers).",
+  canPurchase:
+    "On: you can purchase / stock in this item from suppliers. Off: you don’t buy it in the app.",
+  availableInPos:
+    "On: cashiers see it on the counter. Off: stays in catalog only (hidden from POS).",
+};
+
+/** Types that never keep their own Stock on Hand on New Item. */
+export function catalogKindSkipsStock(kind: CatalogProductKind): boolean {
+  return kind === "service" || kind === "digital" || kind === "bundle";
+}
+
+function trackingFlagHelp(
+  key: keyof typeof TRACKING_FLAG_HELP_BASE,
+  kind: CatalogProductKind,
+): string {
+  if (key === "trackInventory") {
+    if (kind === "service") {
+      return "Services don’t use stock. This stays off — you can’t turn it on for Service.";
+    }
+    if (kind === "digital") {
+      return "Digital items don’t use stock. This stays off — you can’t turn it on for Digital.";
+    }
+    if (kind === "bundle") {
+      return "Combo stock comes from items inside. This stays off — you can’t turn it on for Combo.";
+    }
+    if (kind === "rental") {
+      return "On: count how many rental units you have. Off: rent without counting quantity.";
+    }
+  }
+  if (key === "canPurchase") {
+    if (kind === "service" || kind === "digital") {
+      return "Services and digital items aren’t purchased as stock. This stays off for this type.";
+    }
+  }
+  return TRACKING_FLAG_HELP_BASE[key];
+}
+
+/** Which checkboxes can’t be clicked for this item type. */
+function isTrackingFlagLocked(
+  key: "trackInventory" | "canSell" | "canPurchase" | "availableInPos",
+  kind: CatalogProductKind,
+): boolean {
+  if (key === "trackInventory") return catalogKindSkipsStock(kind);
+  if (key === "canPurchase") return kind === "service" || kind === "digital";
+  return false;
+}
+
+function FlagInfo({ text }: { text: string }) {
+  return (
+    <span className="group relative inline-flex shrink-0">
+      <button
+        type="button"
+        className="rounded-full p-0.5 text-[#8b9bb0] hover:bg-[#eef2f8] hover:text-[#1a56db] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1a56db]/60"
+        aria-label={text}
+        title={text}
+      >
+        <Info className="size-3.5" aria-hidden />
+      </button>
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-1.5 w-52 -translate-x-1/2 rounded-md border border-[#d9e0ea] bg-white px-2.5 py-1.5 text-left text-[0.7rem] leading-snug font-normal text-[#5a6b7d] opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+      >
+        {text}
+      </span>
+    </span>
+  );
+}
 
 export const CATALOG_ITEM_KINDS: { id: CatalogProductKind; label: string }[] = [
   { id: "physical", label: "Goods" },
@@ -99,8 +175,7 @@ export function applyCatalogKindDefaults<T extends CatalogItemShopValues>(
   prev: T,
   kind: CatalogProductKind,
 ): T {
-  const nonStock =
-    kind === "service" || kind === "digital" || kind === "bundle";
+  const nonStock = catalogKindSkipsStock(kind);
   let unit = prev.unitOfMeasure;
   if (kind === "service") {
     unit = "service";
@@ -119,6 +194,7 @@ export function applyCatalogKindDefaults<T extends CatalogItemShopValues>(
     canSell: kind === "digital" ? prev.canSell : true,
     availableInPos: true,
     unitOfMeasure: unit,
+    ...(nonStock ? { openingQty: "", reorderPoint: "" } : {}),
   };
 }
 
@@ -134,6 +210,8 @@ export function patchCatalogTrackingFlags<T extends CatalogItemShopValues>(
       trackInventory: false,
       trackSerial: false,
       trackBatch: false,
+      openingQty: "",
+      reorderPoint: "",
     };
   }
   return { ...prev, [key]: checked };
@@ -275,7 +353,14 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
   );
   const kindOptions = catalogKindsForModes(commerceModes);
   const qtyAllowsDecimal = allowsDecimalQty(form.unitOfMeasure || "pcs");
-  const showStockFields = form.trackInventory;
+  const stockNotNeeded = catalogKindSkipsStock(form.kind);
+  const showStockFields = form.trackInventory && !stockNotNeeded;
+  const trackingFlags = [
+    ["trackInventory", "Track inventory"],
+    ["canSell", "Can sell"],
+    ["canPurchase", "Can purchase"],
+    ["availableInPos", "Show on counter"],
+  ] as const;
 
   useEffect(() => {
     if (defaultShowMore) setShowMore(true);
@@ -666,7 +751,34 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                     </span>
                   </div>
                 </ShopField>
-              ) : null}
+              ) : (
+                <ShopField
+                  label="Stock on Hand"
+                  hint={
+                    <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+                      {stockNotNeeded
+                        ? form.kind === "bundle"
+                          ? "Not used for combo packs — stock comes from items inside."
+                          : form.kind === "service"
+                            ? "Not used for services — nothing to count."
+                            : "Not used for digital items — nothing to count."
+                        : "Turn on “Track inventory” below to enter opening qty."}
+                    </p>
+                  }
+                >
+                  <div className="flex items-center gap-2">
+                    <Input
+                      disabled
+                      readOnly
+                      className="bg-[#f4f6fa] text-[#8b9bb0]"
+                      value="Not counted"
+                    />
+                    <span className="shrink-0 rounded-md bg-[#f1f5f9] px-2.5 py-2 text-sm font-semibold text-[#8b9bb0]">
+                      {form.unitOfMeasure || "pcs"}
+                    </span>
+                  </div>
+                </ShopField>
+              )}
 
               {showStockFields ? (
                 <ShopField
@@ -814,37 +926,57 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
             </ShopSection>
 
             <ShopSection title="Inventory tracking">
-              <div className="grid gap-2 sm:grid-cols-2">
-                {(
-                  [
-                    ["trackInventory", "Track inventory"],
-                    ["canSell", "Can sell"],
-                    ["canPurchase", "Can purchase"],
-                    ["availableInPos", "Show on counter"],
-                  ] as const
-                ).map(([key, label]) => (
-                  <label
-                    key={key}
-                    className="flex items-center gap-2 text-sm text-[#0b1f33]"
-                  >
-                    <input
-                      type="checkbox"
-                      className="accent-[#1a56db]"
-                      checked={form[key]}
-                      onChange={(e) =>
-                        setForm((f) =>
-                          patchCatalogTrackingFlags(f, key, e.target.checked),
-                        )
-                      }
-                    />
-                    {label}
-                  </label>
-                ))}
+              <div className="grid gap-2.5 sm:grid-cols-2">
+                {trackingFlags.map(([key, label]) => {
+                  const lockedOff = isTrackingFlagLocked(key, form.kind);
+                  return (
+                    <div
+                      key={key}
+                      className={cn(
+                        "flex items-center gap-2 text-sm text-[#0b1f33]",
+                        lockedOff && "opacity-60",
+                      )}
+                    >
+                      <label
+                        className={cn(
+                          "flex min-w-0 flex-1 items-center gap-2",
+                          lockedOff ? "cursor-not-allowed" : "cursor-pointer",
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          className="accent-[#1a56db] disabled:cursor-not-allowed"
+                          checked={form[key]}
+                          disabled={lockedOff}
+                          onChange={(e) =>
+                            setForm((f) =>
+                              patchCatalogTrackingFlags(
+                                f,
+                                key,
+                                e.target.checked,
+                              ),
+                            )
+                          }
+                        />
+                        <span>{label}</span>
+                      </label>
+                      <FlagInfo text={trackingFlagHelp(key, form.kind)} />
+                    </div>
+                  );
+                })}
               </div>
               <p className="mt-2 text-[0.75rem] text-[#5a6b7d]">
-                {form.trackInventory
-                  ? "Stock on Hand is counted when you sell or stock in."
-                  : "Stock is not counted — item can still sell if “Can sell” is on."}
+                {stockNotNeeded
+                  ? form.kind === "bundle"
+                    ? "Combo packs don’t keep their own stock — quantity comes from items inside. Track inventory stays off."
+                    : form.kind === "service"
+                      ? "Services don’t need stock. Track inventory is off and can’t be turned on for this type."
+                      : "Digital items don’t need stock. Track inventory is off and can’t be turned on for this type."
+                  : form.trackInventory
+                    ? form.kind === "rental"
+                      ? "Rental units are counted when you rent out or return stock."
+                      : "Stock on Hand is counted when you sell or stock in."
+                    : "Stock is not counted — Stock on Hand stays locked. You can still sell if “Can sell” is on."}
               </p>
             </ShopSection>
 
