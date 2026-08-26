@@ -47,8 +47,6 @@ import { ModeBadge } from "@/components/mode-badge";
 import { PageBreadcrumb, PageSkeleton } from "@/components/page-header";
 import { ReceiptModal, type ReceiptData } from "@/components/receipt-modal";
 import { SaleReturnDialog } from "@/components/sale-return-dialog";
-import { printTaxInvoice } from "@/lib/tax-invoice-print";
-import { useBootstrap } from "@/lib/bootstrap";
 
 function lineItemName(item: {
   description?: string | null;
@@ -158,7 +156,6 @@ function OrderDetailInner() {
   const search = useSearchParams();
   const id = search.get("id") ?? "";
   const qc = useQueryClient();
-  const { productName } = useBootstrap();
   const roles = useAuthStore((s) => s.user?.roles ?? EMPTY_ROLES);
   const allowRefund = canRefund(roles);
   const allowFinance = canFinance(roles);
@@ -170,6 +167,11 @@ function OrderDetailInner() {
   const [extendPay, setExtendPay] = useState(true);
   const [receiptOpen, setReceiptOpen] = useState(false);
   const [saleReturnOpen, setSaleReturnOpen] = useState(false);
+  /** Same POS bill as counter payment — highlight this invoice when set */
+  const [receiptFocus, setReceiptFocus] = useState<{
+    invoiceNumber: string;
+    label?: string | null;
+  } | null>(null);
 
   const order = useQuery({
     queryKey: ["order", id],
@@ -540,7 +542,10 @@ function OrderDetailInner() {
             type="button"
             variant="secondary"
             size="sm"
-            onClick={() => setReceiptOpen(true)}
+            onClick={() => {
+              setReceiptFocus(null);
+              setReceiptOpen(true);
+            }}
           >
             Print receipt
           </Button>
@@ -893,7 +898,6 @@ function OrderDetailInner() {
             <ul className="mt-3 divide-y divide-[#f1f5f9] text-sm">
               {(invoices.data ?? []).map((inv) => {
                 const partLabel = invoicePartLabel(inv);
-                const isSplitPart = Boolean(partLabel);
                 return (
                 <li key={inv.id} className="py-3">
                   <p className="font-mono text-[0.85rem] font-bold text-[#0b1f33]">
@@ -915,126 +919,14 @@ function OrderDetailInner() {
                     type="button"
                     className="mt-2 text-[0.78rem] font-bold text-[#1a56db] hover:underline"
                     onClick={() => {
-                      const branding = (tenant.data?.branding ??
-                        {}) as Record<string, unknown>;
-                      const settings = (tenant.data as { settings?: Record<string, unknown> } | undefined)?.settings;
-                      const org =
-                        settings?.organizationProfile &&
-                        typeof settings.organizationProfile === "object"
-                          ? (settings.organizationProfile as Record<
-                              string,
-                              unknown
-                            >)
-                          : {};
-                      const shopName =
-                        (typeof branding.productName === "string" &&
-                          branding.productName) ||
-                        productName ||
-                        tenant.data?.name ||
-                        "Universal POS";
-                      const invTax =
-                        moneyNumber(inv.cgst) +
-                        moneyNumber(inv.sgst) +
-                        moneyNumber(inv.igst);
-                      const invGrand = moneyNumber(inv.grandTotal);
-                      const lines = isSplitPart
-                        ? [
-                            {
-                              name: partLabel
-                                ? `Split bill — ${partLabel}`
-                                : "Split bill part",
-                              sku: null as string | null,
-                              hsn: null as string | null,
-                              qty: 1,
-                              rate: Math.max(0, invGrand - invTax),
-                              tax: invTax,
-                              amount: invGrand,
-                            },
-                          ]
-                        : data.items.map((item) => {
-                            const qty = moneyNumber(item.quantity ?? 1);
-                            const rate = moneyNumber(item.unitPrice);
-                            const tax = moneyNumber(item.taxAmount);
-                            const amount =
-                              item.lineTotal != null
-                                ? moneyNumber(item.lineTotal)
-                                : rate * qty + tax;
-                            return {
-                              name: lineItemName(item),
-                              sku: lineItemSku(item),
-                              hsn:
-                                item.product?.taxCode ||
-                                item.stockLevel?.product?.taxCode ||
-                                null,
-                              qty,
-                              rate,
-                              tax,
-                              amount,
-                            };
-                          });
-                      const ok = printTaxInvoice({
+                      setReceiptFocus({
                         invoiceNumber: inv.invoiceNumber,
-                        createdAt: inv.createdAt,
-                        orderNumber: data.orderNumber,
-                        gstin:
-                          inv.taxIdSnapshot ||
-                          inv.gstin ||
-                          tenant.data?.gstin ||
-                          tenant.data?.taxId ||
-                          null,
-                        placeOfSupply:
-                          inv.placeOfSupply ||
-                          (typeof inv.taxBreakdown?.placeOfSupply === "string"
-                            ? inv.taxBreakdown.placeOfSupply
-                            : null),
-                        cgst: moneyNumber(inv.cgst),
-                        sgst: moneyNumber(inv.sgst),
-                        igst: moneyNumber(inv.igst),
-                        grandTotal: invGrand,
-                        subtotal: isSplitPart
-                          ? Math.max(0, invGrand - invTax)
-                          : moneyNumber(data.subtotal),
-                        taxTotal: isSplitPart
-                          ? invTax
-                          : moneyNumber(data.taxTotal),
-                        shop: {
-                          name: shopName,
-                          tagline:
-                            typeof branding.tagline === "string"
-                              ? branding.tagline
-                              : null,
-                          address:
-                            data.location?.address ||
-                            data.store?.address ||
-                            [
-                              typeof org.addressLine1 === "string"
-                                ? org.addressLine1
-                                : "",
-                              typeof org.city === "string" ? org.city : "",
-                              typeof org.state === "string" ? org.state : "",
-                            ]
-                              .filter(Boolean)
-                              .join(", ") ||
-                            null,
-                          phone:
-                            typeof org.phone === "string" ? org.phone : null,
-                          email:
-                            typeof org.email === "string" ? org.email : null,
-                          logoUrl:
-                            typeof branding.logoUrl === "string"
-                              ? branding.logoUrl
-                              : null,
-                        },
-                        customer: {
-                          name: data.customer?.fullName ?? "Walk-in Guest",
-                          phone: data.customer?.phone ?? null,
-                        },
-                        lines,
+                        label: partLabel,
                       });
-                      if (!ok) toast.error("Could not open print preview");
+                      setReceiptOpen(true);
                     }}
                   >
-                    Print tax invoice
+                    Print bill
                   </button>
                 </li>
                 );
@@ -1276,11 +1168,26 @@ function OrderDetailInner() {
 
       {receiptOpen ? (
         <ReceiptModal
-          data={(receiptQ.data as ReceiptData | undefined) ?? null}
+          data={
+            receiptQ.data
+              ? ({
+                  ...(receiptQ.data as ReceiptData),
+                  ...(receiptFocus
+                    ? {
+                        activeInvoiceNumber: receiptFocus.invoiceNumber,
+                        activeInvoiceLabel: receiptFocus.label ?? null,
+                      }
+                    : {}),
+                } as ReceiptData)
+              : null
+          }
           loading={receiptQ.isLoading}
           change={receiptQ.data?.change}
           cashTendered={receiptQ.data?.cashTendered}
-          onClose={() => setReceiptOpen(false)}
+          onClose={() => {
+            setReceiptOpen(false);
+            setReceiptFocus(null);
+          }}
         />
       ) : null}
 
