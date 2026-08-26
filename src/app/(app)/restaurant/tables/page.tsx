@@ -160,9 +160,59 @@ function bookingWhen(iso: string) {
 }
 
 /** Petpooja-style display status (billed ≠ still running). */
-function floorStatus(t: DiningTable): keyof typeof FLOOR_TILE {
+function parseReservationDuration(notes?: string | null): number {
+  if (!notes) return 60;
+  const match = notes.match(/\[Duration:\s*(\d+)m\]/);
+  return match ? parseInt(match[1], 10) : 60;
+}
+
+function isReservationActiveNow(
+  r: { startAt: string; notes?: string | null; status: string },
+  nowMs: number = Date.now(),
+): boolean {
+  if (r.status === "seated") return true;
+  if (r.status !== "booked") return false;
+  const startMs = new Date(r.startAt).getTime();
+  if (Number.isNaN(startMs)) return false;
+  const duration = parseReservationDuration(r.notes);
+  const endMs = startMs + duration * 60 * 1000;
+  return nowMs >= startMs - 15 * 60 * 1000 && nowMs < endMs;
+}
+
+function floorStatus(
+  t: DiningTable,
+  reservations?: Array<{
+    table: { id: string } | null;
+    status: string;
+    guestName: string;
+    startAt: string;
+    notes?: string | null;
+  }>,
+): keyof typeof FLOOR_TILE {
+  const now = Date.now();
   if (t.billedAt || t.kitchenPhase === "billed") return "billed";
-  if (t.status === "occupied" && t.currentOrderId) return "occupied";
+  if (t.status === "occupied" || Boolean(t.currentOrderId)) return "occupied";
+  if (
+    reservations &&
+    reservations.some(
+      (r) => r.table?.id === t.id && r.status === "seated",
+    )
+  ) {
+    return "occupied";
+  }
+  if (
+    reservations &&
+    reservations.some(
+      (r) =>
+        r.table?.id === t.id &&
+        isReservationActiveNow(r, now),
+    )
+  ) {
+    return "reserved";
+  }
+  if (t.status === "reserved") return "reserved";
+  if (t.status === "cleaning") return "cleaning";
+  if (t.status === "blocked") return "blocked";
   if (FLOOR_TILE[t.status]) return t.status as keyof typeof FLOOR_TILE;
   return "available";
 }
@@ -196,12 +246,45 @@ export default function RestaurantTablesPage() {
   const [floorFilter, setFloorFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [viewMode, setViewMode] = useState<"grid" | "layout">("layout");
+
+  const cfg = useQuery({
+    queryKey: ["restaurant-config"],
+    queryFn: () => restaurantApi.config(),
+    enabled: allowed,
+  });
+
+  const saveConfig = useMutation({
+    mutationFn: (body: Record<string, unknown>) => restaurantApi.saveConfig(body),
+    onSuccess: (_, variables) => {
+      toast.success(
+        variables.seatingBasedReservation
+          ? "Seating-based reservation enabled"
+          : "Seating-based reservation disabled",
+      );
+      void qc.invalidateQueries({ queryKey: ["restaurant-config"] });
+      void qc.refetchQueries({ queryKey: ["restaurant-config"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
   const [modal, setModal] = useState<Modal | null>(null);
+  const markStatus = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: string }) =>
+      restaurantApi.updateTable(id, { status }),
+    onSuccess: (_, variables) => {
+      toast.success(
+        variables.status === "available"
+          ? "Table marked clean and available"
+          : "Table marked for cleaning",
+      );
+      refreshFloor();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
   const [menuTableId, setMenuTableId] = useState<string | null>(null);
   const [, setTick] = useState(0);
 
   useEffect(() => {
-    const id = window.setInterval(() => setTick((n) => n + 1), 30_000);
+    const id = window.setInterval(() => setTick((n) => n + 1), 10_000);
     return () => window.clearInterval(id);
   }, []);
 
@@ -239,6 +322,9 @@ export default function RestaurantTablesPage() {
   const refreshFloor = () => {
     void qc.invalidateQueries({ queryKey: ["restaurant-floors"] });
     void qc.invalidateQueries({ queryKey: ["restaurant-tables"] });
+    void qc.invalidateQueries({ queryKey: ["dining-reservations"] });
+    void qc.refetchQueries({ queryKey: ["restaurant-tables"] });
+    void qc.refetchQueries({ queryKey: ["dining-reservations"] });
   };
 
   const allTables = tables.data ?? [];
@@ -260,7 +346,7 @@ export default function RestaurantTablesPage() {
       blocked: 0,
     };
     for (const t of allTables) {
-      const s = floorStatus(t);
+      const s = floorStatus(t, reservations.data ?? []);
       c[s] = (c[s] ?? 0) + 1;
     }
     return c;
@@ -270,7 +356,7 @@ export default function RestaurantTablesPage() {
     return allTables.filter((t) => {
       if (floorFilter !== "all" && (t.floorId || "unassigned") !== floorFilter)
         return false;
-      if (statusFilter !== "all" && floorStatus(t) !== statusFilter)
+      if (statusFilter !== "all" && floorStatus(t, reservations.data ?? []) !== statusFilter)
         return false;
       return true;
     });
@@ -293,22 +379,38 @@ export default function RestaurantTablesPage() {
 
   function onTableActivate(t: DiningTable) {
     setMenuTableId(null);
-    if (t.currentOrderId) {
-      setModal({ kind: "order", orderId: t.currentOrderId });
+    const st = floorStatus(t, reservations.data ?? []);
+    if (t.currentOrderId || st === "occupied") {
+      if (t.currentOrderId) {
+        setModal({ kind: "order", orderId: t.currentOrderId });
+      } else {
+        toast.info(`${t.name} is occupied`);
+      }
       return;
     }
-    if (t.status === "blocked") {
+    if (st === "blocked") {
       setModal({ kind: "table", id: t.id });
       return;
     }
-    if (t.status === "cleaning") {
+    if (st === "cleaning") {
       void restaurantApi
         .updateTable(t.id, { status: "available" })
         .then(() => {
-          toast.success(`${t.name} marked free`);
+          toast.success(`${t.name} marked cleaned & available`);
           refreshFloor();
         })
         .catch((e: Error) => toast.error(e.message));
+      return;
+    }
+    if (st === "reserved") {
+      const booking = (reservations.data ?? []).find(
+        (r) => r.table?.id === t.id && r.status === "booked",
+      );
+      if (booking) {
+        setModal({ kind: "open", tableId: t.id });
+      } else {
+        setModal({ kind: "open", tableId: t.id });
+      }
       return;
     }
     setModal({ kind: "open", tableId: t.id });
@@ -396,6 +498,15 @@ export default function RestaurantTablesPage() {
               Reserve
             </Button>
           ) : null}
+          <label className="flex items-center gap-1.5 rounded-lg border border-[#e2e8f0] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#334155] shadow-sm hover:bg-[#f8fafc] cursor-pointer">
+            <span>Seating fit</span>
+            <input
+              type="checkbox"
+              className="h-3.5 w-3.5 rounded border-[#cbd5e1] text-[#1a56db] focus:ring-[#1a56db]"
+              checked={Boolean((cfg.data as Record<string, unknown>)?.seatingBasedReservation)}
+              onChange={(e) => saveConfig.mutate({ seatingBasedReservation: e.target.checked })}
+            />
+          </label>
           <Button
             type="button"
             variant="secondary"
@@ -760,6 +871,7 @@ export default function RestaurantTablesPage() {
           tables={allTables}
           locationId={locationId!}
           defaultTableId={modal.tableId}
+          reservations={reservations.data ?? []}
           onClose={() => setModal(null)}
           onSaved={() => {
             refreshFloor();
@@ -934,7 +1046,7 @@ function TableTile({
               </button>
             </>
           ) : null}
-          {onReserve ? (
+          {onReserve && t.status !== "occupied" && !t.currentOrderId ? (
             <button
               type="button"
               className="block w-full px-3 py-1.5 text-left hover:bg-[#f8fafc]"
@@ -996,7 +1108,7 @@ function FloorLayoutPreview({
         const slot = layoutSlot(i);
         const x = t.layoutX ?? slot.layoutX;
         const y = t.layoutY ?? slot.layoutY;
-        const st = floorStatus(t);
+        const st = floorStatus(t, reservations);
         const style = FLOOR_TILE[st] ?? FLOOR_TILE.available;
         const elapsed = elapsedLabel(t.orderCreatedAt);
         const amt = moneyShort(t.runningTotal ?? t.balanceDue);
@@ -1018,27 +1130,24 @@ function FloorLayoutPreview({
                 style.tile,
               )}
             >
-              <p className={cn("truncate text-sm font-bold", style.ink)}>
-                {t.name}
-              </p>
+              <div className="flex items-center justify-between gap-1">
+                <p className={cn("truncate text-xs font-bold", style.ink)}>
+                  {t.name}
+                </p>
+                <span className={cn("inline-flex items-center gap-1 rounded-full bg-black/25 px-1.5 py-0.5 text-[0.55rem] font-bold uppercase tracking-wider", style.ink)}>
+                  <span className="size-1 rounded-full bg-white/90" />
+                  {style.label}
+                </span>
+              </div>
               <p className={cn("text-[0.65rem] opacity-90", style.ink)}>
                 {t.covers ? `${t.covers}p` : `${t.capacity}s`}
-                {elapsed ? ` · ${elapsed}` : ""}
+                {elapsed ? ` ${elapsed}` : ""}
               </p>
               {amt ? (
                 <p className={cn("text-xs font-bold tabular-nums", style.ink)}>
                   {money(t.runningTotal ?? t.balanceDue ?? 0)}
                 </p>
-              ) : (
-                <p
-                  className={cn(
-                    "text-[0.65rem] font-semibold opacity-90",
-                    style.ink,
-                  )}
-                >
-                  {style.label}
-                </p>
-              )}
+              ) : null}
             </button>
             <button
               type="button"
@@ -1078,7 +1187,7 @@ function FloorLayoutPreview({
                     </button>
                   </>
                 ) : null}
-                {onReserve ? (
+                {onReserve && t.status !== "occupied" && !t.currentOrderId ? (
                   <button
                     type="button"
                     className="block w-full px-3 py-1.5 text-left hover:bg-[#f8fafc]"
@@ -1368,9 +1477,15 @@ function TableModal({
               onChange={(e) => setStatus(e.target.value)}
               disabled={!table}
             >
-              {TABLE_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {s}
+              {[
+                ["available", "Available (assignable)"],
+                ["reserved", "Reserved (not assignable to others)"],
+                ["occupied", "Occupied (not assignable)"],
+                ["cleaning", "Cleaning (not assignable)"],
+                ["blocked", "Blocked (not assignable)"],
+              ].map(([val, lbl]) => (
+                <option key={val} value={val}>
+                  {lbl}
                 </option>
               ))}
             </Select>
@@ -1640,16 +1755,7 @@ function RunningOrderModal({
 
         {more ? (
           <div className="flex flex-wrap gap-2 border-t border-[#eef1f4] pt-3">
-            {fromTable && onBookNext ? (
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => onBookNext(fromTable.id)}
-              >
-                Book this table for later
-              </Button>
-            ) : null}
+            /* Reserved option disabled on occupied running orders */
             {fromTable ? (
               <>
                 <Button
@@ -1753,7 +1859,7 @@ function MoveMergeModal({
             onChange={(e) => setFrom(e.target.value)}
           >
             <option value="">Select</option>
-            {tables.map((t) => (
+            {tables.filter((t) => t.status !== "occupied" && !t.currentOrderId).map((t) => (
               <option key={t.id} value={t.id}>
                 {t.name}
                 {t.orderNumber ? ` · ${t.orderNumber}` : ""}
@@ -1884,29 +1990,108 @@ function ReserveModal({
   tables,
   locationId,
   defaultTableId,
+  reservations = [],
   onClose,
   onSaved,
 }: {
   tables: DiningTable[];
   locationId: string;
   defaultTableId?: string;
+  reservations?: Array<{
+    id: string;
+    table: { id: string } | null;
+    status: string;
+    startAt: string;
+    notes?: string | null;
+    guestName: string;
+  }>;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const [guestName, setGuestName] = useState("");
   const [covers, setCovers] = useState("2");
-  const [startAt, setStartAt] = useState(() => localDateTimeIn(90));
-  const [tableId, setTableId] = useState(defaultTableId ?? "");
+
+  const todayYmd = () => {
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  };
+
+  const nowHhMm = () => {
+    const d = new Date();
+    d.setMinutes(d.getMinutes() + 15);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  const [bookingDate, setBookingDate] = useState(todayYmd);
+  const [bookingTime, setBookingTime] = useState(nowHhMm);
+  const [durationMinutes, setDurationMinutes] = useState(60);
+  const [tableId, setTableId] = useState("");
+  const [manualSelected, setManualSelected] = useState(false);
   const [guestPhone, setGuestPhone] = useState("");
+
+  const cfg = useQuery({
+    queryKey: ["restaurant-config"],
+    queryFn: () => restaurantApi.config(),
+  });
+
+  const isSeatingBased = Boolean((cfg.data as Record<string, unknown>)?.seatingBasedReservation);
+  const guestCovers = Math.max(1, Number(covers) || 1);
+
+  const startDateTime = new Date(`${bookingDate}T${bookingTime}:00`);
+  const isValidStart = !Number.isNaN(startDateTime.getTime());
+  const endDateTime = isValidStart
+    ? new Date(startDateTime.getTime() + durationMinutes * 60 * 1000)
+    : null;
+
+  const endFormatted = endDateTime
+    ? endDateTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : "";
+
+  // Check if a table is overlapped by another active reservation for this slot
+  const isTableOverlapped = (tid: string) => {
+    if (!isValidStart || !endDateTime) return false;
+    const startMs = startDateTime.getTime();
+    const endMs = endDateTime.getTime();
+    return reservations.some((r) => {
+      if (r.table?.id !== tid || r.status === "cancelled" || r.status === "completed") return false;
+      const rStart = new Date(r.startAt).getTime();
+      const rDuration = parseReservationDuration(r.notes);
+      const rEnd = rStart + rDuration * 60 * 1000;
+      return startMs < rEnd && endMs > rStart;
+    });
+  };
+
+  // Find dynamic smallest suitable available table for this time slot
+  useEffect(() => {
+    if (!isSeatingBased || manualSelected) return;
+    const suitableAvailable = [...tables]
+      .filter((t) => t.capacity >= guestCovers && !isTableOverlapped(t.id) && t.status !== "blocked")
+      .sort((a, b) => a.capacity - b.capacity);
+
+    if (suitableAvailable.length > 0) {
+      if (tableId !== suitableAvailable[0].id) {
+        setTableId(suitableAvailable[0].id);
+      }
+    } else {
+      setTableId("");
+    }
+  }, [isSeatingBased, guestCovers, bookingDate, bookingTime, durationMinutes, tables, manualSelected, isValidStart]);
+
   const picked = tables.find((t) => t.id === tableId);
+  const isTooSmall = Boolean(isSeatingBased && picked && picked.capacity < guestCovers);
+  const isOverlapped = Boolean(tableId && isTableOverlapped(tableId));
+
   const save = useMutation({
     mutationFn: () =>
       restaurantApi.createReservation({
         locationId,
         guestName,
         guestPhone: guestPhone.trim() || undefined,
-        covers: Number(covers) || 2,
-        startAt: new Date(startAt).toISOString(),
+        covers: guestCovers,
+        startAt: startDateTime.toISOString(),
+        durationMinutes,
         tableId: tableId || undefined,
       }),
     onSuccess: () => {
@@ -1916,12 +2101,14 @@ function ReserveModal({
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const sortedTables = [...tables].sort((a, b) => a.capacity - b.capacity);
+
   return (
     <ModalFrame
-      title={picked?.status === "occupied" ? "Book next on this table" : "Reserve a table"}
+      title="Reserve a table"
       subtitle={
-        picked?.status === "occupied"
-          ? `${picked.name} is occupied now. This books a later slot — current guests stay until billed.`
+        isSeatingBased
+          ? "Seating-based reservation is ON. Smallest suitable table is automatically pre-selected. You can manually choose any larger suitable table."
           : "Booking does not deduct inventory. Seat the guest from the table map when they arrive."
       }
       onClose={onClose}
@@ -1933,35 +2120,37 @@ function ReserveModal({
           <Button
             type="button"
             disabled={
-              !guestName.trim() || !startAt || save.isPending
+              !guestName.trim() || !isValidStart || isTooSmall || isOverlapped || save.isPending
             }
             onClick={() => save.mutate()}
           >
-            Book
+            Book Slot ({bookingTime} – {endFormatted})
           </Button>
         </div>
       }
     >
       <div className="grid gap-4">
         <div>
-          <Label>Guest</Label>
+          <Label>Guest Name</Label>
           <Input
             className="mt-1"
             value={guestName}
             onChange={(e) => setGuestName(e.target.value)}
+            placeholder="e.g. John Doe"
           />
         </div>
         <div>
-          <Label>Phone</Label>
+          <Label>Phone Number</Label>
           <Input
             className="mt-1"
             value={guestPhone}
             onChange={(e) => setGuestPhone(e.target.value)}
+            placeholder="Optional"
           />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <Label>Covers</Label>
+            <Label>Covers / Guests</Label>
             <Input
               className="mt-1"
               value={covers}
@@ -1969,31 +2158,84 @@ function ReserveModal({
             />
           </div>
           <div>
-            <Label>When</Label>
-            <Input
-              className="mt-1"
-              type="datetime-local"
-              value={startAt}
-              onChange={(e) => setStartAt(e.target.value)}
-            />
+            <Label>Table</Label>
+            <Select
+              className={cn(diningSelectClass, "mt-1 w-full")}
+              value={tableId}
+              onChange={(e) => {
+                setTableId(e.target.value);
+                setManualSelected(true);
+              }}
+            >
+              <option value="">Auto-assign smallest suitable table</option>
+              {sortedTables.map((t) => {
+                const undersized = isSeatingBased && t.capacity < guestCovers;
+                const slotBooked = isTableOverlapped(t.id);
+                const disabled = undersized || slotBooked;
+                let note = "";
+                if (undersized) note = ` [TOO SMALL - NEED ${guestCovers} SEATS]`;
+                else if (slotBooked) note = ` [BOOKED FOR THIS TIME SLOT]`;
+
+                return (
+                  <option key={t.id} value={t.id} disabled={disabled}>
+                    {t.name} ({t.capacity} seats) — {t.status}{note}
+                  </option>
+                );
+              })}
+            </Select>
           </div>
         </div>
-        <div>
-          <Label>Table</Label>
-          <Select
-            className={cn(diningSelectClass, "mt-1 w-full")}
-            value={tableId}
-            onChange={(e) => setTableId(e.target.value)}
-          >
-            <option value="">Any</option>
-            {tables.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-                {t.status !== "available" ? ` · ${t.status}` : ""}
-              </option>
-            ))}
-          </Select>
+
+        <div className="grid grid-cols-3 gap-3">
+          <div>
+            <Label>Booking Date</Label>
+            <Input
+              type="date"
+              className="mt-1"
+              value={bookingDate}
+              onChange={(e) => setBookingDate(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label>Start Time</Label>
+            <Input
+              type="time"
+              className="mt-1"
+              value={bookingTime}
+              onChange={(e) => setBookingTime(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label>Duration</Label>
+            <Select
+              className={cn(diningSelectClass, "mt-1 w-full")}
+              value={String(durationMinutes)}
+              onChange={(e) => setDurationMinutes(Number(e.target.value))}
+            >
+              <option value="30">30 min</option>
+              <option value="60">1 hour</option>
+              <option value="90">1.5 hours</option>
+              <option value="120">2 hours</option>
+              <option value="180">3 hours</option>
+              <option value="240">4 hours</option>
+            </Select>
+          </div>
         </div>
+
+        {isTooSmall ? (
+          <div className="rounded-xl border border-red-300 bg-red-50 p-3 text-xs font-semibold text-red-700">
+            ⚠️ Table {picked?.name} has only {picked?.capacity} seats, but {guestCovers} guests were requested. Pick a table with {guestCovers}+ seats.
+          </div>
+        ) : isOverlapped ? (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs font-semibold text-amber-800">
+            ⚠️ Table {picked?.name} is already booked for an overlapping time slot. Select another table or time.
+          </div>
+        ) : isValidStart && endFormatted ? (
+          <div className="rounded-xl border border-[#bfdbfe] bg-[#eff6ff] p-3 text-xs font-semibold text-[#1e40af]">
+            📅 Reserved Slot: {bookingDate} @ {bookingTime} → {endFormatted} ({durationMinutes >= 60 ? `${durationMinutes / 60} hour(s)` : `${durationMinutes} mins`})
+            {picked ? ` • Assigned Table: ${picked.name} (${picked.capacity} seats)` : " • Auto-assigning smallest suitable table"}
+          </div>
+        ) : null}
       </div>
     </ModalFrame>
   );
