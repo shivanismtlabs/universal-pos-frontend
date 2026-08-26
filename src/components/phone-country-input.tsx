@@ -12,6 +12,7 @@ type Props = {
   fallbackCountry?: string;
   label?: string;
   required?: boolean;
+  error?: string;
 };
 
 export function PhoneCountryInput({
@@ -20,6 +21,7 @@ export function PhoneCountryInput({
   fallbackCountry = "IN",
   label = "Phone",
   required,
+  error,
 }: Props) {
   const parts = splitE164(value, fallbackCountry);
   const dial = parts.dial || geoDial(fallbackCountry);
@@ -39,6 +41,7 @@ export function PhoneCountryInput({
             onChange(joinE164(e.target.value, filterMobileDigits(parts.local)))
           }
           aria-label="Country code"
+          aria-invalid={Boolean(error)}
         >
           {GEO_COUNTRIES.map((c) => (
             <option key={c.code} value={c.dial}>
@@ -68,11 +71,16 @@ export function PhoneCountryInput({
             }
           }}
           placeholder="9876543210"
+          aria-invalid={Boolean(error)}
         />
       </div>
-      <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
-        Digits only — no spaces or special characters
-      </p>
+      {error ? (
+        <p className="mt-1 text-[0.75rem] font-medium text-[#b91c1c]">{error}</p>
+      ) : (
+        <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+          Digits only — no spaces or special characters
+        </p>
+      )}
     </div>
   );
 }

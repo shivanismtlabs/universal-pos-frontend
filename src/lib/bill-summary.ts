@@ -25,6 +25,8 @@ export type BillSummary = {
   itemsSubtotal: number;
   discount: number;
   loyaltyOff: number;
+  /** Items − discount − points (before fees / tax add-on). */
+  netAmount: number;
   fees: BillFeeRow[];
   feesTotal: number;
   /** Value shown as “Taxable value” (matches receipt: merchandise+fees − discount). */
@@ -131,9 +133,10 @@ export function buildBillSummary(input: {
   const feesTotal = fees.reduce((s, f) => s + moneyNumber(f.amount), 0);
   const taxInclusive = Boolean(input.taxInclusive);
 
-  // Receipt: Taxable Value = (items + fees) − cash discount. Loyalty treated like discount for display.
+  // Real POS order: Items → Discount → Net → (+fees) → Taxable → Tax → Grand
   const merchandiseAndFees = itemsSubtotal + feesTotal;
   const discountAll = discount + loyaltyOff;
+  const netAmount = Math.max(0, itemsSubtotal - discountAll);
   const taxableValue = Math.max(0, merchandiseAndFees - discountAll);
 
   // Exclusive: grand adds tax on top of net; inclusive: tax already in item prices.
@@ -154,6 +157,7 @@ export function buildBillSummary(input: {
     itemsSubtotal,
     discount,
     loyaltyOff,
+    netAmount,
     fees,
     feesTotal,
     taxableValue,

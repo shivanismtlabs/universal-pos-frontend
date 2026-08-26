@@ -354,16 +354,18 @@ function LevelsTab({
                 <td className="px-3 py-2 font-medium">{r.name}</td>
                 <td className="px-3 py-2 font-mono text-xs">{r.sku}</td>
                 <td className="px-3 py-2 text-right tabular-nums">
-                  {r.qtyOnHand} {r.sellUnit}
+                  {formatQtyWithUnit(Number(r.qtyOnHand), r.sellUnit)}
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums">
                   ₹{Number(r.sellPrice ?? 0).toLocaleString("en-IN")}
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums text-amber-800">
-                  {r.qtyDamaged}
+                  {formatQtyWithUnit(Number(r.qtyDamaged ?? 0), r.sellUnit)}
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums">
-                  {r.reorderPoint ?? "—"}
+                  {r.reorderPoint != null
+                    ? formatQtyWithUnit(Number(r.reorderPoint), r.sellUnit)
+                    : "—"}
                 </td>
                 <td className="px-3 py-2">
                   {r.isLowStock ? (
@@ -441,8 +443,18 @@ function AlertsTab({
     queryFn: () => inventoryApi.lowStock(locationId || undefined),
   });
 
+  type LowStockRow = {
+    stockLevelId: string;
+    name: string;
+    sku: string;
+    sellUnit?: string;
+    qtyOnHand: number;
+    reorderPoint: number | null;
+    location?: { name: string };
+  };
+
   const rows = useMemo(() => {
-    const list = alerts.data?.items ?? [];
+    const list: LowStockRow[] = alerts.data?.items ?? [];
     const needle = q.trim().toLowerCase();
     if (!needle) return list;
     return list.filter(
@@ -497,13 +509,13 @@ function AlertsTab({
                       {i.sku}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums text-amber-800">
-                      {i.qtyOnHand}
+                      {formatQtyWithUnit(Number(i.qtyOnHand), i.sellUnit)}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums text-[#5a6b7d]">
-                      {rp}
+                      {formatQtyWithUnit(Number(rp), i.sellUnit)}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums font-semibold text-[#b45309]">
-                      {gap}
+                      {formatQtyWithUnit(gap, i.sellUnit)}
                     </td>
                     <td className="px-3 py-2 text-[#5a6b7d]">
                       {i.location?.name ?? locationName}
@@ -617,7 +629,8 @@ function MoveTab({
           <option value="">Select item</option>
           {(levels.data?.items ?? []).map((i) => (
             <option key={i.stockLevelId} value={i.stockLevelId}>
-              {i.name} ({i.sku}) — {i.qtyOnHand}
+              {i.name} ({i.sku}) —{" "}
+              {formatQtyWithUnit(Number(i.qtyOnHand), i.sellUnit)}
             </option>
           ))}
         </Select>
@@ -765,10 +778,10 @@ function DamageTab({
                     {d.sku}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">
-                    {d.qtyOnHand}
+                    {formatQtyWithUnit(Number(d.qtyOnHand), d.sellUnit)}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums font-semibold text-[#b45309]">
-                    {d.qtyDamaged}
+                    {formatQtyWithUnit(Number(d.qtyDamaged), d.sellUnit)}
                   </td>
                   <td className="px-3 py-2 text-[#5a6b7d]">{d.sellUnit}</td>
                   <td className="px-3 py-2 text-right">

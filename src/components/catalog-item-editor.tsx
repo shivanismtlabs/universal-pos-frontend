@@ -32,7 +32,7 @@ import {
   zodFieldErrors,
   zodMessages,
 } from "@/lib/validations";
-import { activeUnitOptions } from "@/lib/measure-units";
+import { activeUnitOptions, defaultUnitForBusinessType } from "@/lib/measure-units";
 import {
   CUSTOM_FIELD_QUERY,
   mergeProductFormFields,
@@ -41,6 +41,7 @@ import {
   CatalogItemShopForm,
   type CatalogItemShopValues,
 } from "@/components/catalog-item-shop-form";
+import { formatQtyWithUnit, normalizeQty } from "@/lib/sell-units";
 import {
   GETTING_STARTED_PATH,
   readReturnToParam,
@@ -150,7 +151,8 @@ export function CatalogItemEditor() {
       : "/catalog";
 
   const imagePickerRef = useRef<ProductImagePickerHandle>(null);
-  const { data: boot, itemMetaFields } = useBootstrap();
+  const { data: boot, itemMetaFields, businessType, commerceModes } =
+    useBootstrap();
   const currentLocationId = useBranchStore((s) => s.currentLocationId);
   const authStoreId = useAuthStore((s) => s.user?.storeId);
   const defaultLocationId = resolveOperatingLocationId({
@@ -199,6 +201,24 @@ export function CatalogItemEditor() {
   const [photoUrl, setPhotoUrl] = useState("");
   const [barcodeError, setBarcodeError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const unitDefaultedRef = useRef(false);
+
+  // New item: set UOM once from shop type (grocery → kg). User can still change it.
+  useEffect(() => {
+    if (isEdit || unitDefaultedRef.current) return;
+    if (!businessType && form.kind === "physical") return;
+    const preferred = defaultUnitForBusinessType(businessType, form.kind);
+    unitDefaultedRef.current = true;
+    setForm((prev) =>
+      prev.unitOfMeasure === preferred
+        ? prev
+        : { ...prev, unitOfMeasure: preferred },
+    );
+  }, [isEdit, businessType, form.kind]);
+
+  useEffect(() => {
+    if (!isEdit) unitDefaultedRef.current = false;
+  }, [isEdit]);
 
   const clearFieldError = (key: string) => {
     setFieldErrors((prev) => {
@@ -498,7 +518,13 @@ export function CatalogItemEditor() {
         openingQty: trackInventory
           ? form.trackSerial
             ? 0
-            : Math.max(0, Number(form.openingQty) || 0)
+            : Math.max(
+                0,
+                normalizeQty(
+                  Number(form.openingQty) || 0,
+                  form.unitOfMeasure || "pcs",
+                ) || 0,
+              )
           : undefined,
         reorderPoint: (() => {
           if (!trackInventory) return undefined;
@@ -522,7 +548,7 @@ export function CatalogItemEditor() {
           : form.trackSerial
             ? "Product created — register serials to build Stock on Hand"
             : form.trackInventory && Number(form.openingQty) > 0
-              ? `Product created · Stock on Hand ${Number(form.openingQty)}`
+              ? `Product created · Stock on Hand ${formatQtyWithUnit(Number(form.openingQty), form.unitOfMeasure || "pcs")}`
               : "Product created",
       );
       if (returnTo) {
@@ -656,7 +682,14 @@ export function CatalogItemEditor() {
         stockReadOnly={isEdit}
         stockLocationName={stockLocationName}
         stockOnHandDisplay={
-          isEdit ? (stockOnHand == null ? "—" : String(stockOnHand)) : undefined
+          isEdit
+            ? stockOnHand == null
+              ? "—"
+              : formatQtyWithUnit(
+                  Number(stockOnHand),
+                  form.unitOfMeasure || "pcs",
+                )
+            : undefined
         }
         defaultShowMore={hasOptionalDetails}
         categorySelectedLabel={
@@ -666,6 +699,7 @@ export function CatalogItemEditor() {
               : product.data.category.name
             : null
         }
+        commerceModes={commerceModes}
         photosExtra={
           existingImages.length ? (
             <div className="mb-4 flex flex-wrap gap-2">

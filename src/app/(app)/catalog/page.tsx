@@ -508,6 +508,7 @@ function ProductsPanel() {
                       kind: p.kind,
                       trackInventory: p.trackInventory,
                       stockOnHand: p.stockOnHand,
+                      unit: p.unitOfMeasure || p.sellUnit || "pcs",
                     })}
                   </td>
                   <td className="px-3 py-2 text-[#5a6b7d]">

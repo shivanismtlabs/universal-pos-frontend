@@ -14,6 +14,7 @@ type Props = {
   stateRequired?: boolean;
   countryLabel?: string;
   stateLabel?: string;
+  countryError?: string;
 };
 
 export function CountryStateFields({
@@ -25,6 +26,7 @@ export function CountryStateFields({
   stateRequired,
   countryLabel = "Country",
   stateLabel = "State / region",
+  countryError,
 }: Props) {
   const states = geoStates(countryCode);
   return (
@@ -41,6 +43,7 @@ export function CountryStateFields({
             onCountry(e.target.value);
             onState("");
           }}
+          aria-invalid={Boolean(countryError)}
         >
           <option value="">Select country</option>
           {GEO_COUNTRIES.map((c) => (
@@ -49,6 +52,11 @@ export function CountryStateFields({
             </option>
           ))}
         </Select>
+        {countryError ? (
+          <p className="mt-1 text-[0.75rem] font-medium text-[#b91c1c]">
+            {countryError}
+          </p>
+        ) : null}
       </div>
       <div>
         <Label>

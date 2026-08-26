@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { catalogApi, tenantsApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
+import { formatQtyWithUnit } from "@/lib/sell-units";
 import { useBootstrap } from "@/lib/bootstrap";
 import { useBranchStore } from "@/lib/branch-store";
 import { resolveOperatingLocationId } from "@/lib/operating-location";
@@ -800,7 +801,12 @@ function CatalogProductDetailPage() {
                       ? new Date(b.expiresAt).toLocaleDateString()
                       : "—"}
                   </td>
-                  <td className="px-3 py-2 text-right">{b.qtyOnHand}</td>
+                  <td className="px-3 py-2 text-right">
+                    {formatQtyWithUnit(
+                      Number(b.qtyOnHand),
+                      p.unitOfMeasure || "pcs",
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -920,7 +926,10 @@ function CatalogProductDetailPage() {
                 <tr key={row.stockLevelId} className="border-t border-[#eef1f4]">
                   <td className="py-2">{row.location?.name ?? row.locationId}</td>
                   <td className="py-2 text-right tabular-nums">
-                    {row.qtyOnHand} {row.sellUnit}
+                    {formatQtyWithUnit(
+                      Number(row.qtyOnHand),
+                      row.sellUnit || p.unitOfMeasure || "pcs",
+                    )}
                   </td>
                   <td className="py-2 text-right">{row.sellPrice}</td>
                 </tr>

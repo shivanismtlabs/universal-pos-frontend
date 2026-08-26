@@ -81,7 +81,73 @@ export function unwrapUnits(raw: unknown): MeasureUnitRow[] {
   return [];
 }
 
+/** Grocery / weigh-scale first, then piece packs — matches real shop unit pickers. */
+const UNIT_SORT_ORDER = [
+  "pcs",
+  "pack",
+  "box",
+  "dozen",
+  "kg",
+  "g",
+  "L",
+  "ml",
+  "lb",
+  "m",
+  "hour",
+  "day",
+  "service",
+];
+
+function unitSortRank(code: string): number {
+  const i = UNIT_SORT_ORDER.indexOf(code);
+  return i >= 0 ? i : 100 + code.localeCompare(code);
+}
+
 export function activeUnitOptions(raw: unknown): MeasureUnitRow[] {
   const rows = unwrapUnits(raw).filter((u) => u.active !== false);
-  return rows.length ? rows : FALLBACK_UNITS;
+  const list = rows.length ? rows : FALLBACK_UNITS;
+  return [...list].sort((a, b) => {
+    const ra = unitSortRank(a.code);
+    const rb = unitSortRank(b.code);
+    if (ra !== rb) return ra - rb;
+    return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+  });
+}
+
+/** Sensible default UOM for new catalog items — every business type. */
+export function defaultUnitForBusinessType(
+  businessType?: string | null,
+  kind?: string | null,
+): string {
+  const k = (kind ?? "").toLowerCase();
+  if (k === "service") return "service";
+  if (k === "digital") return "pcs";
+  if (k === "rental") return "pcs";
+  if (k === "bundle") return "pcs";
+
+  const t = (businessType ?? "").toLowerCase().replace(/\s+/g, "_");
+  // Weight / bulk retail
+  if (
+    t === "grocery" ||
+    t === "fb" ||
+    t === "f&b" ||
+    t.includes("grocery") ||
+    t.includes("kirana")
+  ) {
+    return "kg";
+  }
+  // Piece-sold goods
+  if (
+    t === "retail" ||
+    t === "restaurant" ||
+    t === "salon" ||
+    t === "service" ||
+    t === "rental" ||
+    t === "hybrid" ||
+    t === "general" ||
+    t === "other"
+  ) {
+    return "pcs";
+  }
+  return "pcs";
 }

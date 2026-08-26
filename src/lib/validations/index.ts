@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { validateSellQty, requiresWholeQty } from "@/lib/sell-units";
 
 /** Matches backend IsStrongPassword (8–72, upper, lower, number, special) */
 export const strongPasswordSchema = z
@@ -814,6 +815,15 @@ export const createCatalogProductSchema = z
             path: ["openingQty"],
             message: "Opening quantity cannot be negative",
           });
+        } else {
+          const unitErr = validateSellQty(q, v.unitOfMeasure || "pcs");
+          if (unitErr) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ["openingQty"],
+              message: unitErr,
+            });
+          }
         }
       }
 
@@ -826,12 +836,24 @@ export const createCatalogProductSchema = z
             path: ["reorderPoint"],
             message: "Reorder point cannot be negative",
           });
-        } else if (!Number.isInteger(n)) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ["reorderPoint"],
-            message: "Reorder point must be a whole number",
-          });
+        } else {
+          const unit = v.unitOfMeasure || "pcs";
+          if (requiresWholeQty(unit) && !Number.isInteger(n)) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ["reorderPoint"],
+              message: `Reorder point for ${unit} must be a whole number`,
+            });
+          } else if (!requiresWholeQty(unit)) {
+            const rounded = Math.round(n * 1000) / 1000;
+            if (Math.abs(rounded - n) > 1e-9) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["reorderPoint"],
+                message: `Reorder point for ${unit} can have at most 3 decimal places`,
+              });
+            }
+          }
         }
       }
     }
@@ -935,6 +957,51 @@ export const settingsBrandSchema = z.object({
     .regex(/^[A-Z]{3}$/, "Use a 3-letter currency code (e.g. INR)"),
   locale: z.string().trim().min(2, "Locale is required").max(20),
   timezone: z.string().trim().min(2, "Timezone is required").max(64),
+});
+
+/** Full Business Profile save — branding + contact / location fields */
+export const settingsBusinessProfileSchema = settingsBrandSchema.extend({
+  businessType: z.string().trim().min(1, "Select a business type"),
+  phone: phoneSchema,
+  email: z
+    .string()
+    .trim()
+    .max(120)
+    .refine(
+      (v) => !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v),
+      "Enter a valid email",
+    ),
+  website: z
+    .string()
+    .trim()
+    .max(200)
+    .refine((v) => {
+      if (!v) return true;
+      const normalized = /^https?:\/\//i.test(v) ? v : `https://${v}`;
+      try {
+        const u = new URL(normalized);
+        return Boolean(u.hostname.includes("."));
+      } catch {
+        return false;
+      }
+    }, "Enter a valid website (e.g. yourshop.com)"),
+  countryCode: z.string().trim().min(2, "Select a country"),
+  pan: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .refine(
+      (v) => !v || /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(v),
+      "PAN must be 10 characters (e.g. ABCDE1234F)",
+    ),
+  postalCode: z
+    .string()
+    .trim()
+    .max(12)
+    .refine(
+      (v) => !v || /^[A-Za-z0-9][A-Za-z0-9\s-]{2,11}$/.test(v),
+      "Enter a valid postal code",
+    ),
 });
 
 export const settingsTaxSchema = z.object({

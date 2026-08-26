@@ -940,7 +940,7 @@ function SidebarBody({
     );
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col bg-[#fafbfc] text-[#0b1f33] print:bg-white">
+    <div className="flex h-full min-h-0 w-full flex-col bg-white text-[#0b1f33] print:bg-white">
       <div className="shrink-0 border-b border-[#e8ecf1] px-4 pt-4 pb-3">
         <div className="flex items-center gap-2.5">
           {logoSrc ? (
@@ -1532,7 +1532,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <div className="flex h-dvh overflow-hidden bg-[#eef1f5] text-[#0b1f33]">
+    <div
+      className={cn(
+        "flex h-dvh overflow-hidden text-[#0b1f33]",
+        wide ? "bg-white" : "bg-[#eef1f5]",
+      )}
+    >
       {pinLocked && stationToken ? (
         <StationPinLock open locationId={acting?.storeId} />
       ) : null}
@@ -1540,8 +1545,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <InboxPopupListener />
       <UnsavedWorkGuard />
       {/* Light expandable sidebar */}
-      <aside className="app-shell-aside hidden h-dvh w-[17.5rem] shrink-0 flex-col border-r border-[#e2e8f0] md:flex print:hidden">
-        <Suspense fallback={<div className="h-full bg-[#fafbfc]" />}>
+      <aside
+        className={cn(
+          "app-shell-aside hidden h-dvh shrink-0 flex-col border-r border-[#e2e8f0] md:flex print:hidden",
+          "w-[17.5rem]",
+        )}
+      >
+        <Suspense fallback={<div className="h-full bg-white" />}>
           <SidebarBody {...sidebarProps} />
         </Suspense>
       </aside>
@@ -1646,7 +1656,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   </button>
                 </div>
                 <div className="min-h-0 flex-1">
-                  <Suspense fallback={<div className="h-full bg-[#fafbfc]" />}>
+                  <Suspense fallback={<div className="h-full bg-white" />}>
                     <SidebarBody
                       {...sidebarProps}
                       onNavigate={() => setOpen(false)}
@@ -1660,7 +1670,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <main
           className={cn(
-            "min-h-0 flex-1 overflow-y-auto overscroll-contain bg-[#eef1f5]",
+            "min-h-0 flex-1 overflow-y-auto overscroll-contain",
+            wide ? "bg-white" : "bg-[#eef1f5]",
             "[scrollbar-gutter:stable]",
             "print:overflow-visible print:bg-white print:h-auto print:max-h-none",
           )}

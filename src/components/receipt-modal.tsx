@@ -490,19 +490,24 @@ export function ReceiptModal({
                   </span>
                 </div>
               ))}
-              {discount > 0 ? (
-                <div className="flex justify-between">
-                  <span>Discount</span>
-                  <span className="tabular-nums">{pad2(discount)}</span>
-                </div>
-              ) : (
-                <div className="flex justify-between">
-                  <span>Discount</span>
-                  <span className="tabular-nums">0.00</span>
-                </div>
-              )}
               <div className="flex justify-between">
-                <span>Taxable Value</span>
+                <span>Discount</span>
+                <span className="tabular-nums">
+                  {discount > 0 ? `-${pad2(discount)}` : "0.00"}
+                </span>
+              </div>
+              {taxTotal > 0 ? (
+                <div className="flex justify-between">
+                  <span>Tax</span>
+                  <span className="tabular-nums">{pad2(taxTotal)}</span>
+                </div>
+              ) : null}
+              <div className="mt-1 flex justify-between font-bold">
+                <span>Total</span>
+                <span className="tabular-nums">{pad2(grand)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Taxable value</span>
                 <span className="tabular-nums">
                   {pad2(bill.taxableValue)}
                 </span>
@@ -534,10 +539,6 @@ export function ReceiptModal({
                   })}
                 </div>
               ) : null}
-              <div className="mt-1 flex justify-between font-bold">
-                <span>Grand Total</span>
-                <span className="tabular-nums">{pad2(grand)}</span>
-              </div>
               {bill.showRoundOff ? (
                 <div className="flex justify-between">
                   <span>Round Off</span>
@@ -547,8 +548,8 @@ export function ReceiptModal({
                   </span>
                 </div>
               ) : null}
-              <div className="flex justify-between font-bold">
-                <span>Rounded Total</span>
+              <div className="mt-1 flex justify-between font-bold">
+                <span>Grand Total</span>
                 <span className="tabular-nums">{pad2(rounded)}</span>
               </div>
               {changeAmt != null && moneyNumber(changeAmt) > 0 ? (

@@ -1141,6 +1141,7 @@ export const inventoryApi = {
         stockLevelId: string;
         name: string;
         sku: string;
+        sellUnit?: string;
         qtyOnHand: number;
         reorderPoint: number | null;
         location?: { name: string };

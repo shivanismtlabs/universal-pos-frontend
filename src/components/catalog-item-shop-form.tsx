@@ -27,6 +27,10 @@ import { CustomFieldsSection } from "@/components/custom-field-inputs";
 import type { MetaFieldDef } from "@/lib/business-config";
 import { cn } from "@/lib/utils";
 import {
+  allowsDecimalQty,
+  formatQtyWithUnit,
+} from "@/lib/sell-units";
+import {
   FOOD_TYPE_OPTIONS,
   FoodTypeBadge,
   type FoodType,
@@ -39,6 +43,23 @@ export const CATALOG_ITEM_KINDS: { id: CatalogProductKind; label: string }[] = [
   { id: "bundle", label: "Combo" },
   { id: "rental", label: "Rental" },
 ];
+
+/** Which item types to offer — driven by enabled commerce modes, not industry. */
+export function catalogKindsForModes(
+  modes?: string[] | null,
+): typeof CATALOG_ITEM_KINDS {
+  const m = new Set((modes ?? []).map((x) => x.toLowerCase()));
+  const hasAny = m.size > 0;
+  return CATALOG_ITEM_KINDS.filter((k) => {
+    if (!hasAny) return true;
+    if (k.id === "rental") return m.has("rental");
+    if (k.id === "service") return m.has("service") || m.has("sale");
+    if (k.id === "digital" || k.id === "bundle" || k.id === "physical") {
+      return m.has("sale") || m.has("subscription") || m.has("rental");
+    }
+    return true;
+  });
+}
 
 const fieldSelect =
   "mt-0 h-10 w-full rounded-lg border border-[#d9e0ea] bg-white px-3 text-sm text-[#0b1f33] outline-none focus:border-[#1a56db] focus:shadow-[0_0_0_3px_rgba(26,86,219,0.12)]";
@@ -80,6 +101,13 @@ export function applyCatalogKindDefaults<T extends CatalogItemShopValues>(
 ): T {
   const nonStock =
     kind === "service" || kind === "digital" || kind === "bundle";
+  let unit = prev.unitOfMeasure;
+  if (kind === "service") {
+    unit = "service";
+  } else if (prev.unitOfMeasure === "service") {
+    // Leaving service → sensible goods/rental default
+    unit = kind === "rental" ? "pcs" : "pcs";
+  }
   return {
     ...prev,
     kind,
@@ -87,52 +115,26 @@ export function applyCatalogKindDefaults<T extends CatalogItemShopValues>(
     trackSerial: nonStock ? false : prev.trackSerial,
     trackBatch: nonStock ? false : prev.trackBatch,
     canPurchase: kind === "service" || kind === "digital" ? false : true,
-    unitOfMeasure:
-      kind === "service"
-        ? "service"
-        : prev.unitOfMeasure === "service"
-          ? "pcs"
-          : prev.unitOfMeasure,
+    // Rentals / goods sell on counter by default
+    canSell: kind === "digital" ? prev.canSell : true,
+    availableInPos: true,
+    unitOfMeasure: unit,
   };
 }
 
-/** Keep serial/batch flags consistent with inventory tracking. */
+/** Keep inventory flags consistent when Track inventory is toggled. */
 export function patchCatalogTrackingFlags<T extends CatalogItemShopValues>(
   prev: T,
   key: keyof CatalogItemShopValues,
   checked: boolean,
 ): T {
-  if (key === "trackInventory") {
-    if (!checked) {
-      return {
-        ...prev,
-        trackInventory: false,
-        trackSerial: false,
-        trackBatch: false,
-      };
-    }
-    return { ...prev, trackInventory: true };
-  }
-  if (key === "trackSerial") {
-    if (checked) {
-      return {
-        ...prev,
-        trackSerial: true,
-        trackInventory: true,
-        openingQty: "0",
-      };
-    }
-    return { ...prev, trackSerial: false };
-  }
-  if (key === "trackBatch") {
-    if (checked) {
-      return {
-        ...prev,
-        trackBatch: true,
-        trackInventory: true,
-      };
-    }
-    return { ...prev, trackBatch: false };
+  if (key === "trackInventory" && !checked) {
+    return {
+      ...prev,
+      trackInventory: false,
+      trackSerial: false,
+      trackBatch: false,
+    };
   }
   return { ...prev, [key]: checked };
 }
@@ -218,6 +220,7 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
   stockLocationName,
   defaultShowMore,
   categorySelectedLabel,
+  commerceModes,
 }: {
   title: string;
   subtitle: string;
@@ -251,14 +254,39 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
   defaultShowMore?: boolean;
   /** Edit: category name when id is not yet in the categories list */
   categorySelectedLabel?: string | null;
+  /** Enabled commerce modes — filters Type chips (sale/rental/service…) */
+  commerceModes?: string[];
 }) {
   const [showMore, setShowMore] = useState(Boolean(defaultShowMore));
   const foodTypeField = productFormFields.find((f) => f.key === "foodType");
-  const otherFormFields = productFormFields.filter((f) => f.key !== "foodType");
+  // Core form already has Brand / Name / Category — don’t duplicate as extras
+  const CORE_EXTRA_SKIP = new Set([
+    "foodType",
+    "brand",
+    "name",
+    "category",
+    "sku",
+    "barcode",
+    "unit",
+    "price",
+  ]);
+  const otherFormFields = productFormFields.filter(
+    (f) => !CORE_EXTRA_SKIP.has(f.key),
+  );
+  const kindOptions = catalogKindsForModes(commerceModes);
+  const qtyAllowsDecimal = allowsDecimalQty(form.unitOfMeasure || "pcs");
+  const showStockFields = form.trackInventory;
 
   useEffect(() => {
     if (defaultShowMore) setShowMore(true);
   }, [defaultShowMore]);
+
+  // If current kind is hidden for this shop’s modes, snap to first allowed kind
+  useEffect(() => {
+    if (!kindOptions.length) return;
+    if (kindOptions.some((k) => k.id === form.kind)) return;
+    setForm((f) => applyCatalogKindDefaults(f, kindOptions[0].id));
+  }, [kindOptions, form.kind, setForm]);
 
   return (
     <div
@@ -275,6 +303,11 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
           </h1>
           <p className="mt-1 max-w-2xl text-[0.8125rem] leading-relaxed text-[#5a6b7d]">
             {subtitle}
+          </p>
+          <p className="mt-1.5 text-[0.7rem] text-[#8b9bb0]">
+            Universal catalog — same form for retail, grocery, salon, rental,
+            restaurant, and more. Type chips follow your enabled commerce modes;
+            extra boxes come from business setup &amp; custom fields.
           </p>
         </header>
 
@@ -336,7 +369,7 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
               >
                 <Input
                   autoFocus
-                  placeholder="What you sell — e.g. Dairy milk 55g"
+                  placeholder="What you sell or rent — e.g. Blue cotton shirt"
                   value={form.name}
                   onChange={(e) => {
                     clearFieldError("name");
@@ -347,7 +380,7 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
 
               <ShopField label="Type" required>
                 <div className="flex flex-wrap gap-2">
-                  {CATALOG_ITEM_KINDS.map((k) => (
+                  {kindOptions.map((k) => (
                     <button
                       key={k.id}
                       type="button"
@@ -377,7 +410,7 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                   hint={
                     <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
                       {foodTypeField.hint ||
-                        "Shows on menus for restaurant & café only — not used for retail/salon."}
+                        "Optional tag for F&B menus — leave None if not needed."}
                     </p>
                   }
                 >
@@ -483,7 +516,8 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                     <FieldError message={fieldErrors.unitOfMeasure} />
                   ) : (
                     <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
-                      pcs, kg, litre…{" "}
+                      Stock &amp; rate use this unit — pcs, kg, L, hour, day, and
+                      more (any business).{" "}
                       <Link href="/settings/units" className="text-[#1a56db]">
                         Settings → Units
                       </Link>
@@ -541,7 +575,7 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                 />
               </ShopField>
 
-              {form.trackInventory ? (
+              {showStockFields ? (
                 <ShopField
                   label="Stock on Hand"
                   hint={
@@ -549,8 +583,8 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                       <FieldError message={fieldErrors.openingQty} />
                     ) : stockReadOnly ? (
                       <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
-                        Current qty at {stockLocationName ?? "this branch"} —
-                        change in{" "}
+                        Current at {stockLocationName ?? "this branch"} — change
+                        in{" "}
                         <Link href="/inventory" className="text-[#1a56db]">
                           Inventory
                         </Link>
@@ -566,48 +600,75 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                       </p>
                     ) : (
                       <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
-                        Quantity at {stockLocationName ?? "this branch"} — same
-                        value appears on the Items list.
+                        Shown on Items as qty + unit — e.g.{" "}
+                        <span className="font-semibold text-[#0b1f33]">
+                          {formatQtyWithUnit(
+                            form.openingQty.trim() !== "" &&
+                              Number.isFinite(Number(form.openingQty))
+                              ? Number(form.openingQty)
+                              : 10,
+                            form.unitOfMeasure || "pcs",
+                          )}
+                        </span>
                       </p>
                     )
                   }
                 >
-                  <Input
-                    readOnly={stockReadOnly || form.trackSerial}
-                    className={
-                      stockReadOnly || form.trackSerial
-                        ? "bg-[#f4f6fa]"
-                        : undefined
-                    }
-                    type={stockReadOnly || form.trackSerial ? "text" : "number"}
-                    min={stockReadOnly || form.trackSerial ? undefined : 0}
-                    step={stockReadOnly || form.trackSerial ? undefined : "any"}
-                    placeholder={
-                      stockReadOnly || form.trackSerial ? undefined : "e.g. 50"
-                    }
-                    value={
-                      stockReadOnly
-                        ? (stockOnHandDisplay ?? "—")
-                        : form.trackSerial
-                          ? "0"
-                          : form.openingQty
-                    }
-                    onChange={
-                      stockReadOnly || form.trackSerial
-                        ? undefined
-                        : (e) => {
-                            clearFieldError("openingQty");
-                            setForm((f) => ({
-                              ...f,
-                              openingQty: e.target.value,
-                            }));
-                          }
-                    }
-                  />
+                  <div className="flex items-center gap-2">
+                    <Input
+                      readOnly={stockReadOnly || form.trackSerial}
+                      className={
+                        stockReadOnly || form.trackSerial
+                          ? "bg-[#f4f6fa]"
+                          : undefined
+                      }
+                      type={
+                        stockReadOnly || form.trackSerial ? "text" : "number"
+                      }
+                      min={
+                        stockReadOnly || form.trackSerial ? undefined : 0
+                      }
+                      step={
+                        stockReadOnly || form.trackSerial
+                          ? undefined
+                          : qtyAllowsDecimal
+                            ? "0.001"
+                            : "1"
+                      }
+                      placeholder={
+                        stockReadOnly || form.trackSerial
+                          ? undefined
+                          : qtyAllowsDecimal
+                            ? "e.g. 12.5"
+                            : "e.g. 50"
+                      }
+                      value={
+                        stockReadOnly
+                          ? (stockOnHandDisplay ?? "—")
+                          : form.trackSerial
+                            ? "0"
+                            : form.openingQty
+                      }
+                      onChange={
+                        stockReadOnly || form.trackSerial
+                          ? undefined
+                          : (e) => {
+                              clearFieldError("openingQty");
+                              setForm((f) => ({
+                                ...f,
+                                openingQty: e.target.value,
+                              }));
+                            }
+                      }
+                    />
+                    <span className="shrink-0 rounded-md bg-[#f1f5f9] px-2.5 py-2 text-sm font-semibold text-[#5a6b7d]">
+                      {form.unitOfMeasure || "pcs"}
+                    </span>
+                  </div>
                 </ShopField>
               ) : null}
 
-              {form.trackInventory ? (
+              {showStockFields ? (
                 <ShopField
                   label="Reorder Point"
                   hint={
@@ -615,25 +676,31 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                       <FieldError message={fieldErrors.reorderPoint} />
                     ) : (
                       <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
-                        Alert when stock falls to this qty (optional)
+                        Alert when stock falls to this qty in{" "}
+                        {form.unitOfMeasure || "pcs"} (optional)
                       </p>
                     )
                   }
                 >
-                  <Input
-                    type="number"
-                    min={0}
-                    step={1}
-                    placeholder="e.g. 5"
-                    value={form.reorderPoint}
-                    onChange={(e) => {
-                      clearFieldError("reorderPoint");
-                      setForm((f) => ({
-                        ...f,
-                        reorderPoint: e.target.value,
-                      }));
-                    }}
-                  />
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min={0}
+                      step={qtyAllowsDecimal ? "0.001" : "1"}
+                      placeholder="e.g. 5"
+                      value={form.reorderPoint}
+                      onChange={(e) => {
+                        clearFieldError("reorderPoint");
+                        setForm((f) => ({
+                          ...f,
+                          reorderPoint: e.target.value,
+                        }));
+                      }}
+                    />
+                    <span className="shrink-0 rounded-md bg-[#f1f5f9] px-2.5 py-2 text-sm font-semibold text-[#5a6b7d]">
+                      {form.unitOfMeasure || "pcs"}
+                    </span>
+                  </div>
                 </ShopField>
               ) : null}
             </ShopSection>
@@ -751,8 +818,6 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                 {(
                   [
                     ["trackInventory", "Track inventory"],
-                    ["trackSerial", "Serial numbers"],
-                    ["trackBatch", "Batch & expiry"],
                     ["canSell", "Can sell"],
                     ["canPurchase", "Can purchase"],
                     ["availableInPos", "Show on counter"],
@@ -776,24 +841,17 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                   </label>
                 ))}
               </div>
-              {form.trackSerial ? (
-                <p className="mt-2 text-[0.75rem] text-[#5a6b7d]">
-                  After save, register each unit on the item’s{" "}
-                  <strong className="font-semibold text-[#0b1f33]">
-                    Serials
-                  </strong>{" "}
-                  tab (or use Inventory → Stock In with serials).{" "}
-                  <strong className="font-semibold text-[#0b1f33]">
-                    Each serial adds 1 to Stock on Hand
-                  </strong>
-                  — do not type a free stock number while serial tracking is on.
-                </p>
-              ) : null}
+              <p className="mt-2 text-[0.75rem] text-[#5a6b7d]">
+                {form.trackInventory
+                  ? "Stock on Hand is counted when you sell or stock in."
+                  : "Stock is not counted — item can still sell if “Can sell” is on."}
+              </p>
             </ShopSection>
 
             {(customFieldsLoading || otherFormFields.length > 0) ? (
               <CustomFieldsSection
-                hint="These boxes come from Settings → Custom fields (choose Product). They save with the item."
+                title="Shop & custom fields"
+                hint="From your business type (e.g. size/colour, pack size, diet tag) plus Settings → Custom fields. Core Item form stays the same for every shop."
                 fields={otherFormFields}
                 loading={customFieldsLoading}
                 values={extraFields}
@@ -820,7 +878,7 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                     hint={<FieldError message={fieldErrors.shortName} />}
                   >
                     <Input
-                      placeholder="Receipt / KOT short name"
+                      placeholder="Short name on receipt / ticket"
                       value={form.shortName}
                       onChange={(e) => {
                         clearFieldError("shortName");

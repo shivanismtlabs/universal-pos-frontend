@@ -26,6 +26,7 @@ import { useAuthStore } from "@/lib/auth-store";
 import { useBranchStore } from "@/lib/branch-store";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { formatQtyWithUnit } from "@/lib/sell-units";
 
 function moneyNum(v: string | number | undefined | null) {
   const n = Number(v ?? 0);
@@ -738,7 +739,11 @@ export function OverviewDashboard({ embed = false }: { embed?: boolean }) {
                       : "bg-[#fff7ed] text-[#9a3412]",
                   )}
                 >
-                  {row.qtyOnHand} left
+                  {formatQtyWithUnit(
+                    Number(row.qtyOnHand),
+                    row.sellUnit,
+                  )}{" "}
+                  left
                 </span>
               </li>
             ))}

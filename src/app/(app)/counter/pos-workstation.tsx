@@ -995,35 +995,20 @@ export default function PosWorkstation() {
             value={unitFilter}
             onChange={(e) => setUnitFilter(e.target.value)}
           />
-          <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto pb-0.5">
-            <button
-              type="button"
-              onClick={() => setUnitCategory("all")}
-              className={cn(
-                "shrink-0 rounded-md px-2.5 py-1.5 text-[0.7rem] font-semibold transition",
-                unitCategory === "all"
-                  ? "bg-[#1a56db] text-white"
-                  : "bg-[#f1f5f9] text-[#5a6b7d] hover:text-[#0b1f33]",
-              )}
-            >
-              All
-            </button>
+          <Select
+            aria-label="Category"
+            value={unitCategory}
+            onChange={(e) => setUnitCategory(e.target.value)}
+            wrapperClassName="w-auto shrink-0"
+            className="h-9 min-w-[10rem] max-w-[14rem] border-[#d9e0ea] bg-[#f8fafc] text-[0.75rem] font-semibold shadow-none"
+          >
+            <option value="all">All categories</option>
             {floorCategories.map((c) => (
-              <button
-                key={c.id}
-                type="button"
-                onClick={() => setUnitCategory(c.id)}
-                className={cn(
-                  "max-w-[9rem] shrink-0 truncate rounded-md px-2.5 py-1.5 text-[0.7rem] font-semibold transition",
-                  unitCategory === c.id
-                    ? "bg-[#1a56db] text-white"
-                    : "bg-[#f1f5f9] text-[#5a6b7d] hover:text-[#0b1f33]",
-                )}
-              >
+              <option key={c.id} value={c.id}>
                 {c.name}
-              </button>
+              </option>
             ))}
-          </div>
+          </Select>
           <span className="text-[0.7rem] text-[#8b9bb0]">
             {readyCount} ready
           </span>

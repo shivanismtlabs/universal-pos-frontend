@@ -79,7 +79,7 @@ function PosGate() {
   return (
     <div className="space-y-0">
       {showTabs ? (
-        <div className="sticky top-0 z-10 border-b border-[#d9e0ea] bg-[#f7f9fc]">
+        <div className="sticky top-0 z-10 border-b border-[#d9e0ea] bg-white">
           <div
             role="tablist"
             aria-label="Counter mode"

@@ -44,7 +44,7 @@ import { phoneSchema } from "@/lib/validations";
 import { geoStates, isKnownGeoState, splitE164 } from "@/lib/geo";
 import { CountryStateFields } from "@/components/country-state-fields";
 import { PhoneCountryInput } from "@/components/phone-country-input";
-import { citiesForState } from "@/lib/india-locations";
+import { citiesForState, isPostalValidForIndianCity } from "@/lib/india-locations";
 
 function isValidNationalPhone(e164: string, countryCode: string): boolean {
   const raw = e164.trim();
@@ -109,7 +109,7 @@ const createOrgSchema = z
       .string()
       .min(1, "Inventory start date is required")
       .refine((v) => !Number.isNaN(Date.parse(v)), "Enter a valid date"),
-    taxId: z.string().trim().max(20, "Tax ID is too long"),
+    taxId: z.string().trim().max(15, "GSTIN / Tax ID cannot exceed 15 characters"),
     storeName: z
       .string()
       .trim()
@@ -219,6 +219,15 @@ const createOrgSchema = z
             ? "PIN code must be exactly 6 digits"
             : "Enter a valid postal code for the selected country",
       });
+    } else if (v.countryCode === "IN" && v.city.trim()) {
+      const pinCity = isPostalValidForIndianCity(v.city, v.postalCode);
+      if (!pinCity.ok) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["postalCode"],
+          message: pinCity.message ?? "PIN code does not match the selected city",
+        });
+      }
     }
     if (
       v.countryCode === "IN" &&
@@ -228,7 +237,7 @@ const createOrgSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["taxId"],
-        message: "GSTIN must be 15 characters (letters/numbers)",
+        message: "GSTIN must be exactly 15 characters (letters/numbers)",
       });
     }
     const start = Date.parse(v.inventoryStartDate);
@@ -465,9 +474,12 @@ function OrganizationsPageInner() {
   useEffect(() => {
     if (!hydrated) return;
     if (identity?.phone) {
-      form.setValue("phone", identity.phone);
+      form.setValue("phone", identity.phone, { shouldValidate: true });
     }
-  }, [hydrated, identity?.phone, form]);
+    if (identity?.email) {
+      form.setValue("email", identity.email, { shouldValidate: true });
+    }
+  }, [hydrated, identity?.phone, identity?.email, form]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -505,6 +517,7 @@ function OrganizationsPageInner() {
     // Just opened / created a shop — go to app (keep identityToken for Switch org)
     if (accessToken && user) {
       clearedStaleShopRef.current = true;
+      setLoading(false);
       router.replace(defaultHomeForRoles(user.roles, user.permissions));
       return;
     }
@@ -549,16 +562,27 @@ function OrganizationsPageInner() {
     const dest = applyPortalResponse(data);
     if (dest === "app") {
       clearedStaleShopRef.current = true;
-      qc.clear();
-      try {
-        const boot = await appsApi.bootstrap();
-        qc.setQueryData(["tenant-bootstrap"], boot);
-      } catch {
-        /* AppShell retries */
-      }
-      toast.success("Welcome to your shop");
+      setLoading(false);
       const u = useAuthStore.getState().user;
-      router.replace(defaultHomeForRoles(u?.roles, u?.permissions));
+      const home = defaultHomeForRoles(u?.roles, u?.permissions);
+      toast.success("Welcome to your shop");
+      // Navigate immediately — do not block on bootstrap (was stuck on Loading shop…)
+      router.replace(home);
+      // Fresh tenant cache in the background
+      void (async () => {
+        try {
+          qc.clear();
+          const boot = await Promise.race([
+            appsApi.bootstrap(),
+            new Promise<never>((_, rej) =>
+              setTimeout(() => rej(new Error("bootstrap-timeout")), 12_000),
+            ),
+          ]);
+          qc.setQueryData(["tenant-bootstrap"], boot);
+        } catch {
+          /* AppShell retries / shows error */
+        }
+      })();
       return;
     }
     toast.message("Select an organization to continue");
@@ -697,16 +721,23 @@ function OrganizationsPageInner() {
         businessLabel: values.businessLabel?.trim() || undefined,
       });
 
-      try {
-        const boot = await appsApi.bootstrap();
-        qc.setQueryData(["tenant-bootstrap"], boot);
-      } catch {
-        /* AppShell retries */
-      }
-
       toast.success("Organization profile saved");
       const u = useAuthStore.getState().user;
-      router.replace(defaultHomeForRoles(u?.roles, u?.permissions));
+      const home = defaultHomeForRoles(u?.roles, u?.permissions);
+      router.replace(home);
+      void (async () => {
+        try {
+          const boot = await Promise.race([
+            appsApi.bootstrap(),
+            new Promise<never>((_, rej) =>
+              setTimeout(() => rej(new Error("bootstrap-timeout")), 12_000),
+            ),
+          ]);
+          qc.setQueryData(["tenant-bootstrap"], boot);
+        } catch {
+          /* AppShell retries */
+        }
+      })();
     } catch (e) {
       toast.error(
         e instanceof ApiError
@@ -1044,6 +1075,11 @@ function OrganizationsPageInner() {
                     <FieldError
                       message={form.formState.errors.email?.message}
                     />
+                    {identity?.email ? (
+                      <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+                        Pre-filled from your signed-in account
+                      </p>
+                    ) : null}
                   </div>
                   <div className="sm:col-span-2">
                     <Label>Website</Label>
@@ -1163,11 +1199,26 @@ function OrganizationsPageInner() {
                         "mt-1",
                         form.formState.errors.postalCode && fieldErr,
                       )}
-                      placeholder="PIN / ZIP"
-                      inputMode="numeric"
-                      maxLength={12}
+                      placeholder={
+                        selectedCountry === "IN"
+                          ? "6-digit PIN for city"
+                          : "Postal code"
+                      }
+                      inputMode={selectedCountry === "IN" ? "numeric" : "text"}
+                      maxLength={selectedCountry === "IN" ? 6 : 12}
                       aria-invalid={Boolean(form.formState.errors.postalCode)}
-                      {...form.register("postalCode")}
+                      {...form.register("postalCode", {
+                        onChange: (e) => {
+                          if (selectedCountry === "IN") {
+                            const digits = e.target.value
+                              .replace(/\D/g, "")
+                              .slice(0, 6);
+                            form.setValue("postalCode", digits, {
+                              shouldValidate: true,
+                            });
+                          }
+                        },
+                      })}
                     />
                     <FieldError
                       message={form.formState.errors.postalCode?.message}
@@ -1181,12 +1232,26 @@ function OrganizationsPageInner() {
                         form.formState.errors.taxId && fieldErr,
                       )}
                       placeholder="29AABCU9603R1ZM"
+                      maxLength={15}
                       aria-invalid={Boolean(form.formState.errors.taxId)}
-                      {...form.register("taxId")}
+                      {...form.register("taxId", {
+                        onChange: (e) => {
+                          const next = e.target.value
+                            .replace(/[^a-zA-Z0-9]/g, "")
+                            .toUpperCase()
+                            .slice(0, 15);
+                          form.setValue("taxId", next, {
+                            shouldValidate: true,
+                          });
+                        },
+                      })}
                     />
                     <FieldError
                       message={form.formState.errors.taxId?.message}
                     />
+                    <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+                      India GSTIN: exactly 15 characters
+                    </p>
                   </div>
                   <div>
                     <Label>PAN</Label>
