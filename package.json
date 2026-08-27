@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "node ./node_modules/next/dist/bin/next dev --turbopack --hostname 0.0.0.0 --port 3000",
     "build": "node ./node_modules/next/dist/bin/next build",
-    "start": "node ./scripts/ensure-next-build.cjs && node ./node_modules/next/dist/bin/next start --hostname 0.0.0.0 --port 3000",
+    "start": "node ./node_modules/next/dist/bin/next start --hostname 0.0.0.0 --port 3000",
+    "ensure-build": "node ./scripts/ensure-next-build.cjs",
     "lint": "eslint"
   },
   "dependencies": {
