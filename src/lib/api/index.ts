@@ -3273,6 +3273,19 @@ export const posApi = {
         requiresSerial?: boolean;
         recipeTracked?: boolean;
         soldOut?: boolean;
+        productId?: string;
+        pricingStrategy?: "converted" | "fixed_tier";
+        pricePerPricingUnit?: number | null;
+        baseUnitId?: string | null;
+        entryUnits?: Array<{ unitId: string; symbol: string; name: string }>;
+        productUnits?: Array<{
+          unitId: string;
+          symbol: string;
+          name: string;
+          conversionToBase: number;
+          fixedPrice?: number | null;
+          isDefaultSellingUnit?: boolean;
+        }>;
         channelPrices?: {
           dine_in?: number;
           takeaway?: number;
@@ -8523,6 +8536,69 @@ export const catalogApi = {
   },
   createBrand(body: { name: string; description?: string }) {
     return apiRequest("/catalog/brands", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+
+  seedUnitGroups() {
+    return apiRequest("/catalog/units/seed", {
+      method: "POST",
+      token: token(),
+    });
+  },
+
+  listUnitGroups() {
+    return apiRequest<
+      Array<{
+        id: string;
+        code: string;
+        name: string;
+        units: Array<{
+          id: string;
+          name: string;
+          symbol: string;
+          isBaseUnit: boolean;
+          conversionToGroupBase: string | number;
+        }>;
+      }>
+    >("/catalog/unit-groups", { token: token() });
+  },
+
+  listProductUnits(productId: string) {
+    return apiRequest(`/catalog/products/${productId}/units`, {
+      token: token(),
+    });
+  },
+
+  upsertProductUnit(
+    productId: string,
+    body: {
+      unitId: string;
+      conversionToBase: number;
+      fixedPrice?: number | null;
+      isDefaultSellingUnit?: boolean;
+      isPurchaseUnit?: boolean;
+    },
+  ) {
+    return apiRequest(`/catalog/products/${productId}/units`, {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+
+  quotePricingLine(body: {
+    productId: string;
+    enteredQty: number;
+    sellingUnitId: string;
+  }) {
+    return apiRequest<{
+      qtyBase: number;
+      amount: number;
+      conversionFactorUsed: number;
+    }>("/catalog/pricing/quote", {
       method: "POST",
       body,
       token: token(),

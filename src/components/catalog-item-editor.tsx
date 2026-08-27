@@ -46,6 +46,7 @@ import {
   CatalogItemShopForm,
   type CatalogItemShopValues,
 } from "@/components/catalog-item-shop-form";
+import type { UnitPricingValue } from "@/components/unit-pricing-fields";
 import { formatQtyWithUnit, normalizeQty } from "@/lib/sell-units";
 import {
   GETTING_STARTED_PATH,
@@ -217,6 +218,14 @@ export function CatalogItemEditor() {
   const [hydrated, setHydrated] = useState(!isEdit);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [form, setForm] = useState<CatalogItemShopValues>(emptyCatalogItemForm);
+  const [unitPricing, setUnitPricing] = useState<UnitPricingValue>({
+    unitGroupId: "",
+    baseUnitId: "",
+    pricingUnitId: "",
+    pricingStrategy: "converted",
+    pricePerPricingUnit: "",
+    sellingUnits: [],
+  });
   const [photoUrl, setPhotoUrl] = useState("");
   const [barcodeError, setBarcodeError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -512,6 +521,27 @@ export function CatalogItemEditor() {
         mrp: form.mrp ? Number(form.mrp) : isEdit ? null : undefined,
         taxCode: taxCodeFromForm(form) ?? (isEdit ? null : undefined),
         unitOfMeasure: form.unitOfMeasure,
+        baseUnitId: unitPricing.baseUnitId || undefined,
+        pricingUnitId: unitPricing.pricingUnitId || undefined,
+        pricingStrategy: unitPricing.pricingStrategy,
+        pricePerPricingUnit:
+          unitPricing.pricingStrategy === "converted"
+            ? Number(
+                unitPricing.pricePerPricingUnit || form.basePrice,
+              ) || undefined
+            : undefined,
+        productUnits: unitPricing.sellingUnits
+          .filter((r) => r.unitId && Number(r.conversionToBase) > 0)
+          .map((r) => ({
+            unitId: r.unitId,
+            conversionToBase: Number(r.conversionToBase),
+            fixedPrice:
+              unitPricing.pricingStrategy === "fixed_tier"
+                ? Number(r.fixedPrice) || 0
+                : null,
+            isDefaultSellingUnit: r.isDefaultSellingUnit,
+            isPurchaseUnit: r.isPurchaseUnit,
+          })),
         photoUrl:
           uniquePhotos[0] || (isEdit ? photoUrl.trim() || null : undefined),
         images: uniquePhotos.length ? uniquePhotos : undefined,
@@ -530,9 +560,9 @@ export function CatalogItemEditor() {
       };
 
       if (isEdit) {
-        // Live / older APIs reject top-level reorderPoint on PATCH (forbidNonWhitelisted).
-        // Reorder lives in extraFields → product meta (and stock sync when API supports it).
-        return catalogApi.updateProduct(id, shared);
+        const { productUnits: _pu, ...patch } = shared;
+        void _pu;
+        return catalogApi.updateProduct(id, patch);
       }
 
       return catalogApi.createProduct({
@@ -568,8 +598,28 @@ export function CatalogItemEditor() {
         })(),
       });
     },
-    onSuccess: (saved) => {
-      invalidateCatalogQueries(qc, saved?.id || id);
+    onSuccess: async (saved) => {
+      const pid = saved?.id || id;
+      if (pid && unitPricing.sellingUnits.length) {
+        for (const row of unitPricing.sellingUnits) {
+          if (!row.unitId || !(Number(row.conversionToBase) > 0)) continue;
+          try {
+            await catalogApi.upsertProductUnit(pid, {
+              unitId: row.unitId,
+              conversionToBase: Number(row.conversionToBase),
+              fixedPrice:
+                unitPricing.pricingStrategy === "fixed_tier"
+                  ? Number(row.fixedPrice) || 0
+                  : null,
+              isDefaultSellingUnit: row.isDefaultSellingUnit,
+              isPurchaseUnit: row.isPurchaseUnit,
+            });
+          } catch {
+            /* create already wrote units; edit upsert best-effort */
+          }
+        }
+      }
+      invalidateCatalogQueries(qc, pid);
       if (isEdit) {
         toast.success("Item updated");
         router.push(`/catalog/view?id=${id}`);
@@ -732,6 +782,9 @@ export function CatalogItemEditor() {
               : product.data.category.name
             : null
         }
+        brandSelectedLabel={product.data?.brand?.name ?? null}
+        unitPricing={unitPricing}
+        onUnitPricingChange={setUnitPricing}
         commerceModes={commerceModes}
         photosExtra={
           existingImages.length ? (

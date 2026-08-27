@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { customersApi, loyaltyApi, ordersApi, paymentsApi, posApi, resourcesApi, restaurantApi, tenantsApi, billingApi } from "@/lib/api";
+import { customersApi, loyaltyApi, ordersApi, paymentsApi, posApi, resourcesApi, restaurantApi, tenantsApi, billingApi, catalogApi } from "@/lib/api";
 import {
   UPI_PSP_OPTIONS,
   buildUpiPayUri,
@@ -278,6 +278,16 @@ export default function RetailPosWorkstation({
     row: Parameters<typeof upsertLine>[0];
     value: string;
   } | null>(null);
+  /** Bulk qty: type 455 instead of tapping + hundreds of times */
+  const [qtyPick, setQtyPick] = useState<{
+    row: Parameters<typeof upsertLine>[0];
+    value: string;
+    maxQty: number;
+    tracks: boolean;
+    entryUnitId: string;
+  } | null>(null);
+  /** Draft text while editing cart line qty (allows typing 455 freely) */
+  const [qtyDraft, setQtyDraft] = useState<Record<string, string>>({});
   const [resourceId, setResourceId] = useState("");
   const [guestCount, setGuestCount] = useState("1");
   const [orderNote, setOrderNote] = useState("");
@@ -291,6 +301,7 @@ export default function RetailPosWorkstation({
   const [offlinePending, setOfflinePending] = useState(0);
   const [online, setOnline] = useState(true);
   const chargeLock = useRef(false);
+  const scanQtyRef = useRef<number | null>(null);
   const [stripeBusy, setStripeBusy] = useState(false);
   const [stripeCheckout, setStripeCheckout] = useState<{
     orderId: string;
@@ -772,6 +783,9 @@ export default function RetailPosWorkstation({
     soldOut?: boolean;
     foodType?: "veg" | "non_veg" | "egg" | null;
     recipeTracked?: boolean;
+    productId?: string;
+    pricingStrategy?: "converted" | "fixed_tier";
+    entryUnits?: Array<{ unitId: string; symbol: string; name: string }>;
     channelPrices?: {
       dine_in?: number;
       takeaway?: number;
@@ -789,7 +803,9 @@ export default function RetailPosWorkstation({
     modifiers?: string[];
     skipModifierPrompt?: boolean;
     serialNumber?: string;
-  }) {
+  },
+    opts?: { setQty?: number; addQty?: number; unitPriceOverride?: number },
+  ) {
     if (splitSession) {
       toast.message(
         "Split payment in progress — finish collecting parts before changing the ticket",
@@ -836,7 +852,10 @@ export default function RetailPosWorkstation({
       ? Number(row.channelPrices?.[channelKey])
       : NaN;
     const price =
-      Number.isFinite(channelPrice) && channelPrice > 0
+      opts?.unitPriceOverride != null &&
+      Number.isFinite(opts.unitPriceOverride)
+        ? opts.unitPriceOverride
+        : Number.isFinite(channelPrice) && channelPrice > 0
         ? channelPrice
         : moneyNumber(row.sellPrice) +
           (row.modifiers?.length
@@ -852,16 +871,47 @@ export default function RetailPosWorkstation({
           l.stockLevelId === row.id && (l.modifiers ?? []).join("|") === modKey,
       );
       if (existing) {
-        const next = normalizeQty(existing.qty + step, unit);
+        let next: number;
+        if (opts?.setQty != null && Number.isFinite(opts.setQty)) {
+          next = normalizeQty(opts.setQty, unit);
+        } else {
+          const add =
+            opts?.addQty != null && Number.isFinite(opts.addQty)
+              ? opts.addQty
+              : step;
+          next = normalizeQty(existing.qty + add, unit);
+        }
+        if (next <= 0) {
+          return prev.filter(
+            (l) =>
+              !(
+                l.stockLevelId === row.id &&
+                (l.modifiers ?? []).join("|") === modKey
+              ),
+          );
+        }
         if (tracks && next > onHand + 1e-9) {
-          toast.error("Not enough stock");
-          return prev;
+          toast.error(`Only ${formatQtyWithUnit(onHand, unit)} in stock`);
+          next = normalizeQty(onHand, unit);
+          if (next <= 0) {
+            return prev.filter(
+              (l) =>
+                !(
+                  l.stockLevelId === row.id &&
+                  (l.modifiers ?? []).join("|") === modKey
+                ),
+            );
+          }
         }
         return prev.map((l) =>
-          l.stockLevelId === row.id
+          l.stockLevelId === row.id &&
+          (l.modifiers ?? []).join("|") === modKey
             ? {
                 ...l,
                 qty: next,
+                ...(opts?.unitPriceOverride != null
+                  ? { unitPrice: opts.unitPriceOverride }
+                  : {}),
                 maxQty: tracks ? onHand : Math.max(l.maxQty, next + 100),
                 sellUnit: unit,
                 image: l.image ?? image,
@@ -871,11 +921,11 @@ export default function RetailPosWorkstation({
                 variantOptions: row.variantOptions ?? [],
                 requiresBatch: row.requiresBatch === true,
                 batchOptions: row.batchOptions ?? [],
-          requiresSerial: row.requiresSerial === true,
-          kind: row.kind ?? l.kind,
-          foodType: row.foodType ?? l.foodType,
-          modifiers: row.modifiers ?? l.modifiers,
-        }
+                requiresSerial: row.requiresSerial === true,
+                kind: row.kind ?? l.kind,
+                foodType: row.foodType ?? l.foodType,
+                modifiers: row.modifiers ?? l.modifiers,
+              }
             : l,
         );
       }
@@ -883,7 +933,18 @@ export default function RetailPosWorkstation({
         toast.error("Out of stock — set opening qty / stock in Inventory first");
         return prev;
       }
-      const startQty = tracks ? Math.min(step, onHand) : step;
+      let startQty =
+        opts?.setQty != null && Number.isFinite(opts.setQty)
+          ? normalizeQty(opts.setQty, unit)
+          : opts?.addQty != null && Number.isFinite(opts.addQty)
+            ? normalizeQty(opts.addQty, unit)
+            : normalizeQty(step, unit);
+      if (startQty <= 0) startQty = normalizeQty(step, unit);
+      if (tracks) startQty = Math.min(startQty, onHand);
+      if (startQty <= 0) {
+        toast.error("Out of stock — set opening qty / stock in Inventory first");
+        return prev;
+      }
       return [
         ...prev,
         {
@@ -892,7 +953,7 @@ export default function RetailPosWorkstation({
           name: row.name,
           unitPrice: price,
           listPrice: price,
-          qty: normalizeQty(startQty, unit),
+          qty: startQty,
           maxQty: tracks ? onHand : 999999,
           sellUnit: unit,
           category: row.category?.name ?? null,
@@ -923,12 +984,22 @@ export default function RetailPosWorkstation({
   const lookup = useMutation({
     mutationFn: (sku: string) => posApi.saleLookup(sku, locationId),
     onSuccess: (row) => {
-      upsertLine(row);
+      const pendingQty = scanQtyRef.current;
+      scanQtyRef.current = null;
+      upsertLine(
+        row,
+        pendingQty != null ? { setQty: pendingQty } : undefined,
+      );
       setScan("");
-      toast.success(`Added ${row.name}`);
+      toast.success(
+        pendingQty != null
+          ? `Added ${formatQtyWithUnit(pendingQty, row.sellUnit)} · ${row.name}`
+          : `Added ${row.name}`,
+      );
       scanRef.current?.focus();
     },
     onError: (e) => {
+      scanQtyRef.current = null;
       toast.error(
         e instanceof ApiError ? e.messages.join(", ") : "SKU not found",
       );
@@ -936,11 +1007,175 @@ export default function RetailPosWorkstation({
     },
   });
 
+  function parseScanQtyCode(raw: string): { code: string; qty?: number } {
+    const trimmed = raw.trim();
+    const lead = trimmed.match(/^(\d+(?:\.\d+)?)\s*[*xX]\s*(.+)$/);
+    if (lead) {
+      const qty = Number(lead[1]);
+      const code = lead[2].trim();
+      if (Number.isFinite(qty) && qty > 0 && code) return { code, qty };
+    }
+    const trail = trimmed.match(/^(.+?)\s*[*xX]\s*(\d+(?:\.\d+)?)$/);
+    if (trail) {
+      const code = trail[1].trim();
+      const qty = Number(trail[2]);
+      if (Number.isFinite(qty) && qty > 0 && code) return { code, qty };
+    }
+    return { code: trimmed };
+  }
+
+  function openQtyPick(row: Parameters<typeof upsertLine>[0]) {
+    if (splitSession) {
+      toast.message(
+        "Split payment in progress — finish collecting parts before changing the ticket",
+      );
+      return;
+    }
+    if (row.soldOut) {
+      toast.error("86 / sold out");
+      return;
+    }
+    const tracks = row.trackQty !== false && row.recipeTracked !== true;
+    const onHand = Number(row.qtyOnHand);
+    if (tracks && onHand <= 0) {
+      toast.error("Out of stock — set opening qty / stock in Inventory first");
+      return;
+    }
+    const inCart = cart.find((l) => l.stockLevelId === row.id);
+    const unit = normalizeSellUnit(row.sellUnit);
+    const entryUnits = row.entryUnits ?? [];
+    const defaultEntry =
+      entryUnits.find(
+        (u) =>
+          u.symbol.toLowerCase() === String(row.sellUnit ?? "").toLowerCase(),
+      )?.unitId ||
+      entryUnits[0]?.unitId ||
+      "";
+    setQtyPick({
+      row,
+      value: inCart
+        ? String(inCart.qty)
+        : String(qtyStep(unit) >= 1 ? 1 : qtyStep(unit)),
+      maxQty: tracks ? onHand : 999999,
+      tracks,
+      entryUnitId: defaultEntry,
+    });
+  }
+
+  async function applyQtyPick() {
+    if (!qtyPick) return;
+    const n = Number(qtyPick.value.trim().replace(",", "."));
+    if (!Number.isFinite(n) || n <= 0) {
+      toast.error("Enter a quantity greater than 0");
+      return;
+    }
+    const row = qtyPick.row;
+    const entryUnitId = qtyPick.entryUnitId;
+    const entrySym =
+      row.entryUnits?.find((u) => u.unitId === entryUnitId)?.symbol ??
+      row.sellUnit;
+
+    // Grocery / multi-unit: quote → cart qty in stock base unit + correct amount
+    if (row.productId && entryUnitId && (row.entryUnits?.length ?? 0) > 0) {
+      try {
+        const quote = await catalogApi.quotePricingLine({
+          productId: row.productId,
+          enteredQty: n,
+          sellingUnitId: entryUnitId,
+        });
+        if (!(quote.qtyBase > 0)) {
+          toast.error("Quantity converts to zero in stock unit");
+          return;
+        }
+        if (qtyPick.tracks && quote.qtyBase > qtyPick.maxQty + 1e-9) {
+          toast.error(
+            `Only ${formatQtyWithUnit(qtyPick.maxQty, row.sellUnit)} available`,
+          );
+          return;
+        }
+        const unitPrice =
+          quote.qtyBase > 0 ? quote.amount / quote.qtyBase : moneyNumber(row.sellPrice);
+        setQtyPick(null);
+        upsertLine(row, {
+          setQty: quote.qtyBase,
+          unitPriceOverride: unitPrice,
+        });
+        toast.success(
+          `${formatQtyWithUnit(n, entrySym)} → ${formatQtyWithUnit(quote.qtyBase, row.sellUnit)} · ${money(quote.amount)}`,
+        );
+        return;
+      } catch (e) {
+        // Fall through to plain qty if product has no base unit yet
+        if (!(e instanceof ApiError && /base unit/i.test(e.message))) {
+          toast.error(
+            e instanceof ApiError ? e.messages.join(", ") : "Could not price qty",
+          );
+          return;
+        }
+      }
+    }
+
+    setQtyPick(null);
+    upsertLine(row, { setQty: n });
+    toast.success(
+      `Qty ${formatQtyWithUnit(n, row.sellUnit)} · ${row.name}`,
+    );
+  }
+
+  function commitCartLineQty(line: CartLine, raw: string) {
+    const cleaned = raw.trim().replace(",", ".");
+    if (cleaned === "") {
+      setCart((prev) =>
+        prev.filter((x) => x.stockLevelId !== line.stockLevelId),
+      );
+      setQtyDraft((d) => {
+        const next = { ...d };
+        delete next[line.stockLevelId];
+        return next;
+      });
+      return;
+    }
+    const n = Number(cleaned);
+    if (!Number.isFinite(n) || n < 0) {
+      toast.error("Enter a valid quantity");
+      setQtyDraft((d) => {
+        const next = { ...d };
+        delete next[line.stockLevelId];
+        return next;
+      });
+      return;
+    }
+    let next = normalizeQty(n, line.sellUnit);
+    if (next <= 0) {
+      setCart((prev) =>
+        prev.filter((x) => x.stockLevelId !== line.stockLevelId),
+      );
+    } else {
+      if (next > line.maxQty + 1e-9) {
+        toast.error(
+          `Only ${formatQtyWithUnit(line.maxQty, line.sellUnit)} available`,
+        );
+        next = normalizeQty(line.maxQty, line.sellUnit);
+      }
+      setCart((prev) =>
+        prev.map((x) =>
+          x.stockLevelId === line.stockLevelId ? { ...x, qty: next } : x,
+        ),
+      );
+    }
+    setQtyDraft((d) => {
+      const nextDraft = { ...d };
+      delete nextDraft[line.stockLevelId];
+      return nextDraft;
+    });
+  }
+
   function resolveScan(code: string) {
-    const trimmed = code.trim();
+    const parsed = parseScanQtyCode(code);
+    const trimmed = parsed.code;
     if (!trimmed) return;
+    const qty = parsed.qty;
     const norm = trimmed.toLowerCase();
-    // Prefer local catalog hit for speed (SKU, product SKU, barcode)
     const local = (catalog.data?.items ?? []).find((s) => {
       const sku = s.sku?.toLowerCase();
       const productSku = s.productSku?.toLowerCase();
@@ -948,12 +1183,17 @@ export default function RetailPosWorkstation({
       return sku === norm || productSku === norm || barcode === norm;
     });
     if (local) {
-      upsertLine(local);
+      upsertLine(local, qty != null ? { setQty: qty } : undefined);
       setScan("");
-      toast.success(`Added ${local.name}`);
+      toast.success(
+        qty != null
+          ? `Added ${formatQtyWithUnit(qty, local.sellUnit)} · ${local.name}`
+          : `Added ${local.name}`,
+      );
       scanRef.current?.focus();
       return;
     }
+    scanQtyRef.current = qty ?? null;
     lookup.mutate(trimmed);
   }
 
@@ -964,6 +1204,8 @@ export default function RetailPosWorkstation({
 
   function resetAfterFullSale() {
     setCart([]);
+    setQtyDraft({});
+    setQtyPick(null);
     setDiscountAmount("");
     setCouponCode("");
     setCouponApplied(null);
@@ -2162,7 +2404,7 @@ export default function RetailPosWorkstation({
               onChange={setScan}
               onScan={resolveScan}
               label=""
-              placeholder="Scan barcode or type SKU"
+              placeholder="Scan barcode / SKU · bulk: 455*SKU"
               disabled={lookup.isPending}
               autoFocus
               inputRef={scanRef}
@@ -2265,12 +2507,23 @@ export default function RetailPosWorkstation({
                 });
                 return (
                   <li key={row.id} className="min-w-0">
-                    <button
-                      type="button"
-                      onClick={() => upsertLine(row)}
-                      disabled={stock.tone === "out"}
+                    <div
+                      role="button"
+                      tabIndex={stock.tone === "out" ? -1 : 0}
+                      onClick={() => {
+                        if (stock.tone !== "out") upsertLine(row);
+                      }}
+                      onKeyDown={(e) => {
+                        if (
+                          (e.key === "Enter" || e.key === " ") &&
+                          stock.tone !== "out"
+                        ) {
+                          e.preventDefault();
+                          upsertLine(row);
+                        }
+                      }}
                       className={cn(
-                        "group flex h-full w-full flex-col overflow-hidden rounded-xl border border-[#e2e8f0] bg-white text-left shadow-[0_1px_2px_rgba(11,31,51,0.04)] transition hover:border-[#1a56db]/50 hover:shadow-[0_2px_8px_rgba(26,86,219,0.08)]",
+                        "group flex h-full w-full cursor-pointer flex-col overflow-hidden rounded-xl border border-[#e2e8f0] bg-white text-left shadow-[0_1px_2px_rgba(11,31,51,0.04)] transition hover:border-[#1a56db]/50 hover:shadow-[0_2px_8px_rgba(26,86,219,0.08)]",
                         inCart &&
                           "border-[#1a56db] bg-[#f5f8ff] shadow-[0_0_0_1px_rgba(26,86,219,0.2)]",
                         stock.tone === "out" &&
@@ -2295,20 +2548,20 @@ export default function RetailPosWorkstation({
                               : undefined
                           }
                         />
-                        {stock.tone !== "ok" ? (
-                          <span
-                            className={cn(
-                              "absolute top-1.5 left-1.5 z-[1] max-w-[calc(100%-0.75rem)] truncate rounded-md bg-white/95 px-1.5 py-0.5 text-[0.62rem] font-bold shadow-sm",
-                              stock.tone === "out"
-                                ? "text-[#c81e1e]"
-                                : stock.tone === "low"
-                                  ? "text-[#9a3412]"
-                                  : "text-[#1a56db]",
-                            )}
-                          >
-                            {stock.label}
-                          </span>
-                        ) : null}
+                        <span
+                          className={cn(
+                            "absolute top-1.5 left-1.5 z-[1] max-w-[calc(100%-0.75rem)] truncate rounded-md bg-white/95 px-1.5 py-0.5 text-[0.62rem] font-bold shadow-sm",
+                            stock.tone === "out"
+                              ? "text-[#c81e1e]"
+                              : stock.tone === "low"
+                                ? "text-[#9a3412]"
+                                : stock.tone === "info"
+                                  ? "text-[#1a56db]"
+                                  : "text-[#0f766e]",
+                          )}
+                        >
+                          {stock.label}
+                        </span>
                         {row.foodType ? (
                           <span className="absolute top-1.5 right-1.5 z-[1]">
                             <FoodTypeBadge
@@ -2329,20 +2582,35 @@ export default function RetailPosWorkstation({
                           </p>
                         </div>
                         <span
+                          role="button"
+                          tabIndex={stock.tone === "out" ? -1 : 0}
+                          title="Tap to type quantity (e.g. 455)"
                           className={cn(
-                            "grid h-8 w-8 shrink-0 place-items-center rounded-full text-sm font-bold transition",
+                            "grid h-8 min-w-8 place-items-center rounded-full px-1.5 text-sm font-bold transition",
                             stock.tone === "out"
                               ? "bg-[#f1f5f9] text-[#94a3b8]"
                               : inCart
                                 ? "bg-[#1a56db] text-white shadow-sm"
                                 : "bg-[#e8eefb] text-[#1a56db] group-hover:bg-[#1a56db] group-hover:text-white",
                           )}
-                          aria-hidden
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (stock.tone === "out") return;
+                            openQtyPick(row);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              if (stock.tone !== "out") openQtyPick(row);
+                            }
+                          }}
                         >
                           {inCart ? inCart.qty : "+"}
                         </span>
                       </div>
-                    </button>
+                    </div>
                   </li>
                 );
               })}
@@ -2632,34 +2900,50 @@ export default function RetailPosWorkstation({
                           >
                             −
                           </button>
-                          {allowsDecimalQty(l.sellUnit) ? (
-                            <input
-                              type="number"
-                              className="w-10 border-0 bg-transparent text-center text-sm font-bold tabular-nums text-[#0b1f33] outline-none disabled:opacity-40"
-                              min={0}
-                              max={l.maxQty}
-                              step={0.001}
-                              value={l.qty}
-                              disabled={Boolean(splitSession)}
-                              onChange={(e) => {
-                                const raw = Number(e.target.value);
-                                if (!Number.isFinite(raw)) return;
-                                setCart((prev) =>
-                                  prev.map((x) => {
-                                    if (x.stockLevelId !== l.stockLevelId)
-                                      return x;
-                                    const next = normalizeQty(raw, x.sellUnit);
-                                    if (next < 0 || next > x.maxQty) return x;
-                                    return { ...x, qty: next };
-                                  }),
-                                );
-                              }}
-                            />
-                          ) : (
-                            <span className="w-8 text-center text-sm font-bold tabular-nums text-[#0b1f33]">
-                              {l.qty}
-                            </span>
-                          )}
+                          <input
+                            type="text"
+                            inputMode={
+                              allowsDecimalQty(l.sellUnit)
+                                ? "decimal"
+                                : "numeric"
+                            }
+                            className="h-8 w-14 border-0 bg-transparent text-center text-sm font-bold tabular-nums text-[#0b1f33] outline-none disabled:opacity-40"
+                            aria-label={`Quantity for ${l.name}`}
+                            title="Type quantity (e.g. 455)"
+                            value={
+                              qtyDraft[l.stockLevelId] !== undefined
+                                ? qtyDraft[l.stockLevelId]
+                                : String(l.qty)
+                            }
+                            disabled={Boolean(splitSession)}
+                            onFocus={(e) => {
+                              setQtyDraft((d) => ({
+                                ...d,
+                                [l.stockLevelId]: String(l.qty),
+                              }));
+                              e.target.select();
+                            }}
+                            onChange={(e) => {
+                              const v = e.target.value.replace(",", ".");
+                              if (v !== "" && !/^\d*\.?\d*$/.test(v)) return;
+                              setQtyDraft((d) => ({
+                                ...d,
+                                [l.stockLevelId]: v,
+                              }));
+                            }}
+                            onBlur={() =>
+                              commitCartLineQty(
+                                l,
+                                qtyDraft[l.stockLevelId] ?? String(l.qty),
+                              )
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                (e.target as HTMLInputElement).blur();
+                              }
+                            }}
+                          />
                           <button
                             type="button"
                             disabled={Boolean(splitSession)}
@@ -2674,7 +2958,12 @@ export default function RetailPosWorkstation({
                                     x.qty + step,
                                     x.sellUnit,
                                   );
-                                  if (next > x.maxQty + 1e-9) return x;
+                                  if (next > x.maxQty + 1e-9) {
+                                    toast.error(
+                                      `Only ${formatQtyWithUnit(x.maxQty, x.sellUnit)} available`,
+                                    );
+                                    return x;
+                                  }
                                   return { ...x, qty: next };
                                 }),
                               )
@@ -3246,6 +3535,89 @@ export default function RetailPosWorkstation({
               >
                 Add
               </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {qtyPick ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-[#0b1f33]/40 p-4">
+          <div className="w-full max-w-sm rounded-xl border border-[#e2e8f0] bg-white p-4 shadow-lg">
+            <h3 className="text-sm font-semibold text-[#0b1f33]">
+              Quantity · {qtyPick.row.name}
+            </h3>
+            <p className="mt-1 text-xs text-[#5a6b7d]">
+              Type how many to put on the bill
+              {qtyPick.tracks
+                ? ` · max ${formatQtyWithUnit(qtyPick.maxQty, qtyPick.row.sellUnit)}`
+                : ""}
+              {(qtyPick.row.entryUnits?.length ?? 0) > 1
+                ? " · pick entry unit (e.g. g or kg)"
+                : ""}
+              .
+            </p>
+            {(qtyPick.row.entryUnits?.length ?? 0) > 1 ? (
+              <div className="mt-3">
+                <Label className="text-[0.65rem] uppercase text-[#8b9bb0]">
+                  Enter as
+                </Label>
+                <Select
+                  className="mt-1 h-9 w-full rounded-md border border-[#d9e0ea] bg-white px-2 text-sm"
+                  value={qtyPick.entryUnitId}
+                  onChange={(e) =>
+                    setQtyPick((cur) =>
+                      cur ? { ...cur, entryUnitId: e.target.value } : cur,
+                    )
+                  }
+                >
+                  {qtyPick.row.entryUnits!.map((u) => (
+                    <option key={u.unitId} value={u.unitId}>
+                      {u.symbol} — {u.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            ) : null}
+            <Input
+              className="mt-3 text-center text-lg font-bold tabular-nums"
+              autoFocus
+              inputMode="decimal"
+              placeholder="e.g. 500"
+              value={qtyPick.value}
+              onChange={(e) => {
+                const v = e.target.value.replace(",", ".");
+                if (v !== "" && !/^\d*\.?\d*$/.test(v)) return;
+                setQtyPick((cur) => (cur ? { ...cur, value: v } : cur));
+              }}
+              onFocus={(e) => e.target.select()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void applyQtyPick();
+                }
+              }}
+            />
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {[1, 5, 10, 25, 50, 100, 250, 500].map((q) => (
+                <button
+                  key={q}
+                  type="button"
+                  className="rounded-md border border-[#e2e8f0] bg-[#f8fafc] px-2.5 py-1 text-xs font-semibold text-[#0b1f33] hover:border-[#1a56db] hover:text-[#1a56db]"
+                  onClick={() =>
+                    setQtyPick((cur) =>
+                      cur ? { ...cur, value: String(q) } : cur,
+                    )
+                  }
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setQtyPick(null)}>
+                Cancel
+              </Button>
+              <Button onClick={() => void applyQtyPick()}>Set qty</Button>
             </div>
           </div>
         </div>

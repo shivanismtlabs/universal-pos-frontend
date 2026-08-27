@@ -17,6 +17,11 @@ import { Label } from "@/components/ui/label";
 import { FieldError } from "@/components/ui/form";
 import { Select } from "@/components/ui/select";
 import { CategorySelectCombobox } from "@/components/category-select-combobox";
+import { BrandSelectCombobox } from "@/components/brand-select-combobox";
+import {
+  UnitPricingFields,
+  type UnitPricingValue,
+} from "@/components/unit-pricing-fields";
 import { BarcodeScanInput } from "@/components/barcode-scan-input";
 import { ProductBarcodePreview } from "@/components/product-barcode-preview";
 import {
@@ -342,6 +347,9 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
   stockLocationName,
   defaultShowMore,
   categorySelectedLabel,
+  brandSelectedLabel,
+  unitPricing,
+  onUnitPricingChange,
   commerceModes,
 }: {
   title: string;
@@ -376,6 +384,10 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
   defaultShowMore?: boolean;
   /** Edit: category name when id is not yet in the categories list */
   categorySelectedLabel?: string | null;
+  /** Edit: brand name when id is not yet in the brands list */
+  brandSelectedLabel?: string | null;
+  unitPricing?: UnitPricingValue;
+  onUnitPricingChange?: (next: UnitPricingValue) => void;
   /** Enabled commerce modes — filters Type chips (sale/rental/service…) */
   commerceModes?: string[];
 }) {
@@ -621,20 +633,14 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
               </ShopField>
 
               <ShopField label="Brand">
-                <Select
-                  className={fieldSelect}
+                <BrandSelectCombobox
                   value={form.brandId}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, brandId: e.target.value }))
+                  onChange={(val) =>
+                    setForm((f) => ({ ...f, brandId: val }))
                   }
-                >
-                  <option value="">None</option>
-                  {brands.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name}
-                    </option>
-                  ))}
-                </Select>
+                  brands={brands}
+                  selectedLabel={brandSelectedLabel}
+                />
               </ShopField>
 
               <ShopField label="Status">
@@ -693,6 +699,19 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                   ))}
                 </Select>
               </ShopField>
+
+              {unitPricing && onUnitPricingChange ? (
+                <div className="sm:col-span-2">
+                  <UnitPricingFields
+                    value={unitPricing}
+                    onChange={onUnitPricingChange}
+                    onBaseUnitSymbol={(symbol) => {
+                      clearFieldError("unitOfMeasure");
+                      setForm((f) => applyCatalogUnitChange(f, symbol));
+                    }}
+                  />
+                </div>
+              ) : null}
 
               {showPackedContents ? (
                 <ShopField
