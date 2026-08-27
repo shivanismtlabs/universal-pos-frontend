@@ -86,18 +86,37 @@ export default function CatalogPage() {
 function CatalogPageInner() {
   const search = useSearchParams();
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>(() => parseTab(search.get("tab")));
+  const { hasMode, hasScreen, commerceModes } = useBootstrap();
+  const showStockTab = hasMode("sale") && hasScreen("inventory");
+  const [tab, setTab] = useState<Tab>(() => {
+    const parsed = parseTab(search.get("tab"));
+    if (parsed === "stock" && !showStockTab) return "products";
+    return parsed;
+  });
 
   useEffect(() => {
-    setTab(parseTab(search.get("tab")));
-  }, [search]);
+    const parsed = parseTab(search.get("tab"));
+    if (parsed === "stock" && !showStockTab) {
+      setTab("products");
+      return;
+    }
+    setTab(parsed);
+  }, [search, showStockTab]);
 
   function goTab(id: Tab) {
+    if (id === "stock" && !showStockTab) return;
     setTab(id);
     const qs =
       id === "products" ? "/catalog" : `/catalog?tab=${id}`;
     router.replace(qs);
   }
+
+  const catalogTabs: Array<[Tab, string]> = [
+    ["products", "Items"],
+    ["categories", "Categories"],
+    ["brands", "Brands"],
+  ];
+  if (showStockTab) catalogTabs.push(["stock", "Stock levels"]);
 
   return (
     <div className="space-y-4 px-3 sm:px-4">
@@ -110,18 +129,11 @@ function CatalogPageInner() {
             levels
           </p>
         </div>
-        <ModeBadge mode="sale" />
+        {commerceModes[0] ? <ModeBadge mode={commerceModes[0]} /> : null}
       </header>
 
       <div className="flex flex-wrap gap-1 border-b border-[#eef1f4]">
-        {(
-          [
-            ["products", "Items"],
-            ["categories", "Categories"],
-            ["brands", "Brands"],
-            ["stock", "Stock levels"],
-          ] as const
-        ).map(([id, label]) => (
+        {catalogTabs.map(([id, label]) => (
           <button
             key={id}
             type="button"

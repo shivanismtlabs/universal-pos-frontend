@@ -3,7 +3,8 @@
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { GEO_COUNTRIES, geoStates } from "@/lib/geo";
+import { geoStates } from "@/lib/geo";
+import { geoCountrySelectOptions } from "@/components/geo-country-options";
 
 type Props = {
   countryCode: string;
@@ -38,6 +39,7 @@ export function CountryStateFields({
         </Label>
         <Select
           className="mt-1"
+          panelMinWidth={280}
           value={countryCode}
           onChange={(e) => {
             onCountry(e.target.value);
@@ -46,11 +48,7 @@ export function CountryStateFields({
           aria-invalid={Boolean(countryError)}
         >
           <option value="">Select country</option>
-          {GEO_COUNTRIES.map((c) => (
-            <option key={c.code} value={c.code}>
-              {c.name}
-            </option>
-          ))}
+          {geoCountrySelectOptions()}
         </Select>
         {countryError ? (
           <p className="mt-1 text-[0.75rem] font-medium text-[#b91c1c]">

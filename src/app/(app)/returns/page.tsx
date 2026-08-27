@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -1202,11 +1203,22 @@ function ServiceRefundDesk() {
 }
 
 export default function ReturnsPage() {
+  return (
+    <Suspense fallback={<PageSkeleton rows={8} />}>
+      <ReturnsPageInner />
+    </Suspense>
+  );
+}
+
+function ReturnsPageInner() {
   const { hasMode, isLoading } = useBootstrap();
+  const search = useSearchParams();
+  const router = useRouter();
   const hasSale = hasMode("sale");
   const hasRental = hasMode("rental");
   const hasSvc = hasMode("service");
   const hasSub = hasMode("subscription");
+  const tabFromUrl = search.get("tab");
 
   const availableTabs = useMemo(
     () =>
@@ -1229,9 +1241,26 @@ export default function ReturnsPage() {
 
   useEffect(() => {
     if (!availableTabs.length) return;
+    if (
+      tabFromUrl &&
+      availableTabs.some((t) => t.id === tabFromUrl)
+    ) {
+      setTab(tabFromUrl as ReturnTab);
+      return;
+    }
     if (tab && availableTabs.some((t) => t.id === tab)) return;
     setTab(availableTabs[0]!.id);
-  }, [availableTabs, tab]);
+  }, [availableTabs, tab, tabFromUrl]);
+
+  function selectTab(id: ReturnTab) {
+    setTab(id);
+    const qs = new URLSearchParams(search.toString());
+    const first = availableTabs[0]?.id;
+    if (id === first) qs.delete("tab");
+    else qs.set("tab", id);
+    const next = qs.toString();
+    router.replace(next ? `/returns?${next}` : "/returns", { scroll: false });
+  }
 
   if (isLoading) return <PageSkeleton rows={8} />;
 
@@ -1274,7 +1303,7 @@ export default function ReturnsPage() {
       <ModeTabs
         tabs={availableTabs.map((t) => ({ id: t.id, label: t.label }))}
         active={activeTab}
-        onChange={setTab}
+        onChange={selectTab}
       />
 
       {activeTab === "sale" ? <SaleReturnsDesk /> : null}

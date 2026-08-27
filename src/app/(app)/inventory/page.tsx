@@ -54,8 +54,6 @@ import { formatQtyWithUnit } from "@/lib/sell-units";
 
 type Tab =
   | "levels"
-  | "in"
-  | "out"
   | "damage"
   | "audit"
   | "ledger"
@@ -65,8 +63,6 @@ type Tab =
 const TAB_IDS: Tab[] = [
   "levels",
   "alerts",
-  "in",
-  "out",
   "damage",
   "audit",
   "ledger",
@@ -682,18 +678,9 @@ function DamageTab({
   locationId: string;
   canWrite: boolean;
 }) {
-  const levels = useQuery({
-    queryKey: ["inv-levels-picker", locationId],
-    queryFn: () =>
-      inventoryApi.listLevels({
-        locationId,
-        includeZero: true,
-        page: 1,
-        limit: 100,
-      }),
-    enabled: Boolean(locationId),
-  });
   const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
+  const pageSize = 25;
   const [reportOpen, setReportOpen] = useState(false);
   const [restoreTarget, setRestoreTarget] = useState<{
     stockLevelId: string;
@@ -703,17 +690,26 @@ function DamageTab({
     sellUnit?: string;
   } | null>(null);
 
-  const damaged = useMemo(() => {
-    const list = (levels.data?.items ?? []).filter((i) => i.qtyDamaged > 0);
-    const needle = q.trim().toLowerCase();
-    if (!needle) return list;
-    return list.filter(
-      (i) =>
-        i.name.toLowerCase().includes(needle) ||
-        i.sku.toLowerCase().includes(needle) ||
-        i.productSku.toLowerCase().includes(needle),
-    );
-  }, [levels.data, q]);
+  const levels = useQuery({
+    queryKey: ["inv-damaged", locationId, q, page],
+    queryFn: () =>
+      inventoryApi.listLevels({
+        locationId,
+        q: q || undefined,
+        damagedOnly: true,
+        includeZero: true,
+        page,
+        limit: pageSize,
+      }),
+    enabled: Boolean(locationId),
+  });
+
+  useEffect(() => {
+    setPage(1);
+  }, [q, locationId]);
+
+  const damaged = levels.data?.items ?? [];
+  const meta = levels.data?.meta;
 
   return (
     <div className="space-y-4">
@@ -748,7 +744,8 @@ function DamageTab({
           onChange={(e) => setQ(e.target.value)}
         />
         <p className="mt-1 text-[0.72rem] text-[#6b7280]">
-          {damaged.length} damaged item{damaged.length === 1 ? "" : "s"} at this location.
+          {meta?.total ?? damaged.length} damaged item
+          {(meta?.total ?? damaged.length) === 1 ? "" : "s"} at this location.
         </p>
       </div>
 
@@ -810,7 +807,16 @@ function DamageTab({
                   </td>
                 </tr>
               ))}
-              {!damaged.length ? (
+              {levels.isLoading ? (
+                <tr>
+                  <td
+                    colSpan={6}
+                    className="px-3 py-10 text-center text-[#8b9bb0]"
+                  >
+                    Loading damaged stock…
+                  </td>
+                </tr>
+              ) : !damaged.length ? (
                 <tr>
                   <td
                     colSpan={6}
@@ -824,6 +830,9 @@ function DamageTab({
           </table>
         </div>
       </div>
+      <TablePager
+        {...pagerFromMeta(meta, page, pageSize, setPage, damaged.length)}
+      />
 
       <DamagedStockModal
         open={reportOpen}

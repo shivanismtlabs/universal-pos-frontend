@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { GEO_COUNTRIES } from "@/lib/geo";
+import { geoCountrySelectOptions } from "@/components/geo-country-options";
 import { PageHeader } from "@/components/page-header";
 
 
@@ -156,6 +157,7 @@ export default function AccountingSettingsPage() {
           <Label>Tax country</Label>
           <Select
             value={form.taxCountry}
+            panelMinWidth={280}
             onChange={(e) =>
               setForm((f) => ({ ...f, taxCountry: e.target.value }))
             }
@@ -165,11 +167,9 @@ export default function AccountingSettingsPage() {
             form.taxCountry ? (
               <option value={form.taxCountry}>{form.taxCountry}</option>
             ) : null}
-            {GEO_COUNTRIES.map((c) => (
-              <option key={c.code} value={c.code}>
-                {c.name} ({c.code})
-              </option>
-            ))}
+            {geoCountrySelectOptions({
+              formatLabel: (c) => `${c.name} (${c.code})`,
+            })}
           </Select>
         </div>
         <label className="flex items-center gap-2 text-sm">

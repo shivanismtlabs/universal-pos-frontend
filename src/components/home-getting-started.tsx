@@ -16,7 +16,7 @@ import {
   Users,
   Wallet,
 } from "lucide-react";
-import { posApi } from "@/lib/api";
+import { catalogApi, posApi, resourcesApi, subscriptionsApi } from "@/lib/api";
 import { useBootstrap } from "@/lib/bootstrap";
 import { useAuthStore } from "@/lib/auth-store";
 import { Button } from "@/components/ui/button";
@@ -34,6 +34,7 @@ type StepId =
   | "build"
   | "stockup"
   | "resources"
+  | "services"
   | "plans"
   | "prefs"
   | "register"
@@ -66,12 +67,19 @@ function firstName(full?: string | null) {
  * commerce-mode aware — sale unlocks inventory steps; never industry-hardcoded.
  */
 export function HomeGettingStarted() {
-  const { hasMode, hasCapability, productName, data: boot } = useBootstrap();
+  const {
+    hasMode,
+    hasCapability,
+    productName,
+    data: boot,
+    businessConfig,
+  } = useBootstrap();
   const user = useAuthStore((s) => s.user);
   const search = useSearchParams();
   const stepFromUrl = readSetupStepParam(search);
   const hasSale = hasMode("sale");
   const hasRental = hasMode("rental") || hasCapability("AVAILABILITY");
+  const hasService = hasMode("service");
   const hasPlans =
     hasMode("subscription") ||
     hasCapability("SUBSCRIPTION") ||
@@ -83,9 +91,27 @@ export function HomeGettingStarted() {
     queryFn: () => posApi.saleFloor(),
     enabled: hasSale,
   });
+  const catalogCount = useQuery({
+    queryKey: ["catalog-setup-count"],
+    queryFn: () => catalogApi.listProducts({ status: "active", limit: 1 }),
+  });
+  const resourcesCount = useQuery({
+    queryKey: ["resources-setup-count"],
+    queryFn: () => resourcesApi.list({ limit: 1 }),
+    enabled: hasRental,
+  });
+  const plansCount = useQuery({
+    queryKey: ["subscriptions-plans-setup"],
+    queryFn: () => subscriptionsApi.listPlans(),
+    enabled: hasPlans,
+  });
 
-  const products = floor.data?.counts?.products ?? 0;
+  const products =
+    catalogCount.data?.meta?.total ?? floor.data?.counts?.products ?? 0;
   const inStock = floor.data?.counts?.inStock ?? 0;
+  const resourceTotal = resourcesCount.data?.meta?.total ?? 0;
+  const planTotal =
+    plansCount.data?.counts?.plans ?? plansCount.data?.items?.length ?? 0;
 
   const taxConfigured = useMemo(() => {
     const t = boot?.tenant;
@@ -147,36 +173,67 @@ export function HomeGettingStarted() {
       },
     ];
 
+    const buildTitle = hasSale
+      ? "Build your inventory"
+      : hasService
+        ? "Add services you bill"
+        : hasRental
+          ? "Add rentable items"
+          : hasPlans
+            ? "Add plans to your catalog"
+            : "Add items to your catalog";
+    const buildDetail = hasSale
+      ? "Bulk import your items/services using a file, or create them one by one — same catalog for every industry."
+      : "Create catalog items for this shop (goods, services, rentals, or plans). Import a file or add them one by one.";
+
+    list.push({
+      id: "build",
+      n: list.length + 1,
+      title: buildTitle,
+      detail: buildDetail,
+      tip: "Categories auto-create from CSV when missing. Prefer short universal SKUs.",
+      buildInventory: true,
+      done: products > 0,
+    });
+
     if (hasSale) {
-      list.push(
-        {
-          id: "build",
-          n: 3,
-          title: "Build your inventory",
-          detail:
-            "Bulk import your items/services using a file, or create them one by one — same catalog for every industry.",
-          tip: "Categories auto-create from CSV when missing. Prefer short universal SKUs.",
-          buildInventory: true,
-          done: products > 0,
+      list.push({
+        id: "stockup",
+        n: list.length + 1,
+        title: "Stock up your inventory",
+        detail:
+          "Raise opening stock via purchases or stock adjust so the counter never sells negative quantities.",
+        tip: "Purchases from suppliers restock multiple items at once.",
+        primary: {
+          label: "Add supplier",
+          href: withGettingStartedReturn("/suppliers/new", "stockup"),
         },
-        {
-          id: "stockup",
-          n: 4,
-          title: "Stock up your inventory",
-          detail:
-            "Raise opening stock via purchases or stock adjust so the counter never sells negative quantities.",
-          tip: "Purchases from suppliers restock multiple items at once.",
-          primary: {
-            label: "Add supplier",
-            href: withGettingStartedReturn("/suppliers/new", "stockup"),
-          },
-          secondary: {
-            label: "Stock levels",
-            href: withGettingStartedReturn("/inventory", "stockup"),
-          },
-          done: products > 0 && inStock > 0,
+        secondary: {
+          label: "Stock levels",
+          href: withGettingStartedReturn("/inventory", "stockup"),
         },
-      );
+        done: products > 0 && inStock > 0,
+      });
+    }
+
+    if (hasService) {
+      list.push({
+        id: "services",
+        n: list.length + 1,
+        title: "Charge a service",
+        detail:
+          "Open the counter Services tab and bill a timed or walk-in service — same checkout as retail.",
+        tip: "Appointments stay under the Appointments screen when that capability is on.",
+        primary: {
+          label: "Counter · services",
+          href: withGettingStartedReturn("/counter?view=service", "services"),
+        },
+        secondary: {
+          label: "Appointments",
+          href: withGettingStartedReturn("/appointments", "services"),
+        },
+        done: products > 0 && prefsConfigured,
+      });
     }
 
     if (hasRental) {
@@ -193,9 +250,9 @@ export function HomeGettingStarted() {
         },
         secondary: {
           label: "Counter",
-          href: withGettingStartedReturn("/counter", "resources"),
+          href: withGettingStartedReturn("/counter?view=rental", "resources"),
         },
-        done: prefsConfigured,
+        done: resourceTotal > 0,
       });
     }
 
@@ -209,13 +266,13 @@ export function HomeGettingStarted() {
         tip: "Check-in uses the same membership record for gym, salon, or coworking.",
         primary: {
           label: "Counter · plans",
-          href: withGettingStartedReturn("/counter", "plans"),
+          href: withGettingStartedReturn("/counter?view=subscription", "plans"),
         },
         secondary: {
           label: "Check-in",
           href: withGettingStartedReturn("/check-in", "plans"),
         },
-        done: prefsConfigured,
+        done: planTotal > 0,
       });
     }
 
@@ -238,7 +295,7 @@ export function HomeGettingStarted() {
       },
       {
         id: "register",
-        n: list.length + 2,
+        n: list.length + 1,
         title: "Setup POS register",
         detail:
           "Open the counter, run a sales register for the shift, and take your first payment.",
@@ -254,7 +311,7 @@ export function HomeGettingStarted() {
       },
       {
         id: "customers",
-        n: list.length + 3,
+        n: list.length + 1,
         title: "Customers & reports",
         detail:
           "Save customers for credit and history. Review sales and export CSV when needed.",
@@ -271,7 +328,18 @@ export function HomeGettingStarted() {
     );
 
     return list.map((s, i) => ({ ...s, n: i + 1 }));
-  }, [hasSale, hasRental, hasPlans, products, inStock, taxConfigured, prefsConfigured]);
+  }, [
+    hasSale,
+    hasService,
+    hasRental,
+    hasPlans,
+    products,
+    inStock,
+    resourceTotal,
+    planTotal,
+    taxConfigured,
+    prefsConfigured,
+  ]);
 
   const firstOpen =
     steps.find((s) => !s.done)?.id ?? steps[0]?.id ?? "store";
@@ -303,6 +371,9 @@ export function HomeGettingStarted() {
           <p className="mt-1.5 text-[0.9rem] text-[#5a6b7d]">
             Follow this checklist to get started with{" "}
             {productName || "Universal POS"}.
+            {businessConfig?.gettingStartedHints?.[0]
+              ? ` ${businessConfig.gettingStartedHints[0]}.`
+              : ""}
           </p>
         </div>
         <div className="min-w-[10rem] text-right">
@@ -436,7 +507,7 @@ export function HomeGettingStarted() {
                   <Store className="h-6 w-6" />
                 ) : active?.id === "tax" || active?.id === "prefs" ? (
                   <Settings2 className="h-6 w-6" />
-                ) : active?.id === "register" ? (
+                ) : active?.id === "register" || active?.id === "services" ? (
                   <ShoppingCart className="h-6 w-6" />
                 ) : active?.id === "customers" ? (
                   <Users className="h-6 w-6" />

@@ -27,7 +27,7 @@ type CrmTab =
   | "notes";
 
 export function CustomerCrmPanel({ customerId }: { customerId: string }) {
-  const { money } = useBootstrap();
+  const { money, hasMode } = useBootstrap();
   const qc = useQueryClient();
   const [tab, setTab] = useState<CrmTab>("overview");
   const [noteBody, setNoteBody] = useState("");
@@ -158,7 +158,9 @@ export function CustomerCrmPanel({ customerId }: { customerId: string }) {
     { id: "orders", label: "Purchases" },
     { id: "payments", label: "Payments" },
     { id: "dues", label: "Due" },
-    { id: "membership", label: "Membership" },
+    ...(hasMode("subscription")
+      ? [{ id: "membership" as const, label: "Membership" }]
+      : []),
     { id: "activity", label: "Activity" },
     { id: "loyalty", label: "Loyalty" },
     { id: "wallet", label: "Wallet" },

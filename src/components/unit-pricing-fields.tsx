@@ -241,9 +241,16 @@ export function UnitPricingFields({
                 }}
               />
             ) : (
-              <span className="flex items-center text-[0.65rem] text-[#8b9bb0]">
-                Proportional
-              </span>
+              <Input
+                className="h-8 text-xs"
+                placeholder="Unit price (optional)"
+                value={row.fixedPrice}
+                onChange={(e) => {
+                  const next = [...value.sellingUnits];
+                  next[idx] = { ...row, fixedPrice: e.target.value };
+                  patch({ sellingUnits: next });
+                }}
+              />
             )}
             <label className="flex items-center gap-1 text-[0.65rem]">
               <input

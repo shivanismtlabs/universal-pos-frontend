@@ -48,11 +48,20 @@ import {
 import { Info } from "lucide-react";
 
 const TRACKING_FLAG_HELP_BASE: Record<
-  "trackInventory" | "canSell" | "canPurchase" | "availableInPos",
+  | "trackInventory"
+  | "trackSerial"
+  | "trackBatch"
+  | "canSell"
+  | "canPurchase"
+  | "availableInPos",
   string
 > = {
   trackInventory:
     "On: count Stock on Hand when you sell or stock in. Off: no quantity — stock not counted.",
+  trackSerial:
+    "On: each unit has a unique serial. Opening qty stays 0 — register serials after save.",
+  trackBatch:
+    "On: track lots / expiry on this item. Use batches after save (Inventory / item page).",
   canSell: "On: this item can be sold on bills. Off: buy/use only (not sold to customers).",
   canPurchase:
     "On: you can purchase / stock in this item from suppliers. Off: you don’t buy it in the app.",
@@ -83,6 +92,16 @@ function trackingFlagHelp(
       return "On: count how many rental units you have. Off: rent without counting quantity.";
     }
   }
+  if (key === "trackSerial") {
+    if (catalogKindSkipsStock(kind)) {
+      return "Serial numbers are for counted goods/rentals — not used on this type.";
+    }
+  }
+  if (key === "trackBatch") {
+    if (catalogKindSkipsStock(kind)) {
+      return "Batch / expiry is for counted goods — not used on this type.";
+    }
+  }
   if (key === "canPurchase") {
     if (kind === "service" || kind === "digital") {
       return "Services and digital items aren’t purchased as stock. This stays off for this type.";
@@ -93,10 +112,20 @@ function trackingFlagHelp(
 
 /** Which checkboxes can’t be clicked for this item type. */
 function isTrackingFlagLocked(
-  key: "trackInventory" | "canSell" | "canPurchase" | "availableInPos",
+  key:
+    | "trackInventory"
+    | "trackSerial"
+    | "trackBatch"
+    | "canSell"
+    | "canPurchase"
+    | "availableInPos",
   kind: CatalogProductKind,
+  trackInventory: boolean,
 ): boolean {
   if (key === "trackInventory") return catalogKindSkipsStock(kind);
+  if (key === "trackSerial" || key === "trackBatch") {
+    return catalogKindSkipsStock(kind) || !trackInventory;
+  }
   if (key === "canPurchase") return kind === "service" || kind === "digital";
   return false;
 }
@@ -263,6 +292,9 @@ export function patchCatalogTrackingFlags<T extends CatalogItemShopValues>(
       reorderPoint: "",
     };
   }
+  if ((key === "trackSerial" || key === "trackBatch") && checked) {
+    return { ...prev, [key]: true, trackInventory: true };
+  }
   return { ...prev, [key]: checked };
 }
 
@@ -271,15 +303,17 @@ function ShopField({
   required,
   children,
   hint,
+  htmlFor,
 }: {
   label: string;
   required?: boolean;
   children: ReactNode;
   hint?: ReactNode;
+  htmlFor?: string;
 }) {
   return (
     <div className="grid gap-2 sm:grid-cols-[148px_minmax(0,1fr)] sm:items-start">
-      <Label className="sm:pt-2.5">
+      <Label htmlFor={htmlFor} className="sm:pt-2.5">
         {label}
         {required ? " *" : ""}
       </Label>
@@ -431,6 +465,8 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
       : null;
   const trackingFlags = [
     ["trackInventory", "Track inventory"],
+    ["trackSerial", "Track serial numbers"],
+    ["trackBatch", "Track batch / expiry"],
     ["canSell", "Can sell"],
     ["canPurchase", "Can purchase"],
     ["availableInPos", "Show on counter"],
@@ -470,7 +506,7 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
           </p>
         </header>
 
-        <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="grid gap-0 pb-4 lg:grid-cols-[minmax(0,1fr)_300px]">
           <div className="divide-y divide-[#eef1f4] px-4 py-5 sm:px-6">
             <ShopSection title="At the counter">
               <ShopField
@@ -524,9 +560,12 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
               <ShopField
                 label="Name"
                 required
+                htmlFor="catalog-item-name"
                 hint={<FieldError message={fieldErrors.name} />}
               >
                 <Input
+                  id="catalog-item-name"
+                  name="name"
                   autoFocus
                   placeholder="What you sell or rent — e.g. Blue cotton shirt"
                   value={form.name}
@@ -785,6 +824,7 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
               <ShopField
                 label="Rate"
                 required
+                htmlFor="catalog-item-rate"
                 hint={
                   fieldErrors.basePrice ? (
                     <FieldError message={fieldErrors.basePrice} />
@@ -796,6 +836,8 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                 }
               >
                 <Input
+                  id="catalog-item-rate"
+                  name="basePrice"
                   type="number"
                   min={0}
                   step="0.01"
@@ -979,9 +1021,12 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
             <ShopSection title="Pricing & tax">
               <ShopField
                 label="Cost"
+                htmlFor="catalog-item-cost"
                 hint={<FieldError message={fieldErrors.costPrice} />}
               >
                 <Input
+                  id="catalog-item-cost"
+                  name="costPrice"
                   type="number"
                   min={0}
                   step="0.01"
@@ -995,9 +1040,12 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
               </ShopField>
               <ShopField
                 label="MRP"
+                htmlFor="catalog-item-mrp"
                 hint={<FieldError message={fieldErrors.mrp} />}
               >
                 <Input
+                  id="catalog-item-mrp"
+                  name="mrp"
                   type="number"
                   min={0}
                   step="0.01"
@@ -1011,9 +1059,12 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
               </ShopField>
               <ShopField
                 label="Tax %"
+                htmlFor="catalog-item-tax"
                 hint={<FieldError message={fieldErrors.taxRatePercent} />}
               >
                 <Input
+                  id="catalog-item-tax"
+                  name="taxRatePercent"
                   type="number"
                   min={0}
                   max={40}
@@ -1031,9 +1082,12 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
               </ShopField>
               <ShopField
                 label="HSN / SAC"
+                htmlFor="catalog-item-hsn"
                 hint={<FieldError message={fieldErrors.taxCode} />}
               >
                 <Input
+                  id="catalog-item-hsn"
+                  name="taxCode"
                   placeholder="e.g. GST18 or HSN"
                   value={form.taxCode}
                   onChange={(e) => {
@@ -1047,10 +1101,13 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
             <ShopSection title="SKU & labels">
               <ShopField
                 label="SKU"
+                htmlFor="catalog-item-sku"
                 hint={<FieldError message={fieldErrors.skuCode} />}
               >
                 <div className="flex">
                   <Input
+                    id="catalog-item-sku"
+                    name="skuCode"
                     className="rounded-r-none font-mono uppercase"
                     placeholder="Leave empty to auto-create"
                     value={form.skuCode}
@@ -1087,7 +1144,11 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
             <ShopSection title="Inventory tracking">
               <div className="grid gap-2.5 sm:grid-cols-2">
                 {trackingFlags.map(([key, label]) => {
-                  const lockedOff = isTrackingFlagLocked(key, form.kind);
+                  const lockedOff = isTrackingFlagLocked(
+                    key,
+                    form.kind,
+                    form.trackInventory,
+                  );
                   return (
                     <div
                       key={key}
@@ -1166,9 +1227,12 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                 <div className="mt-4 space-y-3.5">
                   <ShopField
                     label="Short name"
+                    htmlFor="catalog-item-short-name"
                     hint={<FieldError message={fieldErrors.shortName} />}
                   >
                     <Input
+                      id="catalog-item-short-name"
+                      name="shortName"
                       placeholder="Short name on receipt / ticket"
                       value={form.shortName}
                       onChange={(e) => {
@@ -1179,9 +1243,12 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                   </ShopField>
                   <ShopField
                     label="Internal code"
+                    htmlFor="catalog-item-internal-code"
                     hint={<FieldError message={fieldErrors.internalCode} />}
                   >
                     <Input
+                      id="catalog-item-internal-code"
+                      name="internalCode"
                       value={form.internalCode}
                       onChange={(e) => {
                         clearFieldError("internalCode");
@@ -1194,11 +1261,14 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                   </ShopField>
                   <ShopField
                     label="Short description"
+                    htmlFor="catalog-item-short-desc"
                     hint={
                       <FieldError message={fieldErrors.shortDescription} />
                     }
                   >
                     <Input
+                      id="catalog-item-short-desc"
+                      name="shortDescription"
                       value={form.shortDescription}
                       onChange={(e) => {
                         clearFieldError("shortDescription");
@@ -1211,9 +1281,12 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                   </ShopField>
                   <ShopField
                     label="Description"
+                    htmlFor="catalog-item-description"
                     hint={<FieldError message={fieldErrors.description} />}
                   >
                     <textarea
+                      id="catalog-item-description"
+                      name="description"
                       className={textareaClass}
                       value={form.description}
                       onChange={(e) => {
@@ -1250,6 +1323,7 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
             <Link href={cancelHref}>Cancel</Link>
           </Button>
           <Button
+            type="button"
             size="sm"
             disabled={
               form.name.trim().length < 2 ||

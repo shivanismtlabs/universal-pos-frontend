@@ -1163,6 +1163,7 @@ export const inventoryApi = {
     locationId?: string;
     q?: string;
     lowStock?: boolean;
+    damagedOnly?: boolean;
     includeZero?: boolean;
     page?: number;
     limit?: number;
@@ -1171,6 +1172,7 @@ export const inventoryApi = {
     if (params?.locationId) qs.set("locationId", params.locationId);
     if (params?.q) qs.set("q", params.q);
     if (params?.lowStock) qs.set("lowStock", "true");
+    if (params?.damagedOnly) qs.set("damaged", "true");
     if (params?.includeZero) qs.set("includeZero", "true");
     if (params?.page) qs.set("page", String(params.page));
     if (params?.limit) qs.set("limit", String(params.limit));
@@ -3378,6 +3380,8 @@ export const posApi = {
     discountAmount?: number;
     couponCode?: string;
     loyaltyPointsToRedeem?: number;
+    /** Nearest-rupee half-up delta (rounded − exact). +fee / −discount write-off. */
+    roundOffAmount?: number;
     allowPartial?: boolean;
     sendReceipt?: boolean;
     sendReceiptChannels?: Array<"email" | "sms" | "whatsapp">;
@@ -3423,6 +3427,8 @@ export const posApi = {
     }>;
     note?: string;
     discountAmount?: number;
+    /** Nearest-rupee half-up delta (rounded − exact). */
+    roundOffAmount?: number;
     meta?: Record<string, unknown>;
   }) {
     return apiRequest<{
@@ -8598,6 +8604,13 @@ export const catalogApi = {
       qtyBase: number;
       amount: number;
       conversionFactorUsed: number;
+      orderedQuantity?: string;
+      orderedUnit?: string;
+      baseQuantity?: string;
+      unitPrice?: string;
+      priceSource?: string;
+      grossAmount?: string;
+      finalAmount?: string;
     }>("/catalog/pricing/quote", {
       method: "POST",
       body,

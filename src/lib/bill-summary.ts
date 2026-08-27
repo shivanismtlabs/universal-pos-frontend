@@ -39,7 +39,7 @@ export type BillSummary = {
   roundOff: number;
   roundedTotal: number;
   showRoundOff: boolean;
-  /** Amount to collect / Charge — not forced to roundedTotal. */
+  /** Amount to collect / Charge — nearest-rupee half-up by default. */
   amountDue: number;
 };
 
@@ -96,13 +96,25 @@ export function slabsToGstBreakup(
   });
 }
 
+/**
+ * Half-up to nearest rupee (Indian POS round-off):
+ * - paisa &lt; 50 → round down (289.40 → 289)
+ * - paisa ≥ 50 → round up   (289.50 → 290, 289.60 → 290)
+ */
+export function roundToNearestRupee(amount: number): number {
+  const n = Number(amount);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.round(n);
+}
+
 export function roundOffForDisplay(grand: number): {
   roundedTotal: number;
   roundOff: number;
   showRoundOff: boolean;
 } {
-  const roundedTotal = Math.round(grand);
-  const roundOff = Number((roundedTotal - grand).toFixed(2));
+  const exact = Math.max(0, Number(grand) || 0);
+  const roundedTotal = roundToNearestRupee(exact);
+  const roundOff = Number((roundedTotal - exact).toFixed(2));
   return {
     roundedTotal,
     roundOff,
@@ -112,7 +124,7 @@ export function roundOffForDisplay(grand: number): {
 
 /**
  * Build a bill summary for payment panel and receipt.
- * Charge / settle must keep using `amountDue` (exact), not `roundedTotal`.
+ * By default Net Payable / amountDue uses nearest-rupee half-up round-off.
  */
 export function buildBillSummary(input: {
   itemsSubtotal: number;
@@ -122,8 +134,13 @@ export function buildBillSummary(input: {
   fees?: BillFeeRow[];
   taxInclusive?: boolean;
   lines?: BillTaxLine[];
-  /** Exact collectable total (ticket after discount/fees). Defaults to computed grand. */
+  /**
+   * Collectable total. When omitted, uses rounded grand (half-up to ₹).
+   * Pass exact only when intentionally skipping payment round-off.
+   */
   amountDue?: number;
+  /** When true (default), amountDue defaults to roundedTotal. */
+  applyRoundOff?: boolean;
 }): BillSummary {
   const itemsSubtotal = Math.max(0, Number(input.itemsSubtotal) || 0);
   const taxTotal = Math.max(0, Math.round((Number(input.taxTotal) || 0) * 100) / 100);
@@ -132,9 +149,10 @@ export function buildBillSummary(input: {
   const fees = input.fees ?? [];
   const feesTotal = fees.reduce((s, f) => s + moneyNumber(f.amount), 0);
   const taxInclusive = Boolean(input.taxInclusive);
+  const applyRoundOff = input.applyRoundOff !== false;
 
   // Display order (payment + print): Total → Taxable value (label) → CGST/SGST → Discount → Net Payable
-  // Charge math: Items → Discount → Net → (+fees) → Taxable → Tax → Grand
+  // Charge math: Items → Discount → Net → (+fees) → Taxable → Tax → Grand → Round off
   const merchandiseAndFees = itemsSubtotal + feesTotal;
   const discountAll = discount + loyaltyOff;
   const netAmount = Math.max(0, itemsSubtotal - discountAll);
@@ -145,12 +163,15 @@ export function buildBillSummary(input: {
     ? Math.max(0, merchandiseAndFees - discountAll)
     : Math.max(0, merchandiseAndFees - discountAll + taxTotal);
 
+  const { roundedTotal, roundOff, showRoundOff } = roundOffForDisplay(grand);
+
   const amountDue =
     input.amountDue != null && Number.isFinite(Number(input.amountDue))
       ? Math.max(0, Number(input.amountDue))
-      : grand;
+      : applyRoundOff
+        ? roundedTotal
+        : grand;
 
-  const { roundedTotal, roundOff, showRoundOff } = roundOffForDisplay(grand);
   const rawSlabs = groupGstSlabs(input.lines ?? [], taxTotal);
   const taxSlabs = slabsToGstBreakup(rawSlabs);
 

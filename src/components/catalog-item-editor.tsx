@@ -131,6 +131,49 @@ function buildExtraFieldsPayload(
   return Object.keys(out).length ? out : undefined;
 }
 
+/** Only attach unit-pricing keys when the shop actually configured them.
+ * Live APIs that predate unit pricing reject pricingStrategy / pricePerPricingUnit / productUnits. */
+function catalogUnitPricingPayload(
+  unitPricing: UnitPricingValue,
+  basePrice: string,
+): Record<string, unknown> {
+  const productUnits = unitPricing.sellingUnits
+    .filter((r) => r.unitId && Number(r.conversionToBase) > 0)
+    .map((r) => ({
+      unitId: r.unitId,
+      conversionToBase: Number(r.conversionToBase),
+      fixedPrice:
+        unitPricing.pricingStrategy === "fixed_tier"
+          ? Number(r.fixedPrice) || 0
+          : null,
+      isDefaultSellingUnit: r.isDefaultSellingUnit,
+      isPurchaseUnit: r.isPurchaseUnit,
+    }));
+
+  if (
+    !unitPricing.baseUnitId &&
+    !unitPricing.pricingUnitId &&
+    productUnits.length === 0
+  ) {
+    return {};
+  }
+
+  return {
+    ...(unitPricing.baseUnitId ? { baseUnitId: unitPricing.baseUnitId } : {}),
+    ...(unitPricing.pricingUnitId
+      ? { pricingUnitId: unitPricing.pricingUnitId }
+      : {}),
+    pricingStrategy: unitPricing.pricingStrategy,
+    ...(unitPricing.pricingStrategy === "converted"
+      ? {
+          pricePerPricingUnit:
+            Number(unitPricing.pricePerPricingUnit || basePrice) || undefined,
+        }
+      : {}),
+    ...(productUnits.length ? { productUnits } : {}),
+  };
+}
+
 function taxCodeFromForm(form: CatalogItemShopValues): string | null {
   const rate = Number(form.taxRatePercent);
   if (Number.isFinite(rate) && rate > 0) {
@@ -521,27 +564,7 @@ export function CatalogItemEditor() {
         mrp: form.mrp ? Number(form.mrp) : isEdit ? null : undefined,
         taxCode: taxCodeFromForm(form) ?? (isEdit ? null : undefined),
         unitOfMeasure: form.unitOfMeasure,
-        baseUnitId: unitPricing.baseUnitId || undefined,
-        pricingUnitId: unitPricing.pricingUnitId || undefined,
-        pricingStrategy: unitPricing.pricingStrategy,
-        pricePerPricingUnit:
-          unitPricing.pricingStrategy === "converted"
-            ? Number(
-                unitPricing.pricePerPricingUnit || form.basePrice,
-              ) || undefined
-            : undefined,
-        productUnits: unitPricing.sellingUnits
-          .filter((r) => r.unitId && Number(r.conversionToBase) > 0)
-          .map((r) => ({
-            unitId: r.unitId,
-            conversionToBase: Number(r.conversionToBase),
-            fixedPrice:
-              unitPricing.pricingStrategy === "fixed_tier"
-                ? Number(r.fixedPrice) || 0
-                : null,
-            isDefaultSellingUnit: r.isDefaultSellingUnit,
-            isPurchaseUnit: r.isPurchaseUnit,
-          })),
+        ...catalogUnitPricingPayload(unitPricing, form.basePrice),
         photoUrl:
           uniquePhotos[0] || (isEdit ? photoUrl.trim() || null : undefined),
         images: uniquePhotos.length ? uniquePhotos : undefined,
@@ -560,9 +583,7 @@ export function CatalogItemEditor() {
       };
 
       if (isEdit) {
-        const { productUnits: _pu, ...patch } = shared;
-        void _pu;
-        return catalogApi.updateProduct(id, patch);
+        return catalogApi.updateProduct(id, shared);
       }
 
       return catalogApi.createProduct({

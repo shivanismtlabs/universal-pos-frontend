@@ -16,6 +16,11 @@ export function middleware(request: NextRequest) {
     url.pathname = "/kitchen";
     return NextResponse.redirect(url);
   }
+  if (path === "/adjusment" || path === "/adjustment") {
+    const url = request.nextUrl.clone();
+    url.pathname = "/adjustments";
+    return NextResponse.redirect(url);
+  }
   const catalog = path.match(CATALOG_UUID);
   if (catalog) {
     const url = request.nextUrl.clone();
@@ -41,5 +46,13 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/kot", "/kot/", "/catalog/:path*", "/orders/:path*", "/accounting/journals/:path*"],
+  matcher: [
+    "/kot",
+    "/kot/",
+    "/adjusment",
+    "/adjustment",
+    "/catalog/:path*",
+    "/orders/:path*",
+    "/accounting/journals/:path*",
+  ],
 };

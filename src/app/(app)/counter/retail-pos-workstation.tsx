@@ -65,6 +65,7 @@ import {
   buildBillSummary,
   cashChangeDue,
   lineTaxAmount,
+  roundOffForDisplay,
 } from "@/lib/bill-summary";
 
 type CartLine = {
@@ -77,6 +78,9 @@ type CartLine = {
   qty: number;
   maxQty: number;
   sellUnit: SellUnit;
+  sellingUnitId?: string;
+  baseQty?: number;
+  conversionFactor?: number;
   category?: string | null;
   image?: string | null;
   /** Product override % (e.g. 18). null/undefined → tenant rate */
@@ -103,6 +107,43 @@ type CartLine = {
   foodType?: "veg" | "non_veg" | "egg" | null;
   modifiers?: string[];
 };
+
+/** Shelf / list rate for a cart line (before this ticket’s line discount). */
+function cartLineListPrice(line: CartLine): number {
+  return line.listPrice > 0 ? line.listPrice : line.unitPrice;
+}
+
+/** Discount % off list for this line only (0 if none / markup). */
+function cartLineDiscountPercent(line: CartLine): number {
+  const base = cartLineListPrice(line);
+  if (base <= 0 || line.unitPrice >= base - 0.001) return 0;
+  return Math.round(((1 - line.unitPrice / base) * 100) * 10) / 10;
+}
+
+/** ₹ off list × qty for this line (not bill-level coupon). */
+function cartLineDiscountAmount(line: CartLine): number {
+  const base = cartLineListPrice(line);
+  const off = Math.max(0, base - line.unitPrice) * line.qty;
+  return Math.round(off * 100) / 100;
+}
+
+function unitPriceAfterLineDiscount(
+  listPrice: number,
+  opts: { percent?: number; amountOffPerUnit?: number },
+): number {
+  const base = Math.max(0, listPrice);
+  if (opts.amountOffPerUnit != null && Number.isFinite(opts.amountOffPerUnit)) {
+    return Math.max(
+      0,
+      Math.round((base - Math.max(0, opts.amountOffPerUnit)) * 100) / 100,
+    );
+  }
+  const pct = Math.max(0, opts.percent ?? 0);
+  if (pct > 0) {
+    return Math.max(0, Math.round(base * (1 - pct / 100) * 100) / 100);
+  }
+  return Math.round(base * 100) / 100;
+}
 
 type PayMethod =
   | "cash"
@@ -543,6 +584,14 @@ export default function RetailPosWorkstation({
   });
 
   const subtotal = cart.reduce((s, l) => s + l.unitPrice * l.qty, 0);
+  /** Sum of per-item discounts (list − sell) × qty — each product can differ. */
+  const lineDiscountsTotal =
+    Math.round(
+      cart.reduce((s, l) => s + cartLineDiscountAmount(l), 0) * 100,
+    ) / 100;
+  /** Payment “Total” before item discounts (so Discount line can show savings). */
+  const displaySubtotal =
+    Math.round((subtotal + lineDiscountsTotal) * 100) / 100;
   const taxAmount = (() => {
     if (taxSettings.rate <= 0 && !cart.some((l) => (l.taxRatePercent ?? null) != null))
       return 0;
@@ -586,6 +635,9 @@ export default function RetailPosWorkstation({
   const discountCapped =
     discountEntered > discountNum + 0.001 && !canOverrideDiscount;
   const loyaltyOff = loyaltyQuote?.amountOff ?? 0;
+  /** Item discounts + whole-bill discount — shown on payment panel. */
+  const totalDiscountShown =
+    Math.round((lineDiscountsTotal + discountNum) * 100) / 100;
   const ticketNet = Math.max(0, ticketBeforeDiscount - discountNum - loyaltyOff);
   const diningModeForFees =
     orderType === "walk_in" ? (resourceId ? "dine_in" : "") : orderType;
@@ -605,7 +657,15 @@ export default function RetailPosWorkstation({
       })
     : [];
   const diningExtras = diningFeeLines.reduce((s, f) => s + f.amount, 0);
-  const totalDue = ticketNet + diningExtras;
+  /** Exact ticket before nearest-rupee round-off. */
+  const exactDue = Math.max(
+    0,
+    Math.round((ticketNet + diningExtras) * 100) / 100,
+  );
+  const paymentRound = roundOffForDisplay(exactDue);
+  /** Collectable total — half-up to nearest ₹ (paisa ≥ 50 → up). */
+  const totalDue = paymentRound.roundedTotal;
+  const paymentRoundOff = paymentRound.roundOff;
   const splitPart = splitSession?.parts[splitSession.index] ?? null;
   const splitFollowUp = Boolean(splitSession?.orderId);
   const splitRemaining = splitSession
@@ -672,9 +732,9 @@ export default function RetailPosWorkstation({
     };
   });
   const billSummary = buildBillSummary({
-    itemsSubtotal: subtotal,
+    itemsSubtotal: displaySubtotal,
     taxTotal: taxAmount,
-    discount: discountNum,
+    discount: totalDiscountShown,
     loyaltyOff,
     fees: diningFeeLines,
     taxInclusive: taxSettings.inclusive,
@@ -804,7 +864,15 @@ export default function RetailPosWorkstation({
     skipModifierPrompt?: boolean;
     serialNumber?: string;
   },
-    opts?: { setQty?: number; addQty?: number; unitPriceOverride?: number },
+    opts?: {
+      setQty?: number;
+      addQty?: number;
+      unitPriceOverride?: number;
+      sellingUnitId?: string;
+      orderedUnitSymbol?: string;
+      baseQty?: number;
+      conversionFactor?: number;
+    },
   ) {
     if (splitSession) {
       toast.message(
@@ -871,15 +939,19 @@ export default function RetailPosWorkstation({
           l.stockLevelId === row.id && (l.modifiers ?? []).join("|") === modKey,
       );
       if (existing) {
+        const lineUnit = normalizeSellUnit(
+          opts?.orderedUnitSymbol ?? existing.sellUnit ?? row.sellUnit,
+        );
+        const lineStep = qtyStep(lineUnit);
         let next: number;
         if (opts?.setQty != null && Number.isFinite(opts.setQty)) {
-          next = normalizeQty(opts.setQty, unit);
+          next = normalizeQty(opts.setQty, lineUnit);
         } else {
           const add =
             opts?.addQty != null && Number.isFinite(opts.addQty)
               ? opts.addQty
-              : step;
-          next = normalizeQty(existing.qty + add, unit);
+              : lineStep;
+          next = normalizeQty(existing.qty + add, lineUnit);
         }
         if (next <= 0) {
           return prev.filter(
@@ -890,17 +962,15 @@ export default function RetailPosWorkstation({
               ),
           );
         }
-        if (tracks && next > onHand + 1e-9) {
-          toast.error(`Only ${formatQtyWithUnit(onHand, unit)} in stock`);
-          next = normalizeQty(onHand, unit);
-          if (next <= 0) {
-            return prev.filter(
-              (l) =>
-                !(
-                  l.stockLevelId === row.id &&
-                  (l.modifiers ?? []).join("|") === modKey
-                ),
+        if (tracks) {
+          const factor =
+            opts?.conversionFactor ?? existing.conversionFactor ?? 1;
+          const need = opts?.baseQty ?? next * factor;
+          if (need > onHand + 1e-9) {
+            toast.error(
+              `Only ${formatQtyWithUnit(onHand, row.sellUnit ?? unit)} in stock`,
             );
+            return prev;
           }
         }
         return prev.map((l) =>
@@ -912,8 +982,20 @@ export default function RetailPosWorkstation({
                 ...(opts?.unitPriceOverride != null
                   ? { unitPrice: opts.unitPriceOverride }
                   : {}),
+                ...(opts?.sellingUnitId
+                  ? { sellingUnitId: opts.sellingUnitId }
+                  : {}),
+                ...(opts?.orderedUnitSymbol
+                  ? { sellUnit: opts.orderedUnitSymbol }
+                  : {}),
+                ...(opts?.baseQty != null ? { baseQty: opts.baseQty } : {}),
+                ...(opts?.conversionFactor != null
+                  ? { conversionFactor: opts.conversionFactor }
+                  : {}),
                 maxQty: tracks ? onHand : Math.max(l.maxQty, next + 100),
-                sellUnit: unit,
+                sellUnit: opts?.orderedUnitSymbol
+                  ? normalizeSellUnit(opts.orderedUnitSymbol)
+                  : unit,
                 image: l.image ?? image,
                 listPrice: l.listPrice ?? price,
                 taxRatePercent: l.taxRatePercent ?? taxRatePercent,
@@ -939,12 +1021,17 @@ export default function RetailPosWorkstation({
           : opts?.addQty != null && Number.isFinite(opts.addQty)
             ? normalizeQty(opts.addQty, unit)
             : normalizeQty(step, unit);
-      if (startQty <= 0) startQty = normalizeQty(step, unit);
-      if (tracks) startQty = Math.min(startQty, onHand);
-      if (startQty <= 0) {
-        toast.error("Out of stock — set opening qty / stock in Inventory first");
-        return prev;
-      }
+        if (tracks) {
+          const need = opts?.baseQty ?? startQty;
+          if (need > onHand + 1e-9) {
+            toast.error(`Only ${formatQtyWithUnit(onHand, unit)} in stock`);
+            return prev;
+          }
+        }
+        if (startQty <= 0) {
+          toast.error("Out of stock — set opening qty / stock in Inventory first");
+          return prev;
+        }
       return [
         ...prev,
         {
@@ -955,7 +1042,12 @@ export default function RetailPosWorkstation({
           listPrice: price,
           qty: startQty,
           maxQty: tracks ? onHand : 999999,
-          sellUnit: unit,
+          sellUnit: opts?.orderedUnitSymbol
+            ? normalizeSellUnit(opts.orderedUnitSymbol)
+            : unit,
+          sellingUnitId: opts?.sellingUnitId,
+          baseQty: opts?.baseQty,
+          conversionFactor: opts?.conversionFactor,
           category: row.category?.name ?? null,
           image,
           taxRatePercent,
@@ -1083,25 +1175,34 @@ export default function RetailPosWorkstation({
           enteredQty: n,
           sellingUnitId: entryUnitId,
         });
-        if (!(quote.qtyBase > 0)) {
+        const qtyBase = Number(quote.qtyBase);
+        if (!(qtyBase > 0)) {
           toast.error("Quantity converts to zero in stock unit");
           return;
         }
-        if (qtyPick.tracks && quote.qtyBase > qtyPick.maxQty + 1e-9) {
+        if (qtyPick.tracks && qtyBase > qtyPick.maxQty + 1e-9) {
           toast.error(
             `Only ${formatQtyWithUnit(qtyPick.maxQty, row.sellUnit)} available`,
           );
           return;
         }
         const unitPrice =
-          quote.qtyBase > 0 ? quote.amount / quote.qtyBase : moneyNumber(row.sellPrice);
+          quote.unitPrice != null
+            ? Number(quote.unitPrice)
+            : n > 0
+              ? Number(quote.amount) / n
+              : moneyNumber(row.sellPrice);
         setQtyPick(null);
         upsertLine(row, {
-          setQty: quote.qtyBase,
+          setQty: n,
           unitPriceOverride: unitPrice,
+          sellingUnitId: entryUnitId,
+          orderedUnitSymbol: entrySym,
+          baseQty: qtyBase,
+          conversionFactor: Number(quote.conversionFactorUsed),
         });
         toast.success(
-          `${formatQtyWithUnit(n, entrySym)} → ${formatQtyWithUnit(quote.qtyBase, row.sellUnit)} · ${money(quote.amount)}`,
+          `${formatQtyWithUnit(n, entrySym)} · ${money(Number(quote.amount))}`,
         );
         return;
       } catch (e) {
@@ -1619,6 +1720,7 @@ export default function RetailPosWorkstation({
           stockLevelId: l.stockLevelId,
           quantity: l.qty,
           unitPrice: l.unitPrice,
+          ...(l.sellingUnitId ? { sellingUnitId: l.sellingUnitId } : {}),
           ...(l.variantId ? { variantId: l.variantId } : {}),
           ...(l.batchId ? { batchId: l.batchId } : {}),
           ...(l.serialNumber?.trim()
@@ -1627,6 +1729,9 @@ export default function RetailPosWorkstation({
           ...(l.modifiers?.length ? { modifiers: l.modifiers } : {}),
         })),
         ...(discountNum > 0 ? { discountAmount: discountNum } : {}),
+        ...(Math.abs(paymentRoundOff) >= 0.005
+          ? { roundOffAmount: paymentRoundOff }
+          : {}),
         ...(couponApplied
           ? { couponCode: couponApplied }
           : couponCode.trim()
@@ -1645,6 +1750,13 @@ export default function RetailPosWorkstation({
             : {}),
           ...(deliveryAddress.trim()
             ? { deliveryAddress: deliveryAddress.trim() }
+            : {}),
+          ...(Math.abs(paymentRoundOff) >= 0.005
+            ? {
+                roundOff: paymentRoundOff,
+                exactTotal: exactDue,
+                roundedTotal: totalDue,
+              }
             : {}),
           ...(Object.keys(orderExtraFields).length
             ? {
@@ -1947,6 +2059,7 @@ export default function RetailPosWorkstation({
             stockLevelId: l.stockLevelId,
             quantity: l.qty,
             unitPrice: l.unitPrice,
+            ...(l.sellingUnitId ? { sellingUnitId: l.sellingUnitId } : {}),
             ...(l.variantId ? { variantId: l.variantId } : {}),
             ...(l.batchId ? { batchId: l.batchId } : {}),
             ...(l.serialNumber?.trim()
@@ -1955,6 +2068,9 @@ export default function RetailPosWorkstation({
             ...(l.modifiers?.length ? { modifiers: l.modifiers } : {}),
           })),
           ...(discountNum > 0 ? { discountAmount: discountNum } : {}),
+          ...(Math.abs(paymentRoundOff) >= 0.005
+            ? { roundOffAmount: paymentRoundOff }
+            : {}),
           ...(orderNote.trim() ? { note: orderNote.trim() } : {}),
           ...(loyaltyQuote && loyaltyQuote.points > 0
             ? { loyaltyPointsToRedeem: loyaltyQuote.points }
@@ -1971,6 +2087,13 @@ export default function RetailPosWorkstation({
             ...(deliveryPhone.trim()
             ? { guestPhone: canonicalPhoneE164(deliveryPhone.trim()) }
             : {}),
+            ...(Math.abs(paymentRoundOff) >= 0.005
+              ? {
+                  roundOff: paymentRoundOff,
+                  exactTotal: exactDue,
+                  roundedTotal: totalDue,
+                }
+              : {}),
             ...(deliveryAddress.trim()
               ? { deliveryAddress: deliveryAddress.trim() }
               : {}),
@@ -2023,6 +2146,7 @@ export default function RetailPosWorkstation({
           stockLevelId: l.stockLevelId,
           quantity: l.qty,
           unitPrice: l.unitPrice,
+          ...(l.sellingUnitId ? { sellingUnitId: l.sellingUnitId } : {}),
           ...(l.variantId ? { variantId: l.variantId } : {}),
           ...(l.batchId ? { batchId: l.batchId } : {}),
           ...(l.serialNumber?.trim()
@@ -2127,6 +2251,8 @@ export default function RetailPosWorkstation({
         qty: l.qty,
         maxQty: Math.max(l.maxQty, l.qty),
         sellUnit: normalizeSellUnit(l.sellUnit ?? "pcs"),
+        sellingUnitId: (l as { sellingUnitId?: string }).sellingUnitId,
+        baseQty: (l as { baseQty?: number }).baseQty,
       }));
       if (!lines.length) {
         toast.error("This draft has no items");
@@ -2168,12 +2294,21 @@ export default function RetailPosWorkstation({
   }
 
   function openRateEdit(line: CartLine) {
-    const base = line.listPrice ?? line.unitPrice;
-    const pct = base > 0 ? ((line.unitPrice / base - 1) * 100) : 0;
+    const base = cartLineListPrice(line);
+    const discPct = cartLineDiscountPercent(line);
+    const markupPct =
+      base > 0 && line.unitPrice > base + 0.001
+        ? Math.round(((line.unitPrice / base - 1) * 100) * 100) / 100
+        : 0;
     setRateEdit({
       stockLevelId: line.stockLevelId,
       amount: String(line.unitPrice),
-      percent: Math.abs(pct) < 0.05 ? "" : String(Math.round(pct * 100) / 100),
+      percent:
+        discPct > 0
+          ? String(-discPct)
+          : markupPct > 0
+            ? String(markupPct)
+            : "",
     });
   }
 
@@ -2192,6 +2327,25 @@ export default function RetailPosWorkstation({
       ),
     );
     setRateEdit(null);
+  }
+
+  function setCartLineDiscount(
+    stockLevelId: string,
+    opts: { percent?: number; amountOffPerUnit?: number; reset?: boolean },
+  ) {
+    setCart((prev) =>
+      prev.map((x) => {
+        if (x.stockLevelId !== stockLevelId) return x;
+        const base = cartLineListPrice(x);
+        if (opts.reset) {
+          return { ...x, unitPrice: Math.round(base * 100) / 100 };
+        }
+        return {
+          ...x,
+          unitPrice: unitPriceAfterLineDiscount(base, opts),
+        };
+      }),
+    );
   }
 
   async function finishStripeSale(paymentIntentId: string) {
@@ -2808,9 +2962,10 @@ export default function RetailPosWorkstation({
 
           <ul className="max-h-[min(48vh,26rem)] min-h-[8rem] flex-1 space-y-3.5 overflow-y-auto px-3 py-3">
             {cart.map((l) => {
-              const catalogRate = l.listPrice ?? l.unitPrice;
+              const catalogRate = cartLineListPrice(l);
               const rateChanged =
                 Math.abs(l.unitPrice - catalogRate) > 0.001;
+              const discPct = cartLineDiscountPercent(l);
               const ratePct =
                 catalogRate > 0
                   ? Math.round(((l.unitPrice / catalogRate - 1) * 100) * 10) /
@@ -2840,7 +2995,19 @@ export default function RetailPosWorkstation({
                           <span className="truncate">{l.name}</span>
                         </p>
                         <p className="mt-1 text-[0.75rem] tabular-nums text-[#8b9bb0]">
-                          {money(l.unitPrice)} {unitLbl.startsWith("per") ? unitLbl : `per ${unitShort}`}
+                          {discPct > 0 ? (
+                            <>
+                              <span className="mr-1.5 line-through decoration-[#94a3b8]">
+                                {money(catalogRate)}
+                              </span>
+                              <span className="font-semibold text-[#c2410c]">
+                                {money(l.unitPrice)}
+                              </span>
+                            </>
+                          ) : (
+                            money(l.unitPrice)
+                          )}{" "}
+                          {unitLbl.startsWith("per") ? unitLbl : `per ${unitShort}`}
                         </p>
                       </div>
                       <div className="flex shrink-0 items-center gap-1">
@@ -2980,16 +3147,20 @@ export default function RetailPosWorkstation({
                         type="button"
                         className={cn(
                           "text-[0.8125rem] font-semibold",
-                          rateChanged
+                          discPct > 0
                             ? "text-[#c2410c] hover:underline"
-                            : "text-[#1a56db] hover:underline",
+                            : rateChanged
+                              ? "text-[#c2410c] hover:underline"
+                              : "text-[#1a56db] hover:underline",
                         )}
-                        title="Change line price"
+                        title="Change price or discount for this item only"
                         onClick={() => openRateEdit(l)}
                       >
-                        {rateChanged
-                          ? `${ratePct > 0 ? "+" : ""}${ratePct}%`
-                          : "Price"}
+                        {discPct > 0
+                          ? `−${discPct}%`
+                          : rateChanged
+                            ? `${ratePct > 0 ? "+" : ""}${ratePct}%`
+                            : "Disc"}
                       </button>
                     </div>
 
@@ -3089,7 +3260,7 @@ export default function RetailPosWorkstation({
             <div className="space-y-2 rounded-xl border border-[#e2e8f0] bg-white px-3 py-3 shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
               <BillTotalsLines
                 summary={billSummary}
-                discount={discountNum}
+                discount={totalDiscountShown}
                 loyaltyOff={loyaltyOff}
                 formatMoney={money}
                 netAmount={splitPart ? chargeAmount : totalDue}
@@ -3113,7 +3284,9 @@ export default function RetailPosWorkstation({
                 disabled={!cart.length && !splitFollowUp}
                 onClick={() => setPayModal("discount")}
               >
-                {discountNum > 0 ? `−${money(discountNum)}` : "Discount"}
+                {totalDiscountShown > 0
+                  ? `−${money(totalDiscountShown)}`
+                  : "Discount"}
               </Button>
               <Button
                 type="button"
@@ -3634,8 +3807,8 @@ export default function RetailPosWorkstation({
 
       {rateEdit ? (
         <ModalFrame
-          title="Change price"
-          subtitle="Type a new price, or add urgent extra % on this item only."
+          title="Price & discount"
+          subtitle="Discount or change price for this item only — other cart lines stay as they are."
           onClose={() => setRateEdit(null)}
           footer={
             <div className="flex gap-2">
@@ -3647,7 +3820,7 @@ export default function RetailPosWorkstation({
                 Cancel
               </Button>
               <Button className="flex-1" onClick={applyRateEdit}>
-                Apply price
+                Apply
               </Button>
             </div>
           }
@@ -3657,7 +3830,7 @@ export default function RetailPosWorkstation({
               (x) => x.stockLevelId === rateEdit.stockLevelId,
             );
             if (!line) return <p className="text-sm">Item is gone.</p>;
-            const base = line.listPrice ?? line.unitPrice;
+            const base = cartLineListPrice(line);
             const draft = moneyNumber(rateEdit.amount || 0);
             const applyPct = (pct: number) => {
               const amount = Math.round(base * (1 + pct / 100) * 100) / 100;
@@ -3677,7 +3850,7 @@ export default function RetailPosWorkstation({
                   {" · "}qty {line.qty}
                 </p>
                 <div className="field-shell">
-                  <Label>New price</Label>
+                  <Label>Selling price</Label>
                   <Input
                     className="mt-1 text-lg tabular-nums"
                     inputMode="decimal"
@@ -3699,11 +3872,11 @@ export default function RetailPosWorkstation({
                   />
                 </div>
                 <div className="field-shell">
-                  <Label>Extra % (optional)</Label>
+                  <Label>Discount / markup % (this item)</Label>
                   <Input
                     className="mt-1 text-lg tabular-nums"
                     inputMode="decimal"
-                    placeholder="e.g. 20"
+                    placeholder="e.g. −10 or 20"
                     value={rateEdit.percent}
                     onChange={(e) => {
                       const percentStr = e.target.value;
@@ -3718,10 +3891,21 @@ export default function RetailPosWorkstation({
                     }}
                   />
                   <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
-                    20 = 20% more than list price. Use minus for less, e.g. −10.
+                    −10 = 10% off list. +20 = 20% above list. Applies only to this
+                    product.
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
+                  {[-5, -10, -20, -50].map((pct) => (
+                    <button
+                      key={pct}
+                      type="button"
+                      className="rounded-lg border border-[#fed7aa] bg-[#fff7ed] px-2.5 py-1.5 text-xs font-semibold text-[#c2410c] hover:border-[#ea580c]"
+                      onClick={() => applyPct(pct)}
+                    >
+                      {pct}%
+                    </button>
+                  ))}
                   {[10, 20, 50].map((pct) => (
                     <button
                       key={pct}
@@ -3748,6 +3932,11 @@ export default function RetailPosWorkstation({
                 </div>
                 <p className="text-sm font-semibold text-[#1a56db]">
                   Line total: {money(Math.max(0, draft) * line.qty)}
+                  {draft < base - 0.001 ? (
+                    <span className="ml-2 text-[#c2410c]">
+                      (save {money((base - draft) * line.qty)})
+                    </span>
+                  ) : null}
                 </p>
               </div>
             );
@@ -3961,101 +4150,240 @@ export default function RetailPosWorkstation({
       {payModal === "discount" ? (
         <ModalFrame
           title="Discount"
-          subtitle="Type an amount, or apply a coupon. Then tap Done."
+          subtitle="Set a different discount on each product, and/or an amount off the whole bill."
           onClose={() => setPayModal(null)}
+          className="max-w-md"
+          bodyScroll
           footer={
             <Button className="w-full" onClick={() => setPayModal(null)}>
               Done
             </Button>
           }
         >
-          <div className="space-y-4">
-            <div className="field-shell">
-              <Label>How much off?</Label>
-              <Input
-                className="mt-1 text-lg tabular-nums"
-                inputMode="decimal"
-                placeholder="0"
-                value={discountAmount}
-                onChange={(e) => {
-                  setDiscountAmount(e.target.value);
-                  setCouponApplied(null);
-                }}
-              />
-              {discountNum > 0 ? (
-                <p className="mt-1 text-sm font-semibold text-[#1a56db]">
-                  Off the bill: {money(discountNum)}
-                </p>
-              ) : null}
-              {discountCapped ? (
-                <p className="mt-1 text-xs text-amber-800">
-                  Cashier max is {money(maxDiscountAmount)} (
-                  {maxCashierDiscountPercent}%). Ask a manager for more.
-                </p>
-              ) : (
-                <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
-                  Ticket before discount: {money(ticketBeforeDiscount)}
-                </p>
-              )}
-            </div>
-            <div className="field-shell">
-              <Label>Coupon code</Label>
-              <div className="mt-1 flex gap-2">
+          <div className="space-y-5">
+            {cart.length ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[0.65rem] font-semibold tracking-[0.1em] text-[#8b9bb0] uppercase">
+                    Per item
+                  </p>
+                  {lineDiscountsTotal > 0 ? (
+                    <p className="text-xs font-semibold text-[#c2410c]">
+                      Items save {money(lineDiscountsTotal)}
+                    </p>
+                  ) : null}
+                </div>
+                <ul className="max-h-[min(40vh,16rem)] space-y-2.5 overflow-y-auto">
+                  {cart.map((l) => {
+                    const base = cartLineListPrice(l);
+                    const discPct = cartLineDiscountPercent(l);
+                    const offUnit = Math.max(0, base - l.unitPrice);
+                    return (
+                      <li
+                        key={l.stockLevelId}
+                        className="rounded-xl border border-[#e8edf4] bg-[#fafbfc] p-3"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-[#0b1f33]">
+                              {l.name}
+                            </p>
+                            <p className="mt-0.5 text-[0.7rem] tabular-nums text-[#8b9bb0]">
+                              List {money(base)} · qty {l.qty}
+                              {discPct > 0 ? (
+                                <span className="ml-1 font-semibold text-[#c2410c]">
+                                  · −{discPct}%
+                                </span>
+                              ) : null}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            className="shrink-0 text-[0.7rem] font-semibold text-[#1a56db] hover:underline"
+                            onClick={() =>
+                              setCartLineDiscount(l.stockLevelId, {
+                                reset: true,
+                              })
+                            }
+                          >
+                            Reset
+                          </button>
+                        </div>
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          <div>
+                            <Label className="text-[0.65rem] text-[#8b9bb0]">
+                              Disc %
+                            </Label>
+                            <Input
+                              className="mt-0.5 h-9 tabular-nums"
+                              inputMode="decimal"
+                              placeholder="0"
+                              value={discPct > 0 ? String(discPct) : ""}
+                              onChange={(e) => {
+                                const raw = e.target.value;
+                                if (raw === "") {
+                                  setCartLineDiscount(l.stockLevelId, {
+                                    reset: true,
+                                  });
+                                  return;
+                                }
+                                const pct = Math.max(
+                                  0,
+                                  Math.min(100, moneyNumber(raw || 0)),
+                                );
+                                setCartLineDiscount(l.stockLevelId, {
+                                  percent: pct,
+                                });
+                              }}
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-[0.65rem] text-[#8b9bb0]">
+                              Off ₹ / unit
+                            </Label>
+                            <Input
+                              className="mt-0.5 h-9 tabular-nums"
+                              inputMode="decimal"
+                              placeholder="0"
+                              value={offUnit > 0.001 ? String(offUnit) : ""}
+                              onChange={(e) => {
+                                const raw = e.target.value;
+                                if (raw === "") {
+                                  setCartLineDiscount(l.stockLevelId, {
+                                    reset: true,
+                                  });
+                                  return;
+                                }
+                                const amt = Math.max(0, moneyNumber(raw || 0));
+                                setCartLineDiscount(l.stockLevelId, {
+                                  amountOffPerUnit: amt,
+                                });
+                              }}
+                            />
+                          </div>
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {[5, 10, 15, 20].map((pct) => (
+                            <button
+                              key={pct}
+                              type="button"
+                              className={cn(
+                                "rounded-md border px-2 py-0.5 text-[0.7rem] font-semibold",
+                                discPct === pct
+                                  ? "border-[#c2410c] bg-[#fff7ed] text-[#c2410c]"
+                                  : "border-[#e2e8f0] bg-white text-[#475569] hover:border-[#c2410c]",
+                              )}
+                              onClick={() =>
+                                setCartLineDiscount(l.stockLevelId, {
+                                  percent: pct,
+                                })
+                              }
+                            >
+                              −{pct}%
+                            </button>
+                          ))}
+                        </div>
+                        <p className="mt-2 text-xs font-semibold tabular-nums text-[#0b1f33]">
+                          Now {money(l.unitPrice)} · line {money(l.unitPrice * l.qty)}
+                        </p>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ) : null}
+
+            <div className="space-y-3 border-t border-[#eef2f8] pt-4">
+              <p className="text-[0.65rem] font-semibold tracking-[0.1em] text-[#8b9bb0] uppercase">
+                Whole bill
+              </p>
+              <div className="field-shell">
+                <Label>How much off the bill?</Label>
                 <Input
-                  className="uppercase"
-                  placeholder="CODE"
-                  value={couponCode}
+                  className="mt-1 text-lg tabular-nums"
+                  inputMode="decimal"
+                  placeholder="0"
+                  value={discountAmount}
                   onChange={(e) => {
-                    setCouponCode(e.target.value);
+                    setDiscountAmount(e.target.value);
                     setCouponApplied(null);
                   }}
                 />
-                {couponApplied ? (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => {
-                      setCouponCode("");
-                      setCouponApplied(null);
-                      setDiscountAmount("");
-                    }}
-                  >
-                    Clear
-                  </Button>
+                {discountNum > 0 ? (
+                  <p className="mt-1 text-sm font-semibold text-[#1a56db]">
+                    Off the bill: {money(discountNum)}
+                  </p>
+                ) : null}
+                {discountCapped ? (
+                  <p className="mt-1 text-xs text-amber-800">
+                    Cashier max is {money(maxDiscountAmount)} (
+                    {maxCashierDiscountPercent}%). Ask a manager for more.
+                  </p>
                 ) : (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    disabled={!couponCode.trim() || ticketBeforeDiscount <= 0}
-                    onClick={async () => {
-                      try {
-                        const v = await loyaltyApi.validateCoupon(
-                          couponCode.trim(),
-                          ticketBeforeDiscount,
-                        );
-                        setDiscountAmount(String(v.amountOff));
-                        setCouponApplied(v.code);
-                        toast.success(
-                          `Coupon ${v.code}: −${money(v.amountOff)}`,
-                        );
-                      } catch (e) {
-                        toast.error(
-                          e instanceof ApiError
-                            ? e.messages.join(", ")
-                            : "Invalid coupon",
-                        );
-                      }
-                    }}
-                  >
-                    Apply
-                  </Button>
+                  <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+                    Ticket before bill discount: {money(ticketBeforeDiscount)}
+                  </p>
                 )}
               </div>
-              {couponApplied ? (
-                <p className="mt-1 text-xs text-[#1a56db]">
-                  Coupon {couponApplied} applied
-                </p>
-              ) : null}
+              <div className="field-shell">
+                <Label>Coupon code</Label>
+                <div className="mt-1 flex gap-2">
+                  <Input
+                    className="uppercase"
+                    placeholder="CODE"
+                    value={couponCode}
+                    onChange={(e) => {
+                      setCouponCode(e.target.value);
+                      setCouponApplied(null);
+                    }}
+                  />
+                  {couponApplied ? (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => {
+                        setCouponCode("");
+                        setCouponApplied(null);
+                        setDiscountAmount("");
+                      }}
+                    >
+                      Clear
+                    </Button>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={!couponCode.trim() || ticketBeforeDiscount <= 0}
+                      onClick={async () => {
+                        try {
+                          const v = await loyaltyApi.validateCoupon(
+                            couponCode.trim(),
+                            ticketBeforeDiscount,
+                          );
+                          setDiscountAmount(String(v.amountOff));
+                          setCouponApplied(v.code);
+                          toast.success(
+                            `Coupon ${v.code}: −${money(v.amountOff)}`,
+                          );
+                        } catch (e) {
+                          toast.error(
+                            e instanceof ApiError
+                              ? e.messages.join(", ")
+                              : "Invalid coupon",
+                          );
+                        }
+                      }}
+                    >
+                      Apply
+                    </Button>
+                  )}
+                </div>
+                {couponApplied ? (
+                  <p className="mt-1 text-xs text-[#1a56db]">
+                    Coupon {couponApplied} applied
+                  </p>
+                ) : null}
+              </div>
             </div>
           </div>
         </ModalFrame>

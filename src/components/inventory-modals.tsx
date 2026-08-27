@@ -242,6 +242,8 @@ export function StockInModal({
       onClose();
       void qc.invalidateQueries({ queryKey: ["inv-levels"] });
       void qc.invalidateQueries({ queryKey: ["inv-levels-picker"] });
+      void qc.invalidateQueries({ queryKey: ["inv-damaged"] });
+      void qc.invalidateQueries({ queryKey: ["inv-low"] });
       void qc.invalidateQueries({ queryKey: ["inv-ledger"] });
     },
     onError: (e: Error) => {
@@ -501,6 +503,8 @@ export function StockOutModal({
       onClose();
       void qc.invalidateQueries({ queryKey: ["inv-levels"] });
       void qc.invalidateQueries({ queryKey: ["inv-levels-picker"] });
+      void qc.invalidateQueries({ queryKey: ["inv-damaged"] });
+      void qc.invalidateQueries({ queryKey: ["inv-low"] });
       void qc.invalidateQueries({ queryKey: ["inv-ledger"] });
     },
     onError: (e: Error) => {
@@ -729,6 +733,9 @@ export function DamagedStockModal({
       onClose();
       void qc.invalidateQueries({ queryKey: ["inv-levels"] });
       void qc.invalidateQueries({ queryKey: ["inv-levels-picker"] });
+      void qc.invalidateQueries({ queryKey: ["inv-damaged"] });
+      void qc.invalidateQueries({ queryKey: ["inv-low"] });
+      void qc.invalidateQueries({ queryKey: ["inv-ledger"] });
     },
     onError: (e: Error) => {
       if (e instanceof ApiError) toast.error(e.message);
@@ -909,6 +916,8 @@ export function BranchPriceReorderModal({
       toast.success("Branch price & reorder settings updated");
       onClose();
       void qc.invalidateQueries({ queryKey: ["inv-levels"] });
+      void qc.invalidateQueries({ queryKey: ["inv-damaged"] });
+      void qc.invalidateQueries({ queryKey: ["inv-low"] });
     },
     onError: (e: Error) =>
       toast.error(e instanceof ApiError ? e.message : "Failed to save"),
@@ -1066,6 +1075,9 @@ export function RestoreDamagedModal({
       toast.success("Restored items back to sellable stock");
       onClose();
       void qc.invalidateQueries({ queryKey: ["inv-levels"] });
+      void qc.invalidateQueries({ queryKey: ["inv-damaged"] });
+      void qc.invalidateQueries({ queryKey: ["inv-low"] });
+      void qc.invalidateQueries({ queryKey: ["inv-ledger"] });
     },
     onError: (e: Error) => {
       if (e instanceof ApiError) toast.error(e.message);

@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 import { Search } from "lucide-react";
-import { customersApi, customFieldsApi } from "@/lib/api";
+import { customersApi, customFieldsApi, subscriptionsApi } from "@/lib/api";
 import {
   CUSTOM_FIELD_QUERY,
   customFieldDefsToMeta,
@@ -76,8 +77,13 @@ export default function CustomersPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [extraFields, setExtraFields] = useState<Record<string, string>>({});
   const qc = useQueryClient();
-  const { hasModule } = useBootstrap();
+  const { hasModule, hasMode } = useBootstrap();
   const rental = hasModule("rental");
+  const hasSub = hasMode("subscription");
+  const pageTab =
+    searchParams.get("tab") === "memberships" && hasSub
+      ? "memberships"
+      : "directory";
   const canLead = useAuthStore((s) =>
     (s.user?.roles ?? []).some((r) => r === "admin" || r === "manager"),
   );
@@ -92,6 +98,14 @@ export default function CustomersPage() {
       setDebouncedQ(qq.trim());
     }
   }, [searchParams]);
+
+  function selectPageTab(id: "directory" | "memberships") {
+    const params = new URLSearchParams(searchParams.toString());
+    if (id === "memberships") params.set("tab", "memberships");
+    else params.delete("tab");
+    const qs = params.toString();
+    router.replace(qs ? `/customers?${qs}` : "/customers", { scroll: false });
+  }
 
   function selectCustomer(id: string | null) {
     setSelectedId(id);
@@ -125,6 +139,12 @@ export default function CustomersPage() {
   const meta = list.data?.meta;
   const total = meta?.total ?? items.length;
   const totalPages = meta?.totalPages ?? 1;
+
+  const members = useQuery({
+    queryKey: ["subscriptions-members-customers"],
+    queryFn: () => subscriptionsApi.list({ limit: 80 }),
+    enabled: hasSub && pageTab === "memberships",
+  });
 
   const selectedDetail = useQuery({
     queryKey: ["customer", selectedId],
@@ -362,6 +382,85 @@ export default function CustomersPage() {
           }
         />
       </FadeIn>
+
+      {hasSub ? (
+        <div
+          role="tablist"
+          aria-label="Customers"
+          className="flex flex-wrap gap-1 border-b border-[#eef1f4]"
+        >
+          {(
+            [
+              ["directory", "Directory"],
+              ["memberships", "Memberships"],
+            ] as const
+          ).map(([id, label]) => {
+            const active = pageTab === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => selectPageTab(id)}
+                className={cn(
+                  "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
+                  active
+                    ? "border-[#1a56db] text-[#1a56db]"
+                    : "border-transparent text-[#5a6b7d] hover:text-[#0b1f33]",
+                )}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+
+      {pageTab === "memberships" ? (
+        <section className="overflow-hidden rounded-2xl border border-[#e5e7eb] bg-white">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#e5e7eb] px-4 py-3">
+            <p className="text-sm font-semibold text-[#0b1f33]">
+              Active and past memberships
+            </p>
+            <Button asChild size="sm">
+              <Link href="/counter?view=subscription">Enroll at counter</Link>
+            </Button>
+          </div>
+          <ul className="divide-y divide-[#f3f4f6]">
+            {(members.data?.items ?? []).map((m) => (
+              <li
+                key={m.id}
+                className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm"
+              >
+                <div className="min-w-0">
+                  <p className="font-semibold text-[#0b1f33]">
+                    {m.customer?.fullName ?? "Customer"}
+                  </p>
+                  <p className="text-[#6b7280]">
+                    {m.plan?.title ?? "Plan"} · {m.status}
+                  </p>
+                </div>
+                <p className="text-[0.75rem] text-[#8b9bb0]">
+                  Through {formatDate(m.currentPeriodEnd)}
+                </p>
+              </li>
+            ))}
+            {members.isLoading ? (
+              <li className="px-4 py-8 text-center text-sm text-[#6b7280]">
+                Loading memberships…
+              </li>
+            ) : null}
+            {!members.isLoading && !(members.data?.items ?? []).length ? (
+              <li className="px-4 py-10 text-center text-sm text-[#6b7280]">
+                No memberships yet. Enroll a customer from the counter Plans
+                tab.
+              </li>
+            ) : null}
+          </ul>
+        </section>
+      ) : (
+        <>
 
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)]">
         {/* Client list — search + pages (never render the whole book) */}
@@ -777,6 +876,8 @@ export default function CustomersPage() {
         </section>
       </FadeIn>
       ) : null}
+        </>
+      )}
     </div>
   );
 }

@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "node ./node_modules/next/dist/bin/next dev --turbopack --hostname 0.0.0.0 --port 3000",
     "build": "node ./node_modules/next/dist/bin/next build",
-    "start": "node ./node_modules/next/dist/bin/next start --hostname 0.0.0.0 --port 3000",
+    "start": "node ./scripts/ensure-next-build.cjs && node ./node_modules/next/dist/bin/next start --hostname 0.0.0.0 --port 3000",
     "lint": "eslint"
   },
   "dependencies": {
@@ -20,6 +20,7 @@
     "@tanstack/react-query-devtools": "^5.101.4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "country-flag-icons": "^1.6.20",
     "dexie": "^4.4.4",
     "exceljs": "^4.4.0",
     "firebase": "^12.17.1",

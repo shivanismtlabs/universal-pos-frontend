@@ -5,7 +5,7 @@ import {
 } from "libphonenumber-js";
 import type { CountryCode } from "libphonenumber-js";
 import examples from "libphonenumber-js/mobile/examples";
-import { GEO_COUNTRIES, splitE164 } from "@/lib/geo";
+import { countryFromDial, splitE164 } from "@/lib/geo";
 
 function asCountry(code?: string | null): CountryCode {
   const c = (code ?? "IN").trim().toUpperCase();
@@ -14,12 +14,14 @@ function asCountry(code?: string | null): CountryCode {
 }
 
 /** Resolve ISO country from dial code (+91 → IN). */
-export function countryCodeFromDial(dial: string): CountryCode {
+export function countryCodeFromDial(
+  dial: string,
+  prefer?: string | null,
+): CountryCode {
   const d = dial.startsWith("+") ? dial : `+${dial.replace(/\D/g, "")}`;
-  const hit = [...GEO_COUNTRIES]
-    .sort((a, b) => b.dial.length - a.dial.length)
-    .find((c) => d.startsWith(c.dial));
-  return asCountry(hit?.code);
+  const hit = countryFromDial(d, prefer);
+  if (hit) return asCountry(hit.code);
+  return asCountry(prefer);
 }
 
 /** Validate E.164 or national number (uses country when no + prefix). */
@@ -94,9 +96,9 @@ export function phoneValidationMessage(countryCode: string): string {
 
 export function phonePlaceholder(
   countryCode: string,
-  dial?: string,
+  _dial?: string,
 ): string {
-  const cc = dial ? countryCodeFromDial(dial) : asCountry(countryCode);
+  const cc = asCountry(countryCode);
   try {
     const ex = getExampleNumber(cc, examples);
     if (ex) return ex.formatNational().replace(/\D/g, "");
@@ -114,7 +116,10 @@ export function validatePhoneParts(
   local: string,
   fallbackCountry: string = "IN",
 ): { ok: boolean; message?: string } {
-  const cc = countryCodeFromDial(dial || splitE164("", fallbackCountry).dial);
+  const cc = countryCodeFromDial(
+    dial || splitE164("", fallbackCountry).dial,
+    fallbackCountry,
+  );
   const national = local.replace(/\D/g, "");
   if (!national) {
     return { ok: false, message: "Phone is required" };

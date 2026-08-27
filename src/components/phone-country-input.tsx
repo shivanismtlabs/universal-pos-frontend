@@ -1,9 +1,11 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { GEO_COUNTRIES, geoDial, joinE164, splitE164 } from "@/lib/geo";
+import { geoCountrySelectOptions } from "@/components/geo-country-options";
+import { geoCountry, geoDial, joinE164, splitE164 } from "@/lib/geo";
 import { filterMobileDigits } from "@/lib/input-guards";
 import {
   phonePlaceholder,
@@ -29,17 +31,31 @@ export function PhoneCountryInput({
   error,
 }: Props) {
   const parts = splitE164(value, fallbackCountry);
-  const dial = parts.dial || geoDial(fallbackCountry);
-  const countryCode = parts.countryCode || fallbackCountry;
+  const [pickedCountry, setPickedCountry] = useState<string | null>(null);
+  const lastEmit = useRef(value);
+  useEffect(() => {
+    if (value === lastEmit.current) return;
+    lastEmit.current = value;
+    setPickedCountry(null);
+  }, [value]);
+  const picked = pickedCountry ? geoCountry(pickedCountry) : undefined;
+  const countryCode =
+    picked && (!parts.dial || picked.dial === parts.dial)
+      ? picked.code
+      : parts.countryCode || fallbackCountry;
+  const selected = geoCountry(countryCode);
+  const dial = selected?.dial || parts.dial || geoDial(fallbackCountry);
   const hint = phoneValidationMessage(countryCode);
   const placeholder = phonePlaceholder(countryCode, dial);
 
   function emit(nextDial: string, nextLocal: string) {
-    onChange(joinE164(nextDial, filterMobileDigits(nextLocal)));
+    const next = joinE164(nextDial, filterMobileDigits(nextLocal));
+    lastEmit.current = next;
+    onChange(next);
   }
 
   const inlineCheck = value.trim()
-    ? validatePhoneParts(dial, parts.local, fallbackCountry)
+    ? validatePhoneParts(dial, parts.local, countryCode)
     : { ok: !required, message: required ? "Phone is required" : undefined };
   const inlineError = error || (!inlineCheck.ok ? inlineCheck.message : undefined);
 
@@ -51,18 +67,22 @@ export function PhoneCountryInput({
       </Label>
       <div className="mt-1.5 flex gap-2">
         <Select
-          wrapperClassName="w-[7.25rem] shrink-0"
+          wrapperClassName="w-[8.75rem] shrink-0"
           className="h-9 px-2 text-[0.8125rem]"
-          value={dial}
-          onChange={(e) => emit(e.target.value, parts.local)}
+          panelMinWidth={300}
+          value={countryCode}
+          onChange={(e) => {
+            const next = geoCountry(e.target.value);
+            setPickedCountry(e.target.value);
+            emit(next?.dial ?? geoDial(e.target.value), parts.local);
+          }}
           aria-label="Country code"
           aria-invalid={Boolean(inlineError)}
         >
-          {GEO_COUNTRIES.map((c) => (
-            <option key={c.code} value={c.dial}>
-              {c.dial} {c.code}
-            </option>
-          ))}
+          {geoCountrySelectOptions({
+            formatLabel: (c) => `${c.dial} ${c.name}`,
+            shortLabel: (c) => c.dial,
+          })}
         </Select>
         <Input
           className="flex-1"

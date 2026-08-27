@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, startTransition, useEffect, useState } from "react";
+import { Suspense, startTransition, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useBootstrap } from "@/lib/bootstrap";
 import { EmptyState, PageSkeleton } from "@/components/page-header";
@@ -44,7 +44,6 @@ function DashboardPageInner() {
   const [homeTab, setHomeTab] = useState<HomeTab>(
     tabFromUrl ?? "getting-started",
   );
-  const [floor, setFloor] = useState<FloorView>("sale");
 
   const hasSale = hasMode("sale");
   const hasRent = hasMode("rental");
@@ -52,7 +51,39 @@ function DashboardPageInner() {
   const hasSub = hasMode("subscription");
   const hasAnyMode = hasSale || hasRent || hasService || hasSub;
 
+  const enabledFloors = useMemo((): FloorView[] => {
+    const list: FloorView[] = [];
+    if (hasSale) list.push("sale");
+    if (hasRent) list.push("rent");
+    if (hasService) list.push("service");
+    if (hasSub) list.push("subscription");
+    return list;
+  }, [hasSale, hasRent, hasService, hasSub]);
+
+  /** Shop floors tab is for multi-mode shops only (Zoho Home). */
+  const showFloors = enabledFloors.length > 1;
+
+  const [floor, setFloor] = useState<FloorView>(
+    () => enabledFloors[0] ?? "sale",
+  );
+
   useEffect(() => {
+    if (!enabledFloors.includes(floor)) {
+      setFloor(enabledFloors[0] ?? "sale");
+    }
+  }, [enabledFloors, floor]);
+
+  useEffect(() => {
+    if (isLoading) return;
+    if (tabFromUrl === "floors" && !showFloors) {
+      setHomeTab("dashboard");
+      if (search.get("tab") !== "dashboard") {
+        const qs = new URLSearchParams(search.toString());
+        qs.set("tab", "dashboard");
+        router.replace(`${pathname}?${qs.toString()}`, { scroll: false });
+      }
+      return;
+    }
     if (tabFromUrl) {
       setHomeTab(tabFromUrl);
       return;
@@ -70,7 +101,7 @@ function DashboardPageInner() {
     } catch {
       /* ignore */
     }
-  }, [tabFromUrl, pathname, router, search]);
+  }, [tabFromUrl, showFloors, isLoading, pathname, router, search]);
 
   useEffect(() => {
     if (homeTab === "dashboard") {
@@ -86,10 +117,10 @@ function DashboardPageInner() {
     const qs = new URLSearchParams(search.toString());
     if (id === "getting-started") {
       qs.set("tab", "getting-started");
-    } else if (id === "dashboard") {
-      qs.set("tab", "dashboard");
-    } else {
+    } else if (id === "floors" && showFloors) {
       qs.set("tab", "floors");
+    } else {
+      qs.set("tab", "dashboard");
     }
     const next = qs.toString();
     router.replace(next ? `${pathname}?${next}` : pathname, { scroll: false });
@@ -108,15 +139,15 @@ function DashboardPageInner() {
     );
   }
 
-  const showFloors =
-    [hasSale, hasRent, hasService, hasSub].filter(Boolean).length > 0;
-
   function selectTab(id: HomeTab) {
     startTransition(() => {
       setHomeTab(id);
       syncTabUrl(id);
     });
   }
+
+  const visibleHomeTab: HomeTab =
+    homeTab === "floors" && !showFloors ? "dashboard" : homeTab;
 
   return (
     <div className="space-y-5">
@@ -147,7 +178,7 @@ function DashboardPageInner() {
                 : []),
             ] as const
           ).map((t) => {
-            const active = homeTab === t.id;
+            const active = visibleHomeTab === t.id;
             return (
               <button
                 key={t.id}
@@ -169,16 +200,16 @@ function DashboardPageInner() {
         </div>
       </div>
 
-      {homeTab === "dashboard" ? (
+      {visibleHomeTab === "dashboard" ? (
         <div className="space-y-6">
           <HomeDashboard />
           <OverviewDashboard embed />
         </div>
       ) : null}
 
-      {homeTab === "getting-started" ? <HomeGettingStarted /> : null}
+      {visibleHomeTab === "getting-started" ? <HomeGettingStarted /> : null}
 
-      {homeTab === "floors" ? (
+      {visibleHomeTab === "floors" && showFloors ? (
         <div className="space-y-4">
           <div className="flex flex-wrap gap-1.5">
             {(
