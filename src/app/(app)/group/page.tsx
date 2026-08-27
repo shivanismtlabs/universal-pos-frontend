@@ -34,6 +34,23 @@ function money(n: number | null | undefined, code = "INR") {
   }
 }
 
+function formatBusinessType(t: string) {
+  const labels: Record<string, string> = {
+    retail: "Retail",
+    grocery: "Grocery",
+    restaurant: "Restaurant",
+    salon: "Salon & spa",
+    service: "Service",
+    gym: "Gym / fitness",
+    rental: "Rental",
+    general: "General",
+    hybrid: "Hybrid",
+    custom: "Custom",
+  };
+  if (labels[t]) return labels[t];
+  return t.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function PanelState({
   loading,
   error,
@@ -103,7 +120,6 @@ export default function GroupDashboardPage() {
   const [invSearch, setInvSearch] = useState("");
   const [apprFilter, setApprFilter] = useState<"pending" | "all">("pending");
   const [decideNote, setDecideNote] = useState<Record<string, string>>({});
-  const currency = boot?.tenant?.currencyCode ?? "INR";
   const canDecide = Boolean(accessToken);
 
   const groupQ = useQuery({
@@ -150,6 +166,20 @@ export default function GroupDashboardPage() {
     return map;
   }, [groupQ.data?.businesses]);
 
+  const businesses = useMemo(() => {
+    const rows = groupQ.data?.businesses ?? [];
+    const role = groupQ.data?.group?.role;
+    if (role === "owner" || role === "finance") return rows;
+    return rows.filter((b) => b.canEnter);
+  }, [groupQ.data?.businesses, groupQ.data?.group?.role]);
+
+  const currency =
+    dashQ.data?.currencyCode ??
+    groupQ.data?.group?.currencyCode ??
+    businesses[0]?.currencyCode ??
+    boot?.tenant?.currencyCode ??
+    "INR";
+
   const decideMut = useMutation({
     mutationFn: (args: {
       id: string;
@@ -173,14 +203,14 @@ export default function GroupDashboardPage() {
       ["Yesterday", kpis.yesterdaySales],
       ["MTD sales", kpis.mtdSales],
       ["YTD sales", kpis.ytdSales],
-      ["Gross profit", kpis.grossProfit],
-      ["Net profit", kpis.netProfit],
-      ["Expenses", kpis.expenses],
+      ["MTD gross profit", kpis.grossProfit],
+      ["MTD net profit", kpis.netProfit],
+      ["MTD expenses", kpis.expenses],
       ["Cash", kpis.cash],
       ["AR", kpis.accountsReceivable],
       ["AP", kpis.accountsPayable],
       ["Inventory", kpis.inventoryValue],
-      ["Tax accrued", kpis.taxAccrued],
+      ["MTD tax accrued", kpis.taxAccrued],
     ],
     [kpis],
   );
@@ -200,7 +230,7 @@ export default function GroupDashboardPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="All Businesses"
+        title={groupQ.data?.group?.name?.trim() || "All Businesses"}
         subtitle="Group control for every shop on this identity. Numbers drill to tenant orders — legal books stay separate."
       />
 
@@ -246,7 +276,7 @@ export default function GroupDashboardPage() {
             ))}
           </div>
           <div className="mt-4 overflow-x-auto rounded-lg border border-[#d9e0ea] bg-white">
-            {(groupQ.data?.businesses ?? []).length === 0 ? (
+            {businesses.length === 0 ? (
               <p className="p-6 text-center text-sm text-[#6b7280]">
                 No businesses in this group yet.{" "}
                 <Link href="/organizations" className="font-medium text-[#1a56db]">
@@ -265,10 +295,10 @@ export default function GroupDashboardPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {(groupQ.data?.businesses ?? []).map((b) => (
+                  {businesses.map((b) => (
                     <tr key={b.tenantId} className="border-t border-[#f3f4f6]">
                       <td className="px-3 py-2 font-medium">{b.name}</td>
-                      <td className="px-3 py-2">{b.businessType}</td>
+                      <td className="px-3 py-2">{formatBusinessType(b.businessType)}</td>
                       <td className="px-3 py-2">{b.branchCount}</td>
                       <td className="px-3 py-2">{b.openRegisterCount}</td>
                       <td className="px-3 py-2 text-right">
@@ -291,6 +321,9 @@ export default function GroupDashboardPage() {
             Low stock {Number(kpis.lowStock ?? 0)} · Dead stock{" "}
             {Number(kpis.deadStock ?? 0)} · Fast movers{" "}
             {Number(kpis.fastMoving ?? 0)}
+            {dashQ.data?.period
+              ? ` · MTD ${dashQ.data.period.mtdFrom} → ${dashQ.data.period.today}`
+              : ""}
           </p>
         </PanelState>
       )}

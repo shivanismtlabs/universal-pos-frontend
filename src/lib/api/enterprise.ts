@@ -17,6 +17,7 @@ export const enterpriseApi = {
         entitlements: string[];
         hideLayer: boolean;
         pricingModel: string;
+        currencyCode?: string;
       };
       businesses: Array<{
         tenantId: string;
@@ -40,6 +41,7 @@ export const enterpriseApi = {
     return apiRequest<{
       timezone: string;
       currencyCode: string;
+      period?: { mtdFrom: string; today: string };
       kpis: Record<string, number | null>;
       businesses: number;
     }>(`/enterprise/dashboard${q ? `?${q}` : ""}`, {

@@ -80,7 +80,7 @@ export function emptyCatalogItemForm(): CatalogItemShopValues {
     canSell: true,
     canPurchase: true,
     availableInPos: true,
-    openingQty: "0",
+    openingQty: "",
     reorderPoint: "",
     multiUnitBaseQty: "",
     multiUnitBaseUnit: "pcs",
@@ -129,6 +129,23 @@ function buildExtraFieldsPayload(
     out.multiUnit = null;
   }
   return Object.keys(out).length ? out : undefined;
+}
+
+/** Opening stock is optional. Do not POST 0 — older APIs used `@Min(1)` and reject it. */
+function createOpeningQtyPayload(
+  trackInventory: boolean,
+  trackSerial: boolean,
+  raw: string,
+  unit: string,
+): number | undefined {
+  if (!trackInventory || trackSerial) return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  const normalized = normalizeQty(n, unit || "pcs");
+  if (!Number.isFinite(normalized) || normalized <= 0) return undefined;
+  return normalized;
 }
 
 /** Only attach unit-pricing keys when the shop actually configured them.
@@ -599,17 +616,12 @@ export function CatalogItemEditor() {
         taxCode: taxCodeFromForm(form) || undefined,
         photoUrl: uniquePhotos[0],
         locationId: defaultLocationId || undefined,
-        openingQty: trackInventory
-          ? form.trackSerial
-            ? 0
-            : Math.max(
-                0,
-                normalizeQty(
-                  Number(form.openingQty) || 0,
-                  form.unitOfMeasure || "pcs",
-                ) || 0,
-              )
-          : undefined,
+        openingQty: createOpeningQtyPayload(
+          trackInventory,
+          form.trackSerial,
+          form.openingQty,
+          form.unitOfMeasure || "pcs",
+        ),
         reorderPoint: (() => {
           if (!trackInventory) return undefined;
           const n = Number(form.reorderPoint);
