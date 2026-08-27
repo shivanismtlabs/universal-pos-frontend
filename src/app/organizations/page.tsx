@@ -42,21 +42,10 @@ import { TotpChallengeForm, is2faChallenge } from "@/components/totp-challenge-f
 import { cn } from "@/lib/utils";
 import { phoneSchema } from "@/lib/validations";
 import { geoStates, isKnownGeoState, splitE164 } from "@/lib/geo";
+import { validatePhoneForCountry } from "@/lib/phone";
 import { CountryStateFields } from "@/components/country-state-fields";
 import { PhoneCountryInput } from "@/components/phone-country-input";
 import { citiesForState, isPostalValidForIndianCity } from "@/lib/india-locations";
-
-function isValidNationalPhone(e164: string, countryCode: string): boolean {
-  const raw = e164.trim();
-  if (!raw) return true;
-  const { dial, local } = splitE164(raw, countryCode);
-  if (!local) return true;
-  if (dial === "+91") return /^[6-9]\d{9}$/.test(local);
-  if (dial === "+1") return /^\d{10}$/.test(local);
-  if (dial === "+971") return /^\d{8,9}$/.test(local);
-  const digits = raw.replace(/\D/g, "");
-  return digits.length >= 8 && digits.length <= 15;
-}
 
 function isValidPostal(countryCode: string, postal: string): boolean {
   const p = postal.trim();
@@ -176,14 +165,11 @@ const createOrgSchema = z
         path: ["phone"],
         message: "Phone is required",
       });
-    } else if (!isValidNationalPhone(v.phone, v.countryCode)) {
+    } else if (!validatePhoneForCountry(v.phone, v.countryCode)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["phone"],
-        message:
-          v.countryCode === "IN" || v.phone.startsWith("+91")
-            ? "Enter a valid 10-digit Indian mobile (starts with 6–9)"
-            : "Enter a valid phone number for the selected country",
+        message: "Enter a valid phone number for the selected country",
       });
     } else {
       const parsed = phoneSchema.safeParse(v.phone);
@@ -1051,6 +1037,7 @@ function OrganizationsPageInner() {
                     <PhoneCountryInput
                       label="Phone *"
                       required
+                      fallbackCountry={form.watch("countryCode") || "IN"}
                       value={form.watch("phone") ?? ""}
                       onChange={(v) =>
                         form.setValue("phone", v, { shouldValidate: true })

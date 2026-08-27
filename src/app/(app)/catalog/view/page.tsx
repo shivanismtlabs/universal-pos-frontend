@@ -8,6 +8,10 @@ import { toast } from "sonner";
 import { catalogApi, tenantsApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { formatQtyWithUnit } from "@/lib/sell-units";
+import {
+  formatPackedContents,
+  parseMultiUnitMeta,
+} from "@/lib/measure-units";
 import { useBootstrap } from "@/lib/bootstrap";
 import { useBranchStore } from "@/lib/branch-store";
 import { resolveOperatingLocationId } from "@/lib/operating-location";
@@ -509,6 +513,20 @@ function CatalogProductDetailPage() {
             />
             <Row label="Tax ref" value={p.taxCode ?? "—"} />
             <Row label="UOM" value={p.unitOfMeasure} />
+            {(() => {
+              const packed = parseMultiUnitMeta(p.meta);
+              if (!packed) return null;
+              return (
+                <Row
+                  label="Qty in box"
+                  value={formatPackedContents(
+                    p.unitOfMeasure || "box",
+                    packed.baseQty,
+                    packed.baseUnit,
+                  )}
+                />
+              );
+            })()}
             <Row
               label="Track inventory"
               value={p.trackInventory ? "Yes" : "No"}

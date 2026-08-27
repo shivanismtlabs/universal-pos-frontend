@@ -27,6 +27,11 @@ import { CustomFieldsSection } from "@/components/custom-field-inputs";
 import type { MetaFieldDef } from "@/lib/business-config";
 import { cn } from "@/lib/utils";
 import {
+  catalogNeedsPackedContents,
+  defaultPackedContentsQty,
+  formatPackedContents,
+} from "@/lib/measure-units";
+import {
   allowsDecimalQty,
   formatQtyWithUnit,
 } from "@/lib/sell-units";
@@ -169,6 +174,9 @@ export type CatalogItemShopValues = {
   availableInPos: boolean;
   openingQty: string;
   reorderPoint: string;
+  /** How many of the smaller unit are inside 1 box/pack (when UOM is packed). */
+  multiUnitBaseQty: string;
+  multiUnitBaseUnit: string;
 };
 
 export function applyCatalogKindDefaults<T extends CatalogItemShopValues>(
@@ -194,7 +202,43 @@ export function applyCatalogKindDefaults<T extends CatalogItemShopValues>(
     canSell: kind === "digital" ? prev.canSell : true,
     availableInPos: true,
     unitOfMeasure: unit,
-    ...(nonStock ? { openingQty: "", reorderPoint: "" } : {}),
+    ...(nonStock
+      ? {
+          openingQty: "",
+          reorderPoint: "",
+          multiUnitBaseQty: "",
+          multiUnitBaseUnit: "pcs",
+        }
+      : catalogNeedsPackedContents(kind, unit)
+        ? {
+            multiUnitBaseQty:
+              prev.multiUnitBaseQty.trim() || defaultPackedContentsQty(unit),
+            multiUnitBaseUnit: prev.multiUnitBaseUnit || "pcs",
+          }
+        : { multiUnitBaseQty: "", multiUnitBaseUnit: "pcs" }),
+  };
+}
+
+export function applyCatalogUnitChange<T extends CatalogItemShopValues>(
+  prev: T,
+  nextUnit: string,
+): T {
+  const nextPacked = catalogNeedsPackedContents(prev.kind, nextUnit);
+  const prevPacked = catalogNeedsPackedContents(prev.kind, prev.unitOfMeasure);
+  let qty = prev.multiUnitBaseQty;
+  let base = prev.multiUnitBaseUnit || "pcs";
+  if (!nextPacked) {
+    qty = "";
+    base = "pcs";
+  } else if (!prevPacked || !qty.trim()) {
+    qty = defaultPackedContentsQty(nextUnit);
+    if ((nextUnit || "").trim().toLowerCase() === "dozen") base = "pcs";
+  }
+  return {
+    ...prev,
+    unitOfMeasure: nextUnit,
+    multiUnitBaseQty: qty,
+    multiUnitBaseUnit: base,
   };
 }
 
@@ -337,6 +381,10 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
 }) {
   const [showMore, setShowMore] = useState(Boolean(defaultShowMore));
   const foodTypeField = productFormFields.find((f) => f.key === "foodType");
+  const showPackedContents = catalogNeedsPackedContents(
+    form.kind,
+    form.unitOfMeasure,
+  );
   // Core form already has Brand / Name / Category — don’t duplicate as extras
   const CORE_EXTRA_SKIP = new Set([
     "foodType",
@@ -347,6 +395,7 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
     "barcode",
     "unit",
     "price",
+    ...(showPackedContents ? ["packSize"] : []),
   ]);
   const otherFormFields = productFormFields.filter(
     (f) => !CORE_EXTRA_SKIP.has(f.key),
@@ -355,6 +404,19 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
   const qtyAllowsDecimal = allowsDecimalQty(form.unitOfMeasure || "pcs");
   const stockNotNeeded = catalogKindSkipsStock(form.kind);
   const showStockFields = form.trackInventory && !stockNotNeeded;
+  const packedUnitLabel =
+    unitOptions.find((u) => u.code === form.unitOfMeasure)?.name ||
+    form.unitOfMeasure ||
+    "box";
+  const packedQtyNum = Number(form.multiUnitBaseQty);
+  const packedContentsHint =
+    Number.isFinite(packedQtyNum) && packedQtyNum > 0
+      ? formatPackedContents(
+          form.unitOfMeasure || "box",
+          packedQtyNum,
+          form.multiUnitBaseUnit || "pcs",
+        )
+      : null;
   const trackingFlags = [
     ["trackInventory", "Track inventory"],
     ["canSell", "Can sell"],
@@ -615,10 +677,8 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                   value={form.unitOfMeasure}
                   onChange={(e) => {
                     clearFieldError("unitOfMeasure");
-                    setForm((f) => ({
-                      ...f,
-                      unitOfMeasure: e.target.value,
-                    }));
+                    clearFieldError("multiUnitBaseQty");
+                    setForm((f) => applyCatalogUnitChange(f, e.target.value));
                   }}
                 >
                   {unitOptions.some((u) => u.code === form.unitOfMeasure) ? null : (
@@ -633,6 +693,75 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                   ))}
                 </Select>
               </ShopField>
+
+              {showPackedContents ? (
+                <ShopField
+                  label={`Qty in 1 ${packedUnitLabel}`}
+                  required
+                  hint={
+                    fieldErrors.multiUnitBaseQty ? (
+                      <FieldError message={fieldErrors.multiUnitBaseQty} />
+                    ) : (
+                      <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+                        How many {form.multiUnitBaseUnit || "pcs"} are inside
+                        one {form.unitOfMeasure || "box"}. Stock is still
+                        counted in {form.unitOfMeasure || "box"}
+                        {packedContentsHint ? (
+                          <>
+                            {" "}
+                            —{" "}
+                            <span className="font-semibold text-[#0b1f33]">
+                              {packedContentsHint}
+                            </span>
+                          </>
+                        ) : (
+                          "."
+                        )}
+                      </p>
+                    )
+                  }
+                >
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min={0.001}
+                      step={
+                        allowsDecimalQty(form.multiUnitBaseUnit || "pcs")
+                          ? "0.001"
+                          : "1"
+                      }
+                      placeholder={
+                        (form.unitOfMeasure || "").toLowerCase() === "dozen"
+                          ? "12"
+                          : "e.g. 12"
+                      }
+                      value={form.multiUnitBaseQty}
+                      onChange={(e) => {
+                        clearFieldError("multiUnitBaseQty");
+                        setForm((f) => ({
+                          ...f,
+                          multiUnitBaseQty: e.target.value,
+                        }));
+                      }}
+                    />
+                    <Select
+                      className={cn(fieldSelect, "w-28 shrink-0")}
+                      value={form.multiUnitBaseUnit || "pcs"}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          multiUnitBaseUnit: e.target.value,
+                        }))
+                      }
+                    >
+                      <option value="pcs">pcs</option>
+                      <option value="g">g</option>
+                      <option value="ml">ml</option>
+                      <option value="kg">kg</option>
+                    </Select>
+                  </div>
+                </ShopField>
+              ) : null}
 
               <ShopField
                 label="Rate"
@@ -695,6 +824,17 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                             form.unitOfMeasure || "pcs",
                           )}
                         </span>
+                        {showPackedContents &&
+                        Number.isFinite(packedQtyNum) &&
+                        packedQtyNum > 0
+                          ? ` (${formatQtyWithUnit(
+                              (form.openingQty.trim() !== "" &&
+                              Number.isFinite(Number(form.openingQty))
+                                ? Number(form.openingQty)
+                                : 10) * packedQtyNum,
+                              form.multiUnitBaseUnit || "pcs",
+                            )} inside)`
+                          : null}
                       </p>
                     )
                   }

@@ -155,6 +155,14 @@ function buildHtml(inv: TaxInvoicePrintInput) {
   .totals .grand {
     background: #eef2ff; font-weight: 800; font-size: 14px; color: #1a56db;
   }
+  .totals .label {
+    justify-content: flex-start;
+    font-weight: 650;
+    color: #64748b;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
   .foot {
     margin-top: 22px; padding-top: 10px; border-top: 1px dashed #cbd5e1;
     display: flex; justify-content: space-between; gap: 12px; color: #64748b; font-size: 11px;
@@ -216,13 +224,13 @@ function buildHtml(inv: TaxInvoicePrintInput) {
     </table>
 
     <div class="totals">
-      <div class="row"><span>Subtotal</span><span class="mono">${formatInr(inv.subtotal)}</span></div>
-      ${(inv.discountTotal ?? 0) > 0 ? `<div class="row"><span>Discount</span><span class="mono">−${formatInr(inv.discountTotal!)}</span></div>` : ""}
-      <div class="row"><span>CGST</span><span class="mono">${formatInr(inv.cgst)}</span></div>
-      <div class="row"><span>SGST</span><span class="mono">${formatInr(inv.sgst)}</span></div>
+      <div class="row"><span>Total</span><span class="mono">${formatInr(inv.subtotal)}</span></div>
+      ${inv.taxTotal > 0 ? `<div class="row label"><span>Taxable value</span></div>` : ""}
+      ${inv.cgst > 0 || inv.sgst > 0 || inv.taxTotal > 0 ? `<div class="row"><span>CGST</span><span class="mono">${formatInr(inv.cgst)}</span></div>` : ""}
+      ${inv.cgst > 0 || inv.sgst > 0 || inv.taxTotal > 0 ? `<div class="row"><span>SGST</span><span class="mono">${formatInr(inv.sgst)}</span></div>` : ""}
       ${moneyNumber(inv.igst) > 0 ? `<div class="row"><span>IGST</span><span class="mono">${formatInr(inv.igst)}</span></div>` : ""}
-      <div class="row"><span>Tax total</span><span class="mono">${formatInr(inv.taxTotal)}</span></div>
-      <div class="row grand"><span>Grand total</span><span class="mono">${formatInr(inv.grandTotal)}</span></div>
+      ${(inv.discountTotal ?? 0) > 0 ? `<div class="row"><span>Discount</span><span class="mono">−${formatInr(inv.discountTotal!)}</span></div>` : ""}
+      <div class="row grand"><span>Net Payable</span><span class="mono">${formatInr(inv.grandTotal)}</span></div>
     </div>
 
     <div class="foot">

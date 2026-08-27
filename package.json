@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbopack --hostname 0.0.0.0 --port 3000",
-    "build": "next build",
-    "start": "next start --hostname 0.0.0.0 --port 3000",
+    "dev": "node ./node_modules/next/dist/bin/next dev --turbopack --hostname 0.0.0.0 --port 3000",
+    "build": "node ./node_modules/next/dist/bin/next build",
+    "start": "node ./node_modules/next/dist/bin/next start --hostname 0.0.0.0 --port 3000",
     "lint": "eslint"
   },
   "dependencies": {
@@ -24,6 +24,7 @@
     "exceljs": "^4.4.0",
     "firebase": "^12.17.1",
     "jsbarcode": "^3.12.3",
+    "libphonenumber-js": "^1.12.9",
     "lucide-react": "^1.28.0",
     "motion": "^12.43.0",
     "next": "15.5.22",

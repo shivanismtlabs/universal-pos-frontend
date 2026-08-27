@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { customersApi, loyaltyApi, ordersApi, paymentsApi, posApi, resourcesApi, restaurantApi, tenantsApi, billingApi } from "@/lib/api";
@@ -26,6 +26,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { ReceiptModal, type ReceiptData } from "@/components/receipt-modal";
+import { BillTotalsLines } from "@/components/bill-totals-lines";
 import { StripeCheckoutModal } from "@/components/stripe-checkout-modal";
 import { ProductThumb } from "@/components/product-thumb";
 import { FoodTypeBadge } from "@/components/food-type-badge";
@@ -34,6 +35,8 @@ import { CustomerPicker } from "@/components/customer-picker";
 import { CustomFieldsSection } from "@/components/custom-field-inputs";
 import { SplitBillModal } from "@/components/split-bill-modal";
 import { ModalFrame } from "@/components/modal-frame";
+import { PhoneCountryInput } from "@/components/phone-country-input";
+import { canonicalPhoneE164, validatePhoneE164 } from "@/lib/phone";
 import { StationPinLock } from "@/components/station-pin-lock";
 import { BarcodeScanInput } from "@/components/barcode-scan-input";
 import { guardedAction } from "@/components/unsaved-work-guard";
@@ -1309,6 +1312,12 @@ export default function RetailPosWorkstation({
         return;
       }
     }
+    if (orderType === "delivery" && deliveryPhone.trim()) {
+      if (!validatePhoneE164(deliveryPhone.trim())) {
+        toast.error("Enter a valid delivery phone for the selected country");
+        return;
+      }
+    }
 
     chargeLock.current = true;
     setBusy(true);
@@ -1389,7 +1398,9 @@ export default function RetailPosWorkstation({
             ? { covers: Number(guestCount) }
             : {}),
           ...(guestName.trim() ? { guestName: guestName.trim() } : {}),
-          ...(deliveryPhone.trim() ? { guestPhone: deliveryPhone.trim() } : {}),
+          ...(deliveryPhone.trim()
+            ? { guestPhone: canonicalPhoneE164(deliveryPhone.trim()) }
+            : {}),
           ...(deliveryAddress.trim()
             ? { deliveryAddress: deliveryAddress.trim() }
             : {}),
@@ -1715,7 +1726,9 @@ export default function RetailPosWorkstation({
               ? { covers: Number(guestCount) }
               : {}),
             ...(guestName.trim() ? { guestName: guestName.trim() } : {}),
-            ...(deliveryPhone.trim() ? { guestPhone: deliveryPhone.trim() } : {}),
+            ...(deliveryPhone.trim()
+            ? { guestPhone: canonicalPhoneE164(deliveryPhone.trim()) }
+            : {}),
             ...(deliveryAddress.trim()
               ? { deliveryAddress: deliveryAddress.trim() }
               : {}),
@@ -2785,85 +2798,13 @@ export default function RetailPosWorkstation({
 
           <div className="mt-auto space-y-2.5 border-t border-[#eef2f8] bg-[#fafbfc] p-3">
             <div className="space-y-2 rounded-xl border border-[#e2e8f0] bg-white px-3 py-3 shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
-              <div className="flex justify-between text-sm text-[#0b1f33]">
-                <span>Subtotal</span>
-                <span className="tabular-nums">
-                  {money(billSummary.itemsSubtotal)}
-                </span>
-              </div>
-              <div className="flex justify-between text-sm text-[#0b1f33]">
-                <span>Discount</span>
-                <span className="tabular-nums">
-                  {discountNum > 0 ? `−${money(discountNum)}` : money(0)}
-                </span>
-              </div>
-              {loyaltyOff > 0 ? (
-                <div className="flex justify-between text-sm text-[#0b1f33]">
-                  <span>Points</span>
-                  <span className="tabular-nums">−{money(loyaltyOff)}</span>
-                </div>
-              ) : null}
-              {diningFeeLines.map((f) => (
-                <div
-                  key={f.feeCode}
-                  className="flex justify-between text-sm text-[#0b1f33]"
-                >
-                  <span>{f.reason}</span>
-                  <span className="tabular-nums">{money(f.amount)}</span>
-                </div>
-              ))}
-              {billSummary.taxTotal > 0 ? (
-                <>
-                  <div className="flex justify-between text-sm text-[#0b1f33]">
-                    <span>Taxable value</span>
-                    <span className="tabular-nums">
-                      {money(billSummary.taxableValue)}
-                    </span>
-                  </div>
-                  {billSummary.taxSlabs.map((s) =>
-                    s.rate <= 0 ? (
-                      <div
-                        key="tax"
-                        className="flex justify-between text-sm text-[#0b1f33]"
-                      >
-                        <span>Tax</span>
-                        <span className="tabular-nums">{money(s.tax)}</span>
-                      </div>
-                    ) : (
-                      <Fragment key={s.rate}>
-                        <div className="flex justify-between text-sm text-[#0b1f33]">
-                          <span>CGST {s.halfRate}%</span>
-                          <span className="tabular-nums">{money(s.cgst)}</span>
-                        </div>
-                        <div className="flex justify-between text-sm text-[#0b1f33]">
-                          <span>SGST {s.halfRate}%</span>
-                          <span className="tabular-nums">{money(s.sgst)}</span>
-                        </div>
-                      </Fragment>
-                    ),
-                  )}
-                </>
-              ) : (
-                <div className="flex justify-between text-sm text-[#0b1f33]">
-                  <span>Tax</span>
-                  <span className="tabular-nums">{money(0)}</span>
-                </div>
-              )}
-              {billSummary.showRoundOff ? (
-                <div className="flex justify-between text-sm text-[#0b1f33]">
-                  <span>Round off</span>
-                  <span className="tabular-nums">
-                    {billSummary.roundOff > 0 ? "+" : ""}
-                    {money(billSummary.roundOff)}
-                  </span>
-                </div>
-              ) : null}
-              <div className="flex items-baseline justify-between border-t border-[#e8edf4] pt-2 text-[#0b1f33]">
-                <span className="text-base font-bold">Total</span>
-                <span className="text-lg font-bold tabular-nums">
-                  {money(splitPart ? chargeAmount : totalDue)}
-                </span>
-              </div>
+              <BillTotalsLines
+                summary={billSummary}
+                discount={discountNum}
+                loyaltyOff={loyaltyOff}
+                formatMoney={money}
+                netAmount={splitPart ? chargeAmount : totalDue}
+              />
               {splitPart || stillDueAfter > 0.001 ? (
                 <p className="text-sm text-[#1341a8]">
                   Collecting {money(chargeAmount)}
@@ -3611,14 +3552,10 @@ export default function RetailPosWorkstation({
                   />
                 </div>
                 <div className="field-shell">
-                  <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
-                    Phone
-                  </Label>
-                  <Input
-                    className="mt-1 h-10"
+                  <PhoneCountryInput
+                    label="Phone"
                     value={deliveryPhone}
-                    onChange={(e) => setDeliveryPhone(e.target.value)}
-                    placeholder="Mobile"
+                    onChange={setDeliveryPhone}
                   />
                 </div>
                 <div className="field-shell sm:col-span-2">

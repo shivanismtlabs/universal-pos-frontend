@@ -32,7 +32,12 @@ import {
   zodFieldErrors,
   zodMessages,
 } from "@/lib/validations";
-import { activeUnitOptions, defaultUnitForBusinessType } from "@/lib/measure-units";
+import {
+  activeUnitOptions,
+  catalogNeedsPackedContents,
+  defaultUnitForBusinessType,
+  parseMultiUnitMeta,
+} from "@/lib/measure-units";
 import {
   CUSTOM_FIELD_QUERY,
   mergeProductFormFields,
@@ -76,6 +81,8 @@ export function emptyCatalogItemForm(): CatalogItemShopValues {
     availableInPos: true,
     openingQty: "0",
     reorderPoint: "",
+    multiUnitBaseQty: "",
+    multiUnitBaseUnit: "pcs",
   };
 }
 
@@ -99,6 +106,7 @@ function buildExtraFieldsPayload(
     }
   }
   for (const f of productFormFields) {
+    if (f.key === "multiUnit") continue;
     const v = (extraFields[f.key] ?? "").trim();
     if (f.key === "foodType") {
       if (v) out.foodType = v;
@@ -107,6 +115,17 @@ function buildExtraFieldsPayload(
     }
     if (v) out[f.key] = v;
     else if (opts?.clearEmpty) out[f.key] = null;
+  }
+  if (catalogNeedsPackedContents(form.kind, form.unitOfMeasure)) {
+    const n = Number(form.multiUnitBaseQty);
+    if (form.multiUnitBaseQty.trim() !== "" && Number.isFinite(n) && n > 0) {
+      out.multiUnit = {
+        baseQty: n,
+        baseUnit: form.multiUnitBaseUnit.trim() || "pcs",
+      };
+    }
+  } else if (opts?.clearEmpty) {
+    out.multiUnit = null;
   }
   return Object.keys(out).length ? out : undefined;
 }
@@ -262,6 +281,7 @@ export function CatalogItemEditor() {
       levelAtBranch?.reorderPoint != null
         ? String(levelAtBranch.reorderPoint)
         : "";
+    const packed = parseMultiUnitMeta(meta);
     setForm({
       name: p.name ?? "",
       shortName: p.shortName ?? "",
@@ -289,6 +309,8 @@ export function CatalogItemEditor() {
       availableInPos: p.availableInPos !== false,
       openingQty: "0",
       reorderPoint: reorderFromMeta || reorderFromLevel,
+      multiUnitBaseQty: packed?.baseQty != null ? String(packed.baseQty) : "",
+      multiUnitBaseUnit: packed?.baseUnit || "pcs",
     });
     setPhotoUrl(p.photoUrl ?? "");
     setHydrated(true);
@@ -314,7 +336,7 @@ export function CatalogItemEditor() {
     const extras: Record<string, string> = {};
     for (const f of productFormFields) {
       const v = bag[f.key];
-      if (v != null && f.key !== "taxRatePercent" && f.key !== "reorderPoint") {
+      if (v != null && f.key !== "taxRatePercent" && f.key !== "reorderPoint" && f.key !== "multiUnit") {
         extras[f.key] = String(v);
       }
     }
@@ -422,6 +444,8 @@ export function CatalogItemEditor() {
             : ""
           : form.openingQty,
         reorderPoint: form.reorderPoint,
+        multiUnitBaseQty: form.multiUnitBaseQty,
+        multiUnitBaseUnit: form.multiUnitBaseUnit,
       });
       if (!parsed.success) {
         setFieldErrors(zodFieldErrors(parsed.error));

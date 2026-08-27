@@ -8,6 +8,8 @@ import { customersApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { PhoneCountryInput } from "@/components/phone-country-input";
+import { canonicalPhoneE164, validatePhoneE164 } from "@/lib/phone";
 import { cn } from "@/lib/utils";
 
 function digitsOnly(v: string) {
@@ -135,7 +137,7 @@ export function CustomerPicker({
     if (noMatches) {
       setCompose(true);
       if (looksLikePhone(debounced)) {
-        setNewPhone((p) => p || digitsOnly(debounced));
+        setNewPhone((p) => p || canonicalPhoneE164(debounced.trim()));
       } else {
         setNewName((n) => n || filterPersonName(debounced));
       }
@@ -144,21 +146,23 @@ export function CustomerPicker({
 
   function openCompose() {
     setCompose(true);
-    if (looksLikePhone(q)) setNewPhone(digitsOnly(q));
-    else if (q.trim().length >= 2) setNewName(filterPersonName(q));
+    if (looksLikePhone(q)) {
+      setNewPhone(canonicalPhoneE164(q.trim()));
+    } else if (q.trim().length >= 2) setNewName(filterPersonName(q));
   }
 
   async function createAndAttach() {
     const name = newName.trim();
-    const phone = digitsOnly(newPhone);
+    const phoneRaw = newPhone.trim();
     if (name.length < 2) {
       toast.error("Enter the customer name");
       return;
     }
-    if (phone.length < 7) {
-      toast.error("Enter a valid phone number");
+    if (!phoneRaw || !validatePhoneE164(phoneRaw)) {
+      toast.error("Enter a valid phone number for the selected country");
       return;
     }
+    const phone = canonicalPhoneE164(phoneRaw);
     setCreating(true);
     try {
       const created = await customersApi.create({
@@ -283,18 +287,11 @@ export function CustomerPicker({
               }
             }}
           />
-          <Input
-            className="h-10 bg-white text-sm"
-            placeholder="Phone"
-            inputMode="numeric"
+          <PhoneCountryInput
+            label="Phone"
+            required
             value={newPhone}
-            onChange={(e) => setNewPhone(digitsOnly(e.target.value))}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                void createAndAttach();
-              }
-            }}
+            onChange={setNewPhone}
           />
           <div className="flex gap-2 pt-0.5">
             <Button
@@ -467,18 +464,11 @@ export function CustomerPicker({
                   }
                 }}
               />
-              <Input
-                className="h-9 bg-white text-sm"
-                placeholder="Phone"
-                inputMode="numeric"
+              <PhoneCountryInput
+                label="Phone"
+                required
                 value={newPhone}
-                onChange={(e) => setNewPhone(digitsOnly(e.target.value))}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    void createAndAttach();
-                  }
-                }}
+                onChange={setNewPhone}
               />
               <div className="flex gap-1.5">
                 <Button

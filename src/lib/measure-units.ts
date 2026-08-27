@@ -114,6 +114,76 @@ export function activeUnitOptions(raw: unknown): MeasureUnitRow[] {
   });
 }
 
+/** Pack-style units: 1 box/pack holds a count of a smaller unit. */
+const PACKED_UNIT_CODES = new Set([
+  "box",
+  "pack",
+  "dozen",
+  "carton",
+  "case",
+  "crate",
+  "bag",
+  "bundle",
+]);
+
+/** Piece / weight / time units that are not a pack of something else. */
+const NEVER_PACKED_UNIT_CODES = new Set([
+  "pcs",
+  "kg",
+  "g",
+  "L",
+  "ml",
+  "lb",
+  "m",
+  "hour",
+  "day",
+  "service",
+  "gal",
+]);
+
+export type MultiUnitMeta = { baseQty: number; baseUnit: string };
+
+export function isPackedMeasureUnit(code: string | null | undefined): boolean {
+  const c = (code ?? "").trim().toLowerCase();
+  if (!c || NEVER_PACKED_UNIT_CODES.has(c)) return false;
+  if (PACKED_UNIT_CODES.has(c)) return true;
+  return /(box|pack|carton|crate|case|dozen)/i.test(c);
+}
+
+/** Services / digital / combo don't store “qty in box”. */
+export function catalogNeedsPackedContents(
+  kind: string | null | undefined,
+  unit: string | null | undefined,
+): boolean {
+  const k = (kind ?? "").toLowerCase();
+  if (k === "service" || k === "digital" || k === "bundle") return false;
+  return isPackedMeasureUnit(unit);
+}
+
+export function defaultPackedContentsQty(unit: string | null | undefined): string {
+  return (unit ?? "").trim().toLowerCase() === "dozen" ? "12" : "";
+}
+
+export function parseMultiUnitMeta(meta: unknown): MultiUnitMeta | null {
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return null;
+  const m = (meta as Record<string, unknown>).multiUnit;
+  if (!m || typeof m !== "object" || Array.isArray(m)) return null;
+  const rec = m as Record<string, unknown>;
+  const qty = Number(rec.baseQty);
+  const unit = String(rec.baseUnit ?? "pcs").trim() || "pcs";
+  if (!Number.isFinite(qty) || qty <= 0) return null;
+  return { baseQty: qty, baseUnit: unit };
+}
+
+export function formatPackedContents(
+  packUnit: string,
+  qty: number,
+  baseUnit: string,
+): string {
+  const n = Number.isInteger(qty) ? String(qty) : String(qty);
+  return `1 ${packUnit} = ${n} ${baseUnit}`;
+}
+
 /** Sensible default UOM for new catalog items — every business type. */
 export function defaultUnitForBusinessType(
   businessType?: string | null,

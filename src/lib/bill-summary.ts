@@ -133,7 +133,8 @@ export function buildBillSummary(input: {
   const feesTotal = fees.reduce((s, f) => s + moneyNumber(f.amount), 0);
   const taxInclusive = Boolean(input.taxInclusive);
 
-  // Real POS order: Items → Discount → Net → (+fees) → Taxable → Tax → Grand
+  // Display order (payment + print): Total → Taxable value (label) → CGST/SGST → Discount → Net Payable
+  // Charge math: Items → Discount → Net → (+fees) → Taxable → Tax → Grand
   const merchandiseAndFees = itemsSubtotal + feesTotal;
   const discountAll = discount + loyaltyOff;
   const netAmount = Math.max(0, itemsSubtotal - discountAll);

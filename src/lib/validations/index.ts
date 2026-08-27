@@ -1,5 +1,7 @@
 import { z } from "zod";
-import { validateSellQty, requiresWholeQty } from "@/lib/sell-units";
+import { validatePhoneE164 } from "@/lib/phone";
+import { validateSellQty, requiresWholeQty, allowsDecimalQty } from "@/lib/sell-units";
+import { catalogNeedsPackedContents } from "@/lib/measure-units";
 
 /** Matches backend IsStrongPassword (8–72, upper, lower, number, special) */
 export const strongPasswordSchema = z
@@ -11,19 +13,15 @@ export const strongPasswordSchema = z
   .regex(/\d/, "Include a number")
   .regex(/[^A-Za-z0-9]/, "Include a special character");
 
-/** Any country: optional +, then digits only (7–15 digit total). No spaces or symbols. */
+/** Country-aware phone (libphonenumber-js). Expect E.164 from PhoneCountryInput. */
 export const phoneSchema = z
   .string()
   .trim()
+  .min(1, "Phone is required")
   .max(18, "Phone is too long")
-  .refine(
-    (v) => {
-      if (!/^\+?\d+$/.test(v)) return false;
-      const digits = v.replace(/\D/g, "");
-      return digits.length >= 7 && digits.length <= 15;
-    },
-    { message: "Enter digits only (7–15), no spaces or symbols" },
-  );
+  .refine((v) => validatePhoneE164(v), {
+    message: "Enter a valid phone number for the selected country",
+  });
 
 /** @deprecated use phoneSchema — kept for older imports */
 export const indianPhoneSchema = phoneSchema;
@@ -802,8 +800,41 @@ export const createCatalogProductSchema = z
     trackInventory: z.boolean(),
     openingQty: z.string().optional().or(z.literal("")),
     reorderPoint: z.string().optional().or(z.literal("")),
+    multiUnitBaseQty: z.string().optional().or(z.literal("")),
+    multiUnitBaseUnit: z.string().optional().or(z.literal("")),
   })
   .superRefine((v, ctx) => {
+    if (catalogNeedsPackedContents(v.kind, v.unitOfMeasure)) {
+      const raw = (v.multiUnitBaseQty ?? "").trim();
+      const n = Number(raw);
+      const pack = v.unitOfMeasure || "box";
+      if (raw === "" || !Number.isFinite(n) || n <= 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["multiUnitBaseQty"],
+          message: `Enter how many are inside 1 ${pack}`,
+        });
+      } else {
+        const base = (v.multiUnitBaseUnit || "pcs").trim() || "pcs";
+        if (!allowsDecimalQty(base) && !Number.isInteger(n)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["multiUnitBaseQty"],
+            message: `Qty in 1 ${pack} must be a whole number of ${base}`,
+          });
+        } else if (allowsDecimalQty(base)) {
+          const rounded = Math.round(n * 1000) / 1000;
+          if (Math.abs(rounded - n) > 1e-9) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ["multiUnitBaseQty"],
+              message: `Qty in 1 ${pack} can have at most 3 decimal places`,
+            });
+          }
+        }
+      }
+    }
+
     if (v.trackInventory) {
       const raw = (v.openingQty ?? "").trim();
       // Empty allowed — create treats blank as 0 Stock on Hand.
