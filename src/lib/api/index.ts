@@ -1092,6 +1092,73 @@ export const inventoryApi = {
     }>(`/stock-transfers${q ? `?${q}` : ""}`, { token: token() });
   },
 
+  /** Document workflow: draft → issue → receive / cancel */
+  listTransferDocs() {
+    return apiRequest<
+      Array<{
+        id: string;
+        status: string;
+        notes?: string | null;
+        createdAt: string;
+        issuedAt?: string | null;
+        receivedAt?: string | null;
+        fromLocationId: string;
+        toLocationId: string;
+        fromLocationName: string;
+        toLocationName: string;
+        lineCount: number;
+        totalQty: number;
+        actorName: string;
+        lines: Array<{
+          id: string;
+          productId: string;
+          productName: string;
+          sku: string;
+          unit: string;
+          qty: number;
+          qtyReceived: number;
+          qtyDamaged: number;
+        }>;
+      }>
+    >("/inventory/transfers", { token: token() });
+  },
+
+  createTransferDoc(body: {
+    fromLocationId: string;
+    toLocationId: string;
+    notes?: string;
+    lines: Array<{ productId: string; qty: number }>;
+  }) {
+    return apiRequest<{ id: string; status: string }>(
+      "/inventory/transfers",
+      { method: "POST", body, token: token() },
+    );
+  },
+
+  issueTransferDoc(id: string) {
+    return apiRequest<{ id: string; status: string }>(
+      `/inventory/transfers/${id}/issue`,
+      { method: "POST", token: token() },
+    );
+  },
+
+  receiveTransferDoc(
+    id: string,
+    lines: Array<{ lineId: string; qty: number; damagedQty?: number }>,
+  ) {
+    return apiRequest<{ id: string; status: string }>(
+      `/inventory/transfers/${id}/receive`,
+      { method: "POST", body: { lines }, token: token() },
+    );
+  },
+
+  cancelTransferDoc(id: string) {
+    return apiRequest<{ id: string; status: string }>(
+      `/inventory/transfers/${id}/cancel`,
+      { method: "POST", token: token() },
+    );
+  },
+
   listLevels(params?: {
     locationId?: string;
     q?: string;
