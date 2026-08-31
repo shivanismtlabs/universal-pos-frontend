@@ -13,6 +13,8 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { useSetupReturn } from "@/lib/use-setup-return";
+import { CountryStateFields } from "@/components/country-state-fields";
+import { geoCountry } from "@/lib/geo";
 
 const STATUSES = [
   { id: "active", label: "Active" },
@@ -96,6 +98,11 @@ function NewSupplierPageInner() {
   const qc = useQueryClient();
   const { fromSetupFlow, returnTo, redirectAfterSetupSave } = useSetupReturn();
   const [form, setForm] = useState<SupplierWriteBody>(emptyForm);
+  const [addrLine, setAddrLine] = useState("");
+  const [addrCity, setAddrCity] = useState("");
+  const [addrPostal, setAddrPostal] = useState("");
+  const [addrState, setAddrState] = useState("");
+  const [addrCountry, setAddrCountry] = useState("IN");
 
   const set = (
     k: keyof SupplierWriteBody,
@@ -103,10 +110,10 @@ function NewSupplierPageInner() {
   ) => setForm((f) => ({ ...f, [k]: v }));
 
   const save = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       const name = (form.name ?? "").trim();
       if (!name) throw new Error("Supplier name is required");
-      return suppliersApi.create({
+      const row = await suppliersApi.create({
         ...form,
         name,
         code: form.code?.trim() || undefined,
@@ -120,6 +127,21 @@ function NewSupplierPageInner() {
             ? Number(form.creditLimit)
             : undefined,
       });
+      const line1 = addrLine.trim();
+      if (row?.id && line1) {
+        await suppliersApi.addAddress(row.id, {
+          kind: "billing",
+          line1,
+          city: addrCity.trim() || undefined,
+          state: addrState.trim() || undefined,
+          postalCode: addrPostal.trim() || undefined,
+          country:
+            geoCountry(addrCountry)?.name ??
+            (addrCountry.trim() || undefined),
+          isDefault: true,
+        });
+      }
+      return row;
     },
     onSuccess: (row) => {
       toast.success(
@@ -457,6 +479,45 @@ function NewSupplierPageInner() {
               onChange={(e) => set("bankIdentifier", e.target.value)}
             />
           </div>
+        </div>
+      </Section>
+
+      <Section
+        title="Billing address"
+        hint="Optional — used on POs and payables"
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="sm:col-span-2">
+            <Label>Address line</Label>
+            <Input
+              className="mt-1.5"
+              value={addrLine}
+              onChange={(e) => setAddrLine(e.target.value)}
+              placeholder="Street, warehouse, building"
+            />
+          </div>
+          <div>
+            <Label>City</Label>
+            <Input
+              className="mt-1.5"
+              value={addrCity}
+              onChange={(e) => setAddrCity(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label>Postal code</Label>
+            <Input
+              className="mt-1.5"
+              value={addrPostal}
+              onChange={(e) => setAddrPostal(e.target.value)}
+            />
+          </div>
+          <CountryStateFields
+            countryCode={addrCountry}
+            state={addrState}
+            onCountry={setAddrCountry}
+            onState={setAddrState}
+          />
         </div>
       </Section>
 

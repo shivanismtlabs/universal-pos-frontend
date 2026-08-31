@@ -6,6 +6,54 @@ function enterpriseToken() {
   return s.accessToken || s.identityToken;
 }
 
+export type EnterpriseKpis = Record<string, number | null>;
+
+export type EnterpriseBusinessKpi = {
+  tenantId: string;
+  name: string;
+  currencyCode: string;
+  timezone: string;
+  todaySales: number;
+  yesterdaySales: number;
+  periodSales: number;
+  mtdSales: number;
+  ytdSales: number;
+  grossProfit: number;
+  expenses: number;
+  netProfit: number;
+  cash: number;
+  unclearedPayments: number;
+  accountsReceivable: number;
+  accountsPayable: number;
+  inventoryValue: number;
+  taxAccrued: number;
+  lowStock: number;
+  deadStock: number;
+  fastMoving: number;
+  slowMoving: number;
+  period: { from: string; to: string };
+};
+
+export type EnterprisePnlBusiness = {
+  tenantId: string;
+  name: string;
+  currencyCode: string;
+  timezone: string;
+  revenue: number;
+  cogs: number;
+  grossProfit: number;
+  grossMarginPct: number | null;
+  expenses: number;
+  netProfit: number;
+  period?: { from: string; to: string };
+};
+
+function withPeriod(params?: Record<string, string>) {
+  const qs = new URLSearchParams(params);
+  const q = qs.toString();
+  return q ? `?${q}` : "";
+}
+
 export const enterpriseApi = {
   group() {
     return apiRequest<{
@@ -18,6 +66,8 @@ export const enterpriseApi = {
         hideLayer: boolean;
         pricingModel: string;
         currencyCode?: string;
+        currencies?: string[];
+        mixedCurrency?: boolean;
       };
       businesses: Array<{
         tenantId: string;
@@ -36,29 +86,39 @@ export const enterpriseApi = {
   },
 
   dashboard(params?: Record<string, string>) {
-    const qs = new URLSearchParams(params);
-    const q = qs.toString();
     return apiRequest<{
       timezone: string;
-      currencyCode: string;
-      period?: { mtdFrom: string; today: string };
-      kpis: Record<string, number | null>;
-      businesses: number;
-    }>(`/enterprise/dashboard${q ? `?${q}` : ""}`, {
+      currencyCode: string | null;
+      mixedCurrency: boolean;
+      currencies: string[];
+      period?: { mtdFrom: string; today: string; custom?: boolean } | null;
+      note?: string;
+      kpis: EnterpriseKpis | null;
+      byCurrency: Array<{ currencyCode: string; kpis: EnterpriseKpis }>;
+      businesses: EnterpriseBusinessKpi[];
+      businessCount: number;
+    }>(`/enterprise/dashboard${withPeriod(params)}`, {
       token: enterpriseToken(),
     });
   },
 
   pnl(params?: Record<string, string>) {
-    const qs = new URLSearchParams(params);
-    const q = qs.toString();
     return apiRequest<{
       note: string;
+      mixedCurrency: boolean;
+      currencies: string[];
       period: { from: string; to: string };
-      group: Record<string, number | null>;
-      businesses: Array<{
-        tenantId: string;
-        name: string;
+      group: {
+        currencyCode?: string;
+        revenue: number;
+        cogs: number;
+        grossProfit: number;
+        grossMarginPct: number | null;
+        expenses: number;
+        netProfit: number;
+      } | null;
+      byCurrency: Array<{
+        currencyCode: string;
         revenue: number;
         cogs: number;
         grossProfit: number;
@@ -66,16 +126,18 @@ export const enterpriseApi = {
         expenses: number;
         netProfit: number;
       }>;
-    }>(`/enterprise/pnl${q ? `?${q}` : ""}`, { token: enterpriseToken() });
+      businesses: EnterprisePnlBusiness[];
+    }>(`/enterprise/pnl${withPeriod(params)}`, { token: enterpriseToken() });
   },
 
   comparison(params?: Record<string, string>) {
-    const qs = new URLSearchParams(params);
-    const q = qs.toString();
     return apiRequest<{
       period: { from: string; to: string };
+      mixedCurrency?: boolean;
+      currencies?: string[];
+      note?: string;
       rows: Array<Record<string, string | number | null>>;
-    }>(`/enterprise/comparison${q ? `?${q}` : ""}`, {
+    }>(`/enterprise/comparison${withPeriod(params)}`, {
       token: enterpriseToken(),
     });
   },

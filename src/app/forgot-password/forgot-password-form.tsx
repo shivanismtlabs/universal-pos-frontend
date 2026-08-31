@@ -146,10 +146,19 @@ export default function ForgotPasswordForm() {
           <p className="text-sm text-[#5a6b7d]">
             Code sent for <span className="font-medium text-[#0b1f33]">{email}</span>
             {devCode ? (
-              <span className="mt-1 block text-xs text-[#1a56db]">
-                Dev OTP: {devCode}
+              <span className="mt-2 block rounded-md border border-[#c5d4f5] bg-[#eef3fc] px-3 py-2 text-sm text-[#0b1f33]">
+                On-screen OTP (demo / local mailboxes cannot receive email):{" "}
+                <span className="font-semibold tracking-widest text-[#1a56db]">
+                  {devCode}
+                </span>
               </span>
-            ) : null}
+            ) : (
+              <span className="mt-1 block text-xs">
+                Check your inbox (and spam). Seed emails like{" "}
+                <span className="font-medium">@*.demo</span> never receive real
+                mail — use a real address or the on-screen code when shown.
+              </span>
+            )}
           </p>
           <div className="space-y-1.5">
             <Label htmlFor="fp-otp">6-digit OTP</Label>

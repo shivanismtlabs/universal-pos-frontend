@@ -7820,20 +7820,34 @@ export const suppliersApi = {
     return apiRequest<
       Array<{
         id: string;
+        poNumber?: string | null;
         poType: string;
         status: string;
         expectedDelivery?: string | null;
         linkedOrderId?: string | null;
-        supplier?: { name: string };
+        subtotal?: number;
+        discountAmount?: number;
+        taxPercent?: number;
+        taxTotal?: number;
+        grandTotal?: number;
+        supplier?: {
+          id?: string;
+          name: string;
+          code?: string | null;
+          supplierType?: string | null;
+        };
+        location?: { id: string; name: string; code?: string | null } | null;
         lines?: Array<{
           id: string;
           stockLevelId: string;
           qtyOrdered: number;
           qtyReceived: number;
+          unitCost?: number | null;
           stockLevel?: {
             id: string;
             sku: string;
             qtyOnHand: number;
+            locationId?: string;
             product?: { name: string };
           };
         }>;
@@ -7846,6 +7860,10 @@ export const suppliersApi = {
     linkedOrderId?: string;
     expectedDelivery?: string;
     notes?: string;
+    locationId?: string;
+    discountAmount?: number;
+    taxPercent?: number;
+    serviceSubtotal?: number;
     lines?: Array<{
       stockLevelId: string;
       qtyOrdered: number;
@@ -7867,7 +7885,10 @@ export const suppliersApi = {
   },
   receivePo(
     id: string,
-    body: { lines: Array<{ stockLevelId: string; qty: number }> },
+    body: {
+      lines: Array<{ stockLevelId: string; qty: number }>;
+      idempotencyKey?: string;
+    },
   ) {
     return apiRequest<{
       purchaseOrder: { id: string; status: string };

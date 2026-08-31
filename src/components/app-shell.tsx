@@ -283,35 +283,26 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Purchases",
     icon: Truck,
     section: "Commerce",
-    commerce: "sale",
     children: [
       {
         href: "/suppliers",
         label: "Supplier directory",
         icon: Building2,
-        commerce: "sale",
-        module: "inventory",
       },
       {
         href: "/suppliers/new",
         label: "New supplier",
         icon: Building2,
-        commerce: "sale",
-        module: "inventory",
       },
       {
         href: "/suppliers/orders",
         label: "Purchase orders",
         icon: ClipboardList,
-        commerce: "sale",
-        module: "inventory",
       },
       {
         href: "/purchases",
         label: "GRN & payables",
         icon: Truck,
-        commerce: "sale",
-        module: "inventory",
       },
     ],
   },
@@ -393,12 +384,6 @@ const NAV_GROUPS: NavGroup[] = [
         label: "Resources",
         icon: LayoutGrid,
         capability: "RESOURCE",
-      },
-      {
-        href: "/kitchen",
-        label: "Kitchen / KOT",
-        icon: ClipboardList,
-        capability: "KOT",
       },
       {
         href: "/jobs",
