@@ -685,7 +685,11 @@ export function CatalogItemEditor() {
       router.push(afterSaveHref);
     },
     onError: (e: Error) =>
-      toast.error(e instanceof ApiError ? e.message : e.message || "Save failed"),
+      toast.error(
+        e instanceof ApiError
+          ? e.messages?.join(", ") || e.message
+          : e.message || "Save failed",
+      ),
   });
 
   if (isEdit && !id) {

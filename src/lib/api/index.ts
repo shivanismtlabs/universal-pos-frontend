@@ -3607,6 +3607,20 @@ export const posApi = {
         exchangeOrderNumber?: string | null;
         invoiceNumber?: string | null;
         items?: unknown;
+        returnedItems?: Array<{
+          kind?: string;
+          name?: string | null;
+          sku?: string | null;
+          quantity?: number | string;
+          condition?: string | null;
+        }>;
+        replacedItems?: Array<{
+          kind?: string;
+          name?: string | null;
+          sku?: string | null;
+          quantity?: number | string;
+        }>;
+        isExchange?: boolean;
       }>;
     }>(`/pos/sale/returns${q ? `?${q}` : ""}`, { token: token() });
   },

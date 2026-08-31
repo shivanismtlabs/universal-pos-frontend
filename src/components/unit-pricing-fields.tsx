@@ -39,6 +39,9 @@ export function UnitPricingFields({
   onBaseUnitSymbol,
 }: Props) {
   const [seeded, setSeeded] = useState(false);
+  const [open, setOpen] = useState(
+    () => Boolean(value.unitGroupId || value.baseUnitId),
+  );
 
   const groups = useQuery({
     queryKey: ["catalog-unit-groups"],
@@ -50,17 +53,19 @@ export function UnitPricingFields({
       }
       return rows;
     },
+    enabled: open,
+    retry: 1,
   });
 
   useEffect(() => {
-    if (seeded || groups.data?.length) return;
+    if (!open || seeded || groups.data?.length) return;
     if (groups.isError) {
       void catalogApi.seedUnitGroups().then(() => {
         setSeeded(true);
         void groups.refetch();
       });
     }
-  }, [groups, seeded]);
+  }, [groups, seeded, open]);
 
   const group = useMemo(
     () => groups.data?.find((g) => g.id === value.unitGroupId),
@@ -81,11 +86,55 @@ export function UnitPricingFields({
     if (u?.symbol) onBaseUnitSymbol?.(u.symbol);
   }
 
+  function clearAdvanced() {
+    onChange({
+      unitGroupId: "",
+      baseUnitId: "",
+      pricingUnitId: "",
+      pricingStrategy: "converted",
+      pricePerPricingUnit: "",
+      sellingUnits: [],
+    });
+    setOpen(false);
+  }
+
+  if (!open) {
+    return (
+      <div className="rounded-lg border border-dashed border-[#d9e0ea] bg-[#fafbfc] px-3 py-2.5">
+        <button
+          type="button"
+          className="text-left text-[0.8rem] font-semibold text-[#1a56db] hover:underline"
+          onClick={() => setOpen(true)}
+        >
+          + Advanced unit pricing (optional)
+        </button>
+        <p className="mt-0.5 text-[0.7rem] text-[#8b9bb0]">
+          Leave closed for normal items — Unit of measure above is enough.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-3 rounded-lg border border-[#e4e9f0] bg-[#fafbfc] p-3">
-      <p className="text-[0.7rem] font-semibold tracking-wide text-[#5a6b7d] uppercase">
-        Unit &amp; pricing
-      </p>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <p className="text-[0.7rem] font-semibold tracking-wide text-[#5a6b7d] uppercase">
+          Unit &amp; pricing
+        </p>
+        <button
+          type="button"
+          className="text-[0.7rem] font-semibold text-[#5a6b7d] hover:text-[#0b1f33]"
+          onClick={clearAdvanced}
+        >
+          Clear / hide
+        </button>
+      </div>
+      {groups.isError ? (
+        <p className="text-[0.75rem] text-rose-600">
+          Unit master not available on this server yet. Hide this section and
+          save with Unit of measure only, or run the units DB migration.
+        </p>
+      ) : null}
 
       <div className="grid gap-3 sm:grid-cols-2">
         <div>

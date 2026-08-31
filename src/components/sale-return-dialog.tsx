@@ -18,7 +18,7 @@ import {
   replaceQtyError,
   returnQtyError,
 } from "@/lib/return-qty-validation";
-import { X } from "lucide-react";
+import { Minus, Plus, X } from "lucide-react";
 
 /**
  * Return / refund a closed Sale ticket — restocks qty + records refund.
@@ -30,12 +30,15 @@ export function SaleReturnDialog({
   onClose,
   defaultMode = "return",
   onRequested,
+  onCompleted,
 }: {
   orderId: string;
   orderNumber: string;
   onClose: () => void;
   defaultMode?: "return" | "exchange";
   onRequested?: () => void;
+  /** After completed refund or exchange — e.g. jump to History tab */
+  onCompleted?: () => void;
 }) {
   const qc = useQueryClient();
   const { money } = useBootstrap();
@@ -364,6 +367,7 @@ export function SaleReturnDialog({
               r.invoiceNumber ? ` · ${r.invoiceNumber}` : ""
             }`,
         );
+        onCompleted?.();
       } else if (r.status === "pending" || r.status === "requested") {
         toast.success(
           r.message ||
@@ -379,6 +383,7 @@ export function SaleReturnDialog({
           r.message ||
             `✓ Return Completed · ${money(r.amount)}${credit}`,
         );
+        onCompleted?.();
       }
       void qc.invalidateQueries({ queryKey: ["pos-sale-recent"] });
       void qc.invalidateQueries({ queryKey: ["pos-sale-catalog"] });
@@ -436,7 +441,7 @@ export function SaleReturnDialog({
             <p className="mt-0.5 text-sm text-[#5a6b7d]">
               {mode === "exchange"
                 ? "Give items back, then sell new ones. Pay or refund the difference."
-                : "Give items back to stock and return money to the customer."}
+                : "Refund uses original sale price, tax, and discounts. Qty cannot exceed returnable."}
             </p>
           </div>
           <button
@@ -488,44 +493,96 @@ export function SaleReturnDialog({
               {lines.map((l) => {
                 const qtyRaw = qtyByLevel[l.stockLevelId] ?? "0";
                 const qtyErr = returnQtyErrors[l.stockLevelId];
+                const qtyN = parseReturnQty(qtyRaw) ?? 0;
+                const canDec = l.remaining > 0 && qtyN > 0;
+                const canInc =
+                  l.remaining > 0 && qtyN < l.remaining - 1e-9;
                 return (
                 <li
                   key={l.stockLevelId}
-                  className="flex flex-wrap items-center justify-between gap-3 py-3"
+                  className="flex flex-wrap items-start justify-between gap-3 py-3"
                 >
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-[#0b1f33]">
                       {l.name}
                     </p>
-                    <p className="font-mono text-[0.65rem] text-[#8b9bb0]">
-                      sold {l.soldQty}
-                      {l.alreadyReturned > 0
-                        ? ` · returned ${l.alreadyReturned}`
-                        : ""}{" "}
-                      · left {l.remaining} · {money(l.unitPrice)} each
+                    <dl className="mt-1 grid grid-cols-3 gap-x-2 text-[0.7rem] text-[#5a6b7d]">
+                      <div>
+                        <dt className="text-[#8b9bb0]">Sold</dt>
+                        <dd className="font-semibold tabular-nums text-[#0b1f33]">
+                          {l.soldQty}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-[#8b9bb0]">Returned</dt>
+                        <dd className="font-semibold tabular-nums text-[#0b1f33]">
+                          {l.alreadyReturned}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-[#8b9bb0]">Returnable</dt>
+                        <dd className="font-semibold tabular-nums text-[#1a56db]">
+                          {l.remaining}
+                        </dd>
+                      </div>
+                    </dl>
+                    <p className="mt-0.5 font-mono text-[0.65rem] text-[#8b9bb0]">
+                      {money(l.unitPrice)} each (original sale)
                     </p>
                   </div>
                   <div className="flex flex-col items-end gap-1">
                     <div className="flex flex-wrap items-center gap-2">
                     <Label className="sr-only">Return qty</Label>
-                    <Input
-                      className={cn(
-                        "h-9 w-20",
-                        qtyErr && "border-rose-400 focus:border-rose-500",
-                      )}
-                      type="number"
-                      min={0}
-                      max={l.remaining}
-                      step={Number.isInteger(l.remaining) ? 1 : "any"}
-                      disabled={l.remaining <= 0}
-                      value={qtyRaw}
-                      onChange={(e) =>
-                        setReturnQty(l.stockLevelId, e.target.value, l.remaining)
-                      }
-                      onBlur={(e) =>
-                        setReturnQty(l.stockLevelId, e.target.value, l.remaining)
-                      }
-                    />
+                    <div className="inline-flex items-center rounded-md border border-[#d9e0ea] bg-white">
+                      <button
+                        type="button"
+                        className="flex h-9 w-8 items-center justify-center text-[#5a6b7d] disabled:opacity-40"
+                        disabled={!canDec}
+                        aria-label="Decrease return qty"
+                        onClick={() =>
+                          setReturnQty(
+                            l.stockLevelId,
+                            String(Math.max(0, qtyN - 1)),
+                            l.remaining,
+                          )
+                        }
+                      >
+                        <Minus className="size-3.5" />
+                      </button>
+                      <Input
+                        className={cn(
+                          "h-9 w-14 border-0 text-center shadow-none focus:shadow-none",
+                          qtyErr && "text-rose-600",
+                        )}
+                        type="number"
+                        min={0}
+                        max={l.remaining}
+                        step={Number.isInteger(l.remaining) ? 1 : "any"}
+                        disabled={l.remaining <= 0}
+                        value={qtyRaw}
+                        onChange={(e) =>
+                          setReturnQty(l.stockLevelId, e.target.value, l.remaining)
+                        }
+                        onBlur={(e) =>
+                          setReturnQty(l.stockLevelId, e.target.value, l.remaining)
+                        }
+                      />
+                      <button
+                        type="button"
+                        className="flex h-9 w-8 items-center justify-center text-[#5a6b7d] disabled:opacity-40"
+                        disabled={!canInc}
+                        aria-label="Increase return qty"
+                        onClick={() =>
+                          setReturnQty(
+                            l.stockLevelId,
+                            String(Math.min(l.remaining, qtyN + 1)),
+                            l.remaining,
+                          )
+                        }
+                      >
+                        <Plus className="size-3.5" />
+                      </button>
+                    </div>
                     <span className="text-xs text-[#8b9bb0]">
                       / {l.remaining}
                     </span>

@@ -7,15 +7,19 @@ import { iamApi } from "@/lib/api";
 import { formatWorkedDuration } from "@/lib/attendance-time";
 import { useAuthStore } from "@/lib/auth-store";
 
+const TRACK_ROLES = new Set(["admin", "manager", "cashier", "staff"]);
+
 /** Live shift timer when the signed-in user is clocked in. */
 export function AttendanceShiftTimer({ className }: { className?: string }) {
-  const permissions = useAuthStore((s) => s.user?.permissions ?? []);
-  const roles = useAuthStore((s) => s.user?.roles ?? []);
+  const user = useAuthStore((s) => s.user);
+  const roles = user?.roles;
+  const permissions = user?.permissions;
   const canTrack =
-    roles.some((r) => ["admin", "manager", "cashier", "staff"].includes(r)) ||
-    permissions.includes("*") ||
-    permissions.includes("attendance.self") ||
-    permissions.includes("attendance.manage");
+    roles?.some((r) => TRACK_ROLES.has(r)) ||
+    permissions?.includes("*") ||
+    permissions?.includes("attendance.self") ||
+    permissions?.includes("attendance.manage") ||
+    false;
 
   const openQ = useQuery({
     queryKey: ["attendance-open"],
