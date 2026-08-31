@@ -12,9 +12,16 @@ import { RentalDashboard } from "./rental-dashboard";
 import { SubscriptionDashboard } from "./subscription-dashboard";
 import { ServiceDashboard } from "./service-dashboard";
 import { cn } from "@/lib/utils";
+import { useAuthStore } from "@/lib/auth-store";
 
 type HomeTab = "dashboard" | "getting-started" | "floors";
 type FloorView = "sale" | "rent" | "service" | "subscription";
+
+function homeSetupSeenKey(tenantId?: string | null) {
+  return tenantId
+    ? `upos-home-setup-seen:${tenantId}`
+    : "upos-home-setup-seen";
+}
 
 function parseHomeTab(raw: string | null): HomeTab | null {
   if (raw === "dashboard" || raw === "getting-started" || raw === "floors") {
@@ -37,6 +44,7 @@ export default function DashboardPage() {
 
 function DashboardPageInner() {
   const { isLoading, hasMode } = useBootstrap();
+  const tenantId = useAuthStore((s) => s.user?.tenantId);
   const router = useRouter();
   const pathname = usePathname();
   const search = useSearchParams();
@@ -89,8 +97,10 @@ function DashboardPageInner() {
       return;
     }
     try {
-      const seen = localStorage.getItem("upos-home-setup-seen");
-      if (seen === "1") {
+      const seen =
+        localStorage.getItem(homeSetupSeenKey(tenantId)) === "1" ||
+        (!tenantId && localStorage.getItem("upos-home-setup-seen") === "1");
+      if (seen) {
         setHomeTab("dashboard");
         if (search.get("tab") !== "dashboard") {
           const qs = new URLSearchParams(search.toString());
@@ -101,17 +111,17 @@ function DashboardPageInner() {
     } catch {
       /* ignore */
     }
-  }, [tabFromUrl, showFloors, isLoading, pathname, router, search]);
+  }, [tabFromUrl, showFloors, isLoading, pathname, router, search, tenantId]);
 
   useEffect(() => {
-    if (homeTab === "dashboard") {
+    if (homeTab === "dashboard" && tenantId) {
       try {
-        localStorage.setItem("upos-home-setup-seen", "1");
+        localStorage.setItem(homeSetupSeenKey(tenantId), "1");
       } catch {
         /* ignore */
       }
     }
-  }, [homeTab]);
+  }, [homeTab, tenantId]);
 
   function syncTabUrl(id: HomeTab) {
     const qs = new URLSearchParams(search.toString());
@@ -130,7 +140,11 @@ function DashboardPageInner() {
     return <PageSkeleton rows={6} />;
   }
 
-  if (!hasAnyMode) {
+  const wantGettingStarted =
+    tabFromUrl === "getting-started" || homeTab === "getting-started";
+
+  /** New shops land on Getting Started even before commerce modes finish hydrating. */
+  if (!hasAnyMode && !wantGettingStarted) {
     return (
       <EmptyState
         title="Complete shop setup"
@@ -146,8 +160,11 @@ function DashboardPageInner() {
     });
   }
 
-  const visibleHomeTab: HomeTab =
-    homeTab === "floors" && !showFloors ? "dashboard" : homeTab;
+  const visibleHomeTab: HomeTab = !hasAnyMode
+    ? "getting-started"
+    : homeTab === "floors" && !showFloors
+      ? "dashboard"
+      : homeTab;
 
   return (
     <div className="space-y-5">

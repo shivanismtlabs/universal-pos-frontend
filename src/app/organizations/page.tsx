@@ -38,6 +38,7 @@ import { ApiError } from "@/lib/api/client";
 import { useAuthStore } from "@/lib/auth-store";
 import { applyPortalResponse } from "@/lib/auth-portal";
 import { defaultHomeForRoles } from "@/lib/roles";
+import { GETTING_STARTED_PATH } from "@/lib/setup-return";
 import { TotpChallengeForm, is2faChallenge } from "@/components/totp-challenge-form";
 import { cn } from "@/lib/utils";
 import { phoneSchema } from "@/lib/validations";
@@ -394,6 +395,8 @@ function OrganizationsPageInner() {
   const [hydrated, setHydrated] = useState(false);
   /** Drop leftover shop JWT only once when opening the identity org picker */
   const clearedStaleShopRef = useRef(false);
+  /** Set before applyPortalResponse so the session effect does not steal /dashboard */
+  const pendingHomeRef = useRef<string | null>(null);
   const [orgs, setOrgs] = useState<
     NonNullable<PortalSessionResponse["organizations"]>
   >([]);
@@ -404,6 +407,11 @@ function OrganizationsPageInner() {
   useEffect(() => {
     if (openCreate) setShowCreate(true);
   }, [openCreate]);
+
+  useEffect(() => {
+    if (!showCreate) return;
+    router.prefetch(GETTING_STARTED_PATH);
+  }, [showCreate, router]);
   const [entering, setEntering] = useState<string | null>(null);
   const [totpToken, setTotpToken] = useState<string | null>(null);
   const [showCustomFields, setShowCustomFields] = useState(false);
@@ -504,7 +512,11 @@ function OrganizationsPageInner() {
     if (accessToken && user) {
       clearedStaleShopRef.current = true;
       setLoading(false);
-      router.replace(defaultHomeForRoles(user.roles, user.permissions));
+      const dest =
+        pendingHomeRef.current ??
+        defaultHomeForRoles(user.roles, user.permissions);
+      pendingHomeRef.current = null;
+      router.replace(dest);
       return;
     }
 
@@ -544,33 +556,35 @@ function OrganizationsPageInner() {
     }
   }
 
-  async function enterApp(data: PortalSessionResponse) {
+  function warmBootstrap() {
+    void qc.prefetchQuery({
+      queryKey: ["tenant-bootstrap"],
+      queryFn: () => appsApi.bootstrap(),
+      staleTime: 5 * 60_000,
+    });
+  }
+
+  async function enterApp(
+    data: PortalSessionResponse,
+    homeOverride?: string,
+  ) {
+    const home =
+      homeOverride ??
+      defaultHomeForRoles(data.user?.roles, data.user?.permissions);
+    // Set before applyPortalResponse — zustand update retriggers the session effect.
+    pendingHomeRef.current = home;
     const dest = applyPortalResponse(data);
     if (dest === "app") {
       clearedStaleShopRef.current = true;
       setLoading(false);
-      const u = useAuthStore.getState().user;
-      const home = defaultHomeForRoles(u?.roles, u?.permissions);
+      setCreating(false);
       toast.success("Welcome to your shop");
-      // Navigate immediately — do not block on bootstrap (was stuck on Loading shop…)
+      // Prefetch then navigate — never qc.clear() first (that caused Loading shop…)
+      warmBootstrap();
       router.replace(home);
-      // Fresh tenant cache in the background
-      void (async () => {
-        try {
-          qc.clear();
-          const boot = await Promise.race([
-            appsApi.bootstrap(),
-            new Promise<never>((_, rej) =>
-              setTimeout(() => rej(new Error("bootstrap-timeout")), 12_000),
-            ),
-          ]);
-          qc.setQueryData(["tenant-bootstrap"], boot);
-        } catch {
-          /* AppShell retries / shows error */
-        }
-      })();
       return;
     }
+    pendingHomeRef.current = null;
     toast.message("Select an organization to continue");
   }
 
@@ -684,13 +698,11 @@ function OrganizationsPageInner() {
           taxId: values.taxId?.trim() || undefined,
           storeName: values.storeName?.trim() || undefined,
         });
-        applyPortalResponse(data);
-        try {
-          await persistOrgProfile(values);
-        } catch {
+        // Enter Getting Started immediately — extras save in the background.
+        await enterApp(data, GETTING_STARTED_PATH);
+        void persistOrgProfile(values).catch(() => {
           /* extras optional until API is upgraded */
-        }
-        await enterApp(data);
+        });
         return;
       }
 
@@ -708,22 +720,9 @@ function OrganizationsPageInner() {
       });
 
       toast.success("Organization profile saved");
-      const u = useAuthStore.getState().user;
-      const home = defaultHomeForRoles(u?.roles, u?.permissions);
-      router.replace(home);
-      void (async () => {
-        try {
-          const boot = await Promise.race([
-            appsApi.bootstrap(),
-            new Promise<never>((_, rej) =>
-              setTimeout(() => rej(new Error("bootstrap-timeout")), 12_000),
-            ),
-          ]);
-          qc.setQueryData(["tenant-bootstrap"], boot);
-        } catch {
-          /* AppShell retries */
-        }
-      })();
+      pendingHomeRef.current = GETTING_STARTED_PATH;
+      warmBootstrap();
+      router.replace(GETTING_STARTED_PATH);
     } catch (e) {
       toast.error(
         e instanceof ApiError
