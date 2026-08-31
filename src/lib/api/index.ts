@@ -1741,7 +1741,7 @@ export const restaurantApi = {
       }>
     >(`/restaurant/floors${q}`, { token: token() });
   },
-  createFloor(body: { locationId: string; name: string }) {
+  createFloor(body: { locationId: string; name: string; categoryIds?: string[]; taxRatePercent?: number | null; serviceChargePercent?: number | null }) {
     return apiRequest<{ id: string }>("/restaurant/floors", {
       method: "POST",
       body,
@@ -2055,6 +2055,7 @@ export const restaurantApi = {
         covers: number;
         startAt: string;
         status: string;
+        notes?: string | null;
         table: { id: string; name: string } | null;
       }>
     >(`/restaurant/reservations${q}`, { token: token() });
@@ -2066,6 +2067,7 @@ export const restaurantApi = {
     guestPhone?: string;
     covers?: number;
     startAt: string;
+    durationMinutes?: number;
     notes?: string;
   }) {
     return apiRequest("/restaurant/reservations", {
