@@ -106,7 +106,11 @@ export default function ForgotPasswordForm() {
   return (
     <AuthShell
       title="Forgot password"
-      subtitle="We’ll email a 6-digit OTP. Enter it with your new password."
+      subtitle={
+        step === "email"
+          ? "Enter your email address to receive an OTP."
+          : "Enter the OTP from your email, then choose a new password."
+      }
     >
       {step === "email" ? (
         <form

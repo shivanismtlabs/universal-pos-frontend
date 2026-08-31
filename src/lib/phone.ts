@@ -84,9 +84,10 @@ export function phoneValidationMessage(countryCode: string): string {
   const cc = asCountry(countryCode);
   try {
     const ex = getExampleNumber(cc, examples);
-    if (ex) {
-      const national = ex.formatNational().replace(/\D/g, "");
-      return `Example: ${national} (${cc})`;
+    // nationalNumber omits trunk prefix (IN "0") — dial code is shown separately in the UI.
+    const national = ex?.nationalNumber?.replace(/\D/g, "");
+    if (national) {
+      return `Enter ${national.length} digits, e.g. ${national}`;
     }
   } catch {
     /* ignore */
@@ -94,20 +95,25 @@ export function phoneValidationMessage(countryCode: string): string {
   return "Enter a valid mobile number for the selected country";
 }
 
+/**
+ * Simple local-input placeholder (dial code is shown in the country select).
+ * Avoids static sample numbers that look like pre-filled data.
+ */
 export function phonePlaceholder(
-  countryCode: string,
+  _countryCode?: string,
   _dial?: string,
 ): string {
-  const cc = asCountry(countryCode);
-  try {
-    const ex = getExampleNumber(cc, examples);
-    if (ex) return ex.formatNational().replace(/\D/g, "");
-  } catch {
-    /* ignore */
-  }
-  if (cc === "IN") return "9876543210";
-  if (cc === "US" || cc === "CA") return "5551234567";
-  return "Mobile number";
+  return "Enter phone number";
+}
+
+/** True when the stored value has national digits (not empty / dial-only). */
+export function phoneHasLocalDigits(
+  value: string,
+  fallbackCountry: string = "IN",
+): boolean {
+  return Boolean(
+    splitE164(value, fallbackCountry).local.replace(/\D/g, "").length,
+  );
 }
 
 /** Validate dial + local parts from PhoneCountryInput. */
@@ -122,7 +128,7 @@ export function validatePhoneParts(
   );
   const national = local.replace(/\D/g, "");
   if (!national) {
-    return { ok: false, message: "Phone is required" };
+    return { ok: false, message: "Please enter your phone number" };
   }
   const full = `${dial.startsWith("+") ? dial : `+${dial.replace(/\D/g, "")}`}${national}`;
   if (!validatePhoneForCountry(full, cc)) {

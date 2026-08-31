@@ -341,7 +341,7 @@ export default function LoginForm() {
             href="/signup"
             className="font-semibold text-[#1a56db] hover:underline"
           >
-            Request Access
+            Sign Up
           </Link>
         </p>
       </form>

@@ -3,6 +3,7 @@
 /**
  * Zoho-style signup — personal identity only.
  * Organization setup happens on /organizations after this.
+ * Validation matches Sign In: submit-time FieldError, no live borders/toasts.
  */
 import { useState } from "react";
 import { useForm } from "react-hook-form";
@@ -21,14 +22,12 @@ import {
   passwordStrength,
   type SignupIdentityInput,
 } from "@/lib/validations";
-import { filterPersonNameInput } from "@/lib/input-guards";
 import { authApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { applyPortalResponse } from "@/lib/auth-portal";
 import { cn } from "@/lib/utils";
 
-const fieldErr =
-  "border-[#fca5a5] focus:border-[#dc2626] focus:shadow-[0_0_0_3px_rgba(220,38,38,0.12)]";
+const authLabel = "text-[0.8125rem] font-semibold text-[#111827]";
 
 export default function SignupClient() {
   const router = useRouter();
@@ -39,11 +38,9 @@ export default function SignupClient() {
     handleSubmit,
     watch,
     setValue,
-    formState: { errors, isSubmitting, isValid },
+    formState: { errors, isSubmitting, isSubmitted },
   } = useForm<SignupIdentityInput>({
     resolver: zodResolver(signupIdentitySchema),
-    mode: "onChange",
-    reValidateMode: "onChange",
     defaultValues: {
       fullName: "",
       email: "",
@@ -58,26 +55,41 @@ export default function SignupClient() {
   const phone = watch("phone") ?? "";
   const strength = passwordStrength(password, { email });
   /** Signup has 6 rules (no shop slug). */
-  const signupScore = [
-    strength.checks.length,
-    strength.checks.lower,
-    strength.checks.upper,
-    strength.checks.number,
-    strength.checks.special,
-    strength.checks.noEmailPart,
-  ].filter(Boolean).length;
-  const strengthPct = Math.round((signupScore / 6) * 100);
-  const passwordMissing = [
-    !strength.checks.length && "At least 8 characters (max 72)",
-    !strength.checks.lower && "One lowercase letter (a–z)",
-    !strength.checks.upper && "One uppercase letter (A–Z)",
-    !strength.checks.number && "One number (0–9)",
-    !strength.checks.special && "One special character (!@#$…)",
-    !strength.checks.noEmailPart && "Must not contain your email name",
-  ].filter(Boolean) as string[];
-  const passwordOk = passwordMissing.length === 0 && password.length > 0;
-  const showPasswordHints =
-    password.length > 0 || Boolean(errors.password);
+  const passwordRules = [
+    {
+      id: "length",
+      ok: strength.checks.length,
+      label: "At least 8 characters (max 72)",
+    },
+    {
+      id: "lower",
+      ok: strength.checks.lower,
+      label: "One lowercase letter (a–z)",
+    },
+    {
+      id: "upper",
+      ok: strength.checks.upper,
+      label: "One uppercase letter (A–Z)",
+    },
+    {
+      id: "number",
+      ok: strength.checks.number,
+      label: "One number (0–9)",
+    },
+    {
+      id: "special",
+      ok: strength.checks.special,
+      label: "One special character (!@#$…)",
+    },
+    {
+      id: "noEmail",
+      ok: strength.checks.noEmailPart,
+      label: "Must not contain your email name",
+    },
+  ] as const;
+  const signupScore = passwordRules.filter((r) => r.ok).length;
+  const strengthPct = Math.round((signupScore / passwordRules.length) * 100);
+  const passwordOk = signupScore === passwordRules.length && password.length > 0;
 
   async function onSubmit(values: SignupIdentityInput) {
     try {
@@ -109,52 +121,34 @@ export default function SignupClient() {
       subtitle="Create your account, then set up your company and store."
     >
       <form
-        onSubmit={handleSubmit(onSubmit, () =>
-          toast.error("Please fix the highlighted fields"),
-        )}
-        className="space-y-4"
+        onSubmit={handleSubmit(onSubmit)}
+        className="space-y-5"
         noValidate
       >
         <div className="space-y-1.5">
-          <Label
-            htmlFor="fullName"
-            className="text-[0.8125rem] font-semibold text-[#111827]"
-          >
-            Full name *
+          <Label htmlFor="fullName" className={authLabel}>
+            Full name
           </Label>
           <Input
             id="fullName"
             autoComplete="name"
             placeholder="Your name"
-            className={cn("h-11 rounded-lg", errors.fullName && fieldErr)}
-            aria-invalid={Boolean(errors.fullName)}
-            {...register("fullName", {
-              onChange: (e) => {
-                const next = filterPersonNameInput(e.target.value);
-                setValue("fullName", next, { shouldValidate: true });
-              },
-            })}
+            className="h-11 rounded-lg"
+            {...register("fullName")}
           />
           <FieldError message={errors.fullName?.message} />
-          <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
-            Letters only — no numbers or special characters
-          </p>
         </div>
 
         <div className="space-y-1.5">
-          <Label
-            htmlFor="email"
-            className="text-[0.8125rem] font-semibold text-[#111827]"
-          >
-            Email *
+          <Label htmlFor="email" className={authLabel}>
+            Email
           </Label>
           <Input
             id="email"
             type="email"
             autoComplete="email"
             placeholder="name@company.com"
-            className={cn("h-11 rounded-lg", errors.email && fieldErr)}
-            aria-invalid={Boolean(errors.email)}
+            className="h-11 rounded-lg"
             {...register("email")}
           />
           <FieldError message={errors.email?.message} />
@@ -163,32 +157,29 @@ export default function SignupClient() {
         <div className="space-y-1.5">
           <PhoneCountryInput
             label="Phone"
-            required
+            labelClassName={authLabel}
+            liveValidate={false}
             value={phone}
             error={errors.phone?.message}
             onChange={(v) =>
-              setValue("phone", v, { shouldValidate: true, shouldDirty: true })
+              setValue("phone", v, {
+                shouldDirty: true,
+                shouldValidate: isSubmitted,
+              })
             }
           />
         </div>
 
         <div className="space-y-1.5">
-          <Label
-            htmlFor="password"
-            className="text-[0.8125rem] font-semibold text-[#111827]"
-          >
-            Password *
+          <Label htmlFor="password" className={authLabel}>
+            Password
           </Label>
           <div className="relative">
             <Input
               id="password"
               type={showPassword ? "text" : "password"}
               autoComplete="new-password"
-              className={cn(
-                "h-11 rounded-lg pr-16",
-                errors.password && fieldErr,
-              )}
-              aria-invalid={Boolean(errors.password)}
+              className="h-11 rounded-lg pr-16"
               {...register("password")}
             />
             <button
@@ -199,9 +190,32 @@ export default function SignupClient() {
               {showPassword ? "Hide" : "Show"}
             </button>
           </div>
-          {showPasswordHints ? (
+          <FieldError message={errors.password?.message} />
+          {password.length > 0 ? (
             <>
-              <div className="h-1 overflow-hidden rounded-full bg-[#eef2f8]">
+              <p className="mt-1.5 text-[0.7rem] font-medium text-[#64748b]">
+                Password must include:
+              </p>
+              <ul className="mt-1 space-y-0.5 text-[0.75rem]" aria-live="polite">
+                {passwordRules.map((rule) => (
+                  <li
+                    key={rule.id}
+                    className={cn(
+                      rule.ok
+                        ? "text-[#15803d]"
+                        : errors.password
+                          ? "text-[#b91c1c]"
+                          : "text-[#64748b]",
+                    )}
+                  >
+                    <span aria-hidden="true" className="mr-1.5">
+                      {rule.ok ? "✓" : "•"}
+                    </span>
+                    {rule.label}
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-2 h-1 overflow-hidden rounded-full bg-[#eef2f8]">
                 <div
                   className={cn(
                     "h-full rounded-full transition-all",
@@ -218,37 +232,20 @@ export default function SignupClient() {
                 <p className="mt-1 text-[0.75rem] text-[#15803d]">
                   Password looks good
                 </p>
-              ) : (
-                <ul
-                  className="mt-1 space-y-0.5 text-[0.75rem] text-[#b91c1c]"
-                  role="alert"
-                >
-                  {passwordMissing.map((line) => (
-                    <li key={line}>{line}</li>
-                  ))}
-                </ul>
-              )}
+              ) : null}
             </>
           ) : null}
-          <FieldError message={errors.password?.message} />
         </div>
 
         <div className="space-y-1.5">
-          <Label
-            htmlFor="confirmPassword"
-            className="text-[0.8125rem] font-semibold text-[#111827]"
-          >
-            Confirm password *
+          <Label htmlFor="confirmPassword" className={authLabel}>
+            Confirm password
           </Label>
           <Input
             id="confirmPassword"
             type={showPassword ? "text" : "password"}
             autoComplete="new-password"
-            className={cn(
-              "h-11 rounded-lg",
-              errors.confirmPassword && fieldErr,
-            )}
-            aria-invalid={Boolean(errors.confirmPassword)}
+            className="h-11 rounded-lg"
             {...register("confirmPassword")}
           />
           <FieldError message={errors.confirmPassword?.message} />
@@ -262,7 +259,7 @@ export default function SignupClient() {
         <Button
           type="submit"
           className="h-11 w-full rounded-lg text-[0.9375rem] font-semibold"
-          disabled={isSubmitting || !isValid}
+          disabled={isSubmitting}
         >
           {isSubmitting ? "Creating account…" : "Create workspace"}
         </Button>

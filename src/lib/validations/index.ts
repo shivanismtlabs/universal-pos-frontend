@@ -17,7 +17,7 @@ export const strongPasswordSchema = z
 export const phoneSchema = z
   .string()
   .trim()
-  .min(1, "Phone is required")
+  .min(1, "Please enter your phone number")
   .max(18, "Phone is too long")
   .refine((v) => validatePhoneE164(v), {
     message: "Enter a valid phone number for the selected country",
@@ -61,7 +61,6 @@ export const signupIdentitySchema = z
       .string()
       .trim()
       .toLowerCase()
-      .min(1, "Email is required")
       .email("Enter a valid email")
       .max(255),
     password: strongPasswordSchema,

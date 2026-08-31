@@ -42,7 +42,7 @@ import { GETTING_STARTED_PATH } from "@/lib/setup-return";
 import { TotpChallengeForm, is2faChallenge } from "@/components/totp-challenge-form";
 import { cn } from "@/lib/utils";
 import { geoStates, isKnownGeoState, splitE164 } from "@/lib/geo";
-import { validatePhoneForCountry } from "@/lib/phone";
+import { phoneHasLocalDigits, validatePhoneForCountry } from "@/lib/phone";
 import { CountryStateFields } from "@/components/country-state-fields";
 import { PhoneCountryInput } from "@/components/phone-country-input";
 import { citiesForState, isPostalValidForIndianCity } from "@/lib/india-locations";
@@ -69,7 +69,7 @@ const createOrgSchema = z
     phone: z
       .string()
       .trim()
-      .min(1, "Phone is required")
+      .min(1, "Please enter your phone number")
       .max(22, "Phone is too long"),
     addressLine1: z
       .string()
@@ -404,7 +404,7 @@ function OrganizationsPageInner() {
 
   const form = useForm<CreateForm>({
     resolver: zodResolver(createOrgSchema),
-    mode: "onChange",
+    mode: "onTouched",
     reValidateMode: "onChange",
     defaultValues: {
       businessType: "",
@@ -451,11 +451,12 @@ function OrganizationsPageInner() {
 
   useEffect(() => {
     if (!hydrated) return;
+    // Prefill only — do not validate the whole form (empty phone would flash "required").
     if (identity?.phone) {
-      form.setValue("phone", identity.phone, { shouldValidate: true });
+      form.setValue("phone", identity.phone, { shouldValidate: false });
     }
     if (identity?.email) {
-      form.setValue("email", identity.email, { shouldValidate: true });
+      form.setValue("email", identity.email, { shouldValidate: false });
     }
   }, [hydrated, identity?.phone, identity?.email, form]);
 
@@ -1022,10 +1023,30 @@ function OrganizationsPageInner() {
                       required
                       fallbackCountry={form.watch("countryCode") || "IN"}
                       value={form.watch("phone") ?? ""}
-                      error={form.formState.errors.phone?.message}
-                      onChange={(v) =>
-                        form.setValue("phone", v, { shouldValidate: true })
+                      error={
+                        form.formState.touchedFields.phone ||
+                        form.formState.isSubmitted
+                          ? form.formState.errors.phone?.message
+                          : undefined
                       }
+                      onChange={(v) => {
+                        const hasLocal = phoneHasLocalDigits(
+                          v,
+                          form.getValues("countryCode") || "IN",
+                        );
+                        const submitted = form.formState.isSubmitted;
+                        form.setValue("phone", v, {
+                          shouldDirty: true,
+                          shouldTouch: hasLocal || submitted,
+                          shouldValidate:
+                            submitted ||
+                            (hasLocal &&
+                              Boolean(form.formState.touchedFields.phone)),
+                        });
+                        if (!hasLocal && !submitted) {
+                          form.clearErrors("phone");
+                        }
+                      }}
                     />
                   </div>
                   <div>
