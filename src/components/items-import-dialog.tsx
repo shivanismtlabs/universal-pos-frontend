@@ -13,7 +13,7 @@ export type ImportableRow = {
   title: string;
   sku: string;
   categoryName?: string;
-  sellUnit?: "pcs" | "pack" | "kg" | "g" | "L" | "ml";
+  sellUnit?: string;
   price: number;
   qty?: number;
   description?: string;
@@ -23,16 +23,21 @@ export type ImportableRow = {
   reorderPoint?: number;
   hsnOrSac?: string;
   trackInventory?: boolean;
+  /** goods (default) | service */
+  itemType?: "goods" | "service";
+  durationMinutes?: number;
   image?: string;
 };
 
 const TEMPLATE_HEADERS = [
   "name",
   "sku",
+  "type",
   "category",
   "unit",
   "selling_price",
   "opening_stock",
+  "duration_minutes",
   "cost_price",
   "barcode",
   "manufacturer",
@@ -91,6 +96,7 @@ function mapHeader(h: string): string | null {
     title: "title",
     item_name: "title",
     product: "title",
+    service_name: "title",
     sku: "sku",
     item_sku: "sku",
     category: "categoryName",
@@ -121,6 +127,14 @@ function mapHeader(h: string): string | null {
     inventory_tracked: "trackInventory",
     reorder_point: "reorderPoint",
     reorder: "reorderPoint",
+    type: "itemType",
+    item_type: "itemType",
+    kind: "itemType",
+    product_type: "itemType",
+    duration_minutes: "durationMinutes",
+    duration: "durationMinutes",
+    duration_min: "durationMinutes",
+    minutes: "durationMinutes",
     image_url: "image",
     image: "image",
     photo_url: "image",
@@ -131,6 +145,40 @@ function mapHeader(h: string): string | null {
     img_url: "image",
   };
   return aliases[n] ?? null;
+}
+
+function parseItemType(
+  raw: string | undefined,
+  unitRaw: string,
+): "goods" | "service" {
+  const t = (raw ?? "").trim().toLowerCase();
+  if (
+    t === "service" ||
+    t === "services" ||
+    t === "svc" ||
+    t === "serv" ||
+    t === "labour" ||
+    t === "labor"
+  ) {
+    return "service";
+  }
+  if (t === "goods" || t === "good" || t === "product" || t === "physical") {
+    return "goods";
+  }
+  // Infer from unit when type column missing
+  const u = unitRaw.trim().toLowerCase();
+  if (
+    u === "service" ||
+    u === "min" ||
+    u === "minute" ||
+    u === "minutes" ||
+    u === "hour" ||
+    u === "hr" ||
+    u === "session"
+  ) {
+    return "service";
+  }
+  return "goods";
 }
 
 export function rowsFromTable(table: string[][]): ImportableRow[] {
@@ -149,8 +197,9 @@ export function rowsFromTable(table: string[][]): ImportableRow[] {
       if (key) obj[key] = String(cells[i] ?? "");
     });
     if (!obj.title?.trim() && !obj.sku?.trim()) continue;
-    const unitRaw = (obj.sellUnit || "pcs").toLowerCase();
-    const unitMap: Record<string, ImportableRow["sellUnit"]> = {
+    const unitRaw = (obj.sellUnit || "").toLowerCase();
+    const itemType = parseItemType(obj.itemType, unitRaw);
+    const unitMap: Record<string, string> = {
       pcs: "pcs",
       piece: "pcs",
       pieces: "pcs",
@@ -162,28 +211,43 @@ export function rowsFromTable(table: string[][]): ImportableRow[] {
       liter: "L",
       litre: "L",
       ml: "ml",
+      service: "service",
+      min: "min",
+      minute: "min",
+      minutes: "min",
+      hour: "hour",
+      hr: "hour",
+      day: "day",
+      session: "service",
     };
     const qty =
       obj.qty !== undefined && obj.qty !== "" ? Number(obj.qty) : 0;
     const trackRaw = (obj.trackInventory ?? "").trim().toLowerCase();
-    // CSV goods default to tracking ON. Only explicit false/no/off/0 turns it off.
-    // Do not treat single-letter "n" as off (misaligned cells caused "Not counted").
     let trackInventory = !["false", "no", "off", "0"].includes(trackRaw);
-    // Any opening stock value (including 0 in the opening_stock column) ⇒ count stock.
     if (obj.qty !== undefined && obj.qty !== "" && Number.isFinite(qty) && qty >= 0) {
       trackInventory = true;
+    }
+    if (itemType === "service") {
+      trackInventory = false;
     }
     const price = Number(obj.price);
     if (!(price > 0)) {
       throw new Error(`Row ${r + 1}: selling_price must be > 0`);
     }
+    const durationRaw = (obj.durationMinutes ?? "").trim();
+    const durationMinutes =
+      durationRaw !== "" && Number.isFinite(Number(durationRaw))
+        ? Number(durationRaw)
+        : undefined;
     out.push({
       title: obj.title?.trim() || "",
       sku: obj.sku?.trim() || "",
       categoryName: obj.categoryName?.trim() || undefined,
-      sellUnit: unitMap[unitRaw] ?? "pcs",
+      sellUnit:
+        unitMap[unitRaw] ??
+        (itemType === "service" ? "service" : unitRaw || "pcs"),
       price,
-      qty: Number.isFinite(qty) ? qty : 0,
+      qty: itemType === "service" ? 0 : Number.isFinite(qty) ? qty : 0,
       description: obj.description?.trim() || undefined,
       manufacturer: obj.manufacturer?.trim() || undefined,
       barcode: obj.barcode?.trim() || undefined,
@@ -197,6 +261,13 @@ export function rowsFromTable(table: string[][]): ImportableRow[] {
           : undefined,
       hsnOrSac: obj.hsnOrSac?.trim() || undefined,
       trackInventory,
+      itemType,
+      durationMinutes:
+        itemType === "service" &&
+        durationMinutes != null &&
+        durationMinutes > 0
+          ? durationMinutes
+          : undefined,
       image: obj.image?.trim() || undefined,
     });
   }
@@ -238,10 +309,12 @@ export function downloadItemsTemplate() {
     [
       "USB-C Cable 1m",
       "USBC-1M",
+      "goods",
       "Accessories",
       "pcs",
       "199",
       "25",
+      "",
       "90",
       "8901234567890",
       "Generic",
@@ -252,16 +325,34 @@ export function downloadItemsTemplate() {
     [
       "Organic Almond Milk 1L",
       "ALM-MILK-1L",
+      "goods",
       "Beverages",
       "L",
       "145",
       "12.5",
+      "",
       "98",
       "",
       "Farm Co",
       "",
       "true",
       "https://images.unsplash.com/photo-1550583724-b2692b85b150",
+    ],
+    [
+      "Haircut 30 min",
+      "HAIR-30",
+      "service",
+      "Hair",
+      "service",
+      "499",
+      "0",
+      "30",
+      "",
+      "",
+      "",
+      "",
+      "false",
+      "",
     ],
   ]);
 }
@@ -304,6 +395,9 @@ export function ItemsImportDialog({
       void qc.invalidateQueries({ queryKey: ["catalog-products"] });
       void qc.invalidateQueries({ queryKey: ["catalog-products-home"] });
       void qc.invalidateQueries({ queryKey: ["pos-sale-catalog"] });
+      void qc.invalidateQueries({ queryKey: ["services-catalog"] });
+      void qc.invalidateQueries({ queryKey: ["services-summary"] });
+      void qc.invalidateQueries({ queryKey: ["catalog-services-for-rental"] });
       toast.success(
         `Imported ${res.imported} item${res.imported === 1 ? "" : "s"}${
           res.failed ? ` · ${res.failed} failed` : ""
@@ -420,8 +514,10 @@ export function ItemsImportDialog({
               <ul className="mt-2 max-h-36 space-y-1 overflow-y-auto text-[#5a6b7d]">
                 {preview.slice(0, 8).map((r) => (
                   <li key={r.sku} className="truncate">
-                    {r.title} · <span className="font-mono">{r.sku}</span> · ₹
+                    {r.title} · <span className="font-mono">{r.sku}</span> ·{" "}
+                    {r.itemType === "service" ? "service" : "goods"} · ₹
                     {r.price}
+                    {r.durationMinutes ? ` · ${r.durationMinutes}m` : ""}
                     {r.image ? " · photo" : ""}
                   </li>
                 ))}
@@ -432,9 +528,11 @@ export function ItemsImportDialog({
             </div>
           ) : (
             <p className="text-[0.78rem] leading-relaxed text-[#8b9bb0]">
-              Required columns: <strong>name</strong>, <strong>sku</strong>,{" "}
-              <strong>selling_price</strong>. Optional: category, unit,
-              opening_stock, cost_price, barcode, manufacturer, hsn,
+              Required: <strong>name</strong>, <strong>sku</strong>,{" "}
+              <strong>selling_price</strong>. For services set{" "}
+              <strong>type</strong>=<code>service</code> (or unit{" "}
+              <code>service</code> / <code>min</code>). Optional: category,
+              unit, opening_stock, duration_minutes, cost_price, barcode,
               track_inventory, image_url.
             </p>
           )}

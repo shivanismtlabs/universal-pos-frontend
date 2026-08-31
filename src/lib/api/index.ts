@@ -2839,7 +2839,7 @@ export const posApi = {
       sku: string;
       categoryName?: string;
       categoryId?: string;
-      sellUnit?: "pcs" | "pack" | "kg" | "g" | "L" | "ml";
+      sellUnit?: string;
       price: number;
       qty?: number;
       description?: string;
@@ -2849,6 +2849,8 @@ export const posApi = {
       reorderPoint?: number;
       hsnOrSac?: string;
       trackInventory?: boolean;
+      itemType?: "goods" | "service";
+      durationMinutes?: number;
       image?: string;
       photoUrl?: string;
     }>;
