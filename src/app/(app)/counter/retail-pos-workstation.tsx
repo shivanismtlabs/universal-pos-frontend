@@ -4045,13 +4045,20 @@ export default function RetailPosWorkstation({
                         (t) =>
                           floorFilter === "all" || t.floorId === floorFilter,
                       )
-                      .map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.floorName ? `${t.floorName} · ` : ""}
-                          {t.name}
-                          {t.status !== "available" ? ` · ${t.status}` : ""}
-                        </option>
-                      ))}
+                      .map((t) => {
+                        const isAssignable = t.status === "available" && !t.currentOrderId;
+                        return (
+                          <option
+                            key={t.id}
+                            value={t.id}
+                            disabled={!isAssignable}
+                          >
+                            {t.floorName ? `${t.floorName} · ` : ""}
+                            {t.name}
+                            {!isAssignable ? ` [${(t.status || "UNAVAILABLE").toUpperCase()} - NOT ASSIGNABLE]` : ""}
+                          </option>
+                        );
+                      })}
                   </Select>
                   {areaCategoryIds.length ||
                   selectedDiningFloor?.taxRatePercent != null ||

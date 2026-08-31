@@ -52,6 +52,7 @@ export default function RestaurantSetupPage() {
     onSuccess: () => {
       toast.success("Dining settings saved");
       void qc.invalidateQueries({ queryKey: ["restaurant-config"] });
+      void qc.refetchQueries({ queryKey: ["restaurant-config"] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -209,6 +210,12 @@ export default function RestaurantSetupPage() {
                 hint="Ingredients consume at checkout"
                 checked={data.recipesEnabled}
                 onChange={(v) => save.mutate({ recipesEnabled: v })}
+              />
+              <DiningToggle
+                label="Seating-based reservation"
+                hint="Matches guest count with table capacity, preferring the smallest suitable table automatically while allowing manual selection of any table with equal or greater capacity."
+                checked={Boolean((data as Record<string, unknown>).seatingBasedReservation)}
+                onChange={(v) => save.mutate({ seatingBasedReservation: v })}
               />
             </div>
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
