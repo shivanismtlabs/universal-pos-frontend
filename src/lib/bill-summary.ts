@@ -151,12 +151,14 @@ export function buildBillSummary(input: {
   const taxInclusive = Boolean(input.taxInclusive);
   const applyRoundOff = input.applyRoundOff !== false;
 
-  // Display order (payment + print): Total → Taxable value (label) → CGST/SGST → Discount → Net Payable
+  // Display order (payment + print): Total → Taxable value → CGST/SGST → Discount → Net Payable
   // Charge math: Items → Discount → Net → (+fees) → Taxable → Tax → Grand → Round off
   const merchandiseAndFees = itemsSubtotal + feesTotal;
   const discountAll = discount + loyaltyOff;
   const netAmount = Math.max(0, itemsSubtotal - discountAll);
-  const taxableValue = Math.max(0, merchandiseAndFees - discountAll);
+  const taxableValue = taxInclusive
+    ? Math.max(0, merchandiseAndFees - discountAll - taxTotal)
+    : Math.max(0, merchandiseAndFees - discountAll);
 
   // Exclusive: grand adds tax on top of net; inclusive: tax already in item prices.
   const grand = taxInclusive

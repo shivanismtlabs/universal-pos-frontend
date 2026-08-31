@@ -44,10 +44,12 @@ import {
 } from "@/lib/product-form-fields";
 import {
   CatalogItemShopForm,
+  DEFAULT_SERVICE_DURATION_MINUTES,
   type CatalogItemShopValues,
 } from "@/components/catalog-item-shop-form";
 import type { UnitPricingValue } from "@/components/unit-pricing-fields";
 import { formatQtyWithUnit, normalizeQty } from "@/lib/sell-units";
+import type { MetaFieldDef } from "@/lib/business-config";
 import {
   GETTING_STARTED_PATH,
   readReturnToParam,
@@ -114,8 +116,23 @@ function buildExtraFieldsPayload(
       else if (opts?.clearEmpty) out.foodType = null;
       continue;
     }
+    if (f.key === "durationMinutes") {
+      const n = Number(v);
+      if (v && Number.isFinite(n) && n > 0) {
+        out.durationMinutes = Math.round(n);
+      } else if (opts?.clearEmpty) {
+        out.durationMinutes = null;
+      }
+      continue;
+    }
     if (v) out[f.key] = v;
     else if (opts?.clearEmpty) out[f.key] = null;
+  }
+  // Service duration even if field list omitted it
+  if (form.kind === "service" && out.durationMinutes === undefined) {
+    const n = Number((extraFields.durationMinutes ?? "").trim());
+    if (Number.isFinite(n) && n > 0) out.durationMinutes = Math.round(n);
+    else if (opts?.clearEmpty) out.durationMinutes = null;
   }
   if (catalogNeedsPackedContents(form.kind, form.unitOfMeasure)) {
     const n = Number(form.multiUnitBaseQty);
@@ -248,10 +265,19 @@ export function CatalogItemEditor() {
     queryFn: () => customFieldsApi.listProductDefinitions(),
     ...CUSTOM_FIELD_QUERY,
   });
-  const productFormFields = useMemo(
-    () => mergeProductFormFields(customFieldsQ.data, itemMetaFields),
-    [customFieldsQ.data, itemMetaFields],
-  );
+  const productFormFields = useMemo(() => {
+    const merged = mergeProductFormFields(customFieldsQ.data, itemMetaFields);
+    if (merged.some((f) => f.key === "durationMinutes")) return merged;
+    const durationField: MetaFieldDef = {
+      key: "durationMinutes",
+      label: "Duration (minutes)",
+      type: "number",
+      required: false,
+      entity: "item",
+      hint: "Typical appointment / service length",
+    };
+    return [...merged, durationField];
+  }, [customFieldsQ.data, itemMetaFields]);
   const cats = useQuery({
     queryKey: ["catalog-categories"],
     queryFn: () => catalogApi.listCategories(),
@@ -303,6 +329,17 @@ export function CatalogItemEditor() {
         : { ...prev, unitOfMeasure: preferred },
     );
   }, [isEdit, businessType, form.kind]);
+
+  // New service: default duration 30 min when empty (salon / any service item)
+  useEffect(() => {
+    if (isEdit) return;
+    if (form.kind !== "service") return;
+    setExtraFields((prev) =>
+      (prev.durationMinutes ?? "").trim()
+        ? prev
+        : { ...prev, durationMinutes: DEFAULT_SERVICE_DURATION_MINUTES },
+    );
+  }, [isEdit, form.kind]);
 
   useEffect(() => {
     if (!isEdit) unitDefaultedRef.current = false;

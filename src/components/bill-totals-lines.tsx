@@ -5,7 +5,7 @@ import type { BillSummary } from "@/lib/bill-summary";
 
 /**
  * Payment panel + printed bill share this order:
- * Total → Taxable value (label only) → CGST/SGST → Discount → Net Payable
+ * Total → Taxable value → CGST/SGST → Discount → Net Payable
  */
 export function BillTotalsLines({
   summary,
@@ -55,8 +55,11 @@ export function BillTotalsLines({
       {extraAfterTotal}
       {summary.taxTotal > 0 ? (
         <>
-          <div className="pt-0.5 text-sm font-medium text-[#5a6b7d]">
-            Taxable value
+          <div className={row}>
+            <span>Taxable value</span>
+            <span className="tabular-nums">
+              {formatMoney(summary.taxableValue)}
+            </span>
           </div>
           {summary.taxSlabs.map((s) =>
             s.rate <= 0 ? (

@@ -181,6 +181,10 @@ const fieldSelect =
 const textareaClass =
   "min-h-[72px] w-full rounded-lg border border-[#d9e0ea] bg-white px-3 py-2 text-sm outline-none focus:border-[#1a56db] focus:shadow-[0_0_0_3px_rgba(26,86,219,0.12)]";
 
+/** Common salon / appointment lengths — also allows custom minutes. */
+export const SERVICE_DURATION_PRESETS = [15, 30, 45, 60, 90, 120] as const;
+export const DEFAULT_SERVICE_DURATION_MINUTES = "30";
+
 export type CatalogItemShopValues = {
   name: string;
   shortName: string;
@@ -441,6 +445,8 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
     "barcode",
     "unit",
     "price",
+    // Shown as dedicated Duration control when Type = Service
+    ...(form.kind === "service" ? (["durationMinutes"] as const) : []),
     ...(showPackedContents ? ["packSize"] : []),
   ]);
   const otherFormFields = productFormFields.filter(
@@ -582,13 +588,23 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                     <button
                       key={k.id}
                       type="button"
-                      onClick={() =>
+                      onClick={() => {
                         setForm((f) =>
                           f.kind === k.id
                             ? f
                             : applyCatalogKindDefaults(f, k.id),
-                        )
-                      }
+                        );
+                        if (k.id === "service") {
+                          setExtraFields((prev) =>
+                            (prev.durationMinutes ?? "").trim()
+                              ? prev
+                              : {
+                                  ...prev,
+                                  durationMinutes: DEFAULT_SERVICE_DURATION_MINUTES,
+                                },
+                          );
+                        }
+                      }}
                       className={cn(
                         "rounded-md border px-3 py-1.5 text-sm font-medium transition",
                         form.kind === k.id
@@ -708,8 +724,10 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                     <FieldError message={fieldErrors.unitOfMeasure} />
                   ) : (
                     <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
-                      Stock &amp; rate use this unit — pcs, kg, L, hour, day, and
-                      more (any business).{" "}
+                      {form.kind === "service"
+                        ? "Billing unit for the service (Service, Minute, Hour…). Appointment length is set in Duration below."
+                        : "Stock & rate use this unit — pcs, kg, L, min, hour, day, and more (any business). "}
+                      {form.kind === "service" ? " " : null}
                       <Link href="/settings/units" className="text-[#1a56db]">
                         Settings → Units
                       </Link>
@@ -738,6 +756,77 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                   ))}
                 </Select>
               </ShopField>
+
+              {form.kind === "service" ? (
+                <ShopField
+                  label="Duration"
+                  htmlFor="catalog-item-duration-minutes"
+                  hint={
+                    fieldErrors.durationMinutes ? (
+                      <FieldError message={fieldErrors.durationMinutes} />
+                    ) : (
+                      <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+                        How long this service usually takes — used for
+                        appointments and scheduling (e.g. 30 min haircut).
+                      </p>
+                    )
+                  }
+                >
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap gap-1.5">
+                      {SERVICE_DURATION_PRESETS.map((mins) => {
+                        const selected =
+                          String(extraFields.durationMinutes ?? "").trim() ===
+                          String(mins);
+                        return (
+                          <button
+                            key={mins}
+                            type="button"
+                            onClick={() => {
+                              clearFieldError("durationMinutes");
+                              setExtraFields((prev) => ({
+                                ...prev,
+                                durationMinutes: String(mins),
+                              }));
+                            }}
+                            className={cn(
+                              "rounded-md border px-2.5 py-1 text-[0.8125rem] font-medium transition",
+                              selected
+                                ? "border-[#1a56db] bg-[#e8eefb] text-[#1a56db]"
+                                : "border-[#d9e0ea] bg-white text-[#5a6b7d] hover:border-[#c5d0e0]",
+                            )}
+                          >
+                            {mins} min
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="catalog-item-duration-minutes"
+                        name="durationMinutes"
+                        type="number"
+                        min={1}
+                        max={24 * 60}
+                        step={1}
+                        inputMode="numeric"
+                        placeholder="Custom"
+                        className="max-w-[8rem]"
+                        value={extraFields.durationMinutes ?? ""}
+                        onChange={(e) => {
+                          clearFieldError("durationMinutes");
+                          const raw = e.target.value;
+                          setExtraFields((prev) => ({
+                            ...prev,
+                            durationMinutes: raw,
+                          }));
+                        }}
+                      />
+                      <span className="text-sm text-[#5a6b7d]">minutes</span>
+                    </div>
+                  </div>
+                </ShopField>
+              ) : null}
 
               {unitPricing && onUnitPricingChange ? (
                 <div className="sm:col-span-2">

@@ -542,7 +542,8 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
         tax: {
           ratePercent:
             parsed.data.taxMode === "none" ? 0 : parsed.data.ratePercent,
-          inclusive: parsed.data.inclusive,
+          inclusive:
+            parsed.data.taxMode === "in_gst" ? false : parsed.data.inclusive,
           receiptFooter: receiptFooter.trim(),
         },
       });
@@ -1343,17 +1344,18 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
               <label className="flex items-center gap-2 text-sm text-[#0b1f33]">
                 <input
                   type="checkbox"
-                  checked={tax.inclusive}
+                  checked={tax.taxMode === "in_gst" ? false : tax.inclusive}
                   onChange={(e) =>
                     setTax((t) => ({ ...t, inclusive: e.target.checked }))
                   }
-                  disabled={tax.taxMode === "none"}
+                  disabled={tax.taxMode === "none" || tax.taxMode === "in_gst"}
                 />
                 Catalog prices include tax
               </label>
               <p className="text-[0.75rem] text-[#8b9bb0]">
-                Off = tax is added on top of ticket due (recommended). On =
-                prices already include tax, so Due matches Subtotal.
+                {tax.taxMode === "in_gst"
+                  ? "India GST is added on the listed price (CGST + SGST). Net Payable = Total + tax."
+                  : "Off = tax is added on top of ticket due (recommended). On = prices already include tax, so Due matches Subtotal."}
               </p>
           <Button
             disabled={saveTax.isPending}

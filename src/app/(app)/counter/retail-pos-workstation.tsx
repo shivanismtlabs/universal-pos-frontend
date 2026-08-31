@@ -225,9 +225,14 @@ export default function RetailPosWorkstation({
       : mode === "vat"
         ? 20
         : 5;
+    const inclusiveFlag =
+      settings?.tax?.inclusive === true ||
+      (settings as { taxInclusive?: boolean } | undefined)?.taxInclusive ===
+        true;
     return {
       rate: Math.min(40, Math.max(0, ratePercent)) / 100,
-      inclusive: settings?.tax?.inclusive === true,
+      // India GST: listed price is exclusive — add CGST/SGST on Net Payable
+      inclusive: mode === "in_gst" ? false : inclusiveFlag,
     };
   }, [boot?.tenant]);
 
@@ -3263,7 +3268,7 @@ export default function RetailPosWorkstation({
                 discount={totalDiscountShown}
                 loyaltyOff={loyaltyOff}
                 formatMoney={money}
-                netAmount={splitPart ? chargeAmount : totalDue}
+                netAmount={splitPart ? chargeAmount : billSummary.amountDue}
               />
               {splitPart || stillDueAfter > 0.001 ? (
                 <p className="text-sm text-[#1341a8]">
