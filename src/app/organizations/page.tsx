@@ -41,7 +41,6 @@ import { defaultHomeForRoles } from "@/lib/roles";
 import { GETTING_STARTED_PATH } from "@/lib/setup-return";
 import { TotpChallengeForm, is2faChallenge } from "@/components/totp-challenge-form";
 import { cn } from "@/lib/utils";
-import { phoneSchema } from "@/lib/validations";
 import { geoStates, isKnownGeoState, splitE164 } from "@/lib/geo";
 import { validatePhoneForCountry } from "@/lib/phone";
 import { CountryStateFields } from "@/components/country-state-fields";
@@ -160,27 +159,12 @@ const createOrgSchema = z
         message: "Enter your business type (at least 2 characters)",
       });
     }
-    if (!v.phone.trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["phone"],
-        message: "Phone is required",
-      });
-    } else if (!validatePhoneForCountry(v.phone, v.countryCode)) {
+    if (v.phone.trim() && !validatePhoneForCountry(v.phone, v.countryCode)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["phone"],
         message: "Enter a valid phone number for the selected country",
       });
-    } else {
-      const parsed = phoneSchema.safeParse(v.phone);
-      if (!parsed.success) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["phone"],
-          message: parsed.error.issues[0]?.message ?? "Enter a valid phone",
-        });
-      }
     }
     if (!isKnownGeoState(v.countryCode, v.state) && geoStates(v.countryCode).length) {
       ctx.addIssue({
@@ -1034,16 +1018,14 @@ function OrganizationsPageInner() {
                   </div>
                   <div>
                     <PhoneCountryInput
-                      label="Phone *"
+                      label="Phone"
                       required
                       fallbackCountry={form.watch("countryCode") || "IN"}
                       value={form.watch("phone") ?? ""}
+                      error={form.formState.errors.phone?.message}
                       onChange={(v) =>
                         form.setValue("phone", v, { shouldValidate: true })
                       }
-                    />
-                    <FieldError
-                      message={form.formState.errors.phone?.message}
                     />
                   </div>
                   <div>

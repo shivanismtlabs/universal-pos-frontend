@@ -27,8 +27,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { ModeBadge } from "@/components/mode-badge";
 import { ProductThumb } from "@/components/product-thumb";
+import { PageHeader } from "@/components/page-header";
 import { FoodTypeBadge } from "@/components/food-type-badge";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { catalogStockOnHandLabel, productKindLabel } from "@/lib/product-kind";
@@ -86,7 +86,8 @@ export default function CatalogPage() {
 function CatalogPageInner() {
   const search = useSearchParams();
   const router = useRouter();
-  const { hasMode, hasScreen, commerceModes } = useBootstrap();
+  const { hasMode, hasScreen } = useBootstrap();
+  const [importOpen, setImportOpen] = useState(false);
   const showStockTab = hasMode("sale") && hasScreen("inventory");
   const [tab, setTab] = useState<Tab>(() => {
     const parsed = parseTab(search.get("tab"));
@@ -120,17 +121,30 @@ function CatalogPageInner() {
 
   return (
     <div className="space-y-4 px-3 sm:px-4">
-      <header className="flex flex-wrap items-end justify-between gap-3 border-b border-[#eef1f4] pb-3">
-        <div className="min-w-0">
-          <p className="eyebrow">Inventory</p>
-          <h1 className="page-title mt-1">Product catalog</h1>
-          <p className="page-subtitle mt-1.5">
-            What you sell · rent · service — stock quantities live under Stock
-            levels
-          </p>
-        </div>
-        {commerceModes[0] ? <ModeBadge mode={commerceModes[0]} /> : null}
-      </header>
+      <PageHeader
+        eyebrow="Inventory"
+        title="Product catalog"
+        subtitle="What you sell, rent, or service. Stock quantities live under Stock levels."
+        action={
+          tab === "products" ? (
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setImportOpen(true)}
+              >
+                Import Items
+              </Button>
+              <Button asChild>
+                <Link href="/catalog/new">
+                  <Plus className="size-4" />
+                  New Item
+                </Link>
+              </Button>
+            </div>
+          ) : undefined
+        }
+      />
 
       <div className="flex flex-wrap gap-1 border-b border-[#eef1f4]">
         {catalogTabs.map(([id, label]) => (
@@ -150,7 +164,9 @@ function CatalogPageInner() {
         ))}
       </div>
 
-      {tab === "products" ? <ProductsPanel /> : null}
+      {tab === "products" ? (
+        <ProductsPanel onImportOpen={setImportOpen} />
+      ) : null}
       {tab === "brands" ? <BrandsPanel /> : null}
       {tab === "categories" ? <CategoriesPanel /> : null}
       {tab === "stock" ? (
@@ -174,12 +190,20 @@ function CatalogPageInner() {
             </Button>
           </div>
         </div>
-              ) : null}
+      ) : null}
+      <ItemsImportDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+      />
     </div>
   );
 }
 
-function ProductsPanel() {
+function ProductsPanel({
+  onImportOpen,
+}: {
+  onImportOpen: (open: boolean) => void;
+}) {
   const router = useRouter();
   const qc = useQueryClient();
   const tenantId = useAuthStore((s) => s.user?.tenantId);
@@ -207,7 +231,6 @@ function ProductsPanel() {
     index: number;
     label: string;
   } | null>(null);
-  const [importOpen, setImportOpen] = useState(false);
 
   const cats = useQuery({
     queryKey: ["catalog-categories", tenantId],
@@ -307,6 +330,10 @@ function ProductsPanel() {
 
   const items = list.data?.items ?? [];
   const meta = list.data?.meta;
+  const total = meta?.total ?? items.length;
+  const hasFilters = Boolean(
+    debouncedQ || kind || statusFilter || categoryId || brandId,
+  );
   const categoryChips = useMemo(() => {
     const fromApi = (cats.data ?? []).filter((c) => c.isActive !== false);
     if (fromApi.length) {
@@ -325,28 +352,55 @@ function ProductsPanel() {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-[200px] flex-1">
-          <Search className="pointer-events-none absolute top-2.5 left-2.5 size-4 text-[#8a9bb0]" />
+        <div className="relative min-w-[12rem] flex-1 sm:max-w-md">
+          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-[#8a9bb0]" />
           <Input
-            className="pl-9"
-            placeholder="Search name, SKU, barcode, brand…"
+            className="h-9 pl-9"
+            placeholder="Search name, SKU, or barcode"
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
         </div>
         <Select
-          wrapperClassName="w-44 sm:w-52"
-          className="h-9 rounded-md border border-[#dce3ec] bg-white px-2 text-sm"
+          wrapperClassName="w-[11rem]"
+          className="h-9"
           value={categoryId}
           onChange={(e) => setCategoryId(e.target.value)}
         >
-          <option value="">All Categories</option>
+          <option value="">All categories</option>
           {categoryChips.map((c) => (
             <option key={c.id} value={c.id}>
               {c.name}
             </option>
           ))}
         </Select>
+        <Select
+          wrapperClassName="w-[10rem]"
+          className="h-9"
+          value={brandId}
+          onChange={(e) => setBrandId(e.target.value)}
+        >
+          <option value="">All brands</option>
+          {(brands.data ?? []).map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name}
+            </option>
+          ))}
+        </Select>
+        <Select
+          wrapperClassName="w-[9.5rem]"
+          className="h-9"
+          value={kind}
+          onChange={(e) => setKind(e.target.value as CatalogProductKind | "")}
+        >
+          {KINDS.map((k) => (
+            <option key={k.label} value={k.value}>
+              {k.label}
+            </option>
+          ))}
+        </Select>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
         <div
           role="tablist"
           aria-label="Status filter"
@@ -379,47 +433,14 @@ function ProductsPanel() {
             );
           })}
         </div>
-        <Select
-          wrapperClassName="w-36"
-          className="h-9 rounded-md border border-[#dce3ec] bg-white px-2 text-sm"
-          value={brandId}
-          onChange={(e) => setBrandId(e.target.value)}
-        >
-          <option value="">All brands</option>
-          {(brands.data ?? []).map((b) => (
-            <option key={b.id} value={b.id}>
-              {b.name}
-            </option>
-          ))}
-        </Select>
-        <Select
-          wrapperClassName="w-36"
-          className="h-9 rounded-md border border-[#dce3ec] bg-white px-2 text-sm"
-          value={kind}
-          onChange={(e) => setKind(e.target.value as CatalogProductKind | "")}
-        >
-          {KINDS.map((k) => (
-            <option key={k.label} value={k.value}>
-              {k.label}
-            </option>
-          ))}
-        </Select>
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={() => setImportOpen(true)}
-        >
-          Import Excel / CSV
-        </Button>
-        <Button asChild>
-          <Link href="/catalog/new">
-            <Plus className="mr-1 size-4" />
-            Add Product
-          </Link>
-        </Button>
+        <p className="ml-auto text-[0.75rem] text-[#5a6b7d]">
+          {list.isLoading
+            ? "Loading…"
+            : `${total.toLocaleString()} item${total === 1 ? "" : "s"}`}
+        </p>
       </div>
 
-      <div className="overflow-x-auto rounded-md border border-[#e4e9f0] bg-white">
+      <div className="overflow-x-auto rounded-lg border border-[#e4e9f0] bg-white">
         <table className="w-full min-w-[820px] text-left text-sm">
           <thead className="border-b border-[#eef1f4] bg-[#f7f9fb] text-[0.7rem] font-semibold tracking-wide text-[#5a6b7d] uppercase">
             <tr>
@@ -462,8 +483,32 @@ function ProductsPanel() {
               </tr>
             ) : items.length === 0 ? (
               <tr>
-                <td colSpan={10} className="px-3 py-8 text-center text-[#5a6b7d]">
-                  No products yet. Add your first item.
+                <td colSpan={10} className="px-3 py-12">
+                  <div className="mx-auto max-w-sm text-center">
+                    <p className="text-sm font-semibold text-[#0b1f33]">
+                      {hasFilters ? "No matching items" : "No items yet"}
+                    </p>
+                    <p className="mt-1 text-sm text-[#5a6b7d]">
+                      {hasFilters
+                        ? "Try another search or clear filters."
+                        : "Import a spreadsheet or add your first item."}
+                    </p>
+                    {!hasFilters ? (
+                      <div className="mt-4 flex flex-wrap justify-center gap-2">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => onImportOpen(true)}
+                        >
+                          Import Items
+                        </Button>
+                        <Button size="sm" asChild>
+                          <Link href="/catalog/new">New Item</Link>
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
                 </td>
               </tr>
             ) : (
@@ -654,10 +699,6 @@ function ProductsPanel() {
         startIndex={lightbox?.index ?? 0}
         label={lightbox?.label}
         onClose={() => setLightbox(null)}
-      />
-      <ItemsImportDialog
-        open={importOpen}
-        onClose={() => setImportOpen(false)}
       />
     </div>
   );

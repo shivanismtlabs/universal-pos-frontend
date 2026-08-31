@@ -1189,6 +1189,7 @@ export const inventoryApi = {
         qtyOnHand: number;
         qtyDamaged: number;
         sellableQty: number;
+        qtyReserved?: number;
         reorderPoint: number | null;
         reorderQty: number | null;
         isLowStock: boolean;
@@ -4814,6 +4815,7 @@ export const servicesCommerceApi = {
         description?: string | null;
         price: string | number;
         durationMinutes?: number | null;
+        taxRatePercent?: number | null;
         isActive: boolean;
         category?: { id: string; name: string } | null;
       }>;
@@ -4828,7 +4830,7 @@ export const servicesCommerceApi = {
     price: number;
     durationMinutes?: number;
   }) {
-    return apiRequest("/services", {
+    return apiRequest<{ id: string }>("/services", {
       method: "POST",
       body,
       token: token(),
@@ -4842,16 +4844,26 @@ export const servicesCommerceApi = {
     });
   },
   bill(body: {
-    customerId: string;
+    customerId?: string;
     productId: string;
     paymentMethod?: "cash" | "card" | "upi";
+    quantity?: number;
     appointmentId?: string;
+    locationId?: string;
     idempotencyKey?: string;
   }) {
     return apiRequest<{
       order: { id: string; orderNumber: string };
       payment: { amount: string | number; method: string };
       service: { title: string; price: string | number };
+      customer?: { id: string; fullName: string } | null;
+      totals?: {
+        subtotal: string;
+        taxTotal: string;
+        grandTotal: string;
+        taxRatePercent: number;
+        quantity: number;
+      };
     }>("/services/bill", {
       method: "POST",
       body,

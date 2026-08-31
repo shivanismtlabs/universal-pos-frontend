@@ -871,11 +871,11 @@ function CustomersPageInner() {
                 <PhoneCountryInput
                   required
                   value={form.watch("phone")}
+                  error={form.formState.errors.phone?.message}
                   onChange={(v) =>
                     form.setValue("phone", v, { shouldValidate: true })
                   }
                 />
-                <FieldError message={form.formState.errors.phone?.message} />
               </div>
               <div>
                 <Label>Email</Label>

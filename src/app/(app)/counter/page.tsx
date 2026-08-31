@@ -112,9 +112,7 @@ function PosGate() {
       {activeView === "sale" && hasSale ? <RetailPosWorkstation /> : null}
       {activeView === "rental" && hasRent ? <PosWorkstation /> : null}
       {activeView === "service" && hasSvc ? (
-        <div className="p-4">
-          <ServiceDashboard />
-        </div>
+        <ServiceDashboard embed />
       ) : null}
       {activeView === "subscription" && hasSub ? (
         <div className="p-4">

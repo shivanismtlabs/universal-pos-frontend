@@ -29,6 +29,7 @@ import {
   Settings,
   Package,
   ArrowRightLeft,
+  ArrowLeftRight,
   Wallet,
   TicketPercent,
   ChevronDown,
@@ -1257,16 +1258,24 @@ function HeaderClock({
 
   return (
     <div
-      className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-[#d9e0ea] bg-white px-2 py-1 tabular-nums text-[#0b1f33]"
-      title={date ? (timeZone ? `${date} · ${time} · ${timeZone}` : `${date} · ${time}`) : time}
+      className="inline-flex shrink-0 items-center gap-2 tabular-nums"
+      title={
+        date
+          ? timeZone
+            ? `${date} · ${time} · ${timeZone}`
+            : `${date} · ${time}`
+          : time
+      }
     >
-      <Clock className="size-3.5 shrink-0 text-[#1a56db]" aria-hidden />
-      <div className="leading-tight">
-        <p className="text-[0.75rem] font-semibold">{time}</p>
-        {!compact && date ? (
-          <p className="text-[0.6rem] text-[#5a6b7d]">{date}</p>
-        ) : null}
-      </div>
+      <Clock className="size-3.5 shrink-0 text-[#94a3b8]" aria-hidden />
+      <p className="text-[0.8125rem] font-medium leading-none text-[#0b1f33]">
+        {time}
+      </p>
+      {!compact && date ? (
+        <p className="hidden text-[0.75rem] leading-none text-[#8b9bb0] sm:block">
+          {date}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -1558,14 +1567,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </aside>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden print:overflow-visible">
-        <header className="app-shell-mobile-header flex shrink-0 items-center justify-between border-b border-[#d9e0ea] bg-white px-4 py-3 md:hidden print:hidden">
-          <div className="flex min-w-0 items-center gap-2.5">
+        <header className="app-shell-mobile-header flex h-12 shrink-0 items-center justify-between gap-2 border-b border-[#e8edf3] bg-white px-3 md:hidden print:hidden">
+          <div className="flex min-w-0 items-center gap-2">
             {logoSrc ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={logoSrc}
                 alt=""
-                className="h-8 w-8 shrink-0 rounded-md border border-[#e2e8f0] bg-white object-contain p-0.5"
+                className="h-8 w-8 shrink-0 rounded-md border border-[#e8edf3] bg-white object-contain p-0.5"
               />
             ) : (
               <div className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-[#1a56db] text-xs font-semibold text-white">
@@ -1576,29 +1585,31 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <p className="truncate text-sm font-semibold tracking-tight text-[#0b1f33]">
                 {productName}
               </p>
-              <p className="mt-0.5 truncate text-[0.6rem] font-medium tracking-wide text-[#5a6b7d] uppercase">
+              <p className="truncate text-[0.65rem] text-[#8b9bb0]">
                 {modeLabel}
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-0.5">
             <AttendanceShiftTimer />
             <HeaderClock
               compact
               locale={locale}
               timeZone={boot?.tenant?.timezone}
             />
-            <BranchSelector className="hidden xs:inline-flex sm:inline-flex" />
+            <BranchSelector className="hidden sm:inline-flex" />
             <button
               type="button"
-              className="rounded-md border border-[#d9e0ea] bg-white px-2 py-1 text-[0.7rem] font-semibold text-[#334155] hover:bg-[#f8fafc]"
+              className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-[0.7rem] font-medium text-[#5a6b7d] hover:bg-[#f1f5f9] hover:text-[#0b1f33]"
               onClick={switchOrganization}
+              title="Switch shop"
             >
-              Switch organization
+              <ArrowLeftRight className="size-3.5" />
+              <span className="sr-only">Switch shop</span>
             </button>
             <button
               type="button"
-              className="rounded-lg border border-[#d9e0ea] p-2 text-[#2c3e50]"
+              className="rounded-md p-2 text-[#334155] hover:bg-[#f1f5f9]"
               onClick={() => setOpen(true)}
               aria-label="Open menu"
             >
@@ -1607,23 +1618,29 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <div className="hidden shrink-0 items-center justify-between gap-3 border-b border-[#d9e0ea] bg-white px-4 py-2 sm:px-6 md:flex lg:px-8 print:hidden">
-          <p className="text-[0.75rem] text-[#5a6b7d]">
-            Operating branch — sales, stock, and expenses use this location
-          </p>
-          <div className="flex items-center gap-2">
+        <div className="hidden h-11 shrink-0 items-center gap-3 border-b border-[#e8edf3] bg-white px-4 md:flex lg:px-6 print:hidden">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="hidden text-[0.6875rem] font-medium tracking-wide text-[#94a3b8] uppercase lg:inline">
+              Location
+            </span>
+            <BranchSelector />
+          </div>
+          <div className="ml-auto flex items-center gap-2">
             <AttendanceShiftTimer />
+            <span className="hidden h-4 w-px bg-[#e8edf3] sm:block" aria-hidden />
             <HeaderClock
               locale={locale}
               timeZone={boot?.tenant?.timezone}
             />
-            <BranchSelector />
+            <span className="hidden h-4 w-px bg-[#e8edf3] sm:block" aria-hidden />
             <button
               type="button"
-              className="rounded-md border border-[#d9e0ea] bg-white px-2.5 py-1 text-[0.75rem] font-semibold text-[#334155] hover:bg-[#f8fafc]"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[0.75rem] font-medium text-[#5a6b7d] hover:bg-[#f1f5f9] hover:text-[#0b1f33]"
               onClick={switchOrganization}
+              title="Open another shop"
             >
-              Switch organization
+              <ArrowLeftRight className="size-3.5" />
+              Switch shop
             </button>
           </div>
         </div>

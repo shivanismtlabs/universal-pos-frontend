@@ -53,7 +53,7 @@ export function AttendanceShiftTimer({ className }: { className?: string }) {
     <div
       className={
         className ??
-        "inline-flex shrink-0 items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 tabular-nums text-emerald-900"
+        "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-emerald-50 px-2.5 tabular-nums text-emerald-800"
       }
       title={`Clocked in since ${new Date(open!.clockInAt!).toLocaleString()}`}
     >

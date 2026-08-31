@@ -162,14 +162,14 @@ export default function SignupClient() {
 
         <div className="space-y-1.5">
           <PhoneCountryInput
-            label="Phone *"
+            label="Phone"
             required
             value={phone}
+            error={errors.phone?.message}
             onChange={(v) =>
               setValue("phone", v, { shouldValidate: true, shouldDirty: true })
             }
           />
-          <FieldError message={errors.phone?.message} />
         </div>
 
         <div className="space-y-1.5">

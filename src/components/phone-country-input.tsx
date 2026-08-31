@@ -47,6 +47,7 @@ export function PhoneCountryInput({
   const dial = selected?.dial || parts.dial || geoDial(fallbackCountry);
   const hint = phoneValidationMessage(countryCode);
   const placeholder = phonePlaceholder(countryCode, dial);
+  const labelText = label.replace(/\s*\*+\s*$/, "").trim() || "Phone";
 
   function emit(nextDial: string, nextLocal: string) {
     const next = joinE164(nextDial, filterMobileDigits(nextLocal));
@@ -54,15 +55,18 @@ export function PhoneCountryInput({
     onChange(next);
   }
 
-  const inlineCheck = value.trim()
+  // Empty required: wait for parent `error` (submit). Avoid a second live line.
+  const filledCheck = value.trim()
     ? validatePhoneParts(dial, parts.local, countryCode)
-    : { ok: !required, message: required ? "Phone is required" : undefined };
-  const inlineError = error || (!inlineCheck.ok ? inlineCheck.message : undefined);
+    : { ok: true as const };
+  const inlineError =
+    error ||
+    (value.trim() && !filledCheck.ok ? filledCheck.message : undefined);
 
   return (
     <div>
       <Label>
-        {label}
+        {labelText}
         {required ? " *" : ""}
       </Label>
       <div className="mt-1.5 flex gap-2">

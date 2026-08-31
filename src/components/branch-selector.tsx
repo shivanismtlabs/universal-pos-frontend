@@ -54,28 +54,30 @@ export function BranchSelector({ className }: { className?: string }) {
     return (
       <div
         className={cn(
-          "inline-flex max-w-[14rem] items-center gap-1.5 truncate rounded-md border border-[#d9e0ea] bg-white px-2 py-1 text-[0.75rem] text-[#5a6b7d]",
+          "inline-flex h-8 max-w-[16rem] items-center gap-1.5 rounded-md border border-[#e2e8f0] bg-white px-2.5 text-[0.8125rem]",
           className,
         )}
-        title={only.name}
+        title={`${only.name} — sales, stock, and expenses use this location`}
       >
-        <MapPin className="size-3.5 shrink-0 text-[#1a56db]" />
+        <MapPin className="size-3.5 shrink-0 text-[#64748b]" />
         <span className="truncate font-medium text-[#0b1f33]">{only.name}</span>
       </div>
     );
   }
 
   return (
-    <label
+    <div
       className={cn(
-        "inline-flex max-w-[16rem] items-center gap-1.5 rounded-md border border-[#d9e0ea] bg-white px-2 py-1 text-[0.75rem]",
+        "inline-flex h-8 max-w-[18rem] items-center gap-1 rounded-md border border-[#e2e8f0] bg-white pl-2 pr-0.5 hover:border-[#c5d0e0]",
         className,
       )}
+      title="Sales, stock, and expenses use this location"
     >
-      <MapPin className="size-3.5 shrink-0 text-[#1a56db]" />
+      <MapPin className="size-3.5 shrink-0 text-[#64748b]" aria-hidden />
       <Select
-        wrapperClassName="w-auto min-w-[8rem] max-w-[13rem] flex-1"
-        className="h-7 max-w-[13rem] truncate border-0 bg-transparent px-1 pr-6 text-[0.75rem] font-medium text-[#0b1f33] shadow-none outline-none focus:shadow-none"
+        searchable={active.length > 8}
+        wrapperClassName="min-w-[7.5rem] max-w-[15rem] flex-1"
+        className="h-7 max-w-[15rem] border-0 bg-transparent px-1 pr-6 text-[0.8125rem] font-medium text-[#0b1f33] shadow-none outline-none hover:border-transparent focus:border-transparent focus:shadow-none"
         value={currentLocationId ?? ""}
         onChange={(e) => setCurrentLocationId(e.target.value || null)}
         aria-label="Current shop / branch"
@@ -87,6 +89,6 @@ export function BranchSelector({ className }: { className?: string }) {
           </option>
         ))}
       </Select>
-    </label>
+    </div>
   );
 }

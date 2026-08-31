@@ -133,9 +133,12 @@ function StockItemSelect({
 function ModalBackdrop({
   children,
   onClose,
+  wide,
 }: {
   children: React.ReactNode;
   onClose: () => void;
+  /** Slightly wider + scroll for combined edit forms */
+  wide?: boolean;
 }) {
   if (typeof document === "undefined") return null;
   return createPortal(
@@ -146,8 +149,18 @@ function ModalBackdrop({
         aria-label="Close modal"
         onClick={onClose}
       />
-      <div className="relative z-10 w-full max-w-lg overflow-hidden rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-2xl transition-all">
-        {children}
+      <div
+        className={
+          wide
+            ? "relative z-10 flex max-h-[min(92vh,900px)] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-[#e5e7eb] bg-white shadow-2xl transition-all"
+            : "relative z-10 w-full max-w-lg overflow-hidden rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-2xl transition-all"
+        }
+      >
+        {wide ? (
+          <div className="overflow-y-auto p-6">{children}</div>
+        ) : (
+          children
+        )}
       </div>
     </div>,
     document.body,
@@ -886,6 +899,10 @@ export function BranchPriceReorderModal({
     sellPrice: number;
     reorderPoint: number | null;
     reorderQty: number | null;
+    qtyOnHand?: number;
+    sellUnit?: string;
+    requiresSerial?: boolean;
+    trackSerial?: boolean;
   } | null;
   onClose: () => void;
   locationId: string;
@@ -894,39 +911,136 @@ export function BranchPriceReorderModal({
   const [rp, setRp] = useState("");
   const [rq, setRq] = useState("");
   const [sp, setSp] = useState("");
+  const [stockInQty, setStockInQty] = useState("");
+  const [stockInReason, setStockInReason] = useState("");
+  const [serialsText, setSerialsText] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+
+  const requiresSerial = Boolean(
+    target?.requiresSerial ?? target?.trackSerial,
+  );
 
   useEffect(() => {
     if (target) {
       setSp(target.sellPrice != null ? String(target.sellPrice) : "");
       setRp(target.reorderPoint != null ? String(target.reorderPoint) : "");
       setRq(target.reorderQty != null ? String(target.reorderQty) : "");
+      setStockInQty("");
+      setStockInReason("");
+      setSerialsText("");
+      setFieldErrors({});
     }
   }, [target]);
 
-  const saveReorder = useMutation({
-    mutationFn: () =>
-      inventoryApi.setReorder({
+  const invalidateInv = () => {
+    void qc.invalidateQueries({ queryKey: ["inv-levels"] });
+    void qc.invalidateQueries({ queryKey: ["inv-levels-picker"] });
+    void qc.invalidateQueries({ queryKey: ["inv-damaged"] });
+    void qc.invalidateQueries({ queryKey: ["inv-low"] });
+    void qc.invalidateQueries({ queryKey: ["inv-ledger"] });
+  };
+
+  async function saveAll() {
+    if (!target) return;
+    setFieldErrors({});
+    setSaving(true);
+    try {
+      await inventoryApi.setReorder({
         locationId,
-        stockLevelId: target!.stockLevelId,
+        stockLevelId: target.stockLevelId,
         reorderPoint: rp === "" ? undefined : Number(rp),
         reorderQty: rq === "" ? undefined : Number(rq),
         sellPrice: sp === "" ? undefined : Number(sp),
-      }),
-    onSuccess: () => {
-      toast.success("Branch price & reorder settings updated");
+      });
+
+      const qtyTrim = stockInQty.trim();
+      const serials = requiresSerial ? parseSerialList(serialsText) : [];
+      const wantsStockIn =
+        (qtyTrim !== "" && Number(qtyTrim) > 0) ||
+        (requiresSerial && serials.length > 0);
+
+      if (wantsStockIn) {
+        const qtyValue = requiresSerial
+          ? String(serials.length || qtyTrim)
+          : qtyTrim;
+        const parsed = stockMoveSchema.safeParse({
+          locationId,
+          stockLevelId: target.stockLevelId,
+          qty: qtyValue,
+          reason: stockInReason,
+        });
+        if (!parsed.success) {
+          setFieldErrors(zodFieldErrors(parsed.error));
+          toast.error(
+            zodMessages(parsed.error)[0] ?? "Fix stock in quantity / reason",
+          );
+          throw new Error("Invalid stock in");
+        }
+        if (requiresSerial) {
+          if (!serials.length) {
+            setFieldErrors({
+              serials: "Enter one serial number per unit received",
+            });
+            toast.error("This item requires serial numbers");
+            throw new Error("Serials required");
+          }
+          if (serials.length !== parsed.data.qty) {
+            setFieldErrors({
+              serials: `Need ${parsed.data.qty} serial(s); you entered ${serials.length}`,
+            });
+            toast.error(
+              `Enter exactly ${parsed.data.qty} serial number(s) — one per unit`,
+            );
+            throw new Error("Serial count mismatch");
+          }
+        }
+        await inventoryApi.stockIn({
+          locationId: parsed.data.locationId,
+          reason: parsed.data.reason || undefined,
+          lines: [
+            {
+              stockLevelId: parsed.data.stockLevelId,
+              qty: parsed.data.qty,
+              ...(requiresSerial ? { serialNumbers: serials } : {}),
+            },
+          ],
+        });
+        toast.success("Settings saved and stock received");
+      } else {
+        toast.success("Branch price & reorder settings updated");
+      }
+
       onClose();
-      void qc.invalidateQueries({ queryKey: ["inv-levels"] });
-      void qc.invalidateQueries({ queryKey: ["inv-damaged"] });
-      void qc.invalidateQueries({ queryKey: ["inv-low"] });
-    },
-    onError: (e: Error) =>
-      toast.error(e instanceof ApiError ? e.message : "Failed to save"),
-  });
+      invalidateInv();
+    } catch (e) {
+      if (e instanceof ApiError) toast.error(e.message);
+      else if (e instanceof Error && e.message.startsWith("Invalid")) {
+        /* already toasted */
+      } else if (!(e instanceof Error)) {
+        toast.error("Failed to save");
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
 
   if (!target) return null;
 
+  const PRESET_REASONS = [
+    "Supplier Delivery (GRN)",
+    "Found Stock",
+    "Customer Return",
+    "Opening Balance",
+  ];
+  const unit = target.sellUnit || "pcs";
+  const onHand =
+    target.qtyOnHand != null && Number.isFinite(Number(target.qtyOnHand))
+      ? Number(target.qtyOnHand)
+      : null;
+
   return (
-    <ModalBackdrop onClose={onClose}>
+    <ModalBackdrop onClose={onClose} wide>
       <div className="flex items-start justify-between gap-3 border-b border-[#f0f3f7] pb-4">
         <div className="flex items-center gap-3">
           <div className="flex size-10 items-center justify-center rounded-xl bg-blue-50 text-[#1a56db]">
@@ -934,13 +1048,18 @@ export function BranchPriceReorderModal({
           </div>
           <div>
             <h3 className="text-lg font-semibold text-[#0b1f33]">
-              Branch Price & Reorder Alert
+              Edit stock
             </h3>
             <p className="text-xs text-[#5a6b7d]">
               {target.name}{" "}
               <span className="font-mono text-[0.72rem] text-[#8b9aab]">
                 ({target.sku})
               </span>
+              {onHand != null ? (
+                <span className="ml-1 text-[#8b9aab]">
+                  · On hand {onHand} {unit}
+                </span>
+              ) : null}
             </p>
           </div>
         </div>
@@ -953,58 +1072,154 @@ export function BranchPriceReorderModal({
         </button>
       </div>
 
-      <div className="mt-4 space-y-4">
+      <div className="mt-4 space-y-5">
         <div>
-          <Label className="text-xs font-semibold text-[#0b1f33]">
-            Branch Selling Price (₹)
-          </Label>
-          <Input
-            className="mt-1 h-10"
-            type="number"
-            min={0}
-            step="0.01"
-            value={sp}
-            onChange={(e) => setSp(e.target.value)}
-            placeholder="e.g. 499.00"
-          />
-          <p className="mt-1 text-[0.72rem] text-[#6b7280]">
-            Branch-specific selling price used at POS checkout for this location.
+          <p className="text-[0.7rem] font-semibold tracking-wide text-[#8b9bb0] uppercase">
+            Price &amp; reorder
           </p>
+          <div className="mt-3 space-y-4">
+            <div>
+              <Label className="text-xs font-semibold text-[#0b1f33]">
+                Branch Selling Price (₹)
+              </Label>
+              <Input
+                className="mt-1 h-10"
+                type="number"
+                min={0}
+                step="0.01"
+                value={sp}
+                onChange={(e) => setSp(e.target.value)}
+                placeholder="e.g. 499.00"
+              />
+              <p className="mt-1 text-[0.72rem] text-[#6b7280]">
+                Branch-specific selling price used at POS for this location.
+              </p>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <Label className="text-xs font-semibold text-[#0b1f33]">
+                  Reorder Point (Qty)
+                </Label>
+                <Input
+                  className="mt-1 h-10"
+                  type="number"
+                  min={0}
+                  value={rp}
+                  onChange={(e) => setRp(e.target.value)}
+                  placeholder="e.g. 5"
+                />
+                <p className="mt-1 text-[0.72rem] text-[#6b7280]">
+                  Low-stock warning when inventory drops to this level.
+                </p>
+              </div>
+
+              <div>
+                <Label className="text-xs font-semibold text-[#0b1f33]">
+                  Suggested Reorder Qty
+                </Label>
+                <Input
+                  className="mt-1 h-10"
+                  type="number"
+                  min={0}
+                  value={rq}
+                  onChange={(e) => setRq(e.target.value)}
+                  placeholder="e.g. 20"
+                />
+                <p className="mt-1 text-[0.72rem] text-[#6b7280]">
+                  Default qty suggested on purchase orders.
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <Label className="text-xs font-semibold text-[#0b1f33]">
-              Reorder Point (Qty)
-            </Label>
-            <Input
-              className="mt-1 h-10"
-              type="number"
-              min={0}
-              value={rp}
-              onChange={(e) => setRp(e.target.value)}
-              placeholder="e.g. 5"
-            />
-            <p className="mt-1 text-[0.72rem] text-[#6b7280]">
-              Triggers low stock warning when inventory drops to this level.
+        <div className="rounded-xl border border-[#e8edf4] bg-[#f8fafc] p-4">
+          <div className="flex items-center gap-2">
+            <PackagePlus className="size-4 text-emerald-600" />
+            <p className="text-[0.7rem] font-semibold tracking-wide text-[#8b9bb0] uppercase">
+              Stock in
             </p>
           </div>
+          <p className="mt-1 text-[0.72rem] text-[#5a6b7d]">
+            Receive quantity for this item in the same dialog as price &amp;
+            reorder.
+          </p>
 
-          <div>
-            <Label className="text-xs font-semibold text-[#0b1f33]">
-              Suggested Reorder Qty
-            </Label>
-            <Input
-              className="mt-1 h-10"
-              type="number"
-              min={0}
-              value={rq}
-              onChange={(e) => setRq(e.target.value)}
-              placeholder="e.g. 20"
-            />
-            <p className="mt-1 text-[0.72rem] text-[#6b7280]">
-              Default quantity suggested when creating purchase orders.
-            </p>
+          <div className="mt-3 space-y-3">
+            {requiresSerial ? (
+              <div>
+                <Label className="text-xs font-semibold text-[#0b1f33]">
+                  Serial numbers * (one per unit)
+                </Label>
+                <textarea
+                  className="mt-1 min-h-[90px] w-full rounded-lg border border-[#dce3ec] bg-white px-3 py-2 font-mono text-sm text-[#0b1f33] outline-none focus:border-[#1a56db]"
+                  value={serialsText}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setSerialsText(next);
+                    const count = parseSerialList(next).length;
+                    if (count > 0) setStockInQty(String(count));
+                    setFieldErrors((f) => ({ ...f, serials: "", qty: "" }));
+                  }}
+                  placeholder={"SN-1001\nSN-1002"}
+                />
+                <FieldError message={fieldErrors.serials} />
+              </div>
+            ) : null}
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <Label className="text-xs font-semibold text-[#0b1f33]">
+                  Qty to receive
+                </Label>
+                <Input
+                  className="mt-1 h-10 bg-white"
+                  type="number"
+                  min={0.001}
+                  step="any"
+                  value={stockInQty}
+                  disabled={requiresSerial}
+                  onChange={(e) => {
+                    setStockInQty(e.target.value);
+                    setFieldErrors((f) => ({ ...f, qty: "" }));
+                  }}
+                  placeholder="Leave blank to skip"
+                />
+                <FieldError message={fieldErrors.qty} />
+              </div>
+              <div>
+                <Label className="text-xs font-semibold text-[#0b1f33]">
+                  Reason / reference
+                </Label>
+                <Input
+                  className="mt-1 h-10 bg-white"
+                  value={stockInReason}
+                  onChange={(e) => {
+                    setStockInReason(e.target.value);
+                    setFieldErrors((f) => ({ ...f, reason: "" }));
+                  }}
+                  placeholder="e.g. Invoice #1024"
+                />
+                <FieldError message={fieldErrors.reason} />
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-1.5">
+              {PRESET_REASONS.map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  className="rounded-md border border-[#dce3ec] bg-white px-2.5 py-1 text-xs text-[#0b1f33] transition hover:border-[#1a56db]"
+                  onClick={() => {
+                    setStockInReason(r);
+                    setFieldErrors((f) => ({ ...f, reason: "" }));
+                  }}
+                >
+                  + {r}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -1015,11 +1230,11 @@ export function BranchPriceReorderModal({
         </Button>
         <Button
           type="button"
-          disabled={saveReorder.isPending}
-          onClick={() => saveReorder.mutate()}
+          disabled={saving}
+          onClick={() => void saveAll()}
           className="bg-[#1a56db] hover:bg-[#1546b3]"
         >
-          {saveReorder.isPending ? "Saving..." : "Save Settings"}
+          {saving ? "Saving..." : "Save"}
         </Button>
       </div>
     </ModalBackdrop>
