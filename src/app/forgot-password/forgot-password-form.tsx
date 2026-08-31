@@ -52,7 +52,13 @@ export default function ForgotPasswordForm() {
       setEmail(trimmed);
       setDevCode(res.devCode ?? null);
       setStep("otp");
-      toast.success(res.message);
+      toast.success(res.message, {
+        style: {
+          background: "#ecfdf5",
+          border: "1px solid #6ee7b7",
+          color: "#065f46",
+        },
+      });
       if (res.devCode) {
         toast.message("Dev OTP", { description: res.devCode });
       }
@@ -186,9 +192,6 @@ export default function ForgotPasswordForm() {
               value={password}
               onChange={(ev) => setPassword(ev.target.value)}
             />
-            <p className="text-[0.7rem] text-[#8b9bb0]">
-              8+ chars, upper, lower, number, special character
-            </p>
             <FieldErrors messages={passwordMessages} />
           </div>
           <div className="space-y-1.5">

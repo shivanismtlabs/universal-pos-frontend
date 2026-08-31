@@ -29,10 +29,15 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
           position="bottom-right"
           offset={16}
           closeButton
+          richColors
           toastOptions={{
             classNames: {
-              toast:
-                "bg-white border border-[#d9e0ea] text-[#0b1f33] shadow-lg rounded-lg",
+              toast: "shadow-lg rounded-lg",
+              success:
+                "!bg-[#ecfdf5] !border-[#6ee7b7] !text-[#065f46]",
+              error: "!bg-[#fef2f2] !border-[#fca5a5] !text-[#991b1b]",
+              default:
+                "bg-white border border-[#d9e0ea] text-[#0b1f33]",
             },
           }}
         />
