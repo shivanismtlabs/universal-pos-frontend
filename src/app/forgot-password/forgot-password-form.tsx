@@ -11,15 +11,41 @@ import { Label } from "@/components/ui/label";
 import { FieldError, FieldErrors } from "@/components/ui/form";
 import { authApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
-import {
-  forgotPasswordEmailSchema,
-  resetPasswordSchema,
-  zodFieldErrors,
-  zodMessages,
-} from "@/lib/validations";
-import { ZodError } from "zod";
+import { forgotPasswordEmailSchema } from "@/lib/validations";
+import { cn } from "@/lib/utils";
 
 type Step = "email" | "otp";
+
+const invalidInput =
+  "border-[#fca5a5] hover:border-[#f87171] focus:border-[#dc2626] focus:shadow-[0_0_0_3px_rgba(220,38,38,0.12)]";
+
+function emailErrorFor(value: string): string {
+  const parsed = forgotPasswordEmailSchema.safeParse({ email: value });
+  if (parsed.success) return "";
+  return parsed.error.issues[0]?.message ?? "Enter a valid email";
+}
+
+function otpErrorFor(value: string): string {
+  if (/^\d{6}$/.test(value)) return "";
+  return "Enter the OTP";
+}
+
+function passwordMessagesFor(value: string): string[] {
+  const messages: string[] = [];
+  if (value.length < 8) messages.push("Password must be at least 8 characters");
+  if (value.length > 72) messages.push("Password must be at most 72 characters");
+  if (!/[a-z]/.test(value)) messages.push("Include a lowercase letter");
+  if (!/[A-Z]/.test(value)) messages.push("Include an uppercase letter");
+  if (!/\d/.test(value)) messages.push("Include a number");
+  if (!/[^A-Za-z0-9]/.test(value)) messages.push("Include a special character");
+  return messages;
+}
+
+function confirmErrorFor(password: string, confirm: string): string {
+  if (!confirm) return "Confirm your password";
+  if (password !== confirm) return "Passwords do not match";
+  return "";
+}
 
 export default function ForgotPasswordForm() {
   const router = useRouter();
@@ -33,25 +59,44 @@ export default function ForgotPasswordForm() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [passwordMessages, setPasswordMessages] = useState<string[]>([]);
 
-  function clearErrors() {
-    setFieldErrors({});
-    setPasswordMessages([]);
+  function syncResetErrors(
+    next: { otp: string; password: string; confirm: string },
+    requireAll: boolean,
+  ) {
+    const errors: Record<string, string> = {};
+    let pwMessages: string[] = [];
+
+    if (next.otp || requireAll) {
+      const otpErr = otpErrorFor(next.otp);
+      if (otpErr) errors.otp = otpErr;
+    }
+    if (next.password || requireAll) {
+      pwMessages = passwordMessagesFor(next.password);
+    }
+    if (requireAll || next.confirm) {
+      const confirmErr = confirmErrorFor(next.password, next.confirm);
+      if (confirmErr) errors.confirm = confirmErr;
+    }
+
+    setFieldErrors(errors);
+    setPasswordMessages(pwMessages);
   }
 
   async function sendOtp() {
-    clearErrors();
-    const parsed = forgotPasswordEmailSchema.safeParse({ email });
-    if (!parsed.success) {
-      setFieldErrors(zodFieldErrors(parsed.error));
+    const emailErr = emailErrorFor(email);
+    if (emailErr) {
+      setFieldErrors({ email: emailErr });
       return;
     }
-    const trimmed = parsed.data.email;
+    const trimmed = email.trim().toLowerCase();
     setBusy(true);
     try {
       const res = await authApi.forgotPassword(trimmed);
       setEmail(trimmed);
       setDevCode(res.devCode ?? null);
       setStep("otp");
+      setFieldErrors({});
+      setPasswordMessages([]);
       toast.success(res.message, {
         style: {
           background: "#ecfdf5",
@@ -73,28 +118,19 @@ export default function ForgotPasswordForm() {
 
   async function resetPassword(e: React.FormEvent) {
     e.preventDefault();
-    clearErrors();
-    const parsed = resetPasswordSchema.safeParse({
-      otp,
-      password,
-      confirm,
-    });
-    if (!parsed.success) {
-      setFieldErrors(zodFieldErrors(parsed.error));
-      const pwIssues = parsed.error.issues.filter(
-        (i) => i.path[0] === "password",
-      );
-      setPasswordMessages(
-        pwIssues.length ? zodMessages(new ZodError(pwIssues)) : [],
-      );
+    const otpErr = otpErrorFor(otp);
+    const pwMessages = passwordMessagesFor(password);
+    const confirmErr = confirmErrorFor(password, confirm);
+    if (otpErr || pwMessages.length || confirmErr) {
+      syncResetErrors({ otp, password, confirm }, true);
       return;
     }
     setBusy(true);
     try {
       const res = await authApi.resetPassword({
         email,
-        otp: parsed.data.otp,
-        newPassword: parsed.data.password,
+        otp,
+        newPassword: password,
       });
       toast.success(res.message);
       router.replace("/login");
@@ -135,7 +171,15 @@ export default function ForgotPasswordForm() {
               autoComplete="username"
               placeholder="you@business.com"
               value={email}
-              onChange={(ev) => setEmail(ev.target.value)}
+              aria-invalid={Boolean(fieldErrors.email)}
+              className={cn(fieldErrors.email && invalidInput)}
+              onChange={(ev) => {
+                const value = ev.target.value;
+                setEmail(value);
+                setFieldErrors({
+                  email: value.trim() ? emailErrorFor(value) : "",
+                });
+              }}
             />
             <FieldError message={fieldErrors.email} />
           </div>
@@ -179,7 +223,13 @@ export default function ForgotPasswordForm() {
               maxLength={6}
               placeholder="482915"
               value={otp}
-              onChange={(ev) => setOtp(ev.target.value.replace(/\D/g, "").slice(0, 6))}
+              aria-invalid={Boolean(fieldErrors.otp)}
+              className={cn(fieldErrors.otp && invalidInput)}
+              onChange={(ev) => {
+                const value = ev.target.value.replace(/\D/g, "").slice(0, 6);
+                setOtp(value);
+                syncResetErrors({ otp: value, password, confirm }, false);
+              }}
             />
             <FieldError message={fieldErrors.otp} />
           </div>
@@ -190,7 +240,13 @@ export default function ForgotPasswordForm() {
               type="password"
               autoComplete="new-password"
               value={password}
-              onChange={(ev) => setPassword(ev.target.value)}
+              aria-invalid={passwordMessages.length > 0}
+              className={cn(passwordMessages.length > 0 && invalidInput)}
+              onChange={(ev) => {
+                const value = ev.target.value;
+                setPassword(value);
+                syncResetErrors({ otp, password: value, confirm }, false);
+              }}
             />
             <FieldErrors messages={passwordMessages} />
           </div>
@@ -201,7 +257,13 @@ export default function ForgotPasswordForm() {
               type="password"
               autoComplete="new-password"
               value={confirm}
-              onChange={(ev) => setConfirm(ev.target.value)}
+              aria-invalid={Boolean(fieldErrors.confirm)}
+              className={cn(fieldErrors.confirm && invalidInput)}
+              onChange={(ev) => {
+                const value = ev.target.value;
+                setConfirm(value);
+                syncResetErrors({ otp, password, confirm: value }, false);
+              }}
             />
             <FieldError message={fieldErrors.confirm} />
           </div>
