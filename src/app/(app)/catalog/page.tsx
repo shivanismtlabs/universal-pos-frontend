@@ -445,10 +445,15 @@ function ProductsPanel() {
             ) : list.isError ? (
               <tr>
                 <td colSpan={10} className="px-3 py-8 text-center text-[#c81e1e]">
-                  Could not load items.{" "}
+                  <p className="font-semibold">Could not load items.</p>
+                  {list.error instanceof ApiError ? (
+                    <p className="mx-auto mt-2 max-w-lg text-sm font-normal text-[#5a6b7d]">
+                      {list.error.messages.join(", ")}
+                    </p>
+                  ) : null}
                   <button
                     type="button"
-                    className="font-semibold underline"
+                    className="mt-3 font-semibold underline"
                     onClick={() => void list.refetch()}
                   >
                     Retry

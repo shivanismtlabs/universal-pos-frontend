@@ -19,6 +19,12 @@ import { FieldError } from "@/components/ui/form";
 import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { useBranchStore } from "@/lib/branch-store";
+import {
+  createLocationFormSchema,
+  inviteStaffSchema,
+  updateLocationFormSchema,
+  zodFieldErrors,
+} from "@/lib/validations";
 
 type LocForm = {
   name: string;
@@ -116,6 +122,9 @@ export default function StoresPage() {
   const [mgrEmail, setMgrEmail] = useState("");
   const [mgrPassword, setMgrPassword] = useState("");
   const [mgrPhone, setMgrPhone] = useState("");
+  const [mgrErrors, setMgrErrors] = useState<
+    Partial<Record<"fullName" | "email" | "password" | "phone", string>>
+  >({});
 
   const list = useQuery({
     queryKey: ["stores-branches"],
@@ -138,41 +147,60 @@ export default function StoresPage() {
 
   const save = useMutation({
     mutationFn: async () => {
-      const nextErr: typeof errors = {};
-      if (form.name.trim().length < 2) nextErr.name = "Name is required";
-      if (!editingId && form.code.trim().length < 1)
-        nextErr.code = "Store code is required";
-      setErrors(nextErr);
-      if (Object.keys(nextErr).length) throw new Error("validation");
-
       if (editingId) {
+        const parsed = updateLocationFormSchema.safeParse(form);
+        if (!parsed.success) {
+          setErrors(
+            zodFieldErrors(parsed.error) as Partial<Record<keyof LocForm, string>>,
+          );
+          throw new Error("validation");
+        }
         return tenantsApi.updateLocation(editingId, {
-          name: form.name.trim(),
-          type: form.type,
-          address: form.address.trim() || undefined,
-          phone: form.phone.trim() || undefined,
-          email: form.email.trim() || undefined,
-          businessHours: form.businessHours.trim() || undefined,
-          timezone: form.timezone.trim() || undefined,
-          currencyCode: form.currencyCode.trim() || undefined,
-          managerUserId: form.managerUserId || undefined,
-          parentLocationId: form.parentLocationId || null,
-          isActive: form.isActive,
+          name: parsed.data.name,
+          type: parsed.data.type,
+          address: parsed.data.address?.trim() || undefined,
+          phone: parsed.data.phone?.trim() || undefined,
+          email: parsed.data.email?.trim() || undefined,
+          businessHours: parsed.data.businessHours?.trim() || undefined,
+          timezone: parsed.data.timezone?.trim() || undefined,
+          currencyCode: parsed.data.currencyCode?.trim() || undefined,
+          managerUserId: parsed.data.managerUserId || undefined,
+          parentLocationId: parsed.data.parentLocationId || null,
+          isActive: parsed.data.isActive,
         });
       }
+
+      const parsed = createLocationFormSchema.safeParse(form);
+      if (!parsed.success) {
+        setErrors(
+          zodFieldErrors(parsed.error) as Partial<Record<keyof LocForm, string>>,
+        );
+        throw new Error("validation");
+      }
+
+      const existingRows = (list.data ?? []) as StoreRow[];
+      if (
+        existingRows.some(
+          (r) => (r.code ?? "").toUpperCase() === parsed.data.code,
+        )
+      ) {
+        setErrors({ code: "This store code is already in use" });
+        throw new Error("validation");
+      }
+
       return tenantsApi.createLocation({
-        name: form.name.trim(),
-        code: form.code.trim().toUpperCase(),
-        type: form.type,
-        address: form.address.trim() || undefined,
-        phone: form.phone.trim() || undefined,
-        email: form.email.trim() || undefined,
-        businessHours: form.businessHours.trim() || undefined,
-        timezone: form.timezone.trim() || undefined,
-        currencyCode: form.currencyCode.trim() || undefined,
-        managerUserId: form.managerUserId || undefined,
-        ...(form.parentLocationId
-          ? { parentLocationId: form.parentLocationId }
+        name: parsed.data.name,
+        code: parsed.data.code,
+        type: parsed.data.type,
+        address: parsed.data.address?.trim() || undefined,
+        phone: parsed.data.phone?.trim() || undefined,
+        email: parsed.data.email?.trim() || undefined,
+        businessHours: parsed.data.businessHours?.trim() || undefined,
+        timezone: parsed.data.timezone?.trim() || undefined,
+        currencyCode: parsed.data.currencyCode?.trim() || undefined,
+        managerUserId: parsed.data.managerUserId || undefined,
+        ...(parsed.data.parentLocationId
+          ? { parentLocationId: parsed.data.parentLocationId }
           : {}),
       });
     },
@@ -188,21 +216,41 @@ export default function StoresPage() {
       setForm(emptyForm());
     },
     onError: (e: Error) => {
-      if (e.message === "validation") return;
+      if (e.message === "validation") {
+        toast.error("Fix the highlighted fields");
+        return;
+      }
       toast.error(e instanceof ApiError ? e.message : "Save failed");
     },
   });
 
   const addManager = useMutation({
-    mutationFn: () =>
-      usersApi.create({
-        fullName: mgrName.trim(),
-        email: mgrEmail.trim(),
+    mutationFn: () => {
+      const parsed = inviteStaffSchema.safeParse({
+        fullName: mgrName,
+        email: mgrEmail,
         password: mgrPassword,
-        phone: mgrPhone.trim() || undefined,
+        phone: mgrPhone,
+        roleCode: "manager",
+        primaryStoreId: editingId || "",
+      });
+      if (!parsed.success) {
+        setMgrErrors(
+          zodFieldErrors(parsed.error) as Partial<
+            Record<"fullName" | "email" | "password" | "phone", string>
+          >,
+        );
+        throw new Error("validation");
+      }
+      return usersApi.create({
+        fullName: parsed.data.fullName,
+        email: parsed.data.email,
+        password: parsed.data.password,
+        phone: parsed.data.phone?.trim() || undefined,
         roleCode: "manager",
         primaryStoreId: editingId || undefined,
-      }),
+      });
+    },
     onSuccess: (row) => {
       const created = row as { id?: string };
       toast.success("Manager added. You can assign them to this location.");
@@ -214,12 +262,31 @@ export default function StoresPage() {
       setMgrEmail("");
       setMgrPassword("");
       setMgrPhone("");
+      setMgrErrors({});
       void qc.invalidateQueries({ queryKey: ["stores-staff"] });
       void qc.invalidateQueries({ queryKey: ["users"] });
     },
-    onError: (e) =>
-      toast.error(e instanceof ApiError ? e.messages.join(", ") : "Could not add manager"),
+    onError: (e) => {
+      if (e instanceof Error && e.message === "validation") {
+        toast.error("Fix the highlighted fields");
+        return;
+      }
+      toast.error(
+        e instanceof ApiError ? e.messages.join(", ") : "Could not add manager",
+      );
+    },
   });
+
+  function patchForm(patch: Partial<LocForm>) {
+    setForm((f) => ({ ...f, ...patch }));
+    setErrors((prev) => {
+      const next = { ...prev };
+      for (const k of Object.keys(patch) as (keyof LocForm)[]) {
+        delete next[k];
+      }
+      return next;
+    });
+  }
 
   function openCreate() {
     setEditingId(null);
@@ -310,21 +377,21 @@ export default function StoresPage() {
           </h2>
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1">
-              <Label>Name</Label>
+              <Label>Name *</Label>
               <Input
                 value={form.name}
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                onChange={(e) => patchForm({ name: e.target.value })}
                 placeholder="Indore Branch"
               />
               <FieldError message={errors.name} />
             </div>
             <div className="space-y-1">
-              <Label>Store code</Label>
+              <Label>Store code{editingId ? "" : " *"}</Label>
               <Input
                 value={form.code}
                 disabled={Boolean(editingId)}
                 onChange={(e) =>
-                  setForm((f) => ({ ...f, code: e.target.value.toUpperCase() }))
+                  patchForm({ code: e.target.value.toUpperCase() })
                 }
                 placeholder="IND01"
               />
@@ -335,13 +402,14 @@ export default function StoresPage() {
               <Select
                 className="h-9 w-full rounded-md border border-[#d9e0ea] bg-white px-2 text-sm"
                 value={form.type}
-                onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))}
+                onChange={(e) => patchForm({ type: e.target.value })}
               >
                 <option value="store">Store</option>
                 <option value="branch">Branch</option>
                 <option value="warehouse">Warehouse</option>
                 <option value="other">Other</option>
               </Select>
+              <FieldError message={errors.type} />
             </div>
             <div className="space-y-1">
               <Label>Parent location</Label>
@@ -349,7 +417,7 @@ export default function StoresPage() {
                 className="h-9 w-full rounded-md border border-[#d9e0ea] bg-white px-2 text-sm"
                 value={form.parentLocationId}
                 onChange={(e) =>
-                  setForm((f) => ({ ...f, parentLocationId: e.target.value }))
+                  patchForm({ parentLocationId: e.target.value })
                 }
               >
                 <option value="">— Organization (top level) —</option>
@@ -372,9 +440,7 @@ export default function StoresPage() {
               <Select
                 className="h-9 w-full rounded-md border border-[#d9e0ea] bg-white px-2 text-sm"
                 value={form.managerUserId}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, managerUserId: e.target.value }))
-                }
+                onChange={(e) => patchForm({ managerUserId: e.target.value })}
               >
                 <option value="">— None —</option>
                 {managers.map((m) => (
@@ -387,7 +453,10 @@ export default function StoresPage() {
                 <button
                   type="button"
                   className="text-[0.75rem] font-semibold text-[#1a56db]"
-                  onClick={() => setMgrOpen(true)}
+                  onClick={() => {
+                    setMgrErrors({});
+                    setMgrOpen(true);
+                  }}
                 >
                   + Add manager
                 </button>
@@ -400,56 +469,57 @@ export default function StoresPage() {
               <Label>Address</Label>
               <Input
                 value={form.address}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, address: e.target.value }))
-                }
+                onChange={(e) => patchForm({ address: e.target.value })}
               />
+              <FieldError message={errors.address} />
             </div>
             <div className="space-y-1">
               <Label>Phone</Label>
               <Input
                 value={form.phone}
-                onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+                placeholder="+91 98765 43210"
+                onChange={(e) => patchForm({ phone: e.target.value })}
               />
+              <FieldError message={errors.phone} />
             </div>
             <div className="space-y-1">
               <Label>Email</Label>
               <Input
+                type="email"
                 value={form.email}
-                onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+                onChange={(e) => patchForm({ email: e.target.value })}
               />
+              <FieldError message={errors.email} />
             </div>
             <div className="space-y-1">
               <Label>Business hours</Label>
               <Input
                 value={form.businessHours}
                 placeholder="Mon–Sat 10:00–21:00"
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, businessHours: e.target.value }))
-                }
+                onChange={(e) => patchForm({ businessHours: e.target.value })}
               />
+              <FieldError message={errors.businessHours} />
             </div>
             <div className="space-y-1">
               <Label>Timezone</Label>
               <Input
                 value={form.timezone}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, timezone: e.target.value }))
-                }
+                placeholder="Asia/Kolkata"
+                onChange={(e) => patchForm({ timezone: e.target.value })}
               />
+              <FieldError message={errors.timezone} />
             </div>
             <div className="space-y-1">
               <Label>Currency</Label>
               <Input
                 value={form.currencyCode}
                 maxLength={3}
+                placeholder="INR"
                 onChange={(e) =>
-                  setForm((f) => ({
-                    ...f,
-                    currencyCode: e.target.value.toUpperCase(),
-                  }))
+                  patchForm({ currencyCode: e.target.value.toUpperCase() })
                 }
               />
+              <FieldError message={errors.currencyCode} />
             </div>
             {editingId ? (
               <div className="flex items-center gap-2 pt-6">
@@ -458,7 +528,7 @@ export default function StoresPage() {
                   type="checkbox"
                   checked={form.isActive}
                   onChange={(e) =>
-                    setForm((f) => ({ ...f, isActive: e.target.checked }))
+                    patchForm({ isActive: e.target.checked })
                   }
                 />
                 <Label htmlFor="branch-active">Active</Label>
@@ -517,47 +587,58 @@ export default function StoresPage() {
             </div>
             <div className="space-y-3">
               <div>
-                <Label>Full name</Label>
+                <Label>Full name *</Label>
                 <Input
                   className="mt-1"
                   value={mgrName}
-                  onChange={(e) => setMgrName(e.target.value)}
+                  onChange={(e) => {
+                    setMgrName(e.target.value);
+                    setMgrErrors((prev) => ({ ...prev, fullName: undefined }));
+                  }}
                 />
+                <FieldError message={mgrErrors.fullName} />
               </div>
               <div>
-                <Label>Email</Label>
+                <Label>Email *</Label>
                 <Input
                   className="mt-1"
                   type="email"
                   value={mgrEmail}
-                  onChange={(e) => setMgrEmail(e.target.value)}
+                  onChange={(e) => {
+                    setMgrEmail(e.target.value);
+                    setMgrErrors((prev) => ({ ...prev, email: undefined }));
+                  }}
                 />
+                <FieldError message={mgrErrors.email} />
               </div>
               <div>
-                <Label>Password</Label>
+                <Label>Password *</Label>
                 <Input
                   className="mt-1"
                   type="password"
                   value={mgrPassword}
-                  onChange={(e) => setMgrPassword(e.target.value)}
+                  onChange={(e) => {
+                    setMgrPassword(e.target.value);
+                    setMgrErrors((prev) => ({ ...prev, password: undefined }));
+                  }}
                 />
+                <FieldError message={mgrErrors.password} />
               </div>
               <div>
                 <Label>Phone (optional)</Label>
                 <Input
                   className="mt-1"
                   value={mgrPhone}
-                  onChange={(e) => setMgrPhone(e.target.value)}
+                  onChange={(e) => {
+                    setMgrPhone(e.target.value);
+                    setMgrErrors((prev) => ({ ...prev, phone: undefined }));
+                  }}
                 />
+                <FieldError message={mgrErrors.phone} />
               </div>
               <Button
                 type="button"
-                disabled={
-                  addManager.isPending ||
-                  !mgrName.trim() ||
-                  !mgrEmail.trim() ||
-                  mgrPassword.length < 8
-                }
+                disabled={addManager.isPending}
                 onClick={() => addManager.mutate()}
               >
                 {addManager.isPending ? "Saving…" : "Save manager"}

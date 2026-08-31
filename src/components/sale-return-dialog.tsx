@@ -10,7 +10,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import { moneyNumber, newIdempotencyKey } from "@/lib/utils";
+import { FieldError } from "@/components/ui/form";
+import { moneyNumber, newIdempotencyKey, cn } from "@/lib/utils";
+import {
+  clampQtyInput,
+  parseReturnQty,
+  replaceQtyError,
+  returnQtyError,
+} from "@/lib/return-qty-validation";
 import { X } from "lucide-react";
 
 /**
@@ -42,6 +49,9 @@ export function SaleReturnDialog({
   const [reason, setReason] = useState("");
   const [catalogQ, setCatalogQ] = useState("");
   const [replaceQty, setReplaceQty] = useState<Record<string, string>>({});
+  const [replaceQtyErrors, setReplaceQtyErrors] = useState<
+    Record<string, string | undefined>
+  >({});
 
   const order = useQuery({
     queryKey: ["order", orderId],
@@ -125,11 +135,20 @@ export function SaleReturnDialog({
     setQtyByLevel((prev) => {
       const next = { ...prev };
       for (const l of lines) {
-        if (next[l.stockLevelId] == null) next[l.stockLevelId] = "0";
+        next[l.stockLevelId] = clampQtyInput(
+          prev[l.stockLevelId] ?? "0",
+          l.remaining,
+        );
       }
       return next;
     });
   }, [lines]);
+
+  useEffect(() => {
+    if (method === "store_credit" && !order.data?.customer?.id) {
+      setMethod("cash");
+    }
+  }, [method, order.data?.customer?.id]);
 
   useEffect(() => {
     if (reasonCode || !reasons.data?.length) return;
@@ -143,10 +162,9 @@ export function SaleReturnDialog({
   const refundPreview = useMemo(() => {
     let total = 0;
     for (const l of lines) {
-      const q = Math.min(
-        l.remaining,
-        Math.max(0, moneyNumber(qtyByLevel[l.stockLevelId] || 0)),
-      );
+      const n = parseReturnQty(qtyByLevel[l.stockLevelId] ?? "0");
+      if (n === null || n <= 0) continue;
+      const q = Math.min(l.remaining, n);
       total += q * l.unitPrice;
     }
     return Math.round(total * 100) / 100;
@@ -156,24 +174,107 @@ export function SaleReturnDialog({
     if (mode !== "exchange") return 0;
     let total = 0;
     for (const item of catalog.data?.items ?? []) {
-      const q = Math.max(0, moneyNumber(replaceQty[item.id] || 0));
-      if (q <= 0) continue;
+      const n = parseReturnQty(replaceQty[item.id] ?? "0");
+      if (n === null || n <= 0) continue;
+      const q = Math.min(item.qtyOnHand, n);
       total += q * moneyNumber(item.sellPrice);
     }
     return Math.round(total * 100) / 100;
   }, [mode, catalog.data, replaceQty]);
 
-  const selectedReturnItems = () =>
-    lines
-      .map((l) => ({
+  const returnQtyErrors = useMemo(() => {
+    const out: Record<string, string | undefined> = {};
+    for (const l of lines) {
+      out[l.stockLevelId] = returnQtyError(
+        qtyByLevel[l.stockLevelId] ?? "0",
+        l.remaining,
+      );
+    }
+    return out;
+  }, [lines, qtyByLevel]);
+
+  const hasInvalidReturnQty = Object.values(returnQtyErrors).some(Boolean);
+
+  const hasInvalidReplaceQty = useMemo(() => {
+    if (mode !== "exchange") return false;
+    for (const item of catalog.data?.items ?? []) {
+      const err = replaceQtyError(
+        replaceQty[item.id] ?? "0",
+        item.qtyOnHand,
+      );
+      if (err) return true;
+    }
+    return false;
+  }, [mode, catalog.data, replaceQty]);
+
+  const refundableExceeded =
+    remainingRefundable != null &&
+    refundPreview > remainingRefundable + 0.009;
+
+  const storeCreditBlocked =
+    method === "store_credit" &&
+    mode === "return" &&
+    !order.data?.customer?.id;
+
+  const noteTooLong = reason.trim().length > 500;
+
+  const selectedReturnItems = () => {
+    const items: Array<{
+      stockLevelId: string;
+      quantity: number;
+      condition: string;
+    }> = [];
+    for (const l of lines) {
+      const raw = qtyByLevel[l.stockLevelId] ?? "0";
+      const err = returnQtyError(raw, l.remaining);
+      if (err) throw new Error(`${l.name}: ${err}`);
+      const parsed = parseReturnQty(raw);
+      if (parsed === null || parsed <= 0) continue;
+      if (parsed > l.remaining + 1e-9) {
+        throw new Error(
+          `Return qty for "${l.name}" cannot exceed ${l.remaining}`,
+        );
+      }
+      items.push({
         stockLevelId: l.stockLevelId,
-        quantity: Math.min(
-          l.remaining,
-          Math.max(0, moneyNumber(qtyByLevel[l.stockLevelId] || 0)),
-        ),
+        quantity: Math.min(l.remaining, parsed),
         condition: conditionByLevel[l.stockLevelId] || "good",
-      }))
-      .filter((i) => i.quantity > 0);
+      });
+    }
+    return items;
+  };
+
+  const selectedReplaceItems = () => {
+    const items: Array<{ stockLevelId: string; quantity: number }> = [];
+    for (const c of catalog.data?.items ?? []) {
+      const raw = replaceQty[c.id] ?? "0";
+      const err = replaceQtyError(raw, c.qtyOnHand);
+      if (err) throw new Error(`${c.name}: ${err}`);
+      const parsed = parseReturnQty(raw);
+      if (parsed === null || parsed <= 0) continue;
+      items.push({
+        stockLevelId: c.id,
+        quantity: Math.min(c.qtyOnHand, parsed),
+      });
+    }
+    return items;
+  };
+
+  function setReturnQty(stockLevelId: string, raw: string, max: number) {
+    setQtyByLevel((m) => ({
+      ...m,
+      [stockLevelId]: clampQtyInput(raw, max),
+    }));
+  }
+
+  function setReplaceQtyForItem(stockLevelId: string, raw: string, maxSoh: number) {
+    const clamped = clampQtyInput(raw, maxSoh, { min: 0 });
+    setReplaceQty((m) => ({ ...m, [stockLevelId]: clamped }));
+    setReplaceQtyErrors((m) => ({
+      ...m,
+      [stockLevelId]: replaceQtyError(clamped, maxSoh),
+    }));
+  }
 
   const refundAll = () => {
     const next: Record<string, string> = {};
@@ -205,14 +306,22 @@ export function SaleReturnDialog({
       const items = selectedReturnItems();
       if (!items.length) throw new Error("Select at least one qty to return");
       if (!reasonCode) throw new Error("Select a refund reason");
+      if (refundableExceeded) {
+        throw new Error(
+          `Refund ${refundPreview.toFixed(2)} exceeds remaining refundable ${moneyNumber(remainingRefundable).toFixed(2)}`,
+        );
+      }
+      if (storeCreditBlocked) {
+        throw new Error(
+          "Store credit refund needs a customer on the original sale",
+        );
+      }
+      if (noteTooLong) {
+        throw new Error("Note must be 500 characters or less");
+      }
 
       if (mode === "exchange") {
-        const replaceItems = (catalog.data?.items ?? [])
-          .map((c) => ({
-            stockLevelId: c.id,
-            quantity: Math.max(0, moneyNumber(replaceQty[c.id] || 0)),
-          }))
-          .filter((i) => i.quantity > 0);
+        const replaceItems = selectedReplaceItems();
         if (!replaceItems.length) {
           throw new Error("Pick at least one replacement item");
         }
@@ -289,6 +398,20 @@ export function SaleReturnDialog({
       ),
   });
 
+  const canSubmit =
+    !submit.isPending &&
+    !order.isLoading &&
+    !returnedQty.isLoading &&
+    lines.length > 0 &&
+    !hasInvalidReturnQty &&
+    !hasInvalidReplaceQty &&
+    !refundableExceeded &&
+    !storeCreditBlocked &&
+    !noteTooLong &&
+    Boolean(reasonCode) &&
+    refundPreview > 0 &&
+    (mode !== "exchange" || replacePreview > 0);
+
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center p-3 sm:items-center">
       <button
@@ -362,7 +485,10 @@ export function SaleReturnDialog({
               </Button>
             </div>
             <ul className="mt-2 divide-y divide-[#eef2f8]">
-              {lines.map((l) => (
+              {lines.map((l) => {
+                const qtyRaw = qtyByLevel[l.stockLevelId] ?? "0";
+                const qtyErr = returnQtyErrors[l.stockLevelId];
+                return (
                 <li
                   key={l.stockLevelId}
                   className="flex flex-wrap items-center justify-between gap-3 py-3"
@@ -379,20 +505,25 @@ export function SaleReturnDialog({
                       · left {l.remaining} · {money(l.unitPrice)} each
                     </p>
                   </div>
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-col items-end gap-1">
+                    <div className="flex flex-wrap items-center gap-2">
                     <Label className="sr-only">Return qty</Label>
                     <Input
-                      className="h-9 w-20"
+                      className={cn(
+                        "h-9 w-20",
+                        qtyErr && "border-rose-400 focus:border-rose-500",
+                      )}
                       type="number"
                       min={0}
                       max={l.remaining}
+                      step={Number.isInteger(l.remaining) ? 1 : "any"}
                       disabled={l.remaining <= 0}
-                      value={qtyByLevel[l.stockLevelId] ?? "0"}
+                      value={qtyRaw}
                       onChange={(e) =>
-                        setQtyByLevel((m) => ({
-                          ...m,
-                          [l.stockLevelId]: e.target.value,
-                        }))
+                        setReturnQty(l.stockLevelId, e.target.value, l.remaining)
+                      }
+                      onBlur={(e) =>
+                        setReturnQty(l.stockLevelId, e.target.value, l.remaining)
                       }
                     />
                     <span className="text-xs text-[#8b9bb0]">
@@ -416,9 +547,12 @@ export function SaleReturnDialog({
                       <option value="quarantine">Quarantine</option>
                       <option value="scrap">Scrap</option>
                     </Select>
+                    </div>
+                    <FieldError message={qtyErr} />
                   </div>
                 </li>
-              ))}
+              );
+              })}
             </ul>
           </>
         )}
@@ -433,10 +567,15 @@ export function SaleReturnDialog({
               placeholder="Search catalog…"
             />
             <ul className="mt-2 max-h-40 divide-y divide-[#f3f4f6] overflow-y-auto text-sm">
-              {(catalog.data?.items ?? []).map((c) => (
+              {(catalog.data?.items ?? []).map((c) => {
+                const repRaw = replaceQty[c.id] ?? "";
+                const repErr =
+                  replaceQtyErrors[c.id] ??
+                  replaceQtyError(repRaw, c.qtyOnHand);
+                return (
                 <li
                   key={c.id}
-                  className="flex items-center justify-between gap-2 py-2"
+                  className="flex flex-col gap-1 py-2 sm:flex-row sm:items-center sm:justify-between"
                 >
                   <div className="min-w-0">
                     <p className="truncate font-medium text-[#111827]">
@@ -447,21 +586,35 @@ export function SaleReturnDialog({
                       {c.qtyOnHand}
                     </p>
                   </div>
-                  <Input
-                    className="h-8 w-16"
-                    type="number"
-                    min={0}
-                    value={replaceQty[c.id] ?? ""}
-                    onChange={(e) =>
-                      setReplaceQty((m) => ({
-                        ...m,
-                        [c.id]: e.target.value,
-                      }))
-                    }
-                    placeholder="0"
-                  />
+                  <div className="flex flex-col items-end gap-0.5">
+                    <div className="flex items-center gap-1.5">
+                      <Input
+                        className={cn(
+                          "h-8 w-16",
+                          repErr && "border-rose-400 focus:border-rose-500",
+                        )}
+                        type="number"
+                        min={0}
+                        max={c.qtyOnHand}
+                        step={Number.isInteger(c.qtyOnHand) ? 1 : "any"}
+                        value={repRaw}
+                        onChange={(e) =>
+                          setReplaceQtyForItem(c.id, e.target.value, c.qtyOnHand)
+                        }
+                        onBlur={(e) =>
+                          setReplaceQtyForItem(c.id, e.target.value, c.qtyOnHand)
+                        }
+                        placeholder="0"
+                      />
+                      <span className="text-xs text-[#8b9bb0]">
+                        / {c.qtyOnHand}
+                      </span>
+                    </div>
+                    <FieldError message={repErr} />
+                  </div>
                 </li>
-              ))}
+              );
+              })}
               {!catalog.isLoading && !(catalog.data?.items ?? []).length ? (
                 <li className="py-3 text-center text-[#6b7280]">No items</li>
               ) : null}
@@ -489,8 +642,14 @@ export function SaleReturnDialog({
               {mode === "return" ? (
                 <option value="original">Original payment method</option>
               ) : null}
-              <option value="store_credit">Store credit</option>
+              <option value="store_credit" disabled={!order.data?.customer?.id}>
+                Store credit
+                {!order.data?.customer?.id ? " (needs customer)" : ""}
+              </option>
             </Select>
+            {storeCreditBlocked ? (
+              <FieldError message="Add a customer to the original sale to refund as store credit" />
+            ) : null}
           </div>
           <div>
             <Label>Reason</Label>
@@ -512,9 +671,17 @@ export function SaleReturnDialog({
           <Input
             className="mt-1.5"
             value={reason}
+            maxLength={500}
             onChange={(e) => setReason(e.target.value)}
             placeholder="Extra detail…"
           />
+          {noteTooLong ? (
+            <FieldError message="Note must be 500 characters or less" />
+          ) : (
+            <p className="mt-1 text-[0.7rem] text-[#8a9bb0]">
+              {reason.trim().length}/500
+            </p>
+          )}
         </div>
 
         <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-[#eef2f8] pt-4">
@@ -529,6 +696,20 @@ export function SaleReturnDialog({
                 Remaining refundable {money(remainingRefundable)}
               </p>
             ) : null}
+            {refundableExceeded ? (
+              <FieldError
+                message={`Refund exceeds remaining refundable ${money(remainingRefundable ?? 0)}`}
+              />
+            ) : null}
+            {hasInvalidReturnQty ? (
+              <FieldError message="Fix return quantities above the max allowed" />
+            ) : null}
+            {mode === "exchange" && hasInvalidReplaceQty ? (
+              <FieldError message="Fix replacement quantities — check stock on hand" />
+            ) : null}
+            {!reasonCode && !reasons.isLoading ? (
+              <FieldError message="Select a refund reason" />
+            ) : null}
             <p className="mt-1 text-[0.7rem] text-[#8a9bb0]">
               Final amount is calculated on the server (tax + discount from the
               original bill). Preview is approximate.
@@ -536,11 +717,7 @@ export function SaleReturnDialog({
           </div>
           <Button
             type="button"
-            disabled={
-              submit.isPending ||
-              refundPreview <= 0 ||
-              (mode === "exchange" && replacePreview <= 0)
-            }
+            disabled={!canSubmit}
             onClick={() => submit.mutate()}
           >
             {submit.isPending

@@ -80,8 +80,8 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-xl border border-[#e2e8f0] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
-      <div className="mb-4 border-b border-[#f1f5f9] pb-3">
+    <section className="rounded-xl border border-[#d9e0ea] bg-white p-5 shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
+      <div className="mb-4 border-b border-[#eef1f4] pb-3">
         <h2 className="section-title text-[0.95rem]">{title}</h2>
         {hint ? (
           <p className="mt-1 text-[0.8rem] font-medium text-[#64748b]">{hint}</p>
@@ -143,12 +143,12 @@ function NewSupplierPageInner() {
   });
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5 pb-16">
-      <header className="sticky top-0 z-10 -mx-1 flex flex-wrap items-center justify-between gap-3 border-b border-[#e8ecf1] bg-[#f3f5f9]/95 px-1 py-3 backdrop-blur-sm">
+    <div className="space-y-5 pb-16">
+      <header className="flex flex-wrap items-end justify-between gap-3 border-b border-[#eef1f4] pb-3">
         <div className="min-w-0">
           <p className="eyebrow">Purchases</p>
           <h1 className="page-title mt-1">New supplier</h1>
-          <p className="page-subtitle mt-1">
+          <p className="page-subtitle mt-1.5">
             Vendor profile for POs, GRN, and payables — any business type.
           </p>
         </div>
@@ -472,7 +472,7 @@ function NewSupplierPageInner() {
         />
       </Section>
 
-      <div className="flex justify-end gap-2 border-t border-[#e8ecf1] pt-4">
+      <div className="flex justify-end gap-2 border-t border-[#eef1f4] pt-4">
         <Button variant="secondary" asChild>
           <Link href={returnTo ?? "/suppliers"}>Cancel</Link>
         </Button>

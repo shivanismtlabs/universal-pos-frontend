@@ -942,6 +942,84 @@ export const createSupplierSchema = z.object({
 });
 export type CreateSupplierInput = z.infer<typeof createSupplierSchema>;
 
+const locationTypeSchema = z.enum(
+  ["store", "branch", "warehouse", "clinic", "kitchen", "office", "other"],
+  { message: "Select a location type" },
+);
+
+const locationSharedFields = {
+  name: z
+    .string()
+    .trim()
+    .min(2, "Name must be at least 2 characters")
+    .max(100, "Name is too long"),
+  type: locationTypeSchema,
+  address: z
+    .string()
+    .trim()
+    .max(500, "Address is too long")
+    .optional()
+    .or(z.literal("")),
+  phone: z
+    .string()
+    .trim()
+    .max(32, "Phone is too long")
+    .optional()
+    .or(z.literal(""))
+    .refine((v) => !v || validatePhoneE164(v), {
+      message: "Enter a valid phone number",
+    }),
+  email: optionalEmailSchema,
+  businessHours: z
+    .string()
+    .trim()
+    .max(200, "Business hours is too long")
+    .optional()
+    .or(z.literal("")),
+  timezone: z
+    .string()
+    .trim()
+    .max(64, "Timezone is too long")
+    .optional()
+    .or(z.literal(""))
+    .refine(
+      (v) => !v || /^[A-Za-z_]+\/[A-Za-z_+-]+$/.test(v),
+      "Use a valid timezone (e.g. Asia/Kolkata)",
+    ),
+  currencyCode: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .optional()
+    .or(z.literal(""))
+    .refine(
+      (v) => !v || /^[A-Z]{3}$/.test(v),
+      "Use a 3-letter currency code (e.g. INR)",
+    ),
+  managerUserId: z.string().optional().or(z.literal("")),
+  parentLocationId: z.string().optional().or(z.literal("")),
+  isActive: z.boolean().optional(),
+};
+
+export const createLocationFormSchema = z.object({
+  ...locationSharedFields,
+  code: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .min(2, "Store code must be at least 2 characters")
+    .max(50, "Store code is too long")
+    .regex(
+      /^[A-Z0-9_-]+$/,
+      "Use letters, numbers, hyphen, or underscore only",
+    ),
+});
+
+export const updateLocationFormSchema = z.object(locationSharedFields);
+
+export type CreateLocationFormInput = z.infer<typeof createLocationFormSchema>;
+export type UpdateLocationFormInput = z.infer<typeof updateLocationFormSchema>;
+
 export const createExpenseSchema = z.object({
   amount: moneyAmountSchema,
   spentAt: z

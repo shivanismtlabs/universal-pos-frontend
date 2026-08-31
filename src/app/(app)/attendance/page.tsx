@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { PageHeader } from "@/components/page-header";
+import { formatWorkedDuration } from "@/lib/attendance-time";
 
 const STATUSES = [
   { value: "present", label: "Present" },
@@ -182,6 +183,23 @@ export default function AttendancePage() {
 
   const open = openQ.data;
   const hoursPreview = useMemo(() => calcPreviewHours(form), [form]);
+  const isClockedIn = Boolean(open?.clockInAt && !open?.clockOutAt);
+
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!isClockedIn) return;
+    const id = window.setInterval(() => setTick((t) => t + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [isClockedIn]);
+
+  const liveElapsed = useMemo(() => {
+    if (!open?.clockInAt || open.clockOutAt) return null;
+    return formatWorkedDuration(
+      open.clockInAt,
+      null,
+      open.breakMinutes ?? 0,
+    );
+  }, [open, tick]);
 
   useEffect(() => {
     if (NO_TIME.has(form.status)) return;
@@ -240,18 +258,33 @@ export default function AttendancePage() {
         }
       />
 
-      <section className="flex flex-wrap items-center gap-3 rounded-xl border border-[#e5e7eb] bg-white p-5">
+      <section className="flex flex-wrap items-center gap-4 rounded-xl border border-[#e4e9f0] bg-white p-5">
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-[#111827]">Your status</p>
-          <p className="text-sm text-[#6b7280]">
-            {open?.clockInAt
-              ? `Clocked in since ${new Date(open.clockInAt).toLocaleString()}`
-              : "Not clocked in"}
-          </p>
+          <p className="text-sm font-semibold text-[#0b1f33]">Your shift</p>
+          {isClockedIn && liveElapsed ? (
+            <>
+              <p className="mt-1 text-2xl font-bold tabular-nums tracking-tight text-[#1a56db]">
+                {liveElapsed}
+              </p>
+              <p className="mt-1 text-sm text-[#5a6b7d]">
+                Clocked in at{" "}
+                {new Date(open!.clockInAt!).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+                {" · "}Timer runs until you clock out
+              </p>
+            </>
+          ) : (
+            <p className="mt-1 text-sm text-[#5a6b7d]">
+              Not clocked in — tap Clock in when your shift starts
+            </p>
+          )}
         </div>
-        {open?.clockInAt && !open.clockOutAt ? (
+        {isClockedIn ? (
           <Button
             type="button"
+            variant="secondary"
             disabled={clockOut.isPending}
             onClick={() => clockOut.mutate()}
           >
@@ -584,8 +617,21 @@ export default function AttendancePage() {
                     {r.breakMinutes ?? 0}m
                   </td>
                   <td className="px-4 py-2.5 tabular-nums">
-                    {r.workingHours ??
-                      (r.minutes != null ? `${r.minutes}m` : "—")}
+                    {r.isOpenSession && r.clockInAt ? (
+                      <span className="font-semibold text-[#1a56db]">
+                        {formatWorkedDuration(
+                          r.clockInAt,
+                          null,
+                          r.breakMinutes ?? 0,
+                        )}{" "}
+                        <span className="text-[0.65rem] font-medium text-[#5a6b7d]">
+                          (running)
+                        </span>
+                      </span>
+                    ) : (
+                      r.workingHours ??
+                      (r.minutes != null ? `${r.minutes}m` : "—")
+                    )}
                   </td>
                   <td className="px-4 py-2.5">{statusLabel(r.status)}</td>
                   <td className="px-4 py-2.5 capitalize">{r.method}</td>

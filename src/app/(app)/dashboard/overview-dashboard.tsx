@@ -74,32 +74,40 @@ export function OverviewDashboard({ embed = false }: { embed?: boolean }) {
   });
 
   const sales = useQuery({
-    queryKey: ["reports-sales-summary"],
-    queryFn: () => reportsApi.salesSummary(),
+    queryKey: ["reports-sales-summary", branchId],
+    queryFn: () => reportsApi.salesSummary(undefined, undefined, branchId!),
+    enabled: Boolean(branchId),
   });
   const payments = useQuery({
-    queryKey: ["reports-payments-summary"],
-    queryFn: () => reportsApi.paymentsSummary(),
+    queryKey: ["reports-payments-summary", branchId],
+    queryFn: () => reportsApi.paymentsSummary(undefined, undefined, branchId!),
+    enabled: Boolean(branchId),
   });
   const financeDash = useQuery({
-    queryKey: ["reports-dashboard-finance"],
-    queryFn: () => reportsApi.dashboardFinance(),
+    queryKey: ["reports-dashboard-finance", branchId],
+    queryFn: () => reportsApi.dashboardFinance({ locationId: branchId! }),
+    enabled: Boolean(branchId),
   });
   const floor = useQuery({
-    queryKey: ["pos-sale-floor"],
-    queryFn: () => posApi.saleFloor(),
-    enabled: hasSale,
+    queryKey: ["pos-sale-floor", branchId],
+    queryFn: () => posApi.saleFloor(branchId!),
+    enabled: hasSale && Boolean(branchId),
   });
   const lowStockQ = useQuery({
-    queryKey: ["pos-sale-low-stock"],
+    queryKey: ["pos-sale-low-stock", branchId],
     queryFn: () =>
-      posApi.saleCatalog({ lowStock: true, maxQty: 5, limit: 8 }),
-    enabled: hasSale,
+      posApi.saleCatalog({
+        locationId: branchId!,
+        lowStock: true,
+        maxQty: 5,
+        limit: 8,
+      }),
+    enabled: hasSale && Boolean(branchId),
   });
   const recent = useQuery({
-    queryKey: ["pos-sale-recent-overview"],
-    queryFn: () => posApi.listRecentSales(8),
-    enabled: hasSale,
+    queryKey: ["pos-sale-recent-overview", branchId],
+    queryFn: () => posApi.listRecentSales(8, branchId!),
+    enabled: hasSale && Boolean(branchId),
   });
   const subSummary = useQuery({
     queryKey: ["subscriptions-summary"],

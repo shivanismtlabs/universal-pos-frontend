@@ -67,6 +67,7 @@ import { Button } from "@/components/ui/button";
 import { StationPinLock } from "@/components/station-pin-lock";
 import { ShellEntitySearch } from "@/components/shell-entity-search";
 import { BranchSelector } from "@/components/branch-selector";
+import { AttendanceShiftTimer } from "@/components/attendance-shift-timer";
 import { OfflineStatusBanner } from "@/components/offline-status-banner";
 import { SetupReturnBanner } from "@/components/setup-return-banner";
 import { SessionIdleWatcher } from "@/components/session-idle-watcher";
@@ -1581,6 +1582,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <AttendanceShiftTimer />
             <HeaderClock
               compact
               locale={locale}
@@ -1610,6 +1612,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             Operating branch — sales, stock, and expenses use this location
           </p>
           <div className="flex items-center gap-2">
+            <AttendanceShiftTimer />
             <HeaderClock
               locale={locale}
               timeZone={boot?.tenant?.timezone}

@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { posApi } from "@/lib/api";
 import { ReceiptModal, type ReceiptData } from "@/components/receipt-modal";
 import { useBootstrap } from "@/lib/bootstrap";
+import { useBranchStore } from "@/lib/branch-store";
 import { Button } from "@/components/ui/button";
 import { FloorTabs } from "@/components/getting-started";
 import { SaleReturnDialog } from "@/components/sale-return-dialog";
@@ -22,6 +23,7 @@ type Tab = "stock" | "sell" | "recent";
  */
 export function SaleDashboard({ embed = false }: { embed?: boolean }) {
   const { productName, money } = useBootstrap();
+  const branchId = useBranchStore((s) => s.currentLocationId);
   const userRoles = useAuthStore((s) => s.user?.roles);
   const allowReturn = canRefund(userRoles);
   const [tab, setTab] = useState<Tab>("sell");
@@ -34,14 +36,15 @@ export function SaleDashboard({ embed = false }: { embed?: boolean }) {
   const [reprint, setReprint] = useState<ReceiptData | null>(null);
 
   const floor = useQuery({
-    queryKey: ["pos-sale-floor"],
-    queryFn: () => posApi.saleFloor(),
+    queryKey: ["pos-sale-floor", branchId],
+    queryFn: () => posApi.saleFloor(branchId!),
+    enabled: Boolean(branchId),
   });
 
   const recent = useQuery({
-    queryKey: ["pos-sale-recent"],
-    queryFn: () => posApi.listRecentSales(25),
-    enabled: tab === "recent",
+    queryKey: ["pos-sale-recent", branchId],
+    queryFn: () => posApi.listRecentSales(25, branchId!),
+    enabled: tab === "recent" && Boolean(branchId),
   });
 
   const counts = floor.data?.counts;

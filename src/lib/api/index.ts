@@ -3190,8 +3190,11 @@ export const posApi = {
       },
     );
   },
-  listRecentSales(limit?: number) {
-    const qs = limit ? `?limit=${limit}` : "";
+  listRecentSales(limit?: number, locationId?: string) {
+    const qs = new URLSearchParams();
+    if (limit) qs.set("limit", String(limit));
+    if (locationId) qs.set("locationId", locationId);
+    const q = qs.toString();
     return apiRequest<{
       items: Array<{
         id: string;
@@ -3208,7 +3211,7 @@ export const posApi = {
         productNames?: string[];
         productSummary?: string;
       }>;
-    }>(`/pos/sale/recent${qs}`, { token: token() });
+    }>(`/pos/sale/recent${q ? `?${q}` : ""}`, { token: token() });
   },
   saleCatalog(params?: {
     locationId?: string;
@@ -7310,6 +7313,7 @@ export type AttendanceRow = {
   notes?: string | null;
   minutes: number | null;
   workingHours?: string | null;
+  isOpenSession?: boolean;
 };
 
 export const iamApi = {
@@ -7374,6 +7378,10 @@ export const iamApi = {
       clockOutAt?: string | null;
       workDate?: string | null;
       status?: string;
+      breakMinutes?: number;
+      minutes?: number | null;
+      workingHours?: string | null;
+      isOpenSession?: boolean;
     } | null>("/iam/attendance/open", { token: token() });
   },
   listAttendance(params?: {

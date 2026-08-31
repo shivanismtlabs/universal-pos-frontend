@@ -16,6 +16,7 @@ import {
   reportsApi,
 } from "@/lib/api";
 import { useBootstrap } from "@/lib/bootstrap";
+import { useBranchStore } from "@/lib/branch-store";
 import { Button } from "@/components/ui/button";
 import { ProductThumb } from "@/components/product-thumb";
 import { TablePager } from "@/components/table-pager";
@@ -39,7 +40,9 @@ type DashLens = "sales" | "inventory" | "purchase";
  * Zoho Home → Dashboard: denser summary + product strip + quick links.
  */
 export function HomeDashboard() {
-  const { money, hasMode, hasScreen } = useBootstrap();
+  const { money, hasMode, hasScreen, data: boot } = useBootstrap();
+  const branchId = useBranchStore((s) => s.currentLocationId);
+  const branchName = boot?.locations?.find((l) => l.id === branchId)?.name;
   const hasSale = hasMode("sale");
   const showInventory = hasSale && hasScreen("inventory");
   const [lens, setLens] = useState<DashLens>("sales");
@@ -54,26 +57,33 @@ export function HomeDashboard() {
   }, []);
 
   const sales = useQuery({
-    queryKey: ["reports-sales-summary", range.from, range.to],
-    queryFn: () => reportsApi.salesSummary(range.from, range.to),
+    queryKey: ["reports-sales-summary", range.from, range.to, branchId],
+    queryFn: () => reportsApi.salesSummary(range.from, range.to, branchId!),
+    enabled: Boolean(branchId),
   });
   const monthly = useQuery({
-    queryKey: ["reports-monthly-home-spark"],
-    queryFn: () => reportsApi.monthlySales({}),
+    queryKey: ["reports-monthly-home-spark", branchId],
+    queryFn: () =>
+      reportsApi.monthlySales({
+        locationIds: branchId ? [branchId] : undefined,
+      }),
+    enabled: Boolean(branchId),
   });
   const payments = useQuery({
-    queryKey: ["reports-payments-summary", range.from, range.to],
-    queryFn: () => reportsApi.paymentsSummary(range.from, range.to),
+    queryKey: ["reports-payments-summary", range.from, range.to, branchId],
+    queryFn: () =>
+      reportsApi.paymentsSummary(range.from, range.to, branchId!),
+    enabled: Boolean(branchId),
   });
   const recent = useQuery({
-    queryKey: ["pos-sale-recent-home"],
-    queryFn: () => posApi.listRecentSales(25),
-    enabled: hasSale,
+    queryKey: ["pos-sale-recent-home", branchId],
+    queryFn: () => posApi.listRecentSales(25, branchId!),
+    enabled: hasSale && Boolean(branchId),
   });
   const floor = useQuery({
-    queryKey: ["pos-sale-floor"],
-    queryFn: () => posApi.saleFloor(),
-    enabled: hasSale,
+    queryKey: ["pos-sale-floor", branchId],
+    queryFn: () => posApi.saleFloor(branchId!),
+    enabled: hasSale && Boolean(branchId),
   });
   const products = useQuery({
     queryKey: ["catalog-products-home"],
@@ -144,6 +154,12 @@ export function HomeDashboard() {
 
   return (
     <div className="space-y-4">
+      {branchName ? (
+        <p className="text-[0.75rem] text-[#5a6b7d]">
+          Operating branch ·{" "}
+          <span className="font-semibold text-[#0b1f33]">{branchName}</span>
+        </p>
+      ) : null}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap gap-1.5">
           {lenses
