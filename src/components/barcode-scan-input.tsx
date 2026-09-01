@@ -163,7 +163,7 @@ export function BarcodeScanInput({
           {label}
         </Label>
       ) : null}
-      <form onSubmit={handleSubmit} className="flex gap-1.5">
+      <form onSubmit={handleSubmit} className="flex items-center gap-2">
         <div className="relative min-w-0 flex-1">
           <span
             aria-hidden
@@ -203,10 +203,10 @@ export function BarcodeScanInput({
         {showSubmitButton ? (
           <Button
             type="submit"
+            size="sm"
             className={cn(
-              "shrink-0",
-              fieldH,
-              compact ? "min-w-[3.5rem] px-3" : "min-w-[5.25rem] px-4",
+              "shrink-0 h-9 rounded-lg text-xs font-semibold px-3.5 inline-flex items-center justify-center gap-1.5 self-center",
+              compact ? "min-w-[3.5rem]" : "min-w-[5.25rem]",
             )}
             disabled={disabled || !value.trim()}
           >

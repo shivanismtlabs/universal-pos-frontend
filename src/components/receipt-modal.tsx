@@ -216,20 +216,19 @@ export function ReceiptModal({
   }, [onClose]);
 
   const changeAmt = change ?? data?.change;
-  const balanceDue = moneyNumber(data?.totals.balanceDue);
+  const balanceDue = moneyNumber((data as any)?.balanceDue ?? data?.totals?.balanceDue);
   const isPaid = balanceDue <= 0;
   const [sending, setSending] = useState(false);
 
-  const subtotal = moneyNumber(data?.totals.subtotal);
-  const taxTotal = moneyNumber(data?.totals.taxTotal);
-  const discount = moneyNumber(data?.totals.discountTotal);
+  const subtotal = moneyNumber((data as any)?.subtotal ?? data?.totals?.subtotal);
+  const taxTotal = moneyNumber((data as any)?.taxTotal ?? data?.totals?.taxTotal);
+  const discount = moneyNumber((data as any)?.discountTotal ?? data?.totals?.discountTotal);
   const feeRows = data?.fees ?? [];
   const feesTotal =
-    moneyNumber(data?.totals.feesTotal) ||
+    moneyNumber((data as any)?.feesTotal ?? data?.totals?.feesTotal) ||
     feeRows.reduce((s, f) => s + moneyNumber(f.amount), 0);
   const itemsSub = Math.max(0, subtotal - feesTotal);
-  // Receipt totals historically treat tax as additive on printed grand
-  // (same as exclusive). Keep that so printed QR/total stay unchanged.
+
   const bill = buildBillSummary({
     itemsSubtotal: itemsSub,
     taxTotal,
@@ -240,6 +239,20 @@ export function ReceiptModal({
     amountDue: Math.max(0, subtotal - discount + taxTotal),
   });
   const rounded = bill.roundedTotal;
+  const isExchange = data?.kind === "exchange" || Boolean((data as any)?.meta?.isExchangeInvoice);
+  const metaObj = (data as any)?.meta ?? {};
+
+  const returnTotalVal = moneyNumber(metaObj.returnAmount ?? 0);
+  const itemsSum = (data?.items ?? []).reduce((sum, item) => {
+    const q = moneyNumber(item.quantity ?? 1);
+    const amt = item.lineTotal !== undefined
+      ? moneyNumber(item.lineTotal)
+      : moneyNumber(item.unitPrice) * q;
+    return sum + amt;
+  }, 0);
+  const replaceTotalVal = moneyNumber(metaObj.replaceTotal) || Math.max(subtotal + taxTotal, itemsSum);
+  const netDiff = moneyNumber(metaObj.exchangeNet ?? (replaceTotalVal - returnTotalVal));
+
   const when = data?.printedAt
     ? new Date(data.printedAt)
     : new Date();
@@ -287,8 +300,8 @@ export function ReceiptModal({
               balanceDue: String(balanceDue),
               storeName: shopName,
               customerName: data.customer.fullName,
-              subtotal: String(data.totals.subtotal),
-              taxTotal: String(data.totals.taxTotal),
+              subtotal: String(data?.totals?.subtotal ?? 0),
+              taxTotal: String(data?.totals?.taxTotal ?? 0),
             },
           });
         }
@@ -377,7 +390,9 @@ export function ReceiptModal({
             <div className="receipt-print mx-auto w-full max-w-[280px] bg-white font-mono text-[12px] leading-[1.35] text-black print:max-w-none">
               <header className="text-center">
                 <p className="text-[13px] font-bold tracking-wide uppercase">
-                  POS GST INVOICE
+                  {(data.kind === "exchange" || Boolean((data as any).meta?.isExchangeInvoice))
+                    ? "EXCHANGE INVOICE"
+                    : "POS GST INVOICE"}
                 </p>
                 <p className="mt-1 font-bold">{shopName}</p>
                 {data.store.address ? (
@@ -394,6 +409,16 @@ export function ReceiptModal({
                     data.invoices?.[data.invoices.length - 1]?.invoiceNumber ||
                     data.orderNumber}
                 </p>
+                {(data as any).meta?.exchangeOfOrderNumber ? (
+                  <p className="font-bold text-[#0b1f33]">
+                    Original Order: {(data as any).meta.exchangeOfOrderNumber}
+                  </p>
+                ) : null}
+                {(data as any).meta?.returnEventId ? (
+                  <p className="font-bold text-[#0b1f33]">
+                    Credit Note: CN-{String((data as any).meta.returnEventId).slice(-6).toUpperCase()}
+                  </p>
+                ) : null}
                 {data.activeInvoiceLabel ? (
                   <p>Split: {data.activeInvoiceLabel}</p>
                 ) : null}
@@ -415,6 +440,36 @@ export function ReceiptModal({
                 ) : null}
               </section>
               {dash}
+
+              {/* Returned Negative Adjustments for Exchange */}
+              {Array.isArray((data as any).meta?.returnedItems) &&
+              (data as any).meta.returnedItems.length > 0 ? (
+                <>
+                  <div className="my-1 border-b border-dashed border-gray-400 pb-0.5 font-bold text-[11px] text-rose-800 uppercase">
+                    RETURNED PRODUCT (ADJUSTMENT)
+                  </div>
+                  {(data as any).meta.returnedItems.map((r: any, idx: number) => {
+                    const q = moneyNumber(r.quantity ?? 1);
+                    const rate = moneyNumber(r.unitPrice ?? 0);
+                    const amt = moneyNumber(r.refundShare ?? q * rate);
+                    return (
+                      <div key={`ret-${idx}`} className="mb-1.5 text-rose-900 font-medium">
+                        <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-1">
+                          <span className="min-w-0 break-words pr-1">- {r.name || "Item"} (Returned)</span>
+                          <span className="w-8 text-right tabular-nums">{q}</span>
+                          <span className="w-12 text-right tabular-nums">{pad2(rate)}</span>
+                          <span className="w-12 text-right tabular-nums font-bold">-₹{pad2(amt)}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {dash}
+                  <div className="my-1 border-b border-dashed border-gray-400 pb-0.5 font-bold text-[11px] text-emerald-800 uppercase">
+                    REPLACEMENT PRODUCT (NEW SALE)
+                  </div>
+                </>
+              ) : null}
+
               <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-1 font-bold">
                 <span>Item</span>
                 <span className="w-8 text-right">Qty</span>
@@ -437,13 +492,11 @@ export function ReceiptModal({
                 const rate = moneyNumber(item.unitPrice);
                 const taxAmt = moneyNumber(item.taxAmount);
                 let gst = moneyNumber(item.taxRatePercent ?? 0);
-                // Prefer amount-derived % when stored rate missing or looks like HSN bleed
                 if (taxAmt > 0 && amt > 0) {
                   const derived = Math.round((taxAmt / amt) * 1000) / 10;
                   if (!gst || gst > 28) gst = derived;
                 }
                 const rawHsn = (item.hsnOrSac || item.taxCode || "").trim();
-                // Don't print rate tags (GST5) as HSN; keep real HSN/SAC
                 const hsn =
                   rawHsn && !/^(?:GST|VAT|TAX)\s*\d/i.test(rawHsn)
                     ? rawHsn
@@ -451,15 +504,17 @@ export function ReceiptModal({
                 return (
                   <div key={i} className="mb-1.5">
                     <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-1">
-                      <span className="min-w-0 break-words pr-1">{label}</span>
+                      <span className="min-w-0 break-words pr-1">
+                        {isExchange ? `+ ${label}` : label}
+                      </span>
                       <span className="w-8 text-right tabular-nums">
                         {qty % 1 === 0 ? String(qty) : pad2(qty)}
                       </span>
                       <span className="w-12 text-right tabular-nums">
                         {pad2(rate)}
                       </span>
-                      <span className="w-12 text-right tabular-nums">
-                        {pad2(amt)}
+                      <span className="w-12 text-right tabular-nums font-bold">
+                        {isExchange ? `+₹${pad2(amt)}` : pad2(amt)}
                       </span>
                     </div>
                     {hsn || gst ? (
@@ -473,44 +528,128 @@ export function ReceiptModal({
                 );
               })}
               {dash}
-              <BillTotalsLines
-                summary={bill}
-                discount={discount}
-                formatMoney={pad2}
-                netAmount={rounded}
-                netLabel="Net Payable"
-                showZeroDiscount
-                showZeroTax={false}
-                rowClassName="flex justify-between"
-              />
-              {changeAmt != null && moneyNumber(changeAmt) > 0 ? (
-                <div className="flex justify-between">
-                  <span>Change to return</span>
-                  <span className="tabular-nums">
-                    {pad2(moneyNumber(changeAmt))}
-                  </span>
+
+              {/* Exchange Net Calculation Summary & Totals */}
+              {isExchange ? (
+                <div className="my-2 space-y-1 font-mono text-[11px] text-black">
+                  <div className="flex justify-between font-semibold text-rose-900">
+                    <span>Returned Product Value:</span>
+                    <span className="tabular-nums">-₹{pad2(returnTotalVal)}</span>
+                  </div>
+                  <div className="flex justify-between font-semibold text-emerald-900">
+                    <span>Replacement Product Value:</span>
+                    <span className="tabular-nums">+₹{pad2(replaceTotalVal)}</span>
+                  </div>
+                  {dash}
+                  <div className="flex justify-between font-extrabold text-[12px]">
+                    <span>Exchange Difference:</span>
+                    <span className="tabular-nums">
+                      {netDiff > 0.009
+                        ? `+₹${pad2(netDiff)}`
+                        : netDiff < -0.009
+                        ? `-₹${pad2(Math.abs(netDiff))}`
+                        : "₹0.00"}
+                    </span>
+                  </div>
+                  {dash}
+
+                  {netDiff < -0.009 ? (
+                    <>
+                      <div className="flex justify-between font-extrabold text-[12px] text-emerald-800 uppercase">
+                        <span>CUSTOMER REFUND:</span>
+                        <span className="tabular-nums">₹{pad2(Math.abs(netDiff))}</span>
+                      </div>
+                      {(data.payments ?? []).map((p, idx) => (
+                        <div key={idx} className="flex justify-between text-[11px]">
+                          <span>Refund Method ({moneyLabel(p.method)}):</span>
+                          <span className="tabular-nums">₹{pad2(moneyNumber(p.amount))}</span>
+                        </div>
+                      ))}
+                      <div className="flex justify-between font-extrabold text-[12px] pt-1 text-emerald-900">
+                        <span>AMOUNT REFUNDED:</span>
+                        <span className="tabular-nums">₹{pad2(Math.abs(netDiff))}</span>
+                      </div>
+                      <div className="flex justify-between text-black">
+                        <span>Balance Due:</span>
+                        <span className="tabular-nums">₹0.00</span>
+                      </div>
+                    </>
+                  ) : netDiff > 0.009 ? (
+                    <>
+                      <div className="flex justify-between font-extrabold text-[12px] text-amber-800 uppercase">
+                        <span>CUSTOMER PAYS:</span>
+                        <span className="tabular-nums">₹{pad2(netDiff)}</span>
+                      </div>
+                      {(data.payments ?? []).map((p, idx) => (
+                        <div key={idx} className="flex justify-between text-[11px]">
+                          <span>Payment Method ({moneyLabel(p.method)}):</span>
+                          <span className="tabular-nums">₹{pad2(moneyNumber(p.amount))}</span>
+                        </div>
+                      ))}
+                      <div className="flex justify-between font-extrabold text-[12px] pt-1 text-amber-900">
+                        <span>AMOUNT PAID:</span>
+                        <span className="tabular-nums">₹{pad2(netDiff)}</span>
+                      </div>
+                      <div className="flex justify-between text-black">
+                        <span>Balance Due:</span>
+                        <span className="tabular-nums">₹0.00</span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex justify-between font-extrabold text-[12px] text-black uppercase">
+                        <span>NO DIFFERENCE:</span>
+                        <span className="tabular-nums">₹0.00</span>
+                      </div>
+                      <div className="flex justify-between text-black">
+                        <span>Balance Due:</span>
+                        <span className="tabular-nums">₹0.00</span>
+                      </div>
+                    </>
+                  )}
                 </div>
-              ) : null}
-              {dash}
-              {(data.payments ?? []).map((p, i) => (
-                <div key={i} className="flex justify-between">
-                  <span>
-                    {moneyLabel(p.method)}
-                    {p.status && p.status !== "succeeded"
-                      ? ` (${p.status})`
-                      : ""}
-                  </span>
-                  <span className="tabular-nums">
-                    {pad2(moneyNumber(p.amount))}
-                  </span>
-                </div>
-              ))}
-              <div className="mt-1 flex justify-between font-bold">
-                <span>{isPaid ? "Amount Paid" : "Balance due"}</span>
-                <span className="tabular-nums">
-                  {pad2(isPaid ? paidTotal : balanceDue)}
-                </span>
-              </div>
+              ) : (
+                <>
+                  <BillTotalsLines
+                    summary={bill}
+                    discount={discount}
+                    formatMoney={pad2}
+                    netAmount={rounded}
+                    netLabel="Net Payable"
+                    showZeroDiscount
+                    showZeroTax={false}
+                    rowClassName="flex justify-between"
+                  />
+                  {changeAmt != null && moneyNumber(changeAmt) > 0 ? (
+                    <div className="flex justify-between">
+                      <span>Change to return</span>
+                      <span className="tabular-nums">
+                        {pad2(moneyNumber(changeAmt))}
+                      </span>
+                    </div>
+                  ) : null}
+                  {dash}
+                  {(data.payments ?? []).map((p, i) => (
+                    <div key={i} className="flex justify-between">
+                      <span>
+                        {moneyLabel(p.method)}
+                        {p.status && p.status !== "succeeded"
+                          ? ` (${p.status})`
+                          : ""}
+                      </span>
+                      <span className="tabular-nums">
+                        {pad2(moneyNumber(p.amount))}
+                      </span>
+                    </div>
+                  ))}
+                  <div className="mt-1 flex justify-between font-bold">
+                    <span>{isPaid ? "Amount Paid" : "Balance due"}</span>
+                    <span className="tabular-nums">
+                      {pad2(isPaid ? paidTotal : balanceDue)}
+                    </span>
+                  </div>
+                </>
+              )}
               {upiVpa ? (
                 <div className="mt-3 text-center">
                   {/* eslint-disable-next-line @next/next/no-img-element */}

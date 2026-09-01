@@ -514,6 +514,15 @@ function OrderDetailInner() {
                 ? lifecycleLabel(lifecycle)
                 : data.status.replaceAll("_", " ")}
             </span>
+            {(data as { returnState?: string }).returnState === "partially_returned" ? (
+              <span className="rounded-md bg-amber-100 px-2 py-0.5 text-[0.7rem] font-bold tracking-wide text-amber-800 uppercase">
+                Partially Returned
+              </span>
+            ) : (data as { returnState?: string }).returnState === "fully_returned" ? (
+              <span className="rounded-md bg-purple-100 px-2 py-0.5 text-[0.7rem] font-bold tracking-wide text-purple-800 uppercase">
+                Fully Returned
+              </span>
+            ) : null}
           </div>
           <p className="page-subtitle mt-1.5">
             {data.customer?.fullName ?? "Walk-in Guest"}
@@ -738,6 +747,50 @@ function OrderDetailInner() {
 
       <div className="grid gap-5 lg:grid-cols-[1.25fr_0.85fr]">
         <section className="overflow-hidden rounded-2xl border border-[#e2e8f0] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+          {(data as any).meta?.isExchangeInvoice || data.kind === "exchange" ? (
+            <div className="border-b border-blue-200 bg-blue-50/70 p-4 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-blue-200 pb-2">
+                <div className="flex items-center gap-2">
+                  <span className="rounded bg-[#1a56db] px-2 py-0.5 text-[0.65rem] font-extrabold text-white uppercase tracking-wider">
+                    Exchange Invoice
+                  </span>
+                  <span className="font-semibold text-blue-900">
+                    Original Order: {(data as any).meta?.exchangeOfOrderNumber ?? "—"}
+                  </span>
+                </div>
+                {(data as any).meta?.returnEventId ? (
+                  <span className="font-semibold text-blue-900">
+                    Credit Note: CN-{String((data as any).meta.returnEventId).slice(-6).toUpperCase()}
+                  </span>
+                ) : null}
+              </div>
+              <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                <div className="rounded-lg bg-white p-2.5 border border-rose-200 shadow-sm">
+                  <span className="text-rose-600 font-bold uppercase text-[0.65rem] block">Returned Product Adjustment</span>
+                  <span className="text-base font-extrabold text-rose-700 tabular-nums">
+                    -₹{formatInr(moneyNumber((data as any).meta?.returnAmount ?? 0))}
+                  </span>
+                </div>
+                <div className="rounded-lg bg-white p-2.5 border border-emerald-200 shadow-sm">
+                  <span className="text-emerald-600 font-bold uppercase text-[0.65rem] block">Replacement Product Value</span>
+                  <span className="text-base font-extrabold text-emerald-700 tabular-nums">
+                    +₹{formatInr(moneyNumber(data.subtotal) + moneyNumber(data.taxTotal))}
+                  </span>
+                </div>
+                <div className="rounded-lg bg-white p-2.5 border border-blue-200 shadow-sm">
+                  <span className="text-blue-600 font-bold uppercase text-[0.65rem] block">Net Difference Settlement</span>
+                  <span className="text-base font-extrabold text-blue-900 tabular-nums">
+                    {moneyNumber((data as any).meta?.exchangeNet ?? 0) > 0
+                      ? `Customer Paid ₹${formatInr(moneyNumber((data as any).meta?.exchangeNet))}`
+                      : moneyNumber((data as any).meta?.exchangeNet ?? 0) < 0
+                      ? `Customer Refund ₹${formatInr(Math.abs(moneyNumber((data as any).meta?.exchangeNet)))}`
+                      : "₹0.00 (Equal Exchange)"}
+                  </span>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
           <div className="flex items-center justify-between border-b border-[#eef1f4] px-4 py-3">
             <div>
               <h2 className="section-title text-[0.95rem]">Line items</h2>
@@ -753,6 +806,8 @@ function OrderDetailInner() {
                 <tr>
                   <th className="px-4 py-2.5 font-bold">Item</th>
                   <th className="px-3 py-2.5 text-right font-bold">Qty</th>
+                  <th className="px-3 py-2.5 text-right font-bold">Returned</th>
+                  <th className="px-3 py-2.5 text-right font-bold">Remaining</th>
                   <th className="px-3 py-2.5 text-right font-bold">Rate</th>
                   <th className="px-3 py-2.5 text-right font-bold">Tax</th>
                   <th className="px-4 py-2.5 text-right font-bold">Amount</th>
@@ -764,6 +819,8 @@ function OrderDetailInner() {
               <tbody className="divide-y divide-[#f1f5f9]">
                 {data.items.map((item) => {
                   const qty = moneyNumber(item.quantity ?? 1);
+                  const returnedQty = (item as { returnedQuantity?: number }).returnedQuantity ?? 0;
+                  const remainingQty = (item as { remainingQuantity?: number }).remainingQuantity ?? Math.max(0, qty - returnedQty);
                   const rate = moneyNumber(item.unitPrice);
                   const tax = moneyNumber(item.taxAmount);
                   const amount =
@@ -792,6 +849,12 @@ function OrderDetailInner() {
                       </td>
                       <td className="px-3 py-3 text-right tabular-nums font-medium">
                         {qty % 1 === 0 ? qty : qty.toFixed(3)}
+                      </td>
+                      <td className="px-3 py-3 text-right tabular-nums font-semibold text-rose-600">
+                        {returnedQty > 0 ? returnedQty : "0"}
+                      </td>
+                      <td className="px-3 py-3 text-right tabular-nums font-semibold text-emerald-700">
+                        {remainingQty}
                       </td>
                       <td className="px-3 py-3 text-right tabular-nums">
                         {formatInr(rate)}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ordersApi, posApi } from "@/lib/api";
@@ -18,11 +19,24 @@ import {
   replaceQtyError,
   returnQtyError,
 } from "@/lib/return-qty-validation";
-import { Minus, Plus, X } from "lucide-react";
+import { BarcodeScanInput } from "@/components/barcode-scan-input";
+import {
+  Barcode,
+  Minus,
+  Plus,
+  X,
+  Search,
+  AlertCircle,
+  CheckCircle2,
+  ExternalLink,
+  Printer,
+  Package,
+} from "lucide-react";
+import { ReceiptModal } from "@/components/receipt-modal";
 
 /**
  * Return / refund a closed Sale ticket — restocks qty + records refund.
- * Optional exchange mode: return lines + pick replacement SKUs.
+ * Optional exchange mode: return lines + pick replacement SKUs via Barcode / SKU scan.
  */
 export function SaleReturnDialog({
   orderId,
@@ -51,6 +65,21 @@ export function SaleReturnDialog({
   const [reasonCode, setReasonCode] = useState("");
   const [reason, setReason] = useState("");
   const [catalogQ, setCatalogQ] = useState("");
+  const [barcodeInput, setBarcodeInput] = useState("");
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [isScanning, setIsScanning] = useState(false);
+  const [scannedItems, setScannedItems] = useState<Array<any>>([]);
+  const [completedExchange, setCompletedExchange] = useState<{
+    originalOrderNumber: string;
+    creditNoteId: string;
+    replacementOrderNumber: string;
+    replacementInvoiceNumber: string;
+    replacementOrderId: string;
+    returnedValue: number;
+    replacementValue: number;
+    net: number;
+  } | null>(null);
+  const [printExchangeOrderId, setPrintExchangeOrderId] = useState<string | null>(null);
   const [replaceQty, setReplaceQty] = useState<Record<string, string>>({});
   const [replaceQtyErrors, setReplaceQtyErrors] = useState<
     Record<string, string | undefined>
@@ -59,6 +88,12 @@ export function SaleReturnDialog({
   const order = useQuery({
     queryKey: ["order", orderId],
     queryFn: () => ordersApi.get(orderId),
+  });
+
+  const printExchangeReceiptQ = useQuery({
+    queryKey: ["order-receipt", printExchangeOrderId],
+    queryFn: () => ordersApi.get(printExchangeOrderId!),
+    enabled: Boolean(printExchangeOrderId),
   });
 
   const reasons = useQuery({
@@ -287,6 +322,53 @@ export function SaleReturnDialog({
     setQtyByLevel(next);
   };
 
+  const handleBarcodeScan = async (codeToSearch?: string) => {
+    const code = (codeToSearch ?? barcodeInput).trim();
+    if (!code) return;
+    setScanError(null);
+    setIsScanning(true);
+    try {
+      const res = await posApi.saleCatalog({ q: code, limit: 10, forPurchase: true });
+      const items = res.items ?? [];
+      if (!items.length) {
+        setScanError("Product not found");
+        return;
+      }
+      const match =
+        items.find((i: any) => i.product?.barcode === code || i.barcode === code) ??
+        items.find((i: any) => i.product?.skuCode === code || i.sku === code || i.productSku === code) ??
+        items[0];
+
+      if (!match) {
+        setScanError("Product not found");
+        return;
+      }
+
+      if (match.qtyOnHand <= 0) {
+        setScannedItems((prev) => {
+          if (prev.some((p) => p.id === match.id)) return prev;
+          return [match, ...prev];
+        });
+        setScanError(`"${match.name}" is Out of Stock (Available Stock: 0)`);
+        return;
+      }
+
+      setScannedItems((prev) => {
+        if (prev.some((p) => p.id === match.id)) return prev;
+        return [match, ...prev];
+      });
+
+      const currentQtyN = parseReturnQty(replaceQty[match.id] ?? "0") ?? 0;
+      const nextQty = Math.min(match.qtyOnHand, currentQtyN + 1);
+      setReplaceQtyForItem(match.id, String(nextQty), match.qtyOnHand);
+      setBarcodeInput("");
+    } catch (err) {
+      setScanError("Product not found");
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
   const submit = useMutation({
     mutationFn: async (): Promise<
       | {
@@ -304,6 +386,9 @@ export function SaleReturnDialog({
           orderNumber: string;
           invoiceNumber?: string | null;
           exchangeOrderId?: string;
+          returnEventId?: string;
+          returnAmount?: number;
+          replaceTotal?: number;
         }
     > => {
       const items = selectedReturnItems();
@@ -330,7 +415,7 @@ export function SaleReturnDialog({
         }
         const settle =
           method === "original" ? "cash" : method;
-        const r = await posApi.saleExchange({
+        const r = (await posApi.saleExchange({
           orderId,
           returnItems: items,
           replaceItems,
@@ -338,14 +423,17 @@ export function SaleReturnDialog({
           reasonCode,
           reason: reason.trim() || undefined,
           idempotencyKey: newIdempotencyKey("sale-exchange"),
-        });
+        })) as any;
         return {
           kind: "exchange",
           message: r.message,
-          net: r.replacement.net,
-          orderNumber: r.replacement.orderNumber,
-          invoiceNumber: r.replacement.invoiceNumber ?? null,
-          exchangeOrderId: r.replacement.orderId,
+          net: r.replacement?.net ?? 0,
+          orderNumber: r.replacement?.orderNumber ?? "",
+          invoiceNumber: r.replacement?.invoiceNumber ?? null,
+          exchangeOrderId: r.replacement?.orderId ?? "",
+          returnEventId: r.return?.returnEventId ?? r.links?.returnEventId ?? "",
+          returnAmount: r.return?.amount ?? r.replacement?.returnAmount ?? refundPreview,
+          replaceTotal: r.replacement?.replaceTotal ?? replacePreview,
         };
       }
 
@@ -360,20 +448,38 @@ export function SaleReturnDialog({
       return { kind: "return", ...r };
     },
     onSuccess: (r) => {
+      void qc.invalidateQueries({ queryKey: ["pos-sale-recent"] });
+      void qc.invalidateQueries({ queryKey: ["pos-sale-catalog"] });
+      void qc.invalidateQueries({ queryKey: ["order", orderId] });
+      void qc.invalidateQueries({ queryKey: ["customers"] });
+      void qc.invalidateQueries({ queryKey: ["sale-returns-list"] });
+      void qc.invalidateQueries({ queryKey: ["returned-qty", orderId] });
+
       if (r.kind === "exchange") {
+        const cNote = r.returnEventId
+          ? `CN-${r.returnEventId.slice(-6).toUpperCase()}`
+          : `CN-${orderNumber.slice(-6).toUpperCase()}`;
+        setCompletedExchange({
+          originalOrderNumber: orderNumber,
+          creditNoteId: cNote,
+          replacementOrderNumber: r.orderNumber,
+          replacementInvoiceNumber: r.invoiceNumber ?? `INV-${r.orderNumber}`,
+          replacementOrderId: r.exchangeOrderId ?? "",
+          returnedValue: r.returnAmount ?? refundPreview,
+          replacementValue: r.replaceTotal ?? replacePreview,
+          net: r.net,
+        });
         toast.success(
           r.message ||
-            `✓ Exchange Completed · net ${money(r.net)} · ${r.orderNumber}${
-              r.invoiceNumber ? ` · ${r.invoiceNumber}` : ""
-            }`,
+            `✓ Exchange Completed · net ${money(r.net)} · ${r.orderNumber}`,
         );
-        onCompleted?.();
       } else if (r.status === "pending" || r.status === "requested") {
         toast.success(
           r.message ||
             `Return requested — awaiting approval · ${money(r.amount ?? 0)}`,
         );
         onRequested?.();
+        onClose();
       } else {
         const credit =
           r.storeCreditBalance != null
@@ -384,14 +490,8 @@ export function SaleReturnDialog({
             `✓ Return Completed · ${money(r.amount)}${credit}`,
         );
         onCompleted?.();
+        onClose();
       }
-      void qc.invalidateQueries({ queryKey: ["pos-sale-recent"] });
-      void qc.invalidateQueries({ queryKey: ["pos-sale-catalog"] });
-      void qc.invalidateQueries({ queryKey: ["order", orderId] });
-      void qc.invalidateQueries({ queryKey: ["customers"] });
-      void qc.invalidateQueries({ queryKey: ["sale-returns-list"] });
-      void qc.invalidateQueries({ queryKey: ["returned-qty", orderId] });
-      onClose();
     },
     onError: (e) =>
       toast.error(
@@ -417,6 +517,133 @@ export function SaleReturnDialog({
     refundPreview > 0 &&
     (mode !== "exchange" || replacePreview > 0);
 
+  if (completedExchange) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-end justify-center p-3 sm:items-center">
+        <div
+          className="absolute inset-0 bg-[#0b1f33]/45"
+          onClick={() => {
+            onCompleted?.();
+            onClose();
+          }}
+        />
+        <div className="relative z-10 w-full max-w-lg overflow-y-auto rounded-[14px] border border-[#d9e0ea] bg-white p-5 shadow-2xl">
+          <div className="flex flex-col items-center text-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+              <CheckCircle2 className="h-6 w-6" />
+            </div>
+            <h2 className="mt-3 text-xl font-bold text-[#0b1f33]">
+              Exchange Completed Successfully
+            </h2>
+            <p className="mt-1 text-sm text-[#5a6b7d]">
+              Return event, credit note, replacement order, and invoice have been processed.
+            </p>
+          </div>
+
+          <div className="mt-5 rounded-xl border border-[#e5e7eb] bg-[#f8fafc] p-4 text-xs space-y-3">
+            <div className="grid grid-cols-2 gap-3 border-b border-[#e2e8f0] pb-3">
+              <div>
+                <span className="text-[#64748b]">Original Order</span>
+                <p className="font-bold text-[#0f172a]">{completedExchange.originalOrderNumber}</p>
+              </div>
+              <div>
+                <span className="text-[#64748b]">Return Document / Credit Note</span>
+                <p className="font-bold text-[#0f172a]">{completedExchange.creditNoteId}</p>
+              </div>
+              <div>
+                <span className="text-[#64748b]">Replacement Order</span>
+                <p className="font-bold text-[#1a56db]">{completedExchange.replacementOrderNumber}</p>
+              </div>
+              <div>
+                <span className="text-[#64748b]">Replacement Invoice</span>
+                <p className="font-bold text-[#1a56db]">{completedExchange.replacementInvoiceNumber}</p>
+              </div>
+            </div>
+
+            <div className="space-y-1.5 pt-1">
+              <div className="flex justify-between">
+                <span className="text-[#475569]">Returned Product Value:</span>
+                <span className="font-semibold text-[#0f172a] tabular-nums">{money(completedExchange.returnedValue)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-[#475569]">Replacement Value:</span>
+                <span className="font-semibold text-[#0f172a] tabular-nums">{money(completedExchange.replacementValue)}</span>
+              </div>
+              <div className="flex justify-between font-bold border-t border-[#e2e8f0] pt-2 text-sm">
+                <span>Net Difference Settlement:</span>
+                <span className={cn(
+                  "tabular-nums font-extrabold",
+                  completedExchange.net > 0 ? "text-amber-700" :
+                  completedExchange.net < 0 ? "text-emerald-700" : "text-slate-700"
+                )}>
+                  {completedExchange.net > 0
+                    ? `Customer Paid ${money(completedExchange.net)}`
+                    : completedExchange.net < 0
+                    ? `Customer Refunded ${money(Math.abs(completedExchange.net))}`
+                    : "₹0.00 (Equal Exchange)"}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {completedExchange.replacementOrderId ? (
+            <Button
+              type="button"
+              className="mt-4 w-full bg-[#1a56db] text-white hover:bg-[#1546b3] flex items-center justify-center gap-2 py-2.5 font-bold"
+              onClick={() => setPrintExchangeOrderId(completedExchange.replacementOrderId)}
+            >
+              <Printer className="size-4" /> Print Exchange Bill ({completedExchange.replacementInvoiceNumber})
+            </Button>
+          ) : null}
+
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <Link
+              href={`/orders/view?id=${orderId}`}
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-[#d9e0ea] bg-white px-3 py-2 text-xs font-semibold text-[#334155] hover:bg-[#f8fafc]"
+              onClick={() => {
+                onCompleted?.();
+                onClose();
+              }}
+            >
+              View Original Order
+            </Link>
+            {completedExchange.replacementOrderId ? (
+              <Link
+                href={`/orders/view?id=${completedExchange.replacementOrderId}`}
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-[#1a56db] bg-[#eef2ff] px-3 py-2 text-xs font-semibold text-[#1a56db] hover:bg-[#e0e7ff]"
+                onClick={() => {
+                  onCompleted?.();
+                  onClose();
+                }}
+              >
+                <ExternalLink className="size-3.5" /> View Replacement Order
+              </Link>
+            ) : null}
+          </div>
+
+          <Button
+            type="button"
+            className="mt-3 w-full bg-[#0f172a] hover:bg-[#1e293b]"
+            onClick={() => {
+              onCompleted?.();
+              onClose();
+            }}
+          >
+            Done / Close
+          </Button>
+
+          {printExchangeOrderId ? (
+            <ReceiptModal
+              data={(printExchangeReceiptQ.data as any) ?? null}
+              loading={printExchangeReceiptQ.isLoading}
+              onClose={() => setPrintExchangeOrderId(null)}
+            />
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center p-3 sm:items-center">
       <button
@@ -440,7 +667,7 @@ export function SaleReturnDialog({
             </h2>
             <p className="mt-0.5 text-sm text-[#5a6b7d]">
               {mode === "exchange"
-                ? "Give items back, then sell new ones. Pay or refund the difference."
+                ? "Give items back, then scan or select replacement SKUs. Pay or refund difference."
                 : "Refund uses original sale price, tax, and discounts. Qty cannot exceed returnable."}
             </p>
           </div>
@@ -452,6 +679,24 @@ export function SaleReturnDialog({
           >
             <X className="h-4 w-4" />
           </button>
+        </div>
+
+        {/* Original Order Summary Header Card */}
+        <div className="mt-3 rounded-lg border border-[#e2e8f0] bg-[#f8fafc] p-2.5 text-xs">
+          <div className="flex flex-wrap justify-between gap-2 border-b border-[#e2e8f0] pb-2">
+            <div>
+              <span className="text-[#64748b]">Customer:</span>{" "}
+              <span className="font-semibold text-[#0f172a]">
+                {order.data?.customer?.fullName ?? "Walk-in Guest"}
+              </span>
+            </div>
+            <div>
+              <span className="text-[#64748b]">Invoice #:</span>{" "}
+              <span className="font-semibold text-[#0f172a]">
+                {(order.data as any)?.invoices?.[0]?.invoiceNumber ?? orderNumber}
+              </span>
+            </div>
+          </div>
         </div>
 
         <div className="mt-3 flex gap-1 rounded-[10px] bg-[#eef2f8] p-1">
@@ -489,7 +734,7 @@ export function SaleReturnDialog({
                 Refund all lines
               </Button>
             </div>
-            <ul className="mt-2 divide-y divide-[#eef2f8]">
+            <ul className="mt-2 divide-y divide-[#eef2f8] ml-[16px]">
               {lines.map((l) => {
                 const qtyRaw = qtyByLevel[l.stockLevelId] ?? "0";
                 const qtyErr = returnQtyErrors[l.stockLevelId];
@@ -598,6 +843,7 @@ export function SaleReturnDialog({
                     >
                       <option value="good">Good / resellable</option>
                       <option value="damaged">Damaged</option>
+                      <option value="refurbish">Refurbish / Quarantine</option>
                       <option value="defective">Defective</option>
                       <option value="opened">Opened</option>
                       <option value="used">Used</option>
@@ -615,71 +861,157 @@ export function SaleReturnDialog({
         )}
 
         {mode === "exchange" ? (
-          <div className="mt-4 rounded-[12px] border border-[#e5e7eb] p-3">
-            <Label>Replacement items</Label>
-            <Input
-              className="mt-1.5"
-              value={catalogQ}
-              onChange={(e) => setCatalogQ(e.target.value)}
-              placeholder="Search catalog…"
-            />
-            <ul className="mt-2 max-h-40 divide-y divide-[#f3f4f6] overflow-y-auto text-sm">
-              {(catalog.data?.items ?? []).map((c) => {
-                const repRaw = replaceQty[c.id] ?? "";
-                const repErr =
-                  replaceQtyErrors[c.id] ??
-                  replaceQtyError(repRaw, c.qtyOnHand);
-                return (
-                <li
-                  key={c.id}
-                  className="flex flex-col gap-1 py-2 sm:flex-row sm:items-center sm:justify-between"
+          <div className="mt-4 rounded-[12px] border border-[#e5e7eb] bg-white p-3 space-y-3">
+            <div className="space-y-1.5">
+              <Label className="font-semibold text-[#0b1f33] text-xs">
+                Scan Barcode / Enter SKU
+              </Label>
+              <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
+                <BarcodeScanInput
+                  value={barcodeInput}
+                  onChange={setBarcodeInput}
+                  onScan={(code) => void handleBarcodeScan(code)}
+                  placeholder="Scan barcode with POS scanner or type SKU..."
+                  inputClassName="h-9 font-mono text-xs uppercase"
+                  compact
+                  showHint={false}
+                  className="min-w-0 flex-1"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-9 shrink-0 rounded-lg bg-[#1a56db] hover:bg-[#1546b3] text-xs font-semibold px-3.5 inline-flex items-center justify-center gap-1.5 self-center"
+                  onClick={() => void handleBarcodeScan()}
+                  disabled={isScanning || !barcodeInput.trim()}
                 >
-                  <div className="min-w-0">
-                    <p className="truncate font-medium text-[#111827]">
-                      {c.name}
-                    </p>
-                    <p className="text-xs text-[#6b7280]">
-                      {c.productSku ?? c.sku} · {money(c.sellPrice)} · SOH{" "}
-                      {c.qtyOnHand}
-                    </p>
+                  {isScanning ? "Scanning…" : "Scan / Search"}
+                </Button>
+              </div>
+              {scanError ? (
+                <div className="rounded-lg bg-rose-50 border border-rose-200 p-2 text-xs text-rose-700 font-medium flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <AlertCircle className="size-3.5 text-rose-500" />
+                    <span>{scanError}</span>
                   </div>
-                  <div className="flex flex-col items-end gap-0.5">
-                    <div className="flex items-center gap-1.5">
-                      <Input
-                        className={cn(
-                          "h-8 w-16",
-                          repErr && "border-rose-400 focus:border-rose-500",
-                        )}
-                        type="number"
-                        min={0}
-                        max={c.qtyOnHand}
-                        step={Number.isInteger(c.qtyOnHand) ? 1 : "any"}
-                        value={repRaw}
-                        onChange={(e) =>
-                          setReplaceQtyForItem(c.id, e.target.value, c.qtyOnHand)
-                        }
-                        onBlur={(e) =>
-                          setReplaceQtyForItem(c.id, e.target.value, c.qtyOnHand)
-                        }
-                        placeholder="0"
-                      />
-                      <span className="text-xs text-[#8b9bb0]">
-                        / {c.qtyOnHand}
-                      </span>
-                    </div>
-                    <FieldError message={repErr} />
-                  </div>
-                </li>
-              );
-              })}
-              {!catalog.isLoading && !(catalog.data?.items ?? []).length ? (
-                <li className="py-3 text-center text-[#6b7280]">No items</li>
+                  <button type="button" onClick={() => setScanError(null)} className="text-rose-500 hover:text-rose-700">
+                    <X className="size-3.5" />
+                  </button>
+                </div>
               ) : null}
-            </ul>
-            <p className="mt-2 text-xs text-[#5a6b7d]">
-              Return {money(refundPreview)} · Replace {money(replacePreview)} ·
-              Net {money(replacePreview - refundPreview)}
-            </p>
+            </div>
+
+            <div className="pt-2 border-t border-[#e2e8f0]">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-xs font-semibold text-[#334155]">Replacement Candidates</span>
+                <Input
+                  className="h-7 w-40 text-xs"
+                  value={catalogQ}
+                  onChange={(e) => setCatalogQ(e.target.value)}
+                  placeholder="Filter catalog…"
+                />
+              </div>
+
+              <ul className="max-h-48 divide-y divide-[#f3f4f6] overflow-y-auto text-sm pr-1">
+                {[...scannedItems, ...(catalog.data?.items ?? []).filter((i) => !scannedItems.some((s) => s.id === i.id))].map((c) => {
+                  const repRaw = replaceQty[c.id] ?? "";
+                  const repErr =
+                    replaceQtyErrors[c.id] ??
+                    replaceQtyError(repRaw, c.qtyOnHand);
+                  const isOutOfStock = c.qtyOnHand <= 0;
+                  return (
+                    <li
+                      key={c.id}
+                      className="flex flex-col gap-1 py-2.5 sm:flex-row sm:items-center sm:justify-between border-b border-[#f1f5f9] last:border-0"
+                    >
+                      <div className="min-w-0 flex items-center gap-2.5">
+                        {c.photoUrl ? (
+                          <img src={c.photoUrl} alt={c.name} className="size-9 rounded-md object-cover border border-[#e2e8f0]" />
+                        ) : (
+                          <div className="size-9 rounded-md bg-[#f1f5f9] flex items-center justify-center text-[#94a3b8]">
+                            <Package className="size-4" />
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <p className="truncate font-medium text-[#111827] text-xs sm:text-sm">
+                            {c.name}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-1.5 text-[0.7rem] text-[#6b7280]">
+                            <span>SKU: {c.productSku ?? c.sku}</span>
+                            {c.barcode ? <span>· Barcode: {c.barcode}</span> : null}
+                            <span>· {money(c.sellPrice)}</span>
+                          </div>
+                          {isOutOfStock ? (
+                            <span className="inline-flex items-center gap-1 rounded bg-rose-100 px-1.5 py-0.5 text-[0.65rem] font-bold text-rose-800 mt-0.5">
+                              Out of Stock
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 rounded bg-emerald-50 px-1.5 py-0.5 text-[0.65rem] font-medium text-emerald-700 mt-0.5">
+                              Available Stock: {c.qtyOnHand}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-end gap-0.5 mt-1 sm:mt-0">
+                        <div className="flex items-center gap-1.5">
+                          <Input
+                            className={cn(
+                              "h-8 w-16 text-center text-xs font-semibold",
+                              repErr && "border-rose-400 focus:border-rose-500 text-rose-600",
+                              isOutOfStock && "opacity-50 cursor-not-allowed"
+                            )}
+                            type="number"
+                            min={0}
+                            max={c.qtyOnHand}
+                            disabled={isOutOfStock}
+                            step={Number.isInteger(c.qtyOnHand) ? 1 : "any"}
+                            value={repRaw}
+                            onChange={(e) =>
+                              setReplaceQtyForItem(c.id, e.target.value, c.qtyOnHand)
+                            }
+                            onBlur={(e) =>
+                              setReplaceQtyForItem(c.id, e.target.value, c.qtyOnHand)
+                            }
+                            placeholder="0"
+                          />
+                          <span className="text-xs text-[#8b9bb0]">
+                            / {c.qtyOnHand}
+                          </span>
+                        </div>
+                        <FieldError message={repErr} />
+                      </div>
+                    </li>
+                  );
+                })}
+                {!catalog.isLoading && !(catalog.data?.items ?? []).length && !scannedItems.length ? (
+                  <li className="py-4 text-center text-[#6b7280] text-xs">No replacement items found</li>
+                ) : null}
+              </ul>
+            </div>
+
+            <div className="mt-3 rounded-lg bg-[#f8fafc] p-3 text-xs space-y-1 text-[#334155] border border-[#e2e8f0]">
+              <div className="flex justify-between">
+                <span>Returned Product Value:</span>
+                <span className="font-semibold tabular-nums">{money(refundPreview)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Replacement Selling Value:</span>
+                <span className="font-semibold tabular-nums">{money(replacePreview)}</span>
+              </div>
+              <div className="flex justify-between font-bold border-t border-[#e2e8f0] pt-1.5 mt-1 text-xs sm:text-sm">
+                <span>Net Difference:</span>
+                <span className={cn(
+                  "tabular-nums font-extrabold",
+                  replacePreview > refundPreview ? "text-amber-700" :
+                  replacePreview < refundPreview ? "text-emerald-700" : "text-slate-700"
+                )}>
+                  {replacePreview > refundPreview
+                    ? `Customer Pays ${money(replacePreview - refundPreview)}`
+                    : replacePreview < refundPreview
+                    ? `Customer Receives ${money(refundPreview - replacePreview)}`
+                    : "₹0.00 (Equal Exchange)"}
+                </span>
+              </div>
+            </div>
           </div>
         ) : null}
 
@@ -745,7 +1077,11 @@ export function SaleReturnDialog({
           <div>
             <p className="text-sm font-semibold text-[#0b1f33]">
               {mode === "exchange"
-                ? `Net ${money(replacePreview - refundPreview)}`
+                ? replacePreview > refundPreview
+                  ? `Customer Pays ${money(replacePreview - refundPreview)}`
+                  : replacePreview < refundPreview
+                  ? `Customer Refund ${money(refundPreview - replacePreview)}`
+                  : `Net ${money(0)}`
                 : `Refund ${money(refundPreview)}`}
             </p>
             {remainingRefundable != null ? (
