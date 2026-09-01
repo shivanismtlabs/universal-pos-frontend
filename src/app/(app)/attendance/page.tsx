@@ -14,7 +14,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { PageHeader } from "@/components/page-header";
-import { formatWorkedDuration } from "@/lib/attendance-time";
+import { formatWorkedDuration, formatAttendanceClockTime, attendanceClockInputValue } from "@/lib/attendance-time";
+import { useBootstrap } from "@/lib/bootstrap";
 import {
   attendanceStatusFilterOptions,
   attendanceStatusLabel,
@@ -94,6 +95,8 @@ function calcPreviewHours(form: FormState): string {
 
 export default function AttendancePage() {
   const qc = useQueryClient();
+  const { data: boot } = useBootstrap();
+  const shopTz = boot?.tenant?.timezone ?? undefined;
   const roles = useAuthStore((s) => s.user?.roles);
   const permissions = useAuthStore((s) => s.user?.permissions);
   const canManage =
@@ -271,8 +274,8 @@ export default function AttendancePage() {
       userId: row.userId,
       workDate: row.workDate || todayYmd(),
       shiftId: row.shiftId || "",
-      clockIn: row.clockIn || "",
-      clockOut: row.clockOut || "",
+      clockIn: attendanceClockInputValue(row.clockInAt, shopTz) || row.clockIn || "",
+      clockOut: attendanceClockInputValue(row.clockOutAt, shopTz) || row.clockOut || "",
       breakMinutes: String(row.breakMinutes ?? 0),
       status: row.status || "present",
       notes: row.notes || "",
@@ -287,8 +290,8 @@ export default function AttendancePage() {
       userId: row.userId,
       workDate: row.workDate || todayYmd(),
       shiftId: row.shiftId || "",
-      clockIn: row.clockIn || "",
-      clockOut: row.clockOut || "",
+      clockIn: attendanceClockInputValue(row.clockInAt, shopTz) || row.clockIn || "",
+      clockOut: attendanceClockInputValue(row.clockOutAt, shopTz) || row.clockOut || "",
       breakMinutes: String(row.breakMinutes ?? 0),
       status: row.status || "present",
       notes: row.notes || "",
@@ -310,7 +313,7 @@ export default function AttendancePage() {
               <Button
                 type="button"
                 variant="secondary"
-                onClick={() => exportAttendanceCsv(filteredRows)}
+                onClick={() => exportAttendanceCsv(filteredRows, shopTz)}
                 disabled={!filteredRows.length}
               >
                 Export CSV
@@ -333,10 +336,7 @@ export default function AttendancePage() {
               </p>
               <p className="mt-1 text-sm text-[#5a6b7d]">
                 Clocked in at{" "}
-                {new Date(open!.clockInAt!).toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
+                {formatAttendanceClockTime(open!.clockInAt, shopTz)}
                 {" · "}Timer runs until you clock out
               </p>
             </>
@@ -766,22 +766,10 @@ export default function AttendancePage() {
                     {r.shift?.name ?? "—"}
                   </td>
                   <td className="px-4 py-2.5 tabular-nums text-[#374151]">
-                    {r.clockIn ??
-                      (r.clockInAt
-                        ? new Date(r.clockInAt).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })
-                        : "—")}
+                    {formatAttendanceClockTime(r.clockInAt, shopTz)}
                   </td>
                   <td className="px-4 py-2.5 tabular-nums text-[#374151]">
-                    {r.clockOut ??
-                      (r.clockOutAt
-                        ? new Date(r.clockOutAt).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })
-                        : "—")}
+                    {formatAttendanceClockTime(r.clockOutAt, shopTz)}
                   </td>
                   <td className="px-4 py-2.5 tabular-nums">
                     {r.breakMinutes ?? 0}m

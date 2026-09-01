@@ -28,3 +28,37 @@ export function formatWorkedDuration(
     workedMinutes(clockInAt, clockOutAt, breakMinutes, asOf),
   );
 }
+
+/** Format actual clock-in/out timestamp in shop timezone (falls back to browser locale). */
+export function formatAttendanceClockTime(
+  value: string | Date | null | undefined,
+  timeZone?: string | null,
+): string {
+  if (!value) return "—";
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  return new Intl.DateTimeFormat(undefined, {
+    ...(timeZone ? { timeZone } : {}),
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(d);
+}
+
+/** HH:mm for edit form — from stored UTC instant in shop timezone. */
+export function attendanceClockInputValue(
+  value: string | Date | null | undefined,
+  timeZone?: string | null,
+): string {
+  if (!value) return "";
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    ...(timeZone ? { timeZone } : {}),
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(d);
+  const hour = parts.find((p) => p.type === "hour")?.value ?? "00";
+  const minute = parts.find((p) => p.type === "minute")?.value ?? "00";
+  return `${hour}:${minute}`;
+}

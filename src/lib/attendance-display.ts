@@ -1,5 +1,9 @@
 /** Human-readable attendance status for admin views and exports. */
 
+import {
+  formatAttendanceClockTime,
+} from "@/lib/attendance-time";
+
 const STATUS_LABELS: Record<string, string> = {
   present: "Present",
   absent: "Absent",
@@ -80,6 +84,7 @@ export function exportAttendanceCsv(
     isOpenSession?: boolean;
     method?: string;
   }>,
+  timeZone?: string | null,
 ) {
   const header = [
     "Staff",
@@ -97,22 +102,13 @@ export function exportAttendanceCsv(
     const status = attendanceStatusLabel(
       r.displayStatus ?? resolveAttendanceDisplayStatus(r),
     );
-    const checkIn =
-      r.clockIn ??
-      (r.clockInAt
-        ? new Date(r.clockInAt).toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          })
-        : "");
-    const checkOut =
-      r.clockOut ??
-      (r.clockOutAt
-        ? new Date(r.clockOutAt).toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          })
-        : "");
+    const fmt = (at?: string | null) => {
+      if (!at) return "";
+      const s = formatAttendanceClockTime(at, timeZone);
+      return s === "—" ? "" : s;
+    };
+    const checkIn = fmt(r.clockInAt);
+    const checkOut = fmt(r.clockOutAt);
     return [
       r.fullName,
       r.email,
