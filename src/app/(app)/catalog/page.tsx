@@ -149,15 +149,17 @@ function CatalogPageInner() {
       />
 
       {hasRental && hasSale && tab === "products" ? (
-        <div className="rounded-xl border border-[#dbeafe] bg-[#eff6ff] px-4 py-3 text-sm text-[#1e40af]">
-          <strong className="font-semibold">Selling vs renting:</strong> Items
-          here are for retail (Counter · Sell). Outfits you rent — with a
-          barcode per size — go in{" "}
-          <Link href="/rental" className="font-medium underline underline-offset-2">
-            Rental desk → Stock
+        <p className="text-sm text-[#5a6b7d]">
+          Retail items stay in this catalog. Manage rental units and barcodes
+          from{" "}
+          <Link
+            href="/rental?tab=stock"
+            className="font-medium text-[#1a56db] hover:underline"
+          >
+            Rental desk
           </Link>
           .
-        </div>
+        </p>
       ) : null}
 
       <div className="flex flex-wrap gap-1 border-b border-[#eef1f4]">

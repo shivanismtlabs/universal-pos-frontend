@@ -13,6 +13,7 @@ import {
   CalendarDays,
   Fingerprint,
   KeyRound,
+  Pencil,
 } from "lucide-react";
 import { tenantsApi, usersApi, iamApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
@@ -30,6 +31,7 @@ import {
 } from "@/lib/validations";
 import { PageHeader } from "@/components/page-header";
 import { SetPinDialog } from "@/components/set-pin-dialog";
+import { EditStaffDialog } from "@/components/edit-staff-dialog";
 import { cn } from "@/lib/utils";
 import { TablePager } from "@/components/table-pager";
 import { usePagedList } from "@/lib/use-paged-list";
@@ -48,6 +50,13 @@ function roleLabel(code: string) {
   return ROLE_LABELS[code] ?? code;
 }
 
+function isSelfPinChange(
+  pinTarget: { id?: string; name: string } | null,
+  meId?: string,
+) {
+  return Boolean(pinTarget && (!pinTarget.id || pinTarget.id === meId));
+}
+
 export default function StaffPage() {
   const qc = useQueryClient();
   const roles = useAuthStore((s) => s.user?.roles ?? EMPTY_ROLES);
@@ -58,12 +67,25 @@ export default function StaffPage() {
     id?: string;
     name: string;
   } | null>(null);
+  const [editTarget, setEditTarget] = useState<{
+    id: string;
+    email: string;
+    fullName: string;
+    phone?: string | null;
+    primaryStoreId?: string | null;
+    roles: string[];
+  } | null>(null);
 
   const roleOptions = [
     {
       value: "cashier",
       label: "Cashier",
       hint: "Counter, customers, returns — no staff/settings",
+    },
+    {
+      value: "staff",
+      label: "Staff",
+      hint: "General staff — attendance and limited read access",
     },
     {
       value: "inventory",
@@ -178,6 +200,9 @@ export default function StaffPage() {
   });
 
   const team = list.data ?? [];
+  const myPinIsSet = Boolean(
+    me?.pinSet || team.find((u) => u.id === me?.id)?.pinSet,
+  );
   const pagedTeam = usePagedList(team, 15);
   const roleCounts = team.reduce<Record<string, number>>((acc, u) => {
     for (const r of u.roles ?? []) {
@@ -233,6 +258,7 @@ export default function StaffPage() {
             ["admin", "Admin"],
             ["manager", "Store Manager"],
             ["cashier", "Cashier"],
+            ["staff", "Staff"],
             ["inventory", "Inventory Mgr"],
             ["accountant", "Accountant"],
           ] as const
@@ -278,10 +304,26 @@ export default function StaffPage() {
       <SetPinDialog
         open={Boolean(pinTarget)}
         title={
-          pinTarget?.id ? `Set PIN · ${pinTarget.name}` : "Change my PIN"
+          pinTarget?.id && pinTarget.id !== me?.id
+            ? `Set PIN · ${pinTarget.name}`
+            : "Change my PIN"
         }
-        userId={pinTarget?.id}
+        userId={
+          pinTarget && pinTarget.id && pinTarget.id !== me?.id
+            ? pinTarget.id
+            : undefined
+        }
+        requireCurrentPin={Boolean(isSelfPinChange(pinTarget, me?.id) && myPinIsSet)}
         onClose={() => setPinTarget(null)}
+        onSaved={() => void qc.invalidateQueries({ queryKey: ["users"] })}
+      />
+
+      <EditStaffDialog
+        open={Boolean(editTarget)}
+        user={editTarget}
+        roleOptions={allRoleOptions}
+        stores={(stores.data ?? []).map((s) => ({ id: s.id, name: s.name }))}
+        onClose={() => setEditTarget(null)}
         onSaved={() => void qc.invalidateQueries({ queryKey: ["users"] })}
       />
 
@@ -339,6 +381,26 @@ export default function StaffPage() {
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  {canManage ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      onClick={() =>
+                        setEditTarget({
+                          id: u.id,
+                          email: u.email,
+                          fullName: u.fullName,
+                          phone: u.phone,
+                          primaryStoreId: u.primaryStoreId,
+                          roles: u.roles ?? [],
+                        })
+                      }
+                    >
+                      <Pencil className="mr-1.5 h-3.5 w-3.5" />
+                      Edit
+                    </Button>
+                  ) : null}
                   {canManage && u.isActive ? (
                     <Button
                       type="button"

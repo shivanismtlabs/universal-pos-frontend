@@ -16,6 +16,7 @@ export type RoleCode =
   | "fitter"
   | "inventory"
   | "accountant"
+  | "staff"
   | "captain"
   | "kitchen";
 
@@ -26,6 +27,7 @@ export const ALL_ROLES: RoleCode[] = [
   "fitter",
   "inventory",
   "accountant",
+  "staff",
   "captain",
   "kitchen",
 ];
@@ -191,6 +193,7 @@ export function defaultHomeForRoles(
   if (hasAnyRole(userRoles, ["kitchen"])) return "/kitchen";
   if (hasAnyRole(userRoles, ["accountant"])) return "/accounting";
   if (hasAnyRole(userRoles, ["fitter"])) return "/appointments";
+  if (hasAnyRole(userRoles, ["staff"])) return "/attendance";
   if (hasAnyRole(userRoles, ["inventory"])) return "/inventory";
   if (hasAnyPermission(userPerms, ["attendance.self", "attendance.manage"])) {
     return "/attendance";

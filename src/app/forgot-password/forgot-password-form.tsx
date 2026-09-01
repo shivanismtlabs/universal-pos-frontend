@@ -199,7 +199,6 @@ export default function ForgotPasswordForm() {
       ) : (
         <form onSubmit={resetPassword} className="space-y-4" noValidate>
           <p className="text-sm text-[#5a6b7d]">
-            Code sent for <span className="font-medium text-[#0b1f33]">{email}</span>
             {devCode ? (
               <span className="mt-2 block rounded-md border border-[#c5d4f5] bg-[#eef3fc] px-3 py-2 text-sm text-[#0b1f33]">
                 On-screen OTP (demo / local mailboxes cannot receive email):{" "}

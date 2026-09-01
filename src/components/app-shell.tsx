@@ -103,11 +103,21 @@ type NavLeaf = {
   icon: LucideIcon;
   module?: string;
   commerce?: string;
+  /** Require at least one of these commerce modes (e.g. unified Counter) */
+  commerceAny?: string[];
   /** Capability code — prefer over businessType gates */
   capability?: string;
   /** Zoho nested folder under secondary panel (e.g. Business → Profile) */
   folder?: string;
 };
+
+/** Commerce modes that share the unified Counter (Sell / Rent / Services / Plans tabs) */
+const COUNTER_COMMERCE_MODES = [
+  "sale",
+  "rental",
+  "service",
+  "subscription",
+] as const;
 
 type NavGroup = {
   id: string;
@@ -192,21 +202,23 @@ const NAV_GROUPS: NavGroup[] = [
     children: [
       {
         href: "/counter",
-        label: "Counter (POS)",
+        label: "Counter",
         icon: CreditCard,
         module: "pos",
+        commerceAny: [...COUNTER_COMMERCE_MODES],
       },
       {
         href: "/orders",
-        label: "All orders",
+        label: "Orders",
         icon: ClipboardList,
         module: "orders",
       },
       {
         href: "/returns",
-        label: "Returns desk",
+        label: "Returns",
         icon: PackageCheck,
         module: "orders",
+        commerceAny: ["sale"],
       },
     ],
   },
@@ -220,27 +232,20 @@ const NAV_GROUPS: NavGroup[] = [
     children: [
       {
         href: "/rental",
-        label: "Rental desk",
+        label: "Rental Desk",
         icon: LayoutGrid,
         commerce: "rental",
       },
       {
-        href: "/counter?view=rental",
-        label: "Counter · Rent",
-        icon: CreditCard,
-        commerce: "rental",
-        module: "pos",
-      },
-      {
         href: "/returns?tab=rental",
-        label: "Receive returns",
+        label: "Returns & Exchange",
         icon: PackageCheck,
         commerce: "rental",
         module: "orders",
       },
       {
         href: "/reports/rental",
-        label: "Rental report",
+        label: "Rental Reports",
         icon: FileLineChart,
         commerce: "rental",
         module: "reports",
@@ -738,6 +743,12 @@ function leafAllowed(
 ) {
   if (item.module && !hasModule(item.module)) return false;
   if (item.commerce && !hasMode(item.commerce)) return false;
+  if (
+    item.commerceAny &&
+    !item.commerceAny.some((mode) => hasMode(mode))
+  ) {
+    return false;
+  }
   if (item.capability && !hasCapability(item.capability)) return false;
   if (
     hrefPath(item.href) === "/resources" &&
@@ -794,6 +805,11 @@ function isLeafActive(pathname: string, search: string, href: string) {
 
   if (base === "/rental") {
     return pathname === "/rental";
+  }
+
+  // Unified Counter — any ?view= tab highlights the single Counter nav item
+  if (base === "/counter") {
+    return pathname === "/counter" || pathname.startsWith("/counter/");
   }
 
   // `/suppliers` directory only — not /suppliers/orders or /suppliers/new
@@ -1457,9 +1473,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       router.replace(home);
       return;
     }
-    const item = NAV_CATALOG.find(
-      (n) => pathname === n.href || pathname.startsWith(`${n.href}/`),
-    );
+    const item = NAV_CATALOG.find((n) => {
+      const base = hrefPath(n.href);
+      return pathname === base || pathname.startsWith(`${base}/`);
+    });
     if (item?.module && !hasModule(item.module)) {
       toast.message("Module not enabled for this shop");
       router.replace("/dashboard");
@@ -1471,6 +1488,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       return;
     }
     if (item?.commerce && !hasMode(item.commerce)) {
+      toast.message("Not enabled for this shop’s commerce modes");
+      router.replace("/dashboard");
+      return;
+    }
+    if (
+      item?.commerceAny &&
+      !item.commerceAny.some((mode) => hasMode(mode))
+    ) {
       toast.message("Not enabled for this shop’s commerce modes");
       router.replace("/dashboard");
     }

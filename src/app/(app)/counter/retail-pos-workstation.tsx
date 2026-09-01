@@ -146,6 +146,24 @@ function unitPriceAfterLineDiscount(
   return Math.round(base * 100) / 100;
 }
 
+function UpiSetupHint({ compact }: { compact?: boolean }) {
+  return (
+    <div className={cn("space-y-2", compact ? "" : "rounded-lg border border-amber-200 bg-amber-50/80 p-2.5")}>
+      <p
+        className={cn(
+          "text-amber-800",
+          compact ? "text-[0.7rem] leading-snug" : "text-sm",
+        )}
+      >
+        Set UPI ID in Settings → Business Settings → Counter.
+      </p>
+      <Button asChild variant="secondary" size="sm" className="h-8">
+        <Link href="/settings/counter">Configure UPI</Link>
+      </Button>
+    </div>
+  );
+}
+
 type PayMethod =
   | "cash"
   | "upi"
@@ -290,11 +308,6 @@ export default function RetailPosWorkstation({
   const [payModal, setPayModal] = useState<
     "discount" | "draft" | "drafts" | "more" | "customer" | "orderDetails" | null
   >(null);
-  const [rateEdit, setRateEdit] = useState<{
-    stockLevelId: string;
-    amount: string;
-    percent: string;
-  } | null>(null);
   const [splitSession, setSplitSession] = useState<{
     mode: SplitBillMode;
     parts: SplitBillPart[];
@@ -359,6 +372,8 @@ export default function RetailPosWorkstation({
   const [online, setOnline] = useState(true);
   const chargeLock = useRef(false);
   const scanQtyRef = useRef<number | null>(null);
+  const paymentPanelRef = useRef<HTMLDivElement>(null);
+  const qrPaymentRef = useRef<HTMLDivElement>(null);
   const [stripeBusy, setStripeBusy] = useState(false);
   const [stripeCheckout, setStripeCheckout] = useState<{
     orderId: string;
@@ -1702,7 +1717,7 @@ export default function RetailPosWorkstation({
     }
     if (payMethod === "qr" && !activeQrVpa) {
       toast.error(
-        "Enter shop mobile or UPI ID for QR — or set UPI ID in Settings → Counter",
+        "Set UPI ID in Settings → Business Settings → Counter.",
       );
       return;
     }
@@ -2398,40 +2413,8 @@ export default function RetailPosWorkstation({
     }
   }
 
-  function openRateEdit(line: CartLine) {
-    const base = cartLineListPrice(line);
-    const discPct = cartLineDiscountPercent(line);
-    const markupPct =
-      base > 0 && line.unitPrice > base + 0.001
-        ? Math.round(((line.unitPrice / base - 1) * 100) * 100) / 100
-        : 0;
-    setRateEdit({
-      stockLevelId: line.stockLevelId,
-      amount: String(line.unitPrice),
-      percent:
-        discPct > 0
-          ? String(-discPct)
-          : markupPct > 0
-            ? String(markupPct)
-            : "",
-    });
-  }
-
-  function applyRateEdit() {
-    if (!rateEdit) return;
-    const next = moneyNumber(rateEdit.amount || 0);
-    if (!Number.isFinite(next) || next < 0) {
-      toast.error("Enter a valid price");
-      return;
-    }
-    setCart((prev) =>
-      prev.map((x) =>
-        x.stockLevelId === rateEdit.stockLevelId
-          ? { ...x, unitPrice: Math.round(next * 100) / 100 }
-          : x,
-      ),
-    );
-    setRateEdit(null);
+  function openDiscountModal() {
+    setPayModal("discount");
   }
 
   function setDraftLineDiscount(
@@ -2492,6 +2475,17 @@ export default function RetailPosWorkstation({
     // Init draft once when the modal opens — not on every cart keystroke.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [payModal]);
+
+  useEffect(() => {
+    if (payMethod !== "qr") return;
+    const panel = paymentPanelRef.current;
+    const qrBlock = qrPaymentRef.current;
+    if (!panel || !qrBlock) return;
+    const timer = window.setTimeout(() => {
+      qrBlock.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [payMethod]);
 
   async function finishStripeSale(paymentIntentId: string) {
     if (!stripeCheckout) return;
@@ -3304,7 +3298,7 @@ export default function RetailPosWorkstation({
                               : "text-[#1a56db] hover:underline",
                         )}
                         title="Change price or discount for this item only"
-                        onClick={() => openRateEdit(l)}
+                        onClick={() => openDiscountModal()}
                       >
                         {discPct > 0
                           ? `−${discPct}%`
@@ -3406,7 +3400,10 @@ export default function RetailPosWorkstation({
             ) : null}
           </ul>
 
-          <div className="mt-auto shrink-0 space-y-2.5 overflow-y-auto overscroll-contain border-t border-[#eef2f8] bg-[#fafbfc] p-3 [scrollbar-width:thin] max-h-[min(52dvh,28rem)] lg:max-h-none lg:overflow-visible">
+          <div
+            ref={paymentPanelRef}
+            className="mt-auto min-h-0 shrink-0 space-y-2.5 overflow-y-auto overscroll-contain border-t border-[#eef2f8] bg-[#fafbfc] p-3 [scrollbar-width:thin] max-h-[min(52dvh,28rem)] sm:max-h-[min(56dvh,30rem)] lg:max-h-[min(48dvh,32rem)]"
+          >
             <div className="space-y-2 rounded-xl border border-[#e2e8f0] bg-white px-3 py-3 shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
               <BillTotalsLines
                 summary={billSummary}
@@ -3586,50 +3583,38 @@ export default function RetailPosWorkstation({
               </button>
             ) : null}
             {payMethod === "qr" ? (
-              <div className="rounded-lg border border-[#d9e0ea] bg-white p-2">
-                {(() => {
-                  const posSettings =
-                    boot?.tenant?.settings &&
-                    typeof boot.tenant.settings === "object"
-                      ? (boot.tenant.settings as Record<string, unknown>).pos
-                      : undefined;
-                  const pos =
-                    posSettings && typeof posSettings === "object"
-                      ? (posSettings as Record<string, unknown>)
-                      : {};
-                  const vpa =
-                    typeof pos.upiVpa === "string" ? pos.upiVpa.trim() : "";
-                  const payee =
-                    (typeof pos.upiPayeeName === "string" &&
-                      pos.upiPayeeName.trim()) ||
-                    productName ||
-                    "Universal POS";
-                  if (!vpa) {
-                    return (
-                      <p className="text-[0.7rem] text-amber-800">
-                        Set UPI ID in Settings → Counter first.
-                      </p>
-                    );
-                  }
-                  const upiUri = `upi://pay?pa=${encodeURIComponent(vpa)}&pn=${encodeURIComponent(payee)}&am=${chargeAmount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(productName || "Universal POS")}`;
-                  return (
-                    <div className="flex items-center gap-2">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        alt="Pay QR"
-                        className="h-20 w-20 shrink-0 rounded border border-[#eef2f8] bg-white"
-                        src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(upiUri)}`}
-                      />
-                      <p className="text-[0.65rem] leading-snug text-[#5a6b7d]">
-                        {stripeConfig.data?.enabled
-                          ? "Customer scans, then Charge opens verified UPI checkout."
-                          : "Customer scans, then Charge and confirm payment received."}
-                        <br />
-                        <span className="font-medium text-[#0b1f33]">{vpa}</span>
-                      </p>
-                    </div>
-                  );
-                })()}
+              <div
+                ref={qrPaymentRef}
+                className="rounded-lg border border-[#d9e0ea] bg-white p-2"
+              >
+                {!activeQrVpa ? (
+                  <UpiSetupHint compact />
+                ) : (
+                  <div className="flex items-center gap-2">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      alt="Pay QR"
+                      className="h-20 w-20 shrink-0 rounded border border-[#eef2f8] bg-white"
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(
+                        buildUpiPayUri({
+                          vpa: activeQrVpa,
+                          payeeName: activeQrPayee,
+                          amount: chargeAmount,
+                          note: productName || "Universal POS",
+                        }),
+                      )}`}
+                    />
+                    <p className="text-[0.65rem] leading-snug text-[#5a6b7d]">
+                      {stripeConfig.data?.enabled
+                        ? "Customer scans, then Charge opens verified UPI checkout."
+                        : "Customer scans, then Charge and confirm payment received."}
+                      <br />
+                      <span className="font-medium text-[#0b1f33]">
+                        {activeQrVpa}
+                      </span>
+                    </p>
+                  </div>
+                )}
               </div>
             ) : null}
             {payMethod === "cash" ? (
@@ -3804,9 +3789,7 @@ export default function RetailPosWorkstation({
                 </div>
               </div>
             ) : (
-              <p className="text-sm text-amber-800">
-                Set UPI ID in Settings → Counter first.
-              </p>
+              <UpiSetupHint />
             )}
           </div>
         </ModalFrame>
@@ -4025,145 +4008,6 @@ export default function RetailPosWorkstation({
           cashTendered={receipt.cashTendered}
           onClose={() => setReceipt(null)}
         />
-      ) : null}
-
-      {rateEdit ? (
-        <ModalFrame
-          title="Price & discount"
-          subtitle="Discount or change price for this item only — other cart lines stay as they are."
-          onClose={() => setRateEdit(null)}
-          footer={
-            <div className="flex gap-2">
-              <Button
-                variant="secondary"
-                className="flex-1"
-                onClick={() => setRateEdit(null)}
-              >
-                Cancel
-              </Button>
-              <Button className="flex-1" onClick={applyRateEdit}>
-                Apply
-              </Button>
-            </div>
-          }
-        >
-          {(() => {
-            const line = cart.find(
-              (x) => x.stockLevelId === rateEdit.stockLevelId,
-            );
-            if (!line) return <p className="text-sm">Item is gone.</p>;
-            const base = cartLineListPrice(line);
-            const draft = moneyNumber(rateEdit.amount || 0);
-            const applyPct = (pct: number) => {
-              const amount = Math.round(base * (1 + pct / 100) * 100) / 100;
-              setRateEdit({
-                ...rateEdit,
-                percent: String(pct),
-                amount: String(amount),
-              });
-            };
-            return (
-              <div className="space-y-4">
-                <p className="text-sm font-semibold text-[#0b1f33]">
-                  {line.name}
-                </p>
-                <p className="text-xs text-[#8b9bb0]">
-                  List price {money(base)} {priceUnitLabel(line.sellUnit)}
-                  {" · "}qty {line.qty}
-                </p>
-                <div className="field-shell">
-                  <Label>Selling price</Label>
-                  <Input
-                    className="mt-1 text-lg tabular-nums"
-                    inputMode="decimal"
-                    value={rateEdit.amount}
-                    onChange={(e) => {
-                      const amountStr = e.target.value;
-                      const next = moneyNumber(amountStr || 0);
-                      const pct =
-                        base > 0 && Number.isFinite(next)
-                          ? Math.round(((next / base - 1) * 100) * 100) / 100
-                          : 0;
-                      setRateEdit({
-                        ...rateEdit,
-                        amount: amountStr,
-                        percent:
-                          Math.abs(pct) < 0.05 ? "" : String(pct),
-                      });
-                    }}
-                  />
-                </div>
-                <div className="field-shell">
-                  <Label>Discount / markup % (this item)</Label>
-                  <Input
-                    className="mt-1 text-lg tabular-nums"
-                    inputMode="decimal"
-                    placeholder="e.g. −10 or 20"
-                    value={rateEdit.percent}
-                    onChange={(e) => {
-                      const percentStr = e.target.value;
-                      const pct = moneyNumber(percentStr || 0);
-                      const amount =
-                        Math.round(base * (1 + pct / 100) * 100) / 100;
-                      setRateEdit({
-                        ...rateEdit,
-                        percent: percentStr,
-                        amount: String(amount),
-                      });
-                    }}
-                  />
-                  <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
-                    −10 = 10% off list. +20 = 20% above list. Applies only to this
-                    product.
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {[-5, -10, -20, -50].map((pct) => (
-                    <button
-                      key={pct}
-                      type="button"
-                      className="rounded-lg border border-[#fed7aa] bg-[#fff7ed] px-2.5 py-1.5 text-xs font-semibold text-[#c2410c] hover:border-[#ea580c]"
-                      onClick={() => applyPct(pct)}
-                    >
-                      {pct}%
-                    </button>
-                  ))}
-                  {[10, 20, 50].map((pct) => (
-                    <button
-                      key={pct}
-                      type="button"
-                      className="rounded-lg border border-[#e2e8f0] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#475569] hover:border-[#1a56db] hover:text-[#1a56db]"
-                      onClick={() => applyPct(pct)}
-                    >
-                      +{pct}%
-                    </button>
-                  ))}
-                  <button
-                    type="button"
-                    className="rounded-lg border border-[#e2e8f0] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#475569] hover:border-[#1a56db] hover:text-[#1a56db]"
-                    onClick={() =>
-                      setRateEdit({
-                        ...rateEdit,
-                        amount: String(base),
-                        percent: "",
-                      })
-                    }
-                  >
-                    Reset {money(base)}
-                  </button>
-                </div>
-                <p className="text-sm font-semibold text-[#1a56db]">
-                  Line total: {money(Math.max(0, draft) * line.qty)}
-                  {draft < base - 0.001 ? (
-                    <span className="ml-2 text-[#c2410c]">
-                      (save {money((base - draft) * line.qty)})
-                    </span>
-                  ) : null}
-                </p>
-              </div>
-            );
-          })()}
-        </ModalFrame>
       ) : null}
 
       {payModal === "customer" ? (
@@ -4649,7 +4493,7 @@ export default function RetailPosWorkstation({
                         }
                       }}
                     >
-                      Apply
+                      Validate
                     </Button>
                   )}
                 </div>

@@ -452,10 +452,10 @@ export const authApi = {
     }>("/auth/refresh", { method: "POST", body: { refreshToken } });
   },
 
-  setOwnPin(pin: string) {
+  setOwnPin(pin: string, currentPin?: string) {
     return apiRequest<{ pinSet: boolean }>("/auth/pin/set", {
       method: "POST",
-      body: { pin },
+      body: { pin, ...(currentPin ? { currentPin } : {}) },
       token: token(),
     });
   },
@@ -3928,6 +3928,21 @@ export const posApi = {
       token: token(),
     });
   },
+  lateFeePreview(orderId: string) {
+    return apiRequest<{
+      orderId: string;
+      returnDueDate: string | null;
+      daysLate: number;
+      applicable: boolean;
+      suggestedLateFee: number;
+      lines: Array<{
+        stockUnitId: string | null;
+        lateFeePerDay: number;
+        daysLate: number;
+        amount: number;
+      }>;
+    }>(`/pos/rental/orders/${orderId}/late-fee-preview`, { token: token() });
+  },
   listRecentRentals(limit?: number) {
     const qs = limit ? `?limit=${limit}` : "";
     return apiRequest<{
@@ -6267,13 +6282,20 @@ export const reportsApi = {
       summary: {
         orderCount: number;
         revenue: number;
+        rentalRevenue?: number;
+        orderSubtotal?: number;
         tax: number;
         balanceDue: number;
         overdueCount: number;
         utilizationPct: number | null;
         availableUnits: number;
+        reservedUnits?: number;
         unitsOut: number;
+        maintenanceUnits?: number;
         unitsTotal: number;
+        depositsCollected?: number;
+        depositsRefunded?: number;
+        depositsHeldNet?: number;
         openDeposits: number;
         openDepositUnits: number;
         damageEvents: number;
@@ -7314,6 +7336,7 @@ export const usersApi = {
       phone?: string;
       isActive?: boolean;
       primaryStoreId?: string;
+      roleCode?: string;
     },
   ) {
     return apiRequest(`/users/${id}`, {
@@ -7350,6 +7373,7 @@ export type AttendanceRow = {
   clockOut?: string | null;
   breakMinutes: number;
   status: string;
+  displayStatus?: string;
   method: string;
   notes?: string | null;
   minutes: number | null;
@@ -7477,6 +7501,7 @@ export const iamApi = {
       breakMinutes?: number;
       status?: string;
       notes?: string | null;
+      correctionReason: string;
     },
   ) {
     return apiRequest<AttendanceRow>(`/iam/attendance/${id}`, {
@@ -7484,6 +7509,17 @@ export const iamApi = {
       body,
       token: token(),
     });
+  },
+  attendanceHistory(id: string) {
+    return apiRequest<
+      Array<{
+        id: string;
+        action: string;
+        actor: { id: string; fullName: string; email: string } | null;
+        beforeAfter: unknown;
+        createdAt: string;
+      }>
+    >(`/iam/attendance/${id}/history`, { token: token() });
   },
   deleteAttendance(id: string) {
     return apiRequest<{ ok: boolean }>(`/iam/attendance/${id}`, {

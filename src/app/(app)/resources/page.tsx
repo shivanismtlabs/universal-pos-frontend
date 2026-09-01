@@ -180,21 +180,29 @@ export default function ResourcesPage() {
       />
 
       {hasRental && hasSale ? (
-        <div className="rounded-xl border border-[#fef3c7] bg-[#fffbeb] px-4 py-3 text-sm text-[#92400e]">
-          Clothes and sized outfits use{" "}
-          <strong className="font-semibold">Rental desk → Stock</strong> (barcode
-          per size), not Resources. Resources are for rooms, tables, vehicles,
-          and similar bookable assets.
-        </div>
+        <p className="text-sm text-[#5a6b7d]">
+          Sized outfits and barcodes belong on{" "}
+          <Link
+            href="/rental?tab=stock"
+            className="font-medium text-[#1a56db] hover:underline"
+          >
+            Rental desk
+          </Link>
+          . Resources are for rooms, tables, vehicles, and similar bookable
+          assets.
+        </p>
       ) : hasRental && !hasSale ? (
-        <div className="rounded-xl border border-[#e5e7eb] bg-[#f8fafc] px-4 py-3 text-sm text-[#4b5563]">
-          Optional for venue rental (rooms, halls, vehicles). For clothing sizes
-          and barcodes, use{" "}
-          <Link href="/rental" className="font-medium text-[#1a56db] underline">
-            Rental desk → Stock
+        <p className="text-sm text-[#5a6b7d]">
+          Optional for rooms, halls, and vehicles. For clothing sizes and
+          barcodes, use{" "}
+          <Link
+            href="/rental?tab=stock"
+            className="font-medium text-[#1a56db] hover:underline"
+          >
+            Rental desk
           </Link>
           .
-        </div>
+        </p>
       ) : null}
 
       {showAdd ? (

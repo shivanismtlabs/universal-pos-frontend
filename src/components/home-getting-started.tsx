@@ -261,15 +261,15 @@ export function HomeGettingStarted() {
           ? "Add rental outfits (sizes & barcodes)"
           : "Add rental units",
         detail: hasSale
-          ? "Each tuxedo, gown, or jacket gets a barcode per size — scan at Counter · Rent. Deposits and return dates apply here, not on sale items."
+          ? "Each tuxedo, gown, or jacket gets a barcode per size — scan at the Counter Rent tab. Deposits and return dates apply here, not on sale items."
           : "Add styles with rental price, deposit, and unit barcodes (size/variant). Same flow for formal wear, gear, or any rentable SKU.",
-        tip: "Use Rental desk → Stock tab, then Counter · Rent to scan barcodes.",
+        tip: "Use Rental desk → Stock tab, then Counter → Rent tab to scan barcodes.",
         primary: {
           label: "Rental desk",
           href: withGettingStartedReturn("/rental", "rentalunits"),
         },
         secondary: {
-          label: "Counter · Rent",
+          label: "Counter → Rent",
           href: withGettingStartedReturn("/counter?view=rental", "rentalunits"),
         },
         done: rentalUnitTotal > 0 || rentalStyleTotal > 0,
@@ -282,10 +282,10 @@ export function HomeGettingStarted() {
         n: list.length + 1,
         title: "Sell accessories live",
         detail:
-          "Use Counter · Sell for retail items (bow ties, bags, kits). Use Counter · Rent for outfits — two tabs, same shop.",
+          "Use the Sell tab for retail items (bow ties, bags, kits). Use the Rent tab for outfits — one counter, two views.",
         tip: "Mixed rent + sale on one receipt is not supported yet; complete as two orders if needed.",
         primary: {
-          label: "Counter · Sell",
+          label: "Counter → Sell",
           href: withGettingStartedReturn("/counter?view=sale", "livesell"),
         },
         secondary: {
@@ -309,7 +309,7 @@ export function HomeGettingStarted() {
           href: withGettingStartedReturn("/resources", "resources"),
         },
         secondary: {
-          label: "Counter · Rent",
+          label: "Counter → Rent",
           href: withGettingStartedReturn("/counter?view=rental", "resources"),
         },
         done: resourceTotal > 0,

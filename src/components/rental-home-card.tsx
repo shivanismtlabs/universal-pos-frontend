@@ -37,7 +37,7 @@ export function RentalHomeCard() {
         </div>
         <div className="flex flex-wrap gap-2">
           <Button asChild variant="secondary" size="sm">
-            <Link href="/counter?view=rental">Counter · Rent</Link>
+            <Link href="/counter?view=rental">Counter → Rent</Link>
           </Button>
           <Button asChild size="sm">
             <Link href="/rental">

@@ -50,6 +50,7 @@ import {
 import {
   CatalogItemShopForm,
   DEFAULT_SERVICE_DURATION_MINUTES,
+  defaultReturnableForKind,
   type CatalogItemShopValues,
 } from "@/components/catalog-item-shop-form";
 import type { UnitPricingValue } from "@/components/unit-pricing-fields";
@@ -60,6 +61,17 @@ import {
   readReturnToParam,
   resolveSetupReturnTo,
 } from "@/lib/setup-return";
+
+function resolveReturnableFromMeta(
+  meta: unknown,
+  kind: CatalogProductKind,
+): boolean {
+  if (meta && typeof meta === "object" && !Array.isArray(meta)) {
+    const v = (meta as Record<string, unknown>).returnable;
+    if (typeof v === "boolean") return v;
+  }
+  return defaultReturnableForKind(kind);
+}
 
 export function emptyCatalogItemForm(): CatalogItemShopValues {
   return {
@@ -91,6 +103,7 @@ export function emptyCatalogItemForm(): CatalogItemShopValues {
     reorderPoint: "",
     multiUnitBaseQty: "",
     multiUnitBaseUnit: "pcs",
+    returnable: true,
   };
 }
 
@@ -101,6 +114,7 @@ function buildExtraFieldsPayload(
   opts?: { clearEmpty?: boolean },
 ): Record<string, unknown> | undefined {
   const out: Record<string, unknown> = {};
+  out.returnable = form.returnable;
   const rate = Number(form.taxRatePercent);
   if (Number.isFinite(rate) && rate >= 0) {
     out.taxRatePercent = rate;
@@ -546,6 +560,7 @@ export function CatalogItemEditor() {
       reorderPoint: reorderFromMeta || reorderFromLevel,
       multiUnitBaseQty: packed?.baseQty != null ? String(packed.baseQty) : "",
       multiUnitBaseUnit: packed?.baseUnit || "pcs",
+      returnable: resolveReturnableFromMeta(meta, p.kind),
     });
     setPhotoUrl(p.photoUrl ?? "");
     setHydrated(true);

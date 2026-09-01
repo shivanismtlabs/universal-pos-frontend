@@ -215,7 +215,12 @@ export type CatalogItemShopValues = {
   /** How many of the smaller unit are inside 1 box/pack (when UOM is packed). */
   multiUnitBaseQty: string;
   multiUnitBaseUnit: string;
+  returnable: boolean;
 };
+
+export function defaultReturnableForKind(kind: CatalogProductKind): boolean {
+  return kind !== "service" && kind !== "digital";
+}
 
 export function applyCatalogKindDefaults<T extends CatalogItemShopValues>(
   prev: T,
@@ -239,6 +244,7 @@ export function applyCatalogKindDefaults<T extends CatalogItemShopValues>(
     // Rentals / goods sell on counter by default
     canSell: kind === "digital" ? prev.canSell : true,
     availableInPos: true,
+    returnable: defaultReturnableForKind(kind),
     unitOfMeasure: unit,
     ...(nonStock
       ? {
@@ -1298,6 +1304,18 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                       : "Stock on Hand is counted when you sell or stock in."
                     : "Stock is not counted — Stock on Hand stays locked. You can still sell if “Can sell” is on."}
               </p>
+              <label className="mt-3 flex cursor-pointer items-center gap-2 text-sm text-[#0b1f33]">
+                <input
+                  type="checkbox"
+                  className="accent-[#1a56db]"
+                  checked={form.returnable}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, returnable: e.target.checked }))
+                  }
+                />
+                Returnable item
+                <FlagInfo text="When off, this item cannot be refunded or returned on a sale." />
+              </label>
             </ShopSection>
 
             {(customFieldsLoading || otherFormFields.length > 0) ? (

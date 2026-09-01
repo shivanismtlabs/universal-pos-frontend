@@ -53,13 +53,20 @@ export default function RentalOpsReportPage() {
       ["from", range.from],
       ["to", range.to],
       ["orders", s?.orderCount ?? 0],
-      ["revenue", s?.revenue ?? 0],
+      ["rental_revenue", s?.rentalRevenue ?? s?.revenue ?? 0],
+      ["deposits_collected", s?.depositsCollected ?? 0],
+      ["deposits_refunded", s?.depositsRefunded ?? 0],
+      ["deposits_held_net", s?.depositsHeldNet ?? 0],
       ["utilization_pct", s?.utilizationPct ?? ""],
       ["units_out", s?.unitsOut ?? 0],
+      ["available_units", s?.availableUnits ?? 0],
+      ["reserved_units", s?.reservedUnits ?? 0],
+      ["maintenance_units", s?.maintenanceUnits ?? 0],
       ["units_total", s?.unitsTotal ?? 0],
       ["overdue", s?.overdueCount ?? 0],
       ["open_deposits", s?.openDeposits ?? 0],
       ["damage_events", s?.damageEvents ?? 0],
+      ["damage_charges", s?.damageCharges ?? 0],
     ];
     for (const r of report.data.overdue) {
       rows.push([
@@ -151,13 +158,31 @@ export default function RentalOpsReportPage() {
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {[
           ["Orders", s?.orderCount ?? "—"],
-          ["Revenue", s ? money(s.revenue) : "—"],
+          [
+            "Rental revenue",
+            s ? money(s.rentalRevenue ?? s.revenue) : "—",
+          ],
+          [
+            "Deposits collected",
+            s?.depositsCollected != null ? money(s.depositsCollected) : "—",
+          ],
+          [
+            "Deposits refunded",
+            s?.depositsRefunded != null ? money(s.depositsRefunded) : "—",
+          ],
           ["Utilization", s?.utilizationPct != null ? `${s.utilizationPct}%` : "—"],
           ["Overdue", s?.overdueCount ?? "—"],
           ["Units out", s ? `${s.unitsOut} / ${s.unitsTotal}` : "—"],
           ["Open deposits", s ? money(s.openDeposits) : "—"],
           ["Damage charges", s ? money(s.damageCharges) : "—"],
           ["Cleaning queue", s?.cleaningQueue ?? "—"],
+          [
+            "Available / reserved",
+            s
+              ? `${s.availableUnits ?? "—"} / ${s.reservedUnits ?? "—"}`
+              : "—",
+          ],
+          ["Maintenance units", s?.maintenanceUnits ?? "—"],
         ].map(([label, value]) => (
           <div
             key={String(label)}

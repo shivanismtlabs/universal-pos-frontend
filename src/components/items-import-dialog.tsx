@@ -388,7 +388,7 @@ export function downloadItemsTemplate() {
 }
 
 /**
- * Zoho-style bulk import — items to **sell** at Counter · Sell (goods or service).
+ * Zoho-style bulk import — items to **sell** at Counter Sell tab (goods or service).
  * Rental outfits: use Rental desk → Stock, not this import.
  */
 export function ItemsImportDialog({
@@ -504,7 +504,7 @@ export function ItemsImportDialog({
                 <Link href="/rental" className="font-medium underline">
                   Rental desk → Stock
                 </Link>
-                , then use Counter · Rent.
+                , then use Counter → Rent tab.
               </p>
             ) : null}
           </div>

@@ -7,19 +7,38 @@ import { RentalDashboard } from "../dashboard/rental-dashboard";
 import { PageHeader, PageSkeleton } from "@/components/page-header";
 import { useBootstrap } from "@/lib/bootstrap";
 
-type RentalTab = "rent" | "stock" | "returns" | "exchange" | "recent";
+type RentalTab =
+  | "overview"
+  | "products"
+  | "units"
+  | "reservations"
+  | "calendar"
+  | "active"
+  | "overdue"
+  | "returns"
+  | "exchange"
+  /** @deprecated deep-link aliases */
+  | "rent"
+  | "stock"
+  | "recent";
 
 function parseRentalTab(raw: string | null): RentalTab | undefined {
-  if (
-    raw === "rent" ||
-    raw === "stock" ||
-    raw === "returns" ||
-    raw === "exchange" ||
-    raw === "recent"
-  ) {
-    return raw;
-  }
-  return undefined;
+  if (!raw) return undefined;
+  const aliases: Record<string, RentalTab> = {
+    rent: "overview",
+    stock: "products",
+    recent: "active",
+    overview: "overview",
+    products: "products",
+    units: "units",
+    reservations: "reservations",
+    calendar: "calendar",
+    active: "active",
+    overdue: "overdue",
+    returns: "returns",
+    exchange: "exchange",
+  };
+  return aliases[raw];
 }
 
 function RentalHubInner() {
@@ -32,8 +51,8 @@ function RentalHubInner() {
   if (!hasRent) {
     return (
       <PageHeader
-        title="Rental"
-        subtitle="Enable rental mode in shop setup to manage outfits and units here."
+        title="Rental Desk"
+        subtitle="Enable rental mode in shop setup to manage rental products and units here."
       />
     );
   }
@@ -41,25 +60,41 @@ function RentalHubInner() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Rental"
+        title="Rental Desk"
         subtitle={
           hasSale
-            ? "Everything you rent lives here — sizes, barcodes, returns. Items is for things you sell."
-            : "Stock, rent out, receive returns, and track units on hire."
+            ? "Rental products, physical units, reservations, and active hire — separate from Items you sell."
+            : "Products, units, reservations, pickups, returns, and overdue rentals."
         }
       />
 
       {hasSale ? (
-        <div className="rounded-xl border border-[#dbeafe] bg-[#eff6ff] px-4 py-3 text-sm text-[#1e40af]">
-          <strong className="font-semibold">Two counters:</strong>{" "}
-          <Link href="/catalog" className="font-medium underline underline-offset-2">
+        <p className="text-sm text-[#5a6b7d]">
+          Sale catalog stays under{" "}
+          <Link href="/catalog" className="font-medium text-[#1a56db] hover:underline">
             Items
-          </Link>{" "}
-          + Counter · Sell = retail ·{" "}
-          <span className="font-medium">this desk</span> + Counter · Rent =
-          outfits (one barcode per size).
-        </div>
-      ) : null}
+          </Link>
+          . Start a rental ticket on{" "}
+          <Link
+            href="/counter?view=rental"
+            className="font-medium text-[#1a56db] hover:underline"
+          >
+            Counter → Rent
+          </Link>
+          .
+        </p>
+      ) : (
+        <p className="text-sm text-[#5a6b7d]">
+          Checkout on{" "}
+          <Link
+            href="/counter?view=rental"
+            className="font-medium text-[#1a56db] hover:underline"
+          >
+            Counter → Rent
+          </Link>
+          .
+        </p>
+      )}
 
       <RentalDashboard embed initialTab={initialTab} />
     </div>
