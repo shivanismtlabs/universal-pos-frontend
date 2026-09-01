@@ -208,10 +208,20 @@ export default function OrdersPage() {
                     <td className="px-4 py-3 font-medium">
                       <Link
                         href={`/orders/view?id=${o.id}`}
-                        className="text-[var(--ink)] hover:underline"
+                        className="text-[var(--ink)] font-bold hover:underline"
                       >
                         {o.orderNumber}
                       </Link>
+                      {(o as any).invoices?.[0]?.invoiceNumber ? (
+                        <p className="text-[11px] font-semibold text-[#1a56db]">
+                          {(o as any).invoices[0].invoiceNumber}
+                        </p>
+                      ) : null}
+                      {(o as any).meta?.isExchangeInvoice ? (
+                        <p className="text-[10px] font-bold text-indigo-700">
+                          Exchange of {(o as any).meta.exchangeOfOrderNumber || "Original Order"}
+                        </p>
+                      ) : null}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-[0.8125rem] text-[var(--muted)]">
                       {o.createdAt
@@ -238,9 +248,22 @@ export default function OrdersPage() {
                       {o.customer?.fullName ?? "—"}
                     </td>
                     <td className="px-4 py-3 capitalize">
-                      {o.rentalExt?.lifecycle
-                        ? String(o.rentalExt.lifecycle).replace(/_/g, " ")
-                        : String(o.status ?? "").replace(/_/g, " ")}
+                      <div className="flex flex-col gap-1">
+                        <span>
+                          {o.rentalExt?.lifecycle
+                            ? String(o.rentalExt.lifecycle).replace(/_/g, " ")
+                            : String(o.status ?? "").replace(/_/g, " ")}
+                        </span>
+                        {(o as { returnState?: string }).returnState === "partially_returned" ? (
+                          <span className="inline-block w-max rounded bg-amber-100 px-1.5 py-0.5 text-[0.65rem] font-bold text-amber-800 uppercase">
+                            Partially Returned
+                          </span>
+                        ) : (o as { returnState?: string }).returnState === "fully_returned" ? (
+                          <span className="inline-block w-max rounded bg-purple-100 px-1.5 py-0.5 text-[0.65rem] font-bold text-purple-800 uppercase">
+                            Fully Returned
+                          </span>
+                        ) : null}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-right font-semibold tabular-nums text-[#0b1f33]">
                       {money(total)}
