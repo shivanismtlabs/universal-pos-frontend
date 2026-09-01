@@ -1,10 +1,8 @@
 import {
-  getExampleNumber,
   isValidPhoneNumber,
   parsePhoneNumberFromString,
 } from "libphonenumber-js";
 import type { CountryCode } from "libphonenumber-js";
-import examples from "libphonenumber-js/mobile/examples";
 import { countryFromDial, splitE164 } from "@/lib/geo";
 
 function asCountry(code?: string | null): CountryCode {
@@ -80,25 +78,11 @@ export function canonicalPhoneE164(
   return trimmed.startsWith("+") ? trimmed : `+${digits}`;
 }
 
-export function phoneValidationMessage(countryCode: string): string {
-  const cc = asCountry(countryCode);
-  try {
-    const ex = getExampleNumber(cc, examples);
-    // nationalNumber omits trunk prefix (IN "0") — dial code is shown separately in the UI.
-    const national = ex?.nationalNumber?.replace(/\D/g, "");
-    if (national) {
-      return `Enter ${national.length} digits, e.g. ${national}`;
-    }
-  } catch {
-    /* ignore */
-  }
-  return "Enter a valid mobile number for the selected country";
+export function phoneValidationMessage(_countryCode?: string): string {
+  return "Enter a valid phone number for the selected country";
 }
 
-/**
- * Simple local-input placeholder (dial code is shown in the country select).
- * Avoids static sample numbers that look like pre-filled data.
- */
+/** @deprecated Use DEFAULT_PHONE_PLACEHOLDER in phone-country-input — kept for imports. */
 export function phonePlaceholder(
   _countryCode?: string,
   _dial?: string,

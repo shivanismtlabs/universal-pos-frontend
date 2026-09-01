@@ -91,6 +91,7 @@ import {
   hydrateOfflinePendingCount,
 } from "@/lib/offline-queue";
 import { useBranchStore } from "@/lib/branch-store";
+import { clearLoginFormPersistence } from "@/lib/auth-form";
 import {
   canAccessPath,
   defaultHomeForRoles,
@@ -1341,6 +1342,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     pathname.startsWith("/counter/") ||
     pathname === "/pos" ||
     pathname.startsWith("/pos/");
+  const isCounter =
+    pathname === "/counter" || pathname.startsWith("/counter/");
   const roles = useMemo(
     () => user?.roles ?? stationUser?.roles ?? [],
     [user?.roles, stationUser?.roles],
@@ -1510,10 +1513,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     } catch {
       /* still clear local session */
     } finally {
+      clearLoginFormPersistence();
       clear();
       qc.removeQueries({ queryKey: ["tenant-bootstrap"] });
       toast.success("Signed out");
-      router.replace("/login");
+      router.replace("/login?signedOut=1");
     }
   }
 
@@ -1723,7 +1727,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <main
           className={cn(
-            "min-h-0 flex-1 overflow-y-auto overscroll-contain",
+            "min-h-0 flex-1 overscroll-contain",
+            isCounter ? "overflow-hidden" : "overflow-y-auto",
             wide ? "bg-white" : "bg-[#eef1f5]",
             "[scrollbar-gutter:stable]",
             "print:overflow-visible print:bg-white print:h-auto print:max-h-none",
@@ -1734,9 +1739,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
           <div
             className={cn(
-              "document-print-root px-4 py-5 sm:px-6 sm:py-6 lg:px-8",
+              "document-print-root",
+              isCounter
+                ? "flex min-h-0 flex-1 flex-col px-2 py-2 sm:px-3 lg:px-4"
+                : "px-4 py-5 sm:px-6 sm:py-6 lg:px-8",
               "print:max-w-none print:px-0 print:py-0",
-              wide ? "max-w-none" : "mx-auto w-full max-w-[72rem]",
+              wide && !isCounter ? "max-w-none" : "",
+              !wide ? "mx-auto w-full max-w-[72rem]" : "",
             )}
           >
             <div className="print:hidden">
@@ -1744,7 +1753,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <SetupReturnBanner />
               </Suspense>
             </div>
-            {canAccessPath(pathname, roles, permissions) ? children : null}
+            {canAccessPath(pathname, roles, permissions) ? (
+              isCounter ? (
+                <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                  {children}
+                </div>
+              ) : (
+                children
+              )
+            ) : null}
           </div>
         </main>
       </div>

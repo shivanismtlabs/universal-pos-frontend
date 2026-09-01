@@ -77,9 +77,9 @@ function PosGate() {
   const showTabs = tabs.length > 1;
 
   return (
-    <div className="space-y-0">
+    <div className="flex min-h-0 flex-1 flex-col">
       {showTabs ? (
-        <div className="sticky top-0 z-10 border-b border-[#d9e0ea] bg-white">
+        <div className="z-10 shrink-0 border-b border-[#d9e0ea] bg-white">
           <div
             role="tablist"
             aria-label="Counter mode"
@@ -109,16 +109,20 @@ function PosGate() {
         </div>
       ) : null}
 
-      {activeView === "sale" && hasSale ? <RetailPosWorkstation /> : null}
-      {activeView === "rental" && hasRent ? <PosWorkstation /> : null}
-      {activeView === "service" && hasSvc ? (
-        <ServiceDashboard embed />
-      ) : null}
-      {activeView === "subscription" && hasSub ? (
-        <div className="p-4">
-          <SubscriptionDashboard />
-        </div>
-      ) : null}
+      <div className="min-h-0 flex-1 overflow-hidden">
+        {activeView === "sale" && hasSale ? <RetailPosWorkstation /> : null}
+        {activeView === "rental" && hasRent ? <PosWorkstation /> : null}
+        {activeView === "service" && hasSvc ? (
+          <div className="h-full overflow-y-auto p-4">
+            <ServiceDashboard embed />
+          </div>
+        ) : null}
+        {activeView === "subscription" && hasSub ? (
+          <div className="h-full overflow-y-auto p-4">
+            <SubscriptionDashboard />
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

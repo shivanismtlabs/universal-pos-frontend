@@ -908,28 +908,42 @@ export function BranchPriceReorderModal({
   locationId: string;
 }) {
   const qc = useQueryClient();
+  const open = Boolean(target);
+  const [stockLevelId, setStockLevelId] = useState("");
   const [rp, setRp] = useState("");
   const [rq, setRq] = useState("");
   const [sp, setSp] = useState("");
   const [stockInQty, setStockInQty] = useState("");
-  const [stockInReason, setStockInReason] = useState("");
   const [serialsText, setSerialsText] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
+  const levels = useStockLevelPicker(locationId, open);
+  const selectedItem =
+    (levels.data?.items ?? []).find((i) => i.stockLevelId === stockLevelId) ??
+    null;
+
   const requiresSerial = Boolean(
-    target?.requiresSerial ?? target?.trackSerial,
+    selectedItem?.requiresSerial ?? selectedItem?.trackSerial,
   );
+
+  function applyItemFields(item: {
+    sellPrice?: number | null;
+    reorderPoint?: number | null;
+    reorderQty?: number | null;
+  }) {
+    setSp(item.sellPrice != null ? String(item.sellPrice) : "");
+    setRp(item.reorderPoint != null ? String(item.reorderPoint) : "");
+    setRq(item.reorderQty != null ? String(item.reorderQty) : "");
+    setStockInQty("");
+    setSerialsText("");
+    setFieldErrors({});
+  }
 
   useEffect(() => {
     if (target) {
-      setSp(target.sellPrice != null ? String(target.sellPrice) : "");
-      setRp(target.reorderPoint != null ? String(target.reorderPoint) : "");
-      setRq(target.reorderQty != null ? String(target.reorderQty) : "");
-      setStockInQty("");
-      setStockInReason("");
-      setSerialsText("");
-      setFieldErrors({});
+      setStockLevelId(target.stockLevelId);
+      applyItemFields(target);
     }
   }, [target]);
 
@@ -942,13 +956,13 @@ export function BranchPriceReorderModal({
   };
 
   async function saveAll() {
-    if (!target) return;
+    if (!target || !stockLevelId) return;
     setFieldErrors({});
     setSaving(true);
     try {
       await inventoryApi.setReorder({
         locationId,
-        stockLevelId: target.stockLevelId,
+        stockLevelId,
         reorderPoint: rp === "" ? undefined : Number(rp),
         reorderQty: rq === "" ? undefined : Number(rq),
         sellPrice: sp === "" ? undefined : Number(sp),
@@ -966,14 +980,14 @@ export function BranchPriceReorderModal({
           : qtyTrim;
         const parsed = stockMoveSchema.safeParse({
           locationId,
-          stockLevelId: target.stockLevelId,
+          stockLevelId,
           qty: qtyValue,
-          reason: stockInReason,
+          reason: "",
         });
         if (!parsed.success) {
           setFieldErrors(zodFieldErrors(parsed.error));
           toast.error(
-            zodMessages(parsed.error)[0] ?? "Fix stock in quantity / reason",
+            zodMessages(parsed.error)[0] ?? "Fix stock in quantity",
           );
           throw new Error("Invalid stock in");
         }
@@ -1027,16 +1041,13 @@ export function BranchPriceReorderModal({
 
   if (!target) return null;
 
-  const PRESET_REASONS = [
-    "Supplier Delivery (GRN)",
-    "Found Stock",
-    "Customer Return",
-    "Opening Balance",
-  ];
-  const unit = target.sellUnit || "pcs";
+  const displayName = selectedItem?.name ?? target.name;
+  const displaySku = selectedItem?.sku ?? target.sku;
+  const unit = selectedItem?.sellUnit ?? target.sellUnit ?? "pcs";
+  const onHandRaw = selectedItem?.qtyOnHand ?? target.qtyOnHand;
   const onHand =
-    target.qtyOnHand != null && Number.isFinite(Number(target.qtyOnHand))
-      ? Number(target.qtyOnHand)
+    onHandRaw != null && Number.isFinite(Number(onHandRaw))
+      ? Number(onHandRaw)
       : null;
 
   return (
@@ -1051,9 +1062,9 @@ export function BranchPriceReorderModal({
               Price, reorder &amp; add stock
             </h3>
             <p className="text-xs text-[#5a6b7d]">
-              {target.name}{" "}
+              {displayName}{" "}
               <span className="font-mono text-[0.72rem] text-[#8b9aab]">
-                ({target.sku})
+                ({displaySku})
               </span>
               {onHand != null ? (
                 <span className="ml-1 text-[#8b9aab]">
@@ -1073,6 +1084,31 @@ export function BranchPriceReorderModal({
       </div>
 
       <div className="mt-4 space-y-5">
+        <div>
+          <Label className="text-xs font-semibold text-[#0b1f33]">
+            Select Item *
+          </Label>
+          <StockItemSelect
+            locationId={locationId}
+            open={open}
+            value={stockLevelId}
+            onChange={(id) => {
+              setStockLevelId(id);
+              const item = (levels.data?.items ?? []).find(
+                (i) => i.stockLevelId === id,
+              );
+              if (item) {
+                applyItemFields(item);
+              }
+            }}
+            placeholder="-- Choose item --"
+            optionLabel={(i) =>
+              `${i.name} (${i.sku}) — On hand: ${i.qtyOnHand} ${i.sellUnit}`
+            }
+          />
+          <FieldError message={fieldErrors.stockLevelId} />
+        </div>
+
         <div>
           <p className="text-[0.7rem] font-semibold tracking-wide text-[#8b9bb0] uppercase">
             Price &amp; reorder
@@ -1170,60 +1206,27 @@ export function BranchPriceReorderModal({
               </div>
             ) : null}
 
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <Label className="text-xs font-semibold text-[#0b1f33]">
-                  Qty to add
-                </Label>
-                <Input
-                  className="mt-1 h-10 bg-white"
-                  type="number"
-                  min={0.001}
-                  step="any"
-                  value={stockInQty}
-                  disabled={requiresSerial}
-                  onChange={(e) => {
-                    setStockInQty(e.target.value);
-                    setFieldErrors((f) => ({ ...f, qty: "" }));
-                  }}
-                  placeholder="e.g. 10 — blank = no change"
-                />
-                <p className="mt-1 text-[0.72rem] text-[#6b7280]">
-                  Leave blank if you only want to update price / reorder.
-                </p>
-                <FieldError message={fieldErrors.qty} />
-              </div>
-              <div>
-                <Label className="text-xs font-semibold text-[#0b1f33]">
-                  Why are you adding? (reference)
-                </Label>
-                <Input
-                  className="mt-1 h-10 bg-white"
-                  value={stockInReason}
-                  onChange={(e) => {
-                    setStockInReason(e.target.value);
-                    setFieldErrors((f) => ({ ...f, reason: "" }));
-                  }}
-                  placeholder="e.g. Invoice #1024"
-                />
-                <FieldError message={fieldErrors.reason} />
-              </div>
-            </div>
-
-            <div className="flex flex-wrap gap-1.5">
-              {PRESET_REASONS.map((r) => (
-                <button
-                  key={r}
-                  type="button"
-                  className="rounded-md border border-emerald-200 bg-white px-2.5 py-1 text-xs text-[#0b1f33] transition hover:border-emerald-500"
-                  onClick={() => {
-                    setStockInReason(r);
-                    setFieldErrors((f) => ({ ...f, reason: "" }));
-                  }}
-                >
-                  + {r}
-                </button>
-              ))}
+            <div>
+              <Label className="text-xs font-semibold text-[#0b1f33]">
+                Qty to add
+              </Label>
+              <Input
+                className="mt-1 h-10 bg-white"
+                type="number"
+                min={0.001}
+                step="any"
+                value={stockInQty}
+                disabled={requiresSerial}
+                onChange={(e) => {
+                  setStockInQty(e.target.value);
+                  setFieldErrors((f) => ({ ...f, qty: "" }));
+                }}
+                placeholder="e.g. 10 — blank = no change"
+              />
+              <p className="mt-1 text-[0.72rem] text-[#6b7280]">
+                Leave blank if you only want to update price / reorder.
+              </p>
+              <FieldError message={fieldErrors.qty} />
             </div>
           </div>
         </div>
@@ -1235,7 +1238,7 @@ export function BranchPriceReorderModal({
         </Button>
         <Button
           type="button"
-          disabled={saving}
+          disabled={saving || !stockLevelId}
           onClick={() => void saveAll()}
           className="bg-[#1a56db] hover:bg-[#1546b3]"
         >

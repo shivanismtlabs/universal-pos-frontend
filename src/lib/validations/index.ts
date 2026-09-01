@@ -6,12 +6,12 @@ import { catalogNeedsPackedContents } from "@/lib/measure-units";
 /** Matches backend IsStrongPassword (8–72, upper, lower, number, special) */
 export const strongPasswordSchema = z
   .string()
-  .min(8, "Password must be at least 8 characters")
-  .max(72, "Password must be at most 72 characters")
-  .regex(/[a-z]/, "Include a lowercase letter")
-  .regex(/[A-Z]/, "Include an uppercase letter")
-  .regex(/\d/, "Include a number")
-  .regex(/[^A-Za-z0-9]/, "Include a special character");
+  .min(8, "Use at least 8 characters")
+  .max(72, "Use at most 72 characters")
+  .regex(/[a-z]/, "Add a lowercase letter")
+  .regex(/[A-Z]/, "Add an uppercase letter")
+  .regex(/\d/, "Add a number")
+  .regex(/[^A-Za-z0-9]/, "Add a special character (!@#$…)");
 
 /** Country-aware phone (libphonenumber-js). Expect E.164 from PhoneCountryInput. */
 export const phoneSchema = z
@@ -41,16 +41,16 @@ export const tenantSlugSchema = z
 export const personNameSchema = z
   .string()
   .trim()
-  .min(2, "Name must be at least 2 characters")
+  .min(2, "Enter at least 2 characters")
   .max(255, "Name is too long")
-  .refine((v) => v.trim().length >= 2, "Enter a real name (not only spaces)")
+  .refine((v) => v.trim().length >= 2, "Enter your full name")
   .refine(
     (v) => /[A-Za-z\u0900-\u097F]/.test(v),
-    "Name must include letters",
+    "Use letters in your name",
   )
   .refine(
     (v) => /^[A-Za-z\u0900-\u097F]+(?: [A-Za-z\u0900-\u097F]+)*$/.test(v),
-    "Use letters only (no numbers or special characters)",
+    "Use letters and spaces only",
   );
 
 /** Zoho-style identity signup (before organization setup) */
@@ -90,9 +90,10 @@ export const loginSchema = z.object({
     .string()
     .trim()
     .toLowerCase()
-    .email("Enter a valid email")
+    .min(1, "Please enter your email address.")
+    .email("Please enter a valid email address.")
     .max(255),
-  password: z.string().min(1, "Password is required").max(72),
+  password: z.string().min(1, "Please enter your password.").max(72),
 });
 export type LoginInput = z.infer<typeof loginSchema>;
 

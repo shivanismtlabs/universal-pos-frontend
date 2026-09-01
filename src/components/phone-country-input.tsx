@@ -8,10 +8,12 @@ import { geoCountrySelectOptions } from "@/components/geo-country-options";
 import { geoCountry, geoDial, joinE164, splitE164 } from "@/lib/geo";
 import { filterMobileDigits } from "@/lib/input-guards";
 import {
-  phonePlaceholder,
   validatePhoneParts,
 } from "@/lib/phone";
 import { FieldError } from "@/components/ui/form";
+
+/** Registration + auth: never show sample digits — dial code is shown separately. */
+const DEFAULT_PHONE_PLACEHOLDER = "Enter phone number";
 
 type Props = {
   value: string;
@@ -23,6 +25,9 @@ type Props = {
   /** When false, only the parent `error` is shown (submit-time, like Sign In). */
   liveValidate?: boolean;
   labelClassName?: string;
+  placeholder?: string;
+  autoComplete?: string;
+  onBlur?: () => void;
 };
 
 export function PhoneCountryInput({
@@ -34,6 +39,9 @@ export function PhoneCountryInput({
   error,
   liveValidate = true,
   labelClassName,
+  placeholder = DEFAULT_PHONE_PLACEHOLDER,
+  autoComplete = "tel-national",
+  onBlur,
 }: Props) {
   const parts = splitE164(value, fallbackCountry);
   /** User-chosen ISO country — kept even when the number field is still empty. */
@@ -54,7 +62,6 @@ export function PhoneCountryInput({
   const selected = geoCountry(countryCode);
   const dial = selected?.dial || parts.dial || geoDial(fallbackCountry);
   const localDigits = filterMobileDigits(parts.local);
-  const placeholder = phonePlaceholder(countryCode, dial);
   // Parents sometimes pass "Phone *" while also setting required — keep a single marker.
   const labelText =
     String(label)
@@ -109,10 +116,11 @@ export function PhoneCountryInput({
         <Input
           className="flex-1"
           inputMode="numeric"
-          autoComplete="tel-national"
+          autoComplete={autoComplete}
           pattern="[0-9]*"
           value={localDigits}
           onChange={(e) => emit(dial, e.target.value)}
+          onBlur={onBlur}
           onKeyDown={(e) => {
             if (
               e.key === " " ||

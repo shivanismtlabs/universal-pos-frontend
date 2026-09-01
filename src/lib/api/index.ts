@@ -279,7 +279,7 @@ export const authApi = {
     fullName: string;
     email: string;
     password: string;
-    phone?: string;
+    phone: string;
   }) {
     return apiRequest<PortalSessionResponse>("/auth/signup", {
       method: "POST",
@@ -4062,6 +4062,17 @@ type ReceiptPayload = {
     discountTotal?: string | number;
     depositTotal: string | number;
     balanceDue: string | number;
+    feesTotal?: string | number;
+  };
+  fees?: Array<{
+    feeCode: string;
+    reason?: string | null;
+    amount: string | number;
+  }>;
+  paymentRounding?: {
+    originalAmount?: number;
+    roundOffAmount?: number;
+    finalAmount?: number;
   };
   payments: Array<{
     method: string;

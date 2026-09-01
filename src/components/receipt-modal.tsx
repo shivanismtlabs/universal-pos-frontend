@@ -96,6 +96,11 @@ export type ReceiptData = {
     reason?: string | null;
     amount: string | number;
   }>;
+  paymentRounding?: {
+    originalAmount?: number;
+    roundOffAmount?: number;
+    finalAmount?: number;
+  };
   payments?: Array<{
     method: string;
     type: string;
@@ -228,18 +233,30 @@ export function ReceiptModal({
     moneyNumber(data?.totals.feesTotal) ||
     feeRows.reduce((s, f) => s + moneyNumber(f.amount), 0);
   const itemsSub = Math.max(0, subtotal - feesTotal);
-  // Receipt totals historically treat tax as additive on printed grand
-  // (same as exclusive). Keep that so printed QR/total stay unchanged.
+  const originalAmount = moneyNumber(
+    data?.paymentRounding?.originalAmount ?? data?.totals.balanceDue,
+  );
+  const finalAmount = moneyNumber(
+    data?.paymentRounding?.finalAmount ?? data?.totals.balanceDue,
+  );
+  const roundOffAmount = moneyNumber(
+    data?.paymentRounding?.roundOffAmount ?? 0,
+  );
+  /** UPI QR on receipt always encodes exact paise (never cash round-off). */
+  const qrPayAmount =
+    balanceDue > 0.005 ? balanceDue : originalAmount;
+  const displayFees = feeRows.filter((f) => f.feeCode !== "round_off");
   const bill = buildBillSummary({
     itemsSubtotal: itemsSub,
     taxTotal,
     discount,
-    fees: feeRows,
+    fees: displayFees,
     taxInclusive: false,
     lines: data?.items ?? [],
-    amountDue: Math.max(0, subtotal - discount + taxTotal),
+    applyRoundOff: false,
+    amountDue: finalAmount,
+    roundOffOverride: roundOffAmount,
   });
-  const rounded = bill.roundedTotal;
   const when = data?.printedAt
     ? new Date(data.printedAt)
     : new Date();
@@ -477,7 +494,7 @@ export function ReceiptModal({
                 summary={bill}
                 discount={discount}
                 formatMoney={pad2}
-                netAmount={rounded}
+                netAmount={finalAmount}
                 netLabel="Net Payable"
                 showZeroDiscount
                 showZeroTax={false}
@@ -518,7 +535,7 @@ export function ReceiptModal({
                     alt="Pay QR"
                     className="mx-auto h-28 w-28 bg-white"
                     src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(
-                      `upi://pay?pa=${encodeURIComponent(upiVpa)}&pn=${encodeURIComponent(upiPayee)}&am=${rounded.toFixed(2)}&cu=INR&tn=${encodeURIComponent(data.orderNumber)}`,
+                      `upi://pay?pa=${encodeURIComponent(upiVpa)}&pn=${encodeURIComponent(upiPayee)}&am=${qrPayAmount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(data.orderNumber)}`,
                     )}`}
                   />
                   <p className="mt-1 font-bold">Scan & Pay</p>

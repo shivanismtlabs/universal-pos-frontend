@@ -124,3 +124,11 @@ export function readRememberedBioEmail(): string {
     return "";
   }
 }
+
+export function clearRememberedBioEmail() {
+  try {
+    localStorage.removeItem(BIOMETRIC_LAST_EMAIL_KEY);
+  } catch {
+    /* ignore */
+  }
+}

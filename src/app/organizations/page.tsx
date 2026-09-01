@@ -4,6 +4,11 @@ import { useEffect, useMemo, useRef, useState, type ComponentType, Suspense } fr
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import {
+  fiscalMonthNameSchema,
+  FISCAL_YEAR_OPTIONS,
+  fiscalYearSettingsPatch,
+} from "@/lib/fiscal-year";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -41,6 +46,7 @@ import { defaultHomeForRoles } from "@/lib/roles";
 import { GETTING_STARTED_PATH } from "@/lib/setup-return";
 import { TotpChallengeForm, is2faChallenge } from "@/components/totp-challenge-form";
 import { cn } from "@/lib/utils";
+import { clearLoginFormPersistence } from "@/lib/auth-form";
 import { geoStates, isKnownGeoState, splitE164 } from "@/lib/geo";
 import { phoneHasLocalDigits, validatePhoneForCountry } from "@/lib/phone";
 import { CountryStateFields } from "@/components/country-state-fields";
@@ -91,9 +97,7 @@ const createOrgSchema = z
     currencyCode: z.enum(["INR", "USD", "EUR", "GBP", "AED"], {
       errorMap: () => ({ message: "Select a currency" }),
     }),
-    fiscalYearStart: z.enum(["January", "April", "July", "October"], {
-      errorMap: () => ({ message: "Select when the fiscal year starts" }),
-    }),
+    fiscalYearStart: fiscalMonthNameSchema,
     inventoryStartDate: z
       .string()
       .min(1, "Inventory start date is required")
@@ -620,6 +624,7 @@ function OrganizationsPageInner() {
           timezone: next.timezone || "Asia/Kolkata",
           taxId: next.taxId?.trim() || undefined,
           settings: {
+            ...fiscalYearSettingsPatch(next.fiscalYearStart),
             organizationProfile: {
               phone: next.phone?.trim() || null,
               email: next.email?.trim() || null,
@@ -745,8 +750,9 @@ function OrganizationsPageInner() {
   ) : null;
 
   function signOut() {
+    clearLoginFormPersistence();
     clear();
-    router.replace("/login");
+    router.replace("/login?signedOut=1");
   }
 
   /** Zoho-style: left “what you get” · right organization form */
@@ -1021,6 +1027,8 @@ function OrganizationsPageInner() {
                     <PhoneCountryInput
                       label="Phone"
                       required
+                      liveValidate={false}
+                      autoComplete="off"
                       fallbackCountry={form.watch("countryCode") || "IN"}
                       value={form.watch("phone") ?? ""}
                       error={
@@ -1358,9 +1366,9 @@ function OrganizationsPageInner() {
                       )}
                       {...form.register("fiscalYearStart")}
                     >
-                      {["January", "April", "July", "October"].map((m) => (
-                        <option key={m} value={m}>
-                          {m}
+                      {FISCAL_YEAR_OPTIONS.map((o) => (
+                        <option key={o.id} value={o.id}>
+                          {o.label}
                         </option>
                       ))}
                     </Select>

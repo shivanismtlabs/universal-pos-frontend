@@ -66,6 +66,7 @@ import {
   cashChangeDue,
   lineTaxAmount,
   roundOffForDisplay,
+  shouldApplyCashRoundOff,
 } from "@/lib/bill-summary";
 
 type CartLine = {
@@ -261,6 +262,16 @@ export default function RetailPosWorkstation({
   const [discountAmount, setDiscountAmount] = useState("");
   const [couponCode, setCouponCode] = useState("");
   const [couponApplied, setCouponApplied] = useState<string | null>(null);
+  type DiscountDraft = {
+    linePrices: Record<string, number>;
+    billDiscount: string;
+    couponCode: string;
+    couponApplied: string | null;
+  };
+  const [discountDraft, setDiscountDraft] = useState<DiscountDraft | null>(
+    null,
+  );
+  const [qrConfirmOpen, setQrConfirmOpen] = useState(false);
   const [parkLabel, setParkLabel] = useState("");
   const [orderExtraFields, setOrderExtraFields] = useState<
     Record<string, string>
@@ -594,6 +605,28 @@ export default function RetailPosWorkstation({
     Math.round(
       cart.reduce((s, l) => s + cartLineDiscountAmount(l), 0) * 100,
     ) / 100;
+
+  const discountModalLines = useMemo(() => {
+    if (!discountDraft) return cart;
+    return cart.map((l) => ({
+      ...l,
+      unitPrice: discountDraft.linePrices[l.stockLevelId] ?? l.unitPrice,
+    }));
+  }, [cart, discountDraft]);
+
+  const draftLineDiscountsTotal = useMemo(
+    () =>
+      Math.round(
+        discountModalLines.reduce(
+          (s, l) =>
+            s +
+            Math.max(0, cartLineListPrice(l) - l.unitPrice) * l.qty,
+          0,
+        ) * 100,
+      ) / 100,
+    [discountModalLines],
+  );
+
   /** Payment “Total” before item discounts (so Discount line can show savings). */
   const displaySubtotal =
     Math.round((subtotal + lineDiscountsTotal) * 100) / 100;
@@ -639,6 +672,28 @@ export default function RetailPosWorkstation({
   );
   const discountCapped =
     discountEntered > discountNum + 0.001 && !canOverrideDiscount;
+  const draftBillDiscountNum = useMemo(() => {
+    if (!discountDraft) return 0;
+    const entered = Math.max(0, moneyNumber(discountDraft.billDiscount || 0));
+    return Math.min(
+      entered,
+      ticketBeforeDiscount,
+      canOverrideDiscount ? ticketBeforeDiscount : maxDiscountAmount,
+    );
+  }, [
+    discountDraft,
+    ticketBeforeDiscount,
+    maxDiscountAmount,
+    canOverrideDiscount,
+  ]);
+  const draftDiscountEntered = Math.max(
+    0,
+    moneyNumber(discountDraft?.billDiscount || 0),
+  );
+  const draftDiscountCapped =
+    discountDraft != null &&
+    draftDiscountEntered > draftBillDiscountNum + 0.001 &&
+    !canOverrideDiscount;
   const loyaltyOff = loyaltyQuote?.amountOff ?? 0;
   /** Item discounts + whole-bill discount — shown on payment panel. */
   const totalDiscountShown =
@@ -662,15 +717,27 @@ export default function RetailPosWorkstation({
       })
     : [];
   const diningExtras = diningFeeLines.reduce((s, f) => s + f.amount, 0);
-  /** Exact ticket before nearest-rupee round-off. */
+  /** Exact ticket total (originalAmount) — always with paise. */
   const exactDue = Math.max(
     0,
     Math.round((ticketNet + diningExtras) * 100) / 100,
   );
-  const paymentRound = roundOffForDisplay(exactDue);
-  /** Collectable total — half-up to nearest ₹ (paisa ≥ 50 → up). */
-  const totalDue = paymentRound.roundedTotal;
-  const paymentRoundOff = paymentRound.roundOff;
+  const applyCashRoundOff = shouldApplyCashRoundOff(payMethod, {
+    splitPay,
+    splitSession: Boolean(splitSession),
+  });
+  const paymentRound = applyCashRoundOff
+    ? roundOffForDisplay(exactDue)
+    : {
+        originalAmount: exactDue,
+        roundedTotal: exactDue,
+        roundOff: 0,
+        finalAmount: exactDue,
+        showRoundOff: false,
+      };
+  /** Collectable total — rounded for cash, exact for UPI/QR/card/digital. */
+  const totalDue = paymentRound.finalAmount;
+  const paymentRoundOff = applyCashRoundOff ? paymentRound.roundOff : 0;
   const splitPart = splitSession?.parts[splitSession.index] ?? null;
   const splitFollowUp = Boolean(splitSession?.orderId);
   const splitRemaining = splitSession
@@ -744,6 +811,7 @@ export default function RetailPosWorkstation({
     fees: diningFeeLines,
     taxInclusive: taxSettings.inclusive,
     lines: billTaxLines,
+    applyRoundOff: applyCashRoundOff,
     amountDue: totalDue,
   });
   const payMethodConfirmLabel = (() => {
@@ -1547,7 +1615,7 @@ export default function RetailPosWorkstation({
     }
   }
 
-  async function checkout() {
+  async function checkout(opts?: { qrConfirmed?: boolean }) {
     if (chargeLock.current || busy || stripeBusy) return;
     if (!locationId) {
       toast.error("No location configured");
@@ -1578,7 +1646,9 @@ export default function RetailPosWorkstation({
     }
     if (
       chargeAmount < 60 &&
-      (payMethod === "card" || payMethod === "upi")
+      (payMethod === "card" ||
+        payMethod === "upi" ||
+        (payMethod === "qr" && stripeConfig.data?.enabled))
     ) {
       toast.error(
         `Card/UPI minimum is ${money(60)} — use cash/QR/bank for smaller amounts`,
@@ -1673,6 +1743,11 @@ export default function RetailPosWorkstation({
       }
     }
 
+    if (payMethod === "qr" && !stripeConfig.data?.enabled && !opts?.qrConfirmed) {
+      setQrConfirmOpen(true);
+      return;
+    }
+
     chargeLock.current = true;
     setBusy(true);
     try {
@@ -1740,7 +1815,7 @@ export default function RetailPosWorkstation({
           ...(l.modifiers?.length ? { modifiers: l.modifiers } : {}),
         })),
         ...(discountNum > 0 ? { discountAmount: discountNum } : {}),
-        ...(Math.abs(paymentRoundOff) >= 0.005
+        ...(applyCashRoundOff && Math.abs(paymentRoundOff) >= 0.005
           ? { roundOffAmount: paymentRoundOff }
           : {}),
         ...(couponApplied
@@ -1762,13 +1837,20 @@ export default function RetailPosWorkstation({
           ...(deliveryAddress.trim()
             ? { deliveryAddress: deliveryAddress.trim() }
             : {}),
-          ...(Math.abs(paymentRoundOff) >= 0.005
+          ...(applyCashRoundOff && Math.abs(paymentRoundOff) >= 0.005
             ? {
                 roundOff: paymentRoundOff,
+                roundOffAmount: paymentRoundOff,
+                originalAmount: exactDue,
+                finalAmount: totalDue,
                 exactTotal: exactDue,
                 roundedTotal: totalDue,
               }
-            : {}),
+            : {
+                originalAmount: exactDue,
+                finalAmount: exactDue,
+                exactTotal: exactDue,
+              }),
           ...(Object.keys(orderExtraFields).length
             ? {
                 customFields: Object.fromEntries(
@@ -1887,8 +1969,12 @@ export default function RetailPosWorkstation({
         // cashPart covers full total — fall through to cash checkout
       }
 
-      // Card / UPI → Stripe (same gateway as rental)
-      if (payMethod === "card" || payMethod === "upi") {
+      // Card / UPI / QR (Stripe-verified UPI) → Stripe gateway
+      if (
+        payMethod === "card" ||
+        payMethod === "upi" ||
+        (payMethod === "qr" && stripeConfig.data?.enabled)
+      ) {
         if (!stripeConfig.data?.enabled) {
           toast.error(
             "Stripe is not configured. Set STRIPE keys or take cash.",
@@ -1898,11 +1984,12 @@ export default function RetailPosWorkstation({
 
         const prepared = await posApi.prepareSale(cartPayload);
         const stripeAmount = chargeAmount;
+        const stripeMethod = payMethod === "qr" ? "upi" : payMethod;
         try {
           const session = await paymentsApi.createStripeIntent({
             orderId: prepared.orderId,
             amount: stripeAmount,
-            method: payMethod,
+            method: stripeMethod,
             type: "payment",
             idempotencyKey: stripeAttemptKey,
           });
@@ -1914,7 +2001,7 @@ export default function RetailPosWorkstation({
             paymentIntentId: session.paymentIntentId,
             amount: stripeAmount,
             description: session.description,
-            method: payMethod,
+            method: stripeMethod,
             splitContinue: Boolean(splitSession),
             keepOrder: Boolean(splitSession && splitRemaining > 1),
           });
@@ -2079,7 +2166,7 @@ export default function RetailPosWorkstation({
             ...(l.modifiers?.length ? { modifiers: l.modifiers } : {}),
           })),
           ...(discountNum > 0 ? { discountAmount: discountNum } : {}),
-          ...(Math.abs(paymentRoundOff) >= 0.005
+          ...(applyCashRoundOff && Math.abs(paymentRoundOff) >= 0.005
             ? { roundOffAmount: paymentRoundOff }
             : {}),
           ...(orderNote.trim() ? { note: orderNote.trim() } : {}),
@@ -2098,13 +2185,20 @@ export default function RetailPosWorkstation({
             ...(deliveryPhone.trim()
             ? { guestPhone: canonicalPhoneE164(deliveryPhone.trim()) }
             : {}),
-            ...(Math.abs(paymentRoundOff) >= 0.005
+            ...(applyCashRoundOff && Math.abs(paymentRoundOff) >= 0.005
               ? {
                   roundOff: paymentRoundOff,
+                  roundOffAmount: paymentRoundOff,
+                  originalAmount: exactDue,
+                  finalAmount: totalDue,
                   exactTotal: exactDue,
                   roundedTotal: totalDue,
                 }
-              : {}),
+              : {
+                  originalAmount: exactDue,
+                  finalAmount: exactDue,
+                  exactTotal: exactDue,
+                }),
             ...(deliveryAddress.trim()
               ? { deliveryAddress: deliveryAddress.trim() }
               : {}),
@@ -2340,24 +2434,64 @@ export default function RetailPosWorkstation({
     setRateEdit(null);
   }
 
-  function setCartLineDiscount(
+  function setDraftLineDiscount(
     stockLevelId: string,
     opts: { percent?: number; amountOffPerUnit?: number; reset?: boolean },
   ) {
+    setDiscountDraft((prev) => {
+      if (!prev) return prev;
+      const line = cart.find((l) => l.stockLevelId === stockLevelId);
+      if (!line) return prev;
+      const base = cartLineListPrice(line);
+      const nextPrice = opts.reset
+        ? Math.round(base * 100) / 100
+        : unitPriceAfterLineDiscount(base, opts);
+      return {
+        ...prev,
+        linePrices: { ...prev.linePrices, [stockLevelId]: nextPrice },
+      };
+    });
+  }
+
+  function commitDiscountDraft() {
+    if (!discountDraft) {
+      setPayModal(null);
+      return;
+    }
     setCart((prev) =>
-      prev.map((x) => {
-        if (x.stockLevelId !== stockLevelId) return x;
-        const base = cartLineListPrice(x);
-        if (opts.reset) {
-          return { ...x, unitPrice: Math.round(base * 100) / 100 };
-        }
-        return {
-          ...x,
-          unitPrice: unitPriceAfterLineDiscount(base, opts),
-        };
+      prev.map((l) => {
+        const p = discountDraft.linePrices[l.stockLevelId];
+        return p != null ? { ...l, unitPrice: p } : l;
       }),
     );
+    setDiscountAmount(discountDraft.billDiscount);
+    setCouponCode(discountDraft.couponCode);
+    setCouponApplied(discountDraft.couponApplied);
+    setDiscountDraft(null);
+    setPayModal(null);
   }
+
+  function closeDiscountModal() {
+    setDiscountDraft(null);
+    setPayModal(null);
+  }
+
+  useEffect(() => {
+    if (payModal !== "discount") {
+      setDiscountDraft(null);
+      return;
+    }
+    setDiscountDraft({
+      linePrices: Object.fromEntries(
+        cart.map((l) => [l.stockLevelId, l.unitPrice]),
+      ),
+      billDiscount: discountAmount,
+      couponCode,
+      couponApplied,
+    });
+    // Init draft once when the modal opens — not on every cart keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [payModal]);
 
   async function finishStripeSale(paymentIntentId: string) {
     if (!stripeCheckout) return;
@@ -2474,10 +2608,10 @@ export default function RetailPosWorkstation({
   return (
     <div
       className={cn(
-        "relative bg-white",
+        "relative flex min-h-0 flex-col bg-white",
         compact
           ? "rounded-xl p-2"
-          : "min-h-0 -mx-1 px-1 pb-3 sm:-mx-2 sm:px-2",
+          : "h-full min-h-0 px-1 pb-2 sm:px-2",
       )}
     >
       {/* Idle lock is handled in AppShell; this overlay is manual Switch user only */}
@@ -2489,7 +2623,7 @@ export default function RetailPosWorkstation({
         onUnlocked={() => setManualPinSwitch(false)}
       />
       {!compact ? (
-        <header className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-2xl bg-white px-4 py-2.5">
+        <header className="mb-2 flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-2xl bg-white px-4 py-2">
           <p className="text-sm font-semibold text-[#0b1f33]">
             {productName}
             <span className="ml-2 font-normal text-[#8b9bb0]">
@@ -2561,8 +2695,8 @@ export default function RetailPosWorkstation({
         </div>
       ) : null}
 
-      <div className="grid grid-cols-[minmax(0,1.45fr)_minmax(300px,0.7fr)] items-stretch gap-3">
-        <section className="flex h-0 min-h-full flex-col overflow-hidden rounded-xl border border-[#e2e8f0] bg-white">
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1.45fr)_minmax(300px,0.7fr)] items-stretch gap-3">
+        <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-[#e2e8f0] bg-white">
           <div className="shrink-0 space-y-2 border-b border-[#eef2f8] bg-white p-3">
             <BarcodeScanInput
               value={scan}
@@ -2852,8 +2986,8 @@ export default function RetailPosWorkstation({
           ) : null}
         </section>
 
-        <aside className="flex min-h-0 flex-col self-start overflow-hidden rounded-xl border border-[#e2e8f0] bg-white">
-          <div className="flex items-center justify-between gap-2 border-b border-[#eef2f8] px-3 py-2.5">
+        <aside className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-[#e2e8f0] bg-white">
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[#eef2f8] px-3 py-2.5">
             <div>
               <p className="text-sm font-semibold text-[#0b1f33]">
                 {cart.length
@@ -2891,7 +3025,7 @@ export default function RetailPosWorkstation({
               </Button>
             )}
           </div>
-          <div className="border-b border-[#eef2f8] px-3 py-2">
+          <div className="shrink-0 border-b border-[#eef2f8] px-3 py-2">
             <button
               type="button"
               onClick={() => setPayModal("customer")}
@@ -2923,7 +3057,7 @@ export default function RetailPosWorkstation({
           </div>
 
           {foodFulfillment || resourceDesk ? (
-            <div className="space-y-1.5 border-b border-[#e8edf4] px-4 py-3">
+            <div className="shrink-0 space-y-1.5 border-b border-[#e8edf4] px-4 py-3">
               <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
                 Order details
               </Label>
@@ -2976,7 +3110,7 @@ export default function RetailPosWorkstation({
             
           </div> */}
 
-          <ul className="max-h-[min(48vh,26rem)] min-h-[8rem] flex-1 space-y-3.5 overflow-y-auto px-3 py-3">
+          <ul className="min-h-0 flex-1 space-y-3.5 overflow-y-auto overscroll-contain px-3 py-3 [scrollbar-width:thin]">
             {cart.map((l) => {
               const catalogRate = cartLineListPrice(l);
               const rateChanged =
@@ -3272,7 +3406,7 @@ export default function RetailPosWorkstation({
             ) : null}
           </ul>
 
-          <div className="mt-auto space-y-2.5 border-t border-[#eef2f8] bg-[#fafbfc] p-3">
+          <div className="mt-auto shrink-0 space-y-2.5 overflow-y-auto overscroll-contain border-t border-[#eef2f8] bg-[#fafbfc] p-3 [scrollbar-width:thin] max-h-[min(52dvh,28rem)] lg:max-h-none lg:overflow-visible">
             <div className="space-y-2 rounded-xl border border-[#e2e8f0] bg-white px-3 py-3 shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
               <BillTotalsLines
                 summary={billSummary}
@@ -3487,7 +3621,9 @@ export default function RetailPosWorkstation({
                         src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(upiUri)}`}
                       />
                       <p className="text-[0.65rem] leading-snug text-[#5a6b7d]">
-                        Customer scans, then Charge.
+                        {stripeConfig.data?.enabled
+                          ? "Customer scans, then Charge opens verified UPI checkout."
+                          : "Customer scans, then Charge and confirm payment received."}
                         <br />
                         <span className="font-medium text-[#0b1f33]">{vpa}</span>
                       </p>
@@ -3549,10 +3685,12 @@ export default function RetailPosWorkstation({
                   </div>
                 ) : null}
               </div>
-            ) : payMethod === "card" || payMethod === "upi" ? (
+            ) : payMethod === "card" ||
+              payMethod === "upi" ||
+              (payMethod === "qr" && stripeConfig.data?.enabled) ? (
               <p className="text-[0.65rem] text-[#5a6b7d]">
                 {stripeConfig.data?.enabled
-                  ? "Opens on the next screen."
+                  ? "Opens verified checkout — sale completes after payment succeeds."
                   : "Not set up — use cash or QR."}
               </p>
             ) : payMethod === "store_credit" ? (
@@ -3574,7 +3712,9 @@ export default function RetailPosWorkstation({
                   payMethod !== "cash" &&
                   payMethod !== "qr" &&
                   payMethod !== "wallet") ||
-                ((payMethod === "card" || payMethod === "upi") &&
+                ((payMethod === "card" ||
+                  payMethod === "upi" ||
+                  (payMethod === "qr" && stripeConfig.data?.enabled)) &&
                   !stripeConfig.data?.enabled) ||
                 (payMethod === "emi" &&
                   (!customerId || !emiProvider.trim()))
@@ -3582,7 +3722,9 @@ export default function RetailPosWorkstation({
               onClick={() => void checkout()}
             >
               {busy || stripeBusy
-                ? payMethod === "card" || payMethod === "upi"
+                ? payMethod === "card" ||
+                  payMethod === "upi" ||
+                  (payMethod === "qr" && stripeConfig.data?.enabled)
                   ? "Opening…"
                   : "Processing…"
                 : splitPart
@@ -3601,9 +3743,73 @@ export default function RetailPosWorkstation({
           clientSecret={stripeCheckout.clientSecret}
           amount={stripeCheckout.amount}
           description={stripeCheckout.description}
+          method={stripeCheckout.method}
           onSuccess={finishStripeSale}
           onClose={() => void closeStripeModal()}
         />
+      ) : null}
+
+      {qrConfirmOpen ? (
+        <ModalFrame
+          title="Confirm QR payment"
+          subtitle={`Only complete the sale after the customer pays ${money(chargeAmount)}.`}
+          onClose={() => setQrConfirmOpen(false)}
+          className="max-w-sm"
+          footer={
+            <div className="flex w-full gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                className="flex-1"
+                onClick={() => setQrConfirmOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                className="flex-1"
+                disabled={busy || stripeBusy}
+                onClick={() => {
+                  setQrConfirmOpen(false);
+                  void checkout({ qrConfirmed: true });
+                }}
+              >
+                Payment received
+              </Button>
+            </div>
+          }
+        >
+          <div className="space-y-3">
+            {activeQrVpa ? (
+              <div className="flex items-center gap-3 rounded-lg border border-[#d9e0ea] bg-white p-3">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  alt="Pay QR"
+                  className="h-24 w-24 shrink-0 rounded border border-[#eef2f8] bg-white"
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(
+                    buildUpiPayUri({
+                      vpa: activeQrVpa,
+                      payeeName: productName || "Universal POS",
+                      amount: chargeAmount,
+                      note: productName || "Universal POS",
+                    }),
+                  )}`}
+                />
+                <div className="min-w-0 text-sm text-[#5a6b7d]">
+                  <p className="font-semibold text-[#0b1f33]">{activeQrVpa}</p>
+                  <p className="mt-1 text-[0.75rem]">
+                    Ask the customer to show the UPI success screen before you
+                    confirm.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-amber-800">
+                Set UPI ID in Settings → Counter first.
+              </p>
+            )}
+          </div>
+        </ModalFrame>
       ) : null}
 
       {modPick ? (
@@ -4170,17 +4376,31 @@ export default function RetailPosWorkstation({
         </ModalFrame>
       ) : null}
 
-      {payModal === "discount" ? (
+      {payModal === "discount" && discountDraft ? (
         <ModalFrame
           title="Discount"
-          subtitle="Set a different discount on each product, and/or an amount off the whole bill."
-          onClose={() => setPayModal(null)}
+          subtitle="Adjust items and whole-bill discount, then tap Done to apply."
+          onClose={closeDiscountModal}
           className="max-w-md"
           bodyScroll
           footer={
-            <Button className="w-full" onClick={() => setPayModal(null)}>
-              Done
-            </Button>
+            <div className="flex w-full gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                className="flex-1"
+                onClick={closeDiscountModal}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                className="flex-1"
+                onClick={commitDiscountDraft}
+              >
+                Done
+              </Button>
+            </div>
           }
         >
           <div className="space-y-5">
@@ -4190,14 +4410,14 @@ export default function RetailPosWorkstation({
                   <p className="text-[0.65rem] font-semibold tracking-[0.1em] text-[#8b9bb0] uppercase">
                     Per item
                   </p>
-                  {lineDiscountsTotal > 0 ? (
+                  {draftLineDiscountsTotal > 0 ? (
                     <p className="text-xs font-semibold text-[#c2410c]">
-                      Items save {money(lineDiscountsTotal)}
+                      Items save {money(draftLineDiscountsTotal)}
                     </p>
                   ) : null}
                 </div>
                 <ul className="max-h-[min(40vh,16rem)] space-y-2.5 overflow-y-auto">
-                  {cart.map((l) => {
+                  {discountModalLines.map((l) => {
                     const base = cartLineListPrice(l);
                     const discPct = cartLineDiscountPercent(l);
                     const offUnit = Math.max(0, base - l.unitPrice);
@@ -4224,7 +4444,7 @@ export default function RetailPosWorkstation({
                             type="button"
                             className="shrink-0 text-[0.7rem] font-semibold text-[#1a56db] hover:underline"
                             onClick={() =>
-                              setCartLineDiscount(l.stockLevelId, {
+                              setDraftLineDiscount(l.stockLevelId, {
                                 reset: true,
                               })
                             }
@@ -4245,7 +4465,7 @@ export default function RetailPosWorkstation({
                               onChange={(e) => {
                                 const raw = e.target.value;
                                 if (raw === "") {
-                                  setCartLineDiscount(l.stockLevelId, {
+                                  setDraftLineDiscount(l.stockLevelId, {
                                     reset: true,
                                   });
                                   return;
@@ -4254,7 +4474,7 @@ export default function RetailPosWorkstation({
                                   0,
                                   Math.min(100, moneyNumber(raw || 0)),
                                 );
-                                setCartLineDiscount(l.stockLevelId, {
+                                setDraftLineDiscount(l.stockLevelId, {
                                   percent: pct,
                                 });
                               }}
@@ -4272,13 +4492,13 @@ export default function RetailPosWorkstation({
                               onChange={(e) => {
                                 const raw = e.target.value;
                                 if (raw === "") {
-                                  setCartLineDiscount(l.stockLevelId, {
+                                  setDraftLineDiscount(l.stockLevelId, {
                                     reset: true,
                                   });
                                   return;
                                 }
                                 const amt = Math.max(0, moneyNumber(raw || 0));
-                                setCartLineDiscount(l.stockLevelId, {
+                                setDraftLineDiscount(l.stockLevelId, {
                                   amountOffPerUnit: amt,
                                 });
                               }}
@@ -4297,7 +4517,7 @@ export default function RetailPosWorkstation({
                                   : "border-[#e2e8f0] bg-white text-[#475569] hover:border-[#c2410c]",
                               )}
                               onClick={() =>
-                                setCartLineDiscount(l.stockLevelId, {
+                                setDraftLineDiscount(l.stockLevelId, {
                                   percent: pct,
                                 })
                               }
@@ -4307,7 +4527,8 @@ export default function RetailPosWorkstation({
                           ))}
                         </div>
                         <p className="mt-2 text-xs font-semibold tabular-nums text-[#0b1f33]">
-                          Now {money(l.unitPrice)} · line {money(l.unitPrice * l.qty)}
+                          Preview {money(l.unitPrice)} · line{" "}
+                          {money(l.unitPrice * l.qty)}
                         </p>
                       </li>
                     );
@@ -4326,18 +4547,25 @@ export default function RetailPosWorkstation({
                   className="mt-1 text-lg tabular-nums"
                   inputMode="decimal"
                   placeholder="0"
-                  value={discountAmount}
+                  value={discountDraft.billDiscount}
                   onChange={(e) => {
-                    setDiscountAmount(e.target.value);
-                    setCouponApplied(null);
+                    setDiscountDraft((d) =>
+                      d
+                        ? {
+                            ...d,
+                            billDiscount: e.target.value,
+                            couponApplied: null,
+                          }
+                        : d,
+                    );
                   }}
                 />
-                {discountNum > 0 ? (
+                {draftBillDiscountNum > 0 ? (
                   <p className="mt-1 text-sm font-semibold text-[#1a56db]">
-                    Off the bill: {money(discountNum)}
+                    Off the bill: {money(draftBillDiscountNum)}
                   </p>
                 ) : null}
-                {discountCapped ? (
+                {draftDiscountCapped ? (
                   <p className="mt-1 text-xs text-amber-800">
                     Cashier max is {money(maxDiscountAmount)} (
                     {maxCashierDiscountPercent}%). Ask a manager for more.
@@ -4354,20 +4582,34 @@ export default function RetailPosWorkstation({
                   <Input
                     className="uppercase"
                     placeholder="CODE"
-                    value={couponCode}
+                    value={discountDraft.couponCode}
                     onChange={(e) => {
-                      setCouponCode(e.target.value);
-                      setCouponApplied(null);
+                      setDiscountDraft((d) =>
+                        d
+                          ? {
+                              ...d,
+                              couponCode: e.target.value,
+                              couponApplied: null,
+                            }
+                          : d,
+                      );
                     }}
                   />
-                  {couponApplied ? (
+                  {discountDraft.couponApplied ? (
                     <Button
                       type="button"
                       variant="secondary"
                       onClick={() => {
-                        setCouponCode("");
-                        setCouponApplied(null);
-                        setDiscountAmount("");
+                        setDiscountDraft((d) =>
+                          d
+                            ? {
+                                ...d,
+                                couponCode: "",
+                                couponApplied: null,
+                                billDiscount: "",
+                              }
+                            : d,
+                        );
                       }}
                     >
                       Clear
@@ -4376,17 +4618,27 @@ export default function RetailPosWorkstation({
                     <Button
                       type="button"
                       variant="secondary"
-                      disabled={!couponCode.trim() || ticketBeforeDiscount <= 0}
+                      disabled={
+                        !discountDraft.couponCode.trim() ||
+                        ticketBeforeDiscount <= 0
+                      }
                       onClick={async () => {
                         try {
                           const v = await loyaltyApi.validateCoupon(
-                            couponCode.trim(),
+                            discountDraft.couponCode.trim(),
                             ticketBeforeDiscount,
                           );
-                          setDiscountAmount(String(v.amountOff));
-                          setCouponApplied(v.code);
+                          setDiscountDraft((d) =>
+                            d
+                              ? {
+                                  ...d,
+                                  billDiscount: String(v.amountOff),
+                                  couponApplied: v.code,
+                                }
+                              : d,
+                          );
                           toast.success(
-                            `Coupon ${v.code}: −${money(v.amountOff)}`,
+                            `Coupon ${v.code}: −${money(v.amountOff)} (applies on Done)`,
                           );
                         } catch (e) {
                           toast.error(
@@ -4401,9 +4653,9 @@ export default function RetailPosWorkstation({
                     </Button>
                   )}
                 </div>
-                {couponApplied ? (
+                {discountDraft.couponApplied ? (
                   <p className="mt-1 text-xs text-[#1a56db]">
-                    Coupon {couponApplied} applied
+                    Coupon {discountDraft.couponApplied} ready — tap Done
                   </p>
                 ) : null}
               </div>

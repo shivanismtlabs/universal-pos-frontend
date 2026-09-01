@@ -12,6 +12,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Minus,
+  Plus,
   AlertTriangle,
   RefreshCw,
 } from "lucide-react";
@@ -30,6 +31,7 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { ItemsImportDialog } from "@/components/items-import-dialog";
 import {
+  StockInModal,
   StockOutModal,
   DamagedStockModal,
   BranchPriceReorderModal,
@@ -95,6 +97,7 @@ function InventoryPageInner() {
   const branchId = useBranchStore((s) => s.currentLocationId);
 
   const { hasScreen } = useBootstrap();
+  const [stockInOpen, setStockInOpen] = useState(false);
   const [stockOutOpen, setStockOutOpen] = useState(false);
   const [damageOpen, setDamageOpen] = useState(false);
 
@@ -135,9 +138,10 @@ function InventoryPageInner() {
         title="Inventory"
         subtitle={
           <>
-            On-hand stock at this location. To receive stock, open{" "}
-            <span className="font-semibold text-[#0b1f33]">Edit</span> on a
-            row.{" "}
+            On-hand stock at this location. Use{" "}
+            <span className="font-semibold text-[#0b1f33]">Stock In</span> or{" "}
+            <span className="font-semibold text-[#0b1f33]">Edit</span> on a row
+            to receive stock.{" "}
             <Link
               href="/adjustments"
               className="font-semibold text-[#1a56db] hover:underline"
@@ -167,6 +171,14 @@ function InventoryPageInner() {
         action={
           canWrite ? (
             <div className="flex flex-wrap items-center justify-end gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setStockInOpen(true)}
+              >
+                <Plus className="size-4" />
+                Stock In
+              </Button>
               <Button
                 type="button"
                 variant="secondary"
@@ -241,6 +253,11 @@ function InventoryPageInner() {
         open={importOpen}
         onClose={() => setImportOpen(false)}
         locationId={activeLoc || undefined}
+      />
+      <StockInModal
+        open={stockInOpen}
+        onClose={() => setStockInOpen(false)}
+        locationId={activeLoc}
       />
       <StockOutModal
         open={stockOutOpen}

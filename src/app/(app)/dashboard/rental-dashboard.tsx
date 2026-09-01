@@ -928,6 +928,7 @@ export function RentalDashboard({
           clientSecret={stripePay.clientSecret}
           amount={stripePay.amount}
           description={stripePay.description}
+          method={stripePay.method}
           onSuccess={finishStripeRental}
           onClose={() => setStripePay(null)}
         />

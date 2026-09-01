@@ -18,10 +18,16 @@ import { FieldError } from "@/components/ui/form";
 import { AuthShell } from "@/components/auth-shell";
 import { PhoneCountryInput } from "@/components/phone-country-input";
 import {
+  AUTH_FORM_OPTIONS,
+  SIGNUP_PASSWORD_RULES,
+  authFieldError,
+} from "@/lib/auth-form";
+import {
   signupIdentitySchema,
   passwordStrength,
   type SignupIdentityInput,
 } from "@/lib/validations";
+import { phoneHasLocalDigits } from "@/lib/phone";
 import { authApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { applyPortalResponse } from "@/lib/auth-portal";
@@ -38,8 +44,11 @@ export default function SignupClient() {
     handleSubmit,
     watch,
     setValue,
-    formState: { errors, isSubmitting, isSubmitted },
+    clearErrors,
+    getValues,
+    formState,
   } = useForm<SignupIdentityInput>({
+    ...AUTH_FORM_OPTIONS,
     resolver: zodResolver(signupIdentitySchema),
     defaultValues: {
       fullName: "",
@@ -50,45 +59,15 @@ export default function SignupClient() {
     },
   });
 
+  const { errors, isSubmitting, isSubmitted, touchedFields } = formState;
   const password = watch("password") ?? "";
   const email = watch("email") ?? "";
   const phone = watch("phone") ?? "";
   const strength = passwordStrength(password, { email });
-  /** Signup has 6 rules (no shop slug). */
-  const passwordRules = [
-    {
-      id: "length",
-      ok: strength.checks.length,
-      label: "At least 8 characters (max 72)",
-    },
-    {
-      id: "lower",
-      ok: strength.checks.lower,
-      label: "One lowercase letter (a–z)",
-    },
-    {
-      id: "upper",
-      ok: strength.checks.upper,
-      label: "One uppercase letter (A–Z)",
-    },
-    {
-      id: "number",
-      ok: strength.checks.number,
-      label: "One number (0–9)",
-    },
-    {
-      id: "special",
-      ok: strength.checks.special,
-      label: "One special character (!@#$…)",
-    },
-    {
-      id: "noEmail",
-      ok: strength.checks.noEmailPart,
-      label: "Must not contain your email name",
-    },
-  ] as const;
-  const signupScore = passwordRules.filter((r) => r.ok).length;
-  const passwordOk = signupScore === passwordRules.length && password.length > 0;
+  const passwordOk =
+    SIGNUP_PASSWORD_RULES.every((r) => strength.checks[r.key]) &&
+    password.length > 0;
+  const showPasswordHints = isSubmitted || touchedFields.password;
 
   async function onSubmit(values: SignupIdentityInput) {
     try {
@@ -131,11 +110,11 @@ export default function SignupClient() {
           <Input
             id="fullName"
             autoComplete="name"
-            placeholder="Your name"
             className="h-11 rounded-lg"
+            aria-invalid={Boolean(authFieldError(formState, "fullName"))}
             {...register("fullName")}
           />
-          <FieldError message={errors.fullName?.message} />
+          <FieldError message={authFieldError(formState, "fullName")} />
         </div>
 
         <div className="space-y-1.5">
@@ -148,9 +127,10 @@ export default function SignupClient() {
             autoComplete="email"
             placeholder="name@company.com"
             className="h-11 rounded-lg"
+            aria-invalid={Boolean(authFieldError(formState, "email"))}
             {...register("email")}
           />
-          <FieldError message={errors.email?.message} />
+          <FieldError message={authFieldError(formState, "email")} />
         </div>
 
         <div className="space-y-1.5">
@@ -158,14 +138,28 @@ export default function SignupClient() {
             label="Phone"
             labelClassName={authLabel}
             liveValidate={false}
+            autoComplete="off"
             value={phone}
-            error={errors.phone?.message}
-            onChange={(v) =>
+            error={authFieldError(formState, "phone")}
+            onBlur={() => {
+              setValue("phone", getValues("phone"), {
+                shouldTouch: true,
+                shouldValidate: isSubmitted,
+              });
+            }}
+            onChange={(v) => {
+              const hasLocal = phoneHasLocalDigits(v);
               setValue("phone", v, {
                 shouldDirty: true,
-                shouldValidate: isSubmitted,
-              })
-            }
+                shouldTouch: hasLocal || isSubmitted,
+                shouldValidate:
+                  isSubmitted ||
+                  (hasLocal && Boolean(touchedFields.phone)),
+              });
+              if (!hasLocal && !isSubmitted) {
+                clearErrors("phone");
+              }
+            }}
           />
         </div>
 
@@ -179,6 +173,7 @@ export default function SignupClient() {
               type={showPassword ? "text" : "password"}
               autoComplete="new-password"
               className="h-11 rounded-lg pr-16"
+              aria-invalid={Boolean(authFieldError(formState, "password"))}
               {...register("password")}
             />
             <button
@@ -189,37 +184,36 @@ export default function SignupClient() {
               {showPassword ? "Hide" : "Show"}
             </button>
           </div>
-          <FieldError message={errors.password?.message} />
-          {password.length > 0 ? (
-            <>
-              <p className="mt-1.5 text-[0.7rem] font-medium text-[#64748b]">
-                Password must include:
-              </p>
-              <ul className="mt-1 space-y-0.5 text-[0.75rem]" aria-live="polite">
-                {passwordRules.map((rule) => (
-                  <li
-                    key={rule.id}
-                    className={cn(
-                      rule.ok
-                        ? "text-[#15803d]"
-                        : errors.password
-                          ? "text-[#b91c1c]"
-                          : "text-[#64748b]",
-                    )}
-                  >
-                    <span aria-hidden="true" className="mr-1.5">
-                      {rule.ok ? "✓" : "•"}
-                    </span>
-                    {rule.label}
-                  </li>
-                ))}
-              </ul>
-              {passwordOk ? (
-                <p className="mt-1 text-[0.75rem] text-[#15803d]">
-                  Password looks good
-                </p>
-              ) : null}
-            </>
+          <FieldError message={authFieldError(formState, "password")} />
+          <p className="mt-1.5 text-[0.7rem] font-medium text-[#64748b]">
+            Password must include:
+          </p>
+          <ul className="mt-1 space-y-0.5 text-[0.75rem]" aria-live="polite">
+            {SIGNUP_PASSWORD_RULES.map((rule) => {
+              const ok = strength.checks[rule.key];
+              return (
+                <li
+                  key={rule.id}
+                  className={cn(
+                    ok
+                      ? "text-[#15803d]"
+                      : showPasswordHints && errors.password
+                        ? "text-[#b91c1c]"
+                        : "text-[#64748b]",
+                  )}
+                >
+                  <span aria-hidden="true" className="mr-1.5">
+                    {ok ? "✓" : "•"}
+                  </span>
+                  {rule.label}
+                </li>
+              );
+            })}
+          </ul>
+          {passwordOk ? (
+            <p className="mt-1 text-[0.75rem] text-[#15803d]">
+              Password looks good
+            </p>
           ) : null}
         </div>
 
@@ -232,9 +226,10 @@ export default function SignupClient() {
             type={showPassword ? "text" : "password"}
             autoComplete="new-password"
             className="h-11 rounded-lg"
+            aria-invalid={Boolean(authFieldError(formState, "confirmPassword"))}
             {...register("confirmPassword")}
           />
-          <FieldError message={errors.confirmPassword?.message} />
+          <FieldError message={authFieldError(formState, "confirmPassword")} />
         </div>
 
         <p className="text-[0.75rem] leading-relaxed text-[#8b9bb0]">

@@ -8,7 +8,7 @@ import {
   useStripe,
 } from "@stripe/react-stripe-js";
 import { loadStripe, type PaymentIntent, type Stripe } from "@stripe/stripe-js";
-import { X } from "lucide-react";
+import { ChevronLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatInr } from "@/lib/utils";
 
@@ -32,6 +32,8 @@ type Props = {
   clientSecret: string;
   amount: number;
   description: string;
+  /** When set, tunes labels and PaymentElement layout for UPI vs card. */
+  method?: "card" | "upi";
   onSuccess: (paymentIntentId: string) => Promise<void> | void;
   onClose: () => void;
 };
@@ -60,7 +62,6 @@ async function settlePaymentIntent(
     intent = next.paymentIntent ?? undefined;
   }
 
-  // UPI often sits in "processing" until the bank confirms
   for (let i = 0; i < 45 && intent?.status === "processing"; i++) {
     onStatus?.(
       i < 2
@@ -72,7 +73,6 @@ async function settlePaymentIntent(
     intent = retrieved.paymentIntent ?? intent;
   }
 
-  // One more next-action pass if bank bounced us back
   if (
     intent?.status === "requires_action" ||
     intent?.status === "requires_confirmation"
@@ -92,6 +92,7 @@ function CheckoutForm({
   clientSecret,
   amount,
   description,
+  method,
   onSuccess,
   onClose,
 }: Omit<Props, "publishableKey">) {
@@ -100,6 +101,15 @@ function CheckoutForm({
   const [busy, setBusy] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const title =
+    method === "upi"
+      ? "UPI payment"
+      : method === "card"
+        ? "Card payment"
+        : "Payment";
+  const payLabel =
+    method === "upi" ? "Confirm UPI" : method === "card" ? "Pay card" : "Pay";
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -147,7 +157,7 @@ function CheckoutForm({
 
       if (intent?.status === "processing") {
         setError(
-          "Payment is still processing at the bank. Keep this window open, or check the order in a minute and verify if it completed.",
+          "Payment is still processing at the bank. Keep this window open, or check the order in a minute.",
         );
         setBusy(false);
         setStatusMsg(null);
@@ -169,54 +179,89 @@ function CheckoutForm({
   }
 
   return (
-    <form onSubmit={onSubmit} className="space-y-4">
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-[#6b7280]">
-          Card / UPI checkout
-        </p>
-        <p className="mt-1 text-sm text-[#111827]">{description}</p>
-        <p className="mt-1 text-lg font-semibold tabular-nums text-[#1a56db]">
+    <form
+      onSubmit={onSubmit}
+      className="flex min-h-0 flex-1 flex-col"
+    >
+      <header className="flex shrink-0 items-center gap-2 border-b border-[#eef1f4] px-3 py-2.5">
+        <button
+          type="button"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[#5a6b7d] hover:bg-[#f1f5f9] hover:text-[#0b1f33]"
+          aria-label="Back to payment methods"
+          onClick={onClose}
+          disabled={busy}
+        >
+          <ChevronLeft className="h-5 w-5" />
+        </button>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-[#0b1f33]">{title}</p>
+          <p className="truncate text-[0.7rem] text-[#5a6b7d]">{description}</p>
+        </div>
+        <p className="shrink-0 text-base font-bold tabular-nums text-[#1a56db]">
           {formatInr(amount)}
         </p>
+      </header>
+
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3">
+        <div className="rounded-lg border border-[#e2e8f0] bg-[#fafbfc] p-2.5 [&_.p-AccordionItem]:border-0 [&_.p-Tab]:py-2">
+          <PaymentElement
+            options={{
+              layout: method === "upi" ? "accordion" : "tabs",
+              paymentMethodOrder:
+                method === "upi"
+                  ? ["upi"]
+                  : method === "card"
+                    ? ["card"]
+                    : undefined,
+              wallets: {
+                applePay: "never",
+                googlePay: "never",
+                link: "never",
+              },
+            }}
+          />
+        </div>
+
+        {statusMsg ? (
+          <p className="mt-2 text-xs font-medium text-[#1341a8]">{statusMsg}</p>
+        ) : null}
+        {error ? (
+          <p className="mt-2 text-xs text-[#b91c1c]">{error}</p>
+        ) : null}
+
+        {method === "upi" ? (
+          <p className="mt-2 text-[0.65rem] leading-snug text-[#8b9bb0]">
+            Customer scans the QR with any UPI app. Sale completes after bank
+            confirmation.
+          </p>
+        ) : null}
       </div>
 
-      <div className="rounded-xl border border-[#e5e7eb] bg-[#f9fafb] p-3">
-        <PaymentElement
-          options={{
-            layout: "tabs",
-            wallets: {
-              applePay: "never",
-              googlePay: "never",
-              link: "never",
-            },
-          }}
-        />
-      </div>
-
-      {statusMsg ? (
-        <p className="text-sm font-medium text-[#1341a8]">{statusMsg}</p>
-      ) : null}
-      {error ? <p className="text-sm text-[#b91c1c]">{error}</p> : null}
-
-      <div className="flex gap-2">
-        <Button
-          type="button"
-          variant="secondary"
-          className="flex-1"
-          disabled={busy}
-          onClick={onClose}
-        >
-          Cancel
-        </Button>
-        <Button type="submit" className="flex-1" disabled={!stripe || busy}>
-          {busy ? "Processing…" : `Pay ${formatInr(amount)}`}
-        </Button>
-      </div>
-
-      <p className="text-center text-[0.65rem] text-[#9ca3af]">
-        UPI: scan the QR in this window. Card test: 4242 4242 4242 4242 · any
-        future expiry · any CVC
-      </p>
+      <footer className="shrink-0 space-y-2 border-t border-[#eef1f4] px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            className="h-9 flex-1 text-sm"
+            disabled={busy}
+            onClick={onClose}
+          >
+            Back
+          </Button>
+          <Button
+            type="submit"
+            className="h-9 flex-1 text-sm font-semibold"
+            disabled={!stripe || busy}
+          >
+            {busy ? "Processing…" : `${payLabel} · ${formatInr(amount)}`}
+          </Button>
+        </div>
+        {method === "card" ? (
+          <p className="text-center text-[0.6rem] text-[#9ca3af]">
+            Test card: 4242 4242 4242 4242 · any future expiry · any CVC
+          </p>
+        ) : null}
+      </footer>
     </form>
   );
 }
@@ -227,23 +272,21 @@ export function StripeCheckoutModal(props: Props) {
     [props.publishableKey],
   );
 
+  const panelWidth =
+    props.method === "upi" ? "max-w-[21rem]" : "max-w-md";
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
       <button
         type="button"
-        className="absolute inset-0 bg-[#111827]/45"
+        className="absolute inset-0 bg-[#0b1f33]/40"
         aria-label="Close"
         onClick={props.onClose}
       />
-      <div className="relative z-10 w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl">
-        <button
-          type="button"
-          className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-lg text-[#5a6b7d] hover:bg-[#f1f5f9]"
-          aria-label="Close"
-          onClick={props.onClose}
-        >
-          <X className="h-4 w-4" />
-        </button>
+      <div
+        className={`relative z-10 flex w-full ${panelWidth} max-h-[min(26rem,88dvh)] flex-col overflow-hidden rounded-xl border border-[#d9e0ea] bg-white shadow-xl`}
+        onClick={(e) => e.stopPropagation()}
+      >
         <Elements
           stripe={stripePromise}
           options={{
@@ -253,6 +296,17 @@ export function StripeCheckoutModal(props: Props) {
               variables: {
                 colorPrimary: "#1a56db",
                 borderRadius: "8px",
+                spacingUnit: "3px",
+                fontSizeBase: "14px",
+              },
+              rules: {
+                ".AccordionItem": {
+                  border: "none",
+                  boxShadow: "none",
+                },
+                ".Tab": {
+                  padding: "8px 10px",
+                },
               },
             },
           }}
@@ -261,6 +315,7 @@ export function StripeCheckoutModal(props: Props) {
             clientSecret={props.clientSecret}
             amount={props.amount}
             description={props.description}
+            method={props.method}
             onSuccess={props.onSuccess}
             onClose={props.onClose}
           />

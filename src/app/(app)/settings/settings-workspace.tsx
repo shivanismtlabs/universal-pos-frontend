@@ -38,6 +38,11 @@ import { geoDial, joinE164, splitE164 } from "@/lib/geo";
 import { CountryStateFields } from "@/components/country-state-fields";
 import { PhoneCountryInput } from "@/components/phone-country-input";
 import { citiesForState } from "@/lib/india-locations";
+import {
+  FISCAL_YEAR_OPTIONS,
+  fiscalYearSettingsPatch,
+  fiscalMonthNameToNumber,
+} from "@/lib/fiscal-year";
 
 export type SettingsSection =
   | "branding"
@@ -85,13 +90,6 @@ const SECTION_META: Record<
   },
 };
 
-
-const FISCAL_YEAR_OPTIONS = [
-  { id: "April", label: "April – March" },
-  { id: "January", label: "January – December" },
-  { id: "July", label: "July – June" },
-  { id: "October", label: "October – September" },
-] as const;
 
 const DATE_FORMAT_OPTIONS = [
   { id: "dd MMM yyyy", label: "dd MMM yyyy  [ 17 Aug 2026 ]" },
@@ -305,11 +303,13 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
         typeof orgProfile.website === "string" ? orgProfile.website : "",
       logoUrl:
         typeof t.branding?.logoUrl === "string" ? t.branding.logoUrl : "",
-      fiscalYearStart:
-        typeof orgProfile.fiscalYearStart === "string" &&
-        orgProfile.fiscalYearStart
-          ? orgProfile.fiscalYearStart
-          : "April",
+      fiscalYearStart: (() => {
+        const raw =
+          typeof orgProfile.fiscalYearStart === "string"
+            ? orgProfile.fiscalYearStart.trim()
+            : "";
+        return raw && fiscalMonthNameToNumber(raw) ? raw : "April";
+      })(),
       dateFormat:
         typeof orgProfile.dateFormat === "string" && orgProfile.dateFormat
           ? orgProfile.dateFormat
@@ -461,6 +461,7 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
           ...(logoTrimmed ? { logoUrl: logoTrimmed } : {}),
         },
         settings: {
+          ...fiscalYearSettingsPatch(profile.fiscalYearStart),
           organizationProfile: {
             phone: phone || null,
             phoneCountryCode: profile.phoneCountryCode,
