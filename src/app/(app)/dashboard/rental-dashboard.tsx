@@ -39,10 +39,16 @@ function errMsg(e: unknown) {
  * Universal rental floor — same ops for any rentable item.
  * Categories/products are dynamic; return + exchange are first-class.
  */
-export function RentalDashboard() {
+export function RentalDashboard({
+  embed = false,
+  initialTab,
+}: {
+  embed?: boolean;
+  initialTab?: Tab;
+} = {}) {
   const { productName, money } = useBootstrap();
   const qc = useQueryClient();
-  const [tab, setTab] = useState<Tab>("stock");
+  const [tab, setTab] = useState<Tab>(initialTab ?? "stock");
 
   const [returnOrderId, setReturnOrderId] = useState("");
   const [returnUnitId, setReturnUnitId] = useState("");
@@ -357,22 +363,33 @@ export function RentalDashboard() {
 
   return (
     <div className="space-y-5">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="display text-2xl sm:text-3xl">{productName}</h1>
-          <p className="mt-1 text-sm text-[#5a6b7d]">
-            Manage rental stock, rent out, and process returns
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button asChild>
-            <Link href="/counter?view=rent&new=1">Start new rental</Link>
+      {!embed ? (
+        <header className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 className="display text-2xl sm:text-3xl">{productName}</h1>
+            <p className="mt-1 text-sm text-[#5a6b7d]">
+              Manage rental stock, rent out, and process returns
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild>
+              <Link href="/counter?view=rental&new=1">Start new rental</Link>
+            </Button>
+            <Button asChild variant="secondary">
+              <Link href="/counter?view=rental">Open rent counter</Link>
+            </Button>
+          </div>
+        </header>
+      ) : (
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button asChild size="sm">
+            <Link href="/counter?view=rental&new=1">Start new rental</Link>
           </Button>
-          <Button asChild variant="secondary">
-            <Link href="/counter?view=rent">Open rent counter</Link>
+          <Button asChild size="sm" variant="secondary">
+            <Link href="/counter?view=rental">Counter · Rent</Link>
           </Button>
         </div>
-      </header>
+      )}
 
       <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-5">
         {[
@@ -398,8 +415,8 @@ export function RentalDashboard() {
 
       {!hasUnits && tab === "rent" ? (
         <p className="rounded-lg border border-[#fde68a] bg-[#fffbeb] px-3 py-2 text-sm text-[#92400e]">
-          No units yet — open <strong>Inventory</strong> (step 1) and add a
-          product with barcodes before renting.
+          No units yet — open the <strong>Stock</strong> tab above and add
+          outfits with barcodes before renting at the counter.
         </p>
       ) : null}
 
@@ -409,8 +426,8 @@ export function RentalDashboard() {
         tabs={[
           {
             id: "stock",
-            label: "Inventory",
-            hint: "Products & barcodes",
+            label: "Stock",
+            hint: "Outfits & barcodes",
           },
           {
             id: "rent",

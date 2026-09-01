@@ -26,7 +26,7 @@ import { ProductBarcodePreview } from "@/components/product-barcode-preview";
 import { EntityRowActions } from "@/components/entity-row-actions";
 import { PageBreadcrumb, PageSkeleton } from "@/components/page-header";
 import { cn } from "@/lib/utils";
-import { productKindLabel } from "@/lib/product-kind";
+import { catalogTypeLabel, productKindLabel } from "@/lib/product-kind";
 
 export default function CatalogProductViewRoute() {
   return (
@@ -371,7 +371,8 @@ function CatalogProductDetailPage() {
     p.images?.length ? p.images : p.photoUrl ? [p.photoUrl] : []
   ).filter(Boolean) as string[];
 
-  const kindLabel = productKindLabel(p.kind) || p.kind;
+  const kindLabel =
+    catalogTypeLabel(p.kind, p.fulfillmentMode) || productKindLabel(p.kind) || p.kind;
   const packed = parseMultiUnitMeta(p.meta);
   const sohHere = p.inventoryByLocation?.[0];
   const detailTabs: Array<[typeof tab, string]> = [

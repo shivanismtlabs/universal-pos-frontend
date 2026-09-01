@@ -8,7 +8,7 @@ import { HomeDashboard } from "@/components/home-dashboard";
 import { HomeGettingStarted } from "@/components/home-getting-started";
 import { OverviewDashboard } from "./overview-dashboard";
 import { SaleDashboard } from "./sale-dashboard";
-import { RentalDashboard } from "./rental-dashboard";
+import { RentalHomeCard } from "@/components/rental-home-card";
 import { SubscriptionDashboard } from "./subscription-dashboard";
 import { ServiceDashboard } from "./service-dashboard";
 import { cn } from "@/lib/utils";
@@ -49,8 +49,9 @@ function DashboardPageInner() {
   const pathname = usePathname();
   const search = useSearchParams();
   const tabFromUrl = parseHomeTab(search.get("tab"));
+  const floorFromUrl = search.get("floor") as FloorView | null;
   const [homeTab, setHomeTab] = useState<HomeTab>(
-    tabFromUrl ?? "getting-started",
+    tabFromUrl ?? (floorFromUrl ? "floors" : "getting-started"),
   );
 
   const hasSale = hasMode("sale");
@@ -62,18 +63,43 @@ function DashboardPageInner() {
   const enabledFloors = useMemo((): FloorView[] => {
     const list: FloorView[] = [];
     if (hasSale) list.push("sale");
-    if (hasRent) list.push("rent");
     if (hasService) list.push("service");
     if (hasSub) list.push("subscription");
     return list;
-  }, [hasSale, hasRent, hasService, hasSub]);
+  }, [hasSale, hasService, hasSub]);
 
   /** Shop floors tab is for multi-mode shops only (Zoho Home). */
   const showFloors = enabledFloors.length > 1;
 
-  const [floor, setFloor] = useState<FloorView>(
-    () => enabledFloors[0] ?? "sale",
-  );
+  const [floor, setFloor] = useState<FloorView>(() => {
+    if (
+      floorFromUrl &&
+      (["sale", "rent", "service", "subscription"] as const).includes(
+        floorFromUrl,
+      )
+    ) {
+      return floorFromUrl;
+    }
+    return enabledFloors[0] ?? "sale";
+  });
+
+  useEffect(() => {
+    if (
+      floorFromUrl &&
+      enabledFloors.includes(floorFromUrl as FloorView)
+    ) {
+      setFloor(floorFromUrl as FloorView);
+      if (showFloors && homeTab !== "floors") {
+        setHomeTab("floors");
+      }
+    }
+  }, [floorFromUrl, enabledFloors, showFloors, homeTab]);
+
+  useEffect(() => {
+    if (floorFromUrl === "rent" && hasRent) {
+      router.replace("/rental");
+    }
+  }, [floorFromUrl, hasRent, router]);
 
   useEffect(() => {
     if (!enabledFloors.includes(floor)) {
@@ -220,6 +246,7 @@ function DashboardPageInner() {
       {visibleHomeTab === "dashboard" ? (
         <div className="space-y-6">
           <HomeDashboard />
+          {hasRent ? <RentalHomeCard /> : null}
           <OverviewDashboard embed />
         </div>
       ) : null}
@@ -232,7 +259,6 @@ function DashboardPageInner() {
             {(
               [
                 { id: "sale" as const, label: "Catalog & sell", show: hasSale },
-                { id: "rent" as const, label: "Rental floor", show: hasRent },
                 {
                   id: "service" as const,
                   label: "Services",
@@ -263,7 +289,6 @@ function DashboardPageInner() {
               ))}
           </div>
           {floor === "sale" && hasSale ? <SaleDashboard embed /> : null}
-          {floor === "rent" && hasRent ? <RentalDashboard /> : null}
           {floor === "service" && hasService ? <ServiceDashboard /> : null}
           {floor === "subscription" && hasSub ? (
             <SubscriptionDashboard />

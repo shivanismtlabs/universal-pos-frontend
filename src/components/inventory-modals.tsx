@@ -1048,7 +1048,7 @@ export function BranchPriceReorderModal({
           </div>
           <div>
             <h3 className="text-lg font-semibold text-[#0b1f33]">
-              Edit stock
+              Price, reorder &amp; add stock
             </h3>
             <p className="text-xs text-[#5a6b7d]">
               {target.name}{" "}
@@ -1134,16 +1134,18 @@ export function BranchPriceReorderModal({
           </div>
         </div>
 
-        <div className="rounded-xl border border-[#e8edf4] bg-[#f8fafc] p-4">
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
           <div className="flex items-center gap-2">
-            <PackagePlus className="size-4 text-emerald-600" />
-            <p className="text-[0.7rem] font-semibold tracking-wide text-[#8b9bb0] uppercase">
-              Stock in
+            <PackagePlus className="size-4 text-emerald-700" />
+            <p className="text-[0.7rem] font-semibold tracking-wide text-emerald-800 uppercase">
+              Add stock (increase qty)
             </p>
           </div>
-          <p className="mt-1 text-[0.72rem] text-[#5a6b7d]">
-            Receive quantity for this item in the same dialog as price &amp;
-            reorder.
+          <p className="mt-1 text-[0.72rem] text-[#374151]">
+            Optional — enters more units into this branch (stock goes up). This
+            is not stock out. To reduce qty, use{" "}
+            <span className="font-medium text-[#0b1f33]">Adjustments</span>{" "}
+            or Stock out from the row actions.
           </p>
 
           <div className="mt-3 space-y-3">
@@ -1171,7 +1173,7 @@ export function BranchPriceReorderModal({
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <Label className="text-xs font-semibold text-[#0b1f33]">
-                  Qty to receive
+                  Qty to add
                 </Label>
                 <Input
                   className="mt-1 h-10 bg-white"
@@ -1184,13 +1186,16 @@ export function BranchPriceReorderModal({
                     setStockInQty(e.target.value);
                     setFieldErrors((f) => ({ ...f, qty: "" }));
                   }}
-                  placeholder="Leave blank to skip"
+                  placeholder="e.g. 10 — blank = no change"
                 />
+                <p className="mt-1 text-[0.72rem] text-[#6b7280]">
+                  Leave blank if you only want to update price / reorder.
+                </p>
                 <FieldError message={fieldErrors.qty} />
               </div>
               <div>
                 <Label className="text-xs font-semibold text-[#0b1f33]">
-                  Reason / reference
+                  Why are you adding? (reference)
                 </Label>
                 <Input
                   className="mt-1 h-10 bg-white"
@@ -1210,7 +1215,7 @@ export function BranchPriceReorderModal({
                 <button
                   key={r}
                   type="button"
-                  className="rounded-md border border-[#dce3ec] bg-white px-2.5 py-1 text-xs text-[#0b1f33] transition hover:border-[#1a56db]"
+                  className="rounded-md border border-emerald-200 bg-white px-2.5 py-1 text-xs text-[#0b1f33] transition hover:border-emerald-500"
                   onClick={() => {
                     setStockInReason(r);
                     setFieldErrors((f) => ({ ...f, reason: "" }));

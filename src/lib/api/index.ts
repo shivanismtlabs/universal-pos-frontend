@@ -8403,6 +8403,7 @@ export type CatalogProductListItem = {
   barcode?: string | null;
   barcodeType?: string | null;
   kind: CatalogProductKind;
+  fulfillmentMode?: string | null;
   status: CatalogProductStatus;
   photoUrl?: string | null;
   images?: string[];
@@ -8629,6 +8630,65 @@ export const catalogApi = {
         }>;
       }>
     >("/catalog/unit-groups", { token: token() });
+  },
+
+  countryUomDefaults(country?: string) {
+    const q = country ? `?country=${encodeURIComponent(country)}` : "";
+    return apiRequest<{
+      countryCode: string;
+      label: string;
+      measureSystem: string;
+      suggestedSymbols: string[];
+      suggestedUnits: Array<{
+        id: string;
+        symbol: string;
+        name: string;
+        category: string;
+        isBaseUnit: boolean;
+      }>;
+    }>(`/catalog/units/country-defaults${q}`, { token: token() });
+  },
+
+  listTenantUomUnits() {
+    return apiRequest<
+      Array<{
+        id: string;
+        symbol: string;
+        name: string;
+        category: string;
+        categoryName: string;
+        isBaseUnit: boolean;
+        isSystem: boolean;
+        measureSystem: string;
+      }>
+    >("/catalog/units/tenant", { token: token() });
+  },
+
+  suggestTenantUomUnits() {
+    return apiRequest<{
+      countryCode: string;
+      label: string;
+      measureSystem: string;
+      suggestedSymbols: string[];
+      suggestedUnits: Array<{
+        id: string;
+        symbol: string;
+        name: string;
+        category: string;
+      }>;
+    }>("/catalog/units/suggest", { token: token() });
+  },
+
+  validateUomConversion(body: {
+    fromUnitId: string;
+    toUnitId: string;
+    productId?: string;
+    quantity?: number;
+  }) {
+    return apiRequest<{ valid: boolean; convertedQty?: string; message?: string }>(
+      "/catalog/units/validate-conversion",
+      { method: "POST", body, token: token() },
+    );
   },
 
   listProductUnits(productId: string) {

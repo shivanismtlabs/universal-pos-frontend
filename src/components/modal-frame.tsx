@@ -42,7 +42,7 @@ export function ModalFrame({
   return (
     <div
       className={cn(
-        "fixed inset-0 flex items-center justify-center p-4",
+        "fixed inset-0 flex items-end justify-center p-0 sm:items-center sm:p-4",
         zClass,
       )}
     >
@@ -59,12 +59,12 @@ export function ModalFrame({
         aria-modal="true"
         aria-labelledby={labelledBy}
         className={cn(
-          "relative z-10 flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-xl border border-[#d9e0ea] bg-white shadow-xl",
+          "relative z-10 flex max-h-[100dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-xl border border-[#d9e0ea] bg-white shadow-xl sm:max-h-[92dvh] sm:rounded-xl",
           className,
         )}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-[#eef1f4] px-5 py-3.5">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-[#eef1f4] px-4 py-3 sm:px-5 sm:py-3.5">
           <div className="min-w-0">
             {title ? (
               <h2
@@ -89,7 +89,7 @@ export function ModalFrame({
         </div>
         <div
           className={cn(
-            "min-h-0 flex-1 p-5",
+            "min-h-0 flex-1 px-4 py-4 sm:px-5 sm:py-5",
             bodyScroll
               ? "overflow-y-auto overscroll-contain"
               : "overflow-visible",
@@ -98,7 +98,7 @@ export function ModalFrame({
           {children}
         </div>
         {footer ? (
-          <div className="shrink-0 border-t border-[#eef1f4] px-5 py-3">
+          <div className="shrink-0 border-t border-[#eef1f4] px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5">
             {footer}
           </div>
         ) : null}

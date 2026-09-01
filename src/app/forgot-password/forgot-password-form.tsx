@@ -55,6 +55,7 @@ export default function ForgotPasswordForm() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [devCode, setDevCode] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [passwordMessages, setPasswordMessages] = useState<string[]>([]);
@@ -97,7 +98,7 @@ export default function ForgotPasswordForm() {
       setStep("otp");
       setFieldErrors({});
       setPasswordMessages([]);
-      toast.success(res.message, {
+      toast.success("OTP sent", {
         style: {
           background: "#ecfdf5",
           border: "1px solid #6ee7b7",
@@ -235,36 +236,57 @@ export default function ForgotPasswordForm() {
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="fp-password">New password</Label>
-            <Input
-              id="fp-password"
-              type="password"
-              autoComplete="new-password"
-              value={password}
-              aria-invalid={passwordMessages.length > 0}
-              className={cn(passwordMessages.length > 0 && invalidInput)}
-              onChange={(ev) => {
-                const value = ev.target.value;
-                setPassword(value);
-                syncResetErrors({ otp, password: value, confirm }, false);
-              }}
-            />
+            <div className="relative">
+              <Input
+                id="fp-password"
+                type={showPassword ? "text" : "password"}
+                autoComplete="new-password"
+                value={password}
+                aria-invalid={passwordMessages.length > 0}
+                className={cn(
+                  "pr-16",
+                  passwordMessages.length > 0 && invalidInput,
+                )}
+                onChange={(ev) => {
+                  const value = ev.target.value;
+                  setPassword(value);
+                  syncResetErrors({ otp, password: value, confirm }, false);
+                }}
+              />
+              <button
+                type="button"
+                className="absolute inset-y-0 right-3 text-[0.7rem] font-semibold tracking-wide text-[#9ca3af] uppercase hover:text-[#4b5563]"
+                onClick={() => setShowPassword((v) => !v)}
+              >
+                {showPassword ? "Hide" : "Show"}
+              </button>
+            </div>
             <FieldErrors messages={passwordMessages} />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="fp-confirm">Confirm password</Label>
-            <Input
-              id="fp-confirm"
-              type="password"
-              autoComplete="new-password"
-              value={confirm}
-              aria-invalid={Boolean(fieldErrors.confirm)}
-              className={cn(fieldErrors.confirm && invalidInput)}
-              onChange={(ev) => {
-                const value = ev.target.value;
-                setConfirm(value);
-                syncResetErrors({ otp, password, confirm: value }, false);
-              }}
-            />
+            <div className="relative">
+              <Input
+                id="fp-confirm"
+                type={showPassword ? "text" : "password"}
+                autoComplete="new-password"
+                value={confirm}
+                aria-invalid={Boolean(fieldErrors.confirm)}
+                className={cn("pr-16", fieldErrors.confirm && invalidInput)}
+                onChange={(ev) => {
+                  const value = ev.target.value;
+                  setConfirm(value);
+                  syncResetErrors({ otp, password, confirm: value }, false);
+                }}
+              />
+              <button
+                type="button"
+                className="absolute inset-y-0 right-3 text-[0.7rem] font-semibold tracking-wide text-[#9ca3af] uppercase hover:text-[#4b5563]"
+                onClick={() => setShowPassword((v) => !v)}
+              >
+                {showPassword ? "Hide" : "Show"}
+              </button>
+            </div>
             <FieldError message={fieldErrors.confirm} />
           </div>
           <Button type="submit" className="w-full" disabled={busy}>

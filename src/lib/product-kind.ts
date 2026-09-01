@@ -19,6 +19,17 @@ export function productKindLabel(kind?: string | null): string {
   }
 }
 
+/** Items list Type column — rental outfits use fulfillmentMode, not kind alone. */
+export function catalogTypeLabel(
+  kind?: string | null,
+  fulfillmentMode?: string | null,
+): string {
+  const fm = (fulfillmentMode ?? "").toLowerCase();
+  if (fm === "rental") return "Rental";
+  if (fm === "service") return "Service";
+  return productKindLabel(kind) || "Goods";
+}
+
 export type StockHintTone = "ok" | "low" | "out" | "info";
 
 export function productStockHint(opts: {

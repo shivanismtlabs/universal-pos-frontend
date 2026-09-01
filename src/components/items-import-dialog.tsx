@@ -1,12 +1,14 @@
 "use client";
 
 import { useRef, useState } from "react";
+import Link from "next/link";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { posApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { downloadCsv } from "@/lib/csv";
 import { Button } from "@/components/ui/button";
+import { useBootstrap } from "@/lib/bootstrap";
 import { X } from "lucide-react";
 
 export type ImportableRow = {
@@ -150,8 +152,20 @@ function mapHeader(h: string): string | null {
 function parseItemType(
   raw: string | undefined,
   unitRaw: string,
+  rowNum?: number,
 ): "goods" | "service" {
   const t = (raw ?? "").trim().toLowerCase();
+  const where = rowNum ? `Row ${rowNum}: ` : "";
+  if (
+    t === "rental" ||
+    t === "rent" ||
+    t === "rentals" ||
+    t === "hire"
+  ) {
+    throw new Error(
+      `${where}type "rental" is not supported in CSV import — add outfits via Rental desk → Stock (barcode per size).`,
+    );
+  }
   if (
     t === "service" ||
     t === "services" ||
@@ -198,7 +212,7 @@ export function rowsFromTable(table: string[][]): ImportableRow[] {
     });
     if (!obj.title?.trim() && !obj.sku?.trim()) continue;
     const unitRaw = (obj.sellUnit || "").toLowerCase();
-    const itemType = parseItemType(obj.itemType, unitRaw);
+    const itemType = parseItemType(obj.itemType, unitRaw, r + 1);
     const unitMap: Record<string, string> = {
       pcs: "pcs",
       piece: "pcs",
@@ -307,44 +321,44 @@ async function rowsFromExcelFile(file: File): Promise<ImportableRow[]> {
 export function downloadItemsTemplate() {
   downloadCsv("universal-pos-items-template.csv", TEMPLATE_HEADERS, [
     [
-      "USB-C Cable 1m",
-      "USBC-1M",
+      "Silk Bow Tie",
+      "BOW-TIE-001",
       "goods",
       "Accessories",
       "pcs",
-      "199",
-      "25",
+      "499",
+      "20",
       "",
-      "90",
-      "8901234567890",
-      "Generic",
-      "8544",
+      "180",
+      "8901000000001",
+      "Velvet Co",
+      "6214",
       "true",
-      "https://images.unsplash.com/photo-1583394838336-acd977736f90",
+      "",
     ],
     [
-      "Organic Almond Milk 1L",
-      "ALM-MILK-1L",
-      "goods",
-      "Beverages",
-      "L",
-      "145",
-      "12.5",
+      "AC Servicing",
+      "AC-SVC-001",
+      "service",
+      "Home Services",
+      "service",
+      "600",
+      "0",
+      "60",
       "",
-      "98",
       "",
-      "Farm Co",
       "",
-      "true",
-      "https://images.unsplash.com/photo-1550583724-b2692b85b150",
+      "",
+      "false",
+      "",
     ],
     [
-      "Haircut 30 min",
+      "Hair Styling",
       "HAIR-30",
       "service",
       "Hair",
       "service",
-      "499",
+      "799",
       "0",
       "30",
       "",
@@ -354,11 +368,28 @@ export function downloadItemsTemplate() {
       "false",
       "",
     ],
+    [
+      "USB-C Cable 1m",
+      "USBC-1M",
+      "goods",
+      "Electronics",
+      "pcs",
+      "199",
+      "25",
+      "",
+      "90",
+      "8901234567890",
+      "Generic",
+      "8544",
+      "true",
+      "",
+    ],
   ]);
 }
 
 /**
- * Zoho-style bulk import items dialog — Universal POS (sale mode).
+ * Zoho-style bulk import — items to **sell** at Counter · Sell (goods or service).
+ * Rental outfits: use Rental desk → Stock, not this import.
  */
 export function ItemsImportDialog({
   open,
@@ -372,6 +403,8 @@ export function ItemsImportDialog({
   locationId?: string;
 }) {
   const qc = useQueryClient();
+  const { hasMode } = useBootstrap();
+  const hasRental = hasMode("rental");
   const fileRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<ImportableRow[] | null>(null);
   const [fileName, setFileName] = useState("");
@@ -457,9 +490,23 @@ export function ItemsImportDialog({
               Import items
             </h2>
             <p className="mt-1 text-[0.8rem] text-[#5a6b7d]">
-              Bulk import from Excel (.xlsx) or CSV. First row must be headers
-              like name, sku, selling_price. Stock is added for this shop.
+              Bulk import from Excel (.xlsx) or CSV. Creates items to{" "}
+              <strong>sell</strong> (Type = Goods or Service). Use column{" "}
+              <code className="text-[0.75rem]">type</code>:{" "}
+              <code className="text-[0.75rem]">goods</code> or{" "}
+              <code className="text-[0.75rem]">service</code> — empty defaults
+              to Goods.
             </p>
+            {hasRental ? (
+              <p className="mt-2 rounded-lg border border-[#dbeafe] bg-[#eff6ff] px-3 py-2 text-[0.75rem] text-[#1e40af]">
+                <strong>Rental shop:</strong> CSV import is for accessories /
+                retail stock only. Rent outfits (sizes + barcodes) via{" "}
+                <Link href="/rental" className="font-medium underline">
+                  Rental desk → Stock
+                </Link>
+                , then use Counter · Rent.
+              </p>
+            ) : null}
           </div>
           <button
             type="button"

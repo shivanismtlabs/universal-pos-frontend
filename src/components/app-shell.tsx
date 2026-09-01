@@ -210,6 +210,43 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    id: "rental",
+    label: "Rental",
+    railLabel: "Rent",
+    icon: Repeat,
+    section: "Commerce",
+    commerce: "rental",
+    children: [
+      {
+        href: "/rental",
+        label: "Rental desk",
+        icon: LayoutGrid,
+        commerce: "rental",
+      },
+      {
+        href: "/counter?view=rental",
+        label: "Counter · Rent",
+        icon: CreditCard,
+        commerce: "rental",
+        module: "pos",
+      },
+      {
+        href: "/returns?tab=rental",
+        label: "Receive returns",
+        icon: PackageCheck,
+        commerce: "rental",
+        module: "orders",
+      },
+      {
+        href: "/reports/rental",
+        label: "Rental report",
+        icon: FileLineChart,
+        commerce: "rental",
+        module: "reports",
+      },
+    ],
+  },
+  {
     id: "dining",
     label: "Dining",
     railLabel: "Dining",
@@ -496,7 +533,7 @@ const NAV_GROUPS: NavGroup[] = [
       },
       {
         href: "/reports/rental",
-        label: "Rental / assets",
+        label: "Rental activity",
         icon: Repeat,
         module: "reports",
         commerce: "rental" as const,
@@ -701,6 +738,13 @@ function leafAllowed(
   if (item.module && !hasModule(item.module)) return false;
   if (item.commerce && !hasMode(item.commerce)) return false;
   if (item.capability && !hasCapability(item.capability)) return false;
+  if (
+    hrefPath(item.href) === "/resources" &&
+    hasMode("rental") &&
+    hasMode("sale")
+  ) {
+    return false;
+  }
   return canAccessPath(hrefPath(item.href), roles, permissions);
 }
 
@@ -745,6 +789,10 @@ function isLeafActive(pathname: string, search: string, href: string) {
   // Floor dashboard is `/restaurant` only — not Tables, Menus, Reservations.
   if (base === "/restaurant") {
     return pathname === "/restaurant";
+  }
+
+  if (base === "/rental") {
+    return pathname === "/rental";
   }
 
   // `/suppliers` directory only — not /suppliers/orders or /suppliers/new

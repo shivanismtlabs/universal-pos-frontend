@@ -1132,6 +1132,12 @@ export default function RetailPosWorkstation({
       toast.error("86 / sold out");
       return;
     }
+    const kind = (row.kind ?? "").toLowerCase();
+    // Services / digital: no stock qty to pick — add 1 (or +1) without the modal.
+    if (kind === "service" || kind === "digital") {
+      upsertLine(row);
+      return;
+    }
     const tracks = row.trackQty !== false && row.recipeTracked !== true;
     const onHand = Number(row.qtyOnHand);
     if (tracks && onHand <= 0) {
@@ -2743,7 +2749,12 @@ export default function RetailPosWorkstation({
                         <span
                           role="button"
                           tabIndex={stock.tone === "out" ? -1 : 0}
-                          title="Tap to type quantity (e.g. 455)"
+                          title={
+                            (row.kind ?? "").toLowerCase() === "service" ||
+                            (row.kind ?? "").toLowerCase() === "digital"
+                              ? "Add to ticket"
+                              : "Tap to type quantity (e.g. 455)"
+                          }
                           className={cn(
                             "grid h-8 min-w-8 place-items-center rounded-full px-1.5 text-sm font-bold transition",
                             stock.tone === "out"

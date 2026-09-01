@@ -35,9 +35,14 @@ import {
 import {
   activeUnitOptions,
   catalogNeedsPackedContents,
-  defaultUnitForBusinessType,
   parseMultiUnitMeta,
 } from "@/lib/measure-units";
+import {
+  defaultUnitForCreate,
+  findUnitInGroups,
+  orderUnitsForCountry,
+  type CatalogUnitGroupRow,
+} from "@/lib/country-uom";
 import {
   CUSTOM_FIELD_QUERY,
   mergeProductFormFields,
@@ -165,6 +170,70 @@ function createOpeningQtyPayload(
   return normalized;
 }
 
+/** Wire baseUnitId + optional pack conversion so POS/inventory math works on create. */
+function buildUnitPricingForCreate(
+  form: CatalogItemShopValues,
+  groups: CatalogUnitGroupRow[] | undefined,
+  basePrice: string,
+): UnitPricingValue {
+  const empty: UnitPricingValue = {
+    unitGroupId: "",
+    baseUnitId: "",
+    pricingUnitId: "",
+    pricingStrategy: "converted",
+    pricePerPricingUnit: basePrice || "",
+    sellingUnits: [],
+  };
+  if (!groups?.length) return empty;
+
+  const sellSymbol = form.unitOfMeasure.trim();
+  const sellResolved = findUnitInGroups(groups, sellSymbol);
+  if (!sellResolved) return empty;
+
+  const packed = catalogNeedsPackedContents(form.kind, sellSymbol);
+  const packQty = Number(form.multiUnitBaseQty);
+  const innerSymbol = (form.multiUnitBaseUnit || "pcs").trim();
+
+  if (packed && Number.isFinite(packQty) && packQty > 0) {
+    const baseResolved = findUnitInGroups(groups, innerSymbol) ?? sellResolved;
+    if (baseResolved.unitId === sellResolved.unitId) {
+      return {
+        unitGroupId: baseResolved.groupId,
+        baseUnitId: baseResolved.unitId,
+        pricingUnitId: baseResolved.unitId,
+        pricingStrategy: "converted",
+        pricePerPricingUnit: basePrice || "",
+        sellingUnits: [],
+      };
+    }
+    return {
+      unitGroupId: baseResolved.groupId,
+      baseUnitId: baseResolved.unitId,
+      pricingUnitId: sellResolved.unitId,
+      pricingStrategy: "converted",
+      pricePerPricingUnit: basePrice || "",
+      sellingUnits: [
+        {
+          unitId: sellResolved.unitId,
+          conversionToBase: String(packQty),
+          fixedPrice: "",
+          isDefaultSellingUnit: true,
+          isPurchaseUnit: true,
+        },
+      ],
+    };
+  }
+
+  return {
+    unitGroupId: sellResolved.groupId,
+    baseUnitId: sellResolved.unitId,
+    pricingUnitId: sellResolved.unitId,
+    pricingStrategy: "converted",
+    pricePerPricingUnit: basePrice || "",
+    sellingUnits: [],
+  };
+}
+
 /** Only attach unit-pricing keys when the shop actually configured them.
  * Live APIs that predate unit pricing reject pricingStrategy / pricePerPricingUnit / productUnits. */
 function catalogUnitPricingPayload(
@@ -290,10 +359,30 @@ export function CatalogItemEditor() {
     queryKey: ["measure-units"],
     queryFn: () => tenantsApi.listUnits(),
   });
-  const unitOptions = useMemo(
-    () => activeUnitOptions(unitsQ.data),
-    [unitsQ.data],
-  );
+  const suggestQ = useQuery({
+    queryKey: ["uom-country-suggest"],
+    queryFn: () => catalogApi.suggestTenantUomUnits(),
+    retry: 1,
+    staleTime: 60_000,
+  });
+  const unitGroupsQ = useQuery({
+    queryKey: ["catalog-unit-groups"],
+    queryFn: async () => {
+      let rows = await catalogApi.listUnitGroups();
+      if (!rows?.length) {
+        await catalogApi.seedUnitGroups();
+        rows = await catalogApi.listUnitGroups();
+      }
+      return rows;
+    },
+    enabled: !isEdit,
+    retry: 1,
+    staleTime: 60_000,
+  });
+  const unitOptions = useMemo(() => {
+    const base = activeUnitOptions(unitsQ.data);
+    return orderUnitsForCountry(base, suggestQ.data?.suggestedSymbols);
+  }, [unitsQ.data, suggestQ.data?.suggestedSymbols]);
   const product = useQuery({
     queryKey: ["catalog-product", id],
     queryFn: () => catalogApi.getProduct(id),
@@ -317,18 +406,58 @@ export function CatalogItemEditor() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const unitDefaultedRef = useRef(false);
 
-  // New item: set UOM once from shop type (grocery → kg). User can still change it.
+  // New item: country + shop type default unit (India grocery → kg, US grocery → lb, etc.)
   useEffect(() => {
     if (isEdit || unitDefaultedRef.current) return;
-    if (!businessType && form.kind === "physical") return;
-    const preferred = defaultUnitForBusinessType(businessType, form.kind);
+    if (form.kind === "physical" && !suggestQ.isFetched && !businessType) return;
+    const preferred = defaultUnitForCreate(
+      suggestQ.data?.countryCode,
+      businessType,
+      form.kind,
+    );
     unitDefaultedRef.current = true;
     setForm((prev) =>
       prev.unitOfMeasure === preferred
         ? prev
         : { ...prev, unitOfMeasure: preferred },
     );
-  }, [isEdit, businessType, form.kind]);
+  }, [
+    isEdit,
+    businessType,
+    form.kind,
+    suggestQ.data?.countryCode,
+    suggestQ.isFetched,
+  ]);
+
+  // New item: link unit master (baseUnitId) so checkout/inventory calculations work
+  useEffect(() => {
+    if (isEdit || !unitGroupsQ.data?.length) return;
+    const next = buildUnitPricingForCreate(
+      form,
+      unitGroupsQ.data,
+      form.basePrice,
+    );
+    setUnitPricing((prev) => {
+      if (
+        prev.baseUnitId === next.baseUnitId &&
+        prev.pricingUnitId === next.pricingUnitId &&
+        prev.sellingUnits.length === next.sellingUnits.length &&
+        (prev.sellingUnits[0]?.conversionToBase ?? "") ===
+          (next.sellingUnits[0]?.conversionToBase ?? "")
+      ) {
+        return prev;
+      }
+      return next;
+    });
+  }, [
+    isEdit,
+    form.unitOfMeasure,
+    form.multiUnitBaseQty,
+    form.multiUnitBaseUnit,
+    form.kind,
+    form.basePrice,
+    unitGroupsQ.data,
+  ]);
 
   // New service: default duration 30 min when empty (salon / any service item)
   useEffect(() => {
@@ -829,6 +958,14 @@ export function CatalogItemEditor() {
           return list;
         })()}
         unitOptions={unitsForForm}
+        countryUnitHint={
+          !isEdit && suggestQ.data
+            ? `Suggested for ${suggestQ.data.label}: ${suggestQ.data.suggestedUnits
+                .slice(0, 8)
+                .map((u) => u.symbol)
+                .join(", ")}. Default unit is set for correct stock & billing math.`
+            : undefined
+        }
         imagePickerRef={imagePickerRef}
         onGenerateSku={() => genSku.mutate()}
         onGenerateBarcode={() => genBarcode.mutate()}

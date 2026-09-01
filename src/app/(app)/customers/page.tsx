@@ -51,7 +51,7 @@ function numOrUndef(v: unknown) {
 function MeasureValue({ label, value }: { label: string; value: unknown }) {
   const text =
     value === null || value === undefined || value === ""
-      ? "â€”"
+      ? "—"
       : String(value);
   return (
     <div className="min-w-0">
@@ -65,11 +65,107 @@ function MeasureValue({ label, value }: { label: string; value: unknown }) {
   );
 }
 
+type CustomerListItem = {
+  id: string;
+  fullName: string;
+  phone: string;
+  email?: string | null;
+  eventDate?: string | null;
+  marketingOptIn?: boolean;
+  loyaltyPoints?: number;
+  storeCreditBalance?: string | number;
+};
+
+function CustomerMobileCard({
+  customer: c,
+  active,
+  money,
+  canLead,
+  onSelect,
+  onEdit,
+  onSoftDelete,
+}: {
+  customer: CustomerListItem;
+  active: boolean;
+  money: (n: number) => string;
+  canLead: boolean;
+  onSelect: () => void;
+  onEdit: () => void;
+  onSoftDelete: () => void;
+}) {
+  return (
+    <article
+      role="button"
+      tabIndex={0}
+      onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
+      className={cn(
+        "rounded-lg border p-3 text-left transition-colors",
+        active
+          ? "border-[#1a56db] bg-[#eef4ff]"
+          : "border-[#e4e9f0] bg-white active:bg-[#fafcfe]",
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold text-[#0b1f33]">{c.fullName}</p>
+          {c.marketingOptIn ? (
+            <p className="mt-0.5 text-[0.65rem] font-medium text-[#1a56db]">
+              Marketing opt-in
+            </p>
+          ) : null}
+          <p className="mt-1 text-sm tabular-nums text-[#475569]">{c.phone}</p>
+          {c.email ? (
+            <p className="truncate text-sm text-[#5a6b7d]">{c.email}</p>
+          ) : null}
+        </div>
+        <div onClick={(e) => e.stopPropagation()}>
+          <EntityRowActions
+            onEdit={onEdit}
+            onSoftDelete={canLead ? onSoftDelete : undefined}
+            softDeleteTitle="Remove"
+            deleteHidden
+          />
+        </div>
+      </div>
+      <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+        <div>
+          <dt className="text-[#8b9bb0]">Loyalty</dt>
+          <dd className="mt-0.5 font-medium tabular-nums text-[#475569]">
+            {typeof c.loyaltyPoints === "number"
+              ? `${c.loyaltyPoints} pts`
+              : "—"}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-[#8b9bb0]">Wallet</dt>
+          <dd className="mt-0.5 font-medium tabular-nums text-[#475569]">
+            {c.storeCreditBalance != null
+              ? money(Number(c.storeCreditBalance))
+              : "—"}
+          </dd>
+        </div>
+        <div className="col-span-2">
+          <dt className="text-[#8b9bb0]">Anniversary</dt>
+          <dd className="mt-0.5 font-medium text-[#5a6b7d]">
+            {c.eventDate ? formatDate(c.eventDate) : "—"}
+          </dd>
+        </div>
+      </dl>
+    </article>
+  );
+}
+
 export default function CustomersPage() {
   return (
     <Suspense
       fallback={
-        <p className="px-4 py-8 text-sm text-[#5a6b7d]">Loading customersâ€¦</p>
+        <p className="px-4 py-8 text-sm text-[#5a6b7d]">Loading customers…</p>
       }
     >
       <CustomersPageInner />
@@ -238,7 +334,7 @@ function CustomersPageInner() {
       }),
     onSuccess: (row) => {
       toast.success(
-        returnTo ? "Customer created â€” back to Getting Started" : "Customer created",
+        returnTo ? "Customer created — back to Getting Started" : "Customer created",
       );
       form.reset();
       setExtraFields({});
@@ -414,19 +510,19 @@ function CustomersPageInner() {
   });
 
   return (
-    <div className="space-y-4 px-3 sm:px-4">
-      <header className="flex flex-wrap items-end justify-between gap-3 border-b border-[#eef1f4] pb-3">
+    <div className="space-y-4 px-3 pb-4 sm:px-4">
+      <header className="flex flex-col gap-2 border-b border-[#eef1f4] pb-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between sm:gap-3">
         <div className="min-w-0">
           <p className="eyebrow">Customers &amp; Perks</p>
           <h1 className="page-title mt-1">Customers</h1>
           <p className="page-subtitle mt-1.5">
-            Directory for any shop â€” contacts, loyalty, wallet, and purchase
+            Directory for any shop — contacts, loyalty, wallet, and purchase
             history.
           </p>
         </div>
         <p className="text-caption shrink-0 text-[#5a6b7d]">
           {list.isLoading
-            ? "Loadingâ€¦"
+            ? "Loading…"
             : `${total.toLocaleString()} customer${total === 1 ? "" : "s"}`}
         </p>
       </header>
@@ -467,8 +563,8 @@ function CustomersPageInner() {
 
       {pageTab === "memberships" ? (
         <section className="overflow-hidden rounded-lg border border-[#e4e9f0] bg-white">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#eef1f4] px-4 py-3">
-            <div>
+          <div className="flex flex-col gap-2 border-b border-[#eef1f4] px-3 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:px-4">
+            <div className="min-w-0">
               <h2 className="text-sm font-semibold text-[#0b1f33]">
                 Memberships
               </h2>
@@ -476,11 +572,11 @@ function CustomersPageInner() {
                 Active and past subscription plans
               </p>
             </div>
-            <Button asChild size="sm">
+            <Button asChild size="sm" className="w-full sm:w-auto">
               <Link href="/counter?view=subscription">Enroll at counter</Link>
             </Button>
           </div>
-          <div className="overflow-x-auto">
+          <div className="hidden overflow-x-auto md:block">
             <table className="w-full min-w-[640px] text-left text-sm">
               <thead className="border-b border-[#eef1f4] bg-[#f7f9fb] text-[0.7rem] font-semibold tracking-wide text-[#5a6b7d] uppercase">
                 <tr>
@@ -518,7 +614,7 @@ function CustomersPageInner() {
                       colSpan={4}
                       className="px-3 py-8 text-center text-[#5a6b7d]"
                     >
-                      Loading membershipsâ€¦
+                      Loading memberships…
                     </td>
                   </tr>
                 ) : null}
@@ -535,11 +631,44 @@ function CustomersPageInner() {
               </tbody>
             </table>
           </div>
+          <ul className="space-y-2 p-3 md:hidden">
+            {(members.data?.items ?? []).map((m) => (
+              <li
+                key={m.id}
+                className="rounded-lg border border-[#eef1f4] bg-[#f8fafc] p-3"
+              >
+                <p className="font-semibold text-[#0b1f33]">
+                  {m.customer?.fullName ?? "Customer"}
+                </p>
+                <p className="mt-0.5 text-sm text-[#5a6b7d]">
+                  {m.plan?.title ?? "Plan"}
+                </p>
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <span className="rounded bg-[#f1f5f9] px-1.5 py-0.5 font-medium capitalize text-[#475569]">
+                    {m.status}
+                  </span>
+                  <span className="tabular-nums text-[#5a6b7d]">
+                    Valid through {formatDate(m.currentPeriodEnd)}
+                  </span>
+                </div>
+              </li>
+            ))}
+            {members.isLoading ? (
+              <li className="py-8 text-center text-sm text-[#5a6b7d]">
+                Loading memberships…
+              </li>
+            ) : null}
+            {!members.isLoading && !(members.data?.items ?? []).length ? (
+              <li className="rounded-lg border border-dashed border-[#dce3ec] px-4 py-10 text-center text-sm text-[#5a6b7d]">
+                No memberships yet. Enroll from the counter Plans tab.
+              </li>
+            ) : null}
+          </ul>
         </section>
       ) : (
         <div className="space-y-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <label className="relative min-w-[14rem] flex-1">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+            <label className="relative min-w-0 flex-1 sm:min-w-[14rem]">
               <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-[#8b9bb0]" />
               <Input
                 className="h-9 pl-9"
@@ -548,13 +677,17 @@ function CustomersPageInner() {
                 onChange={(e) => setQ(e.target.value)}
               />
             </label>
-            <Button type="button" onClick={openNewCustomer}>
+            <Button
+              type="button"
+              className="h-9 w-full shrink-0 sm:w-auto"
+              onClick={openNewCustomer}
+            >
               <Plus className="mr-1 size-4" />
               New Customer
             </Button>
           </div>
 
-          <div className="overflow-x-auto rounded-lg border border-[#e4e9f0] bg-white">
+          <div className="hidden overflow-x-auto rounded-lg border border-[#e4e9f0] bg-white md:block">
             <table className="w-full min-w-[820px] text-left text-sm">
               <thead className="border-b border-[#eef1f4] bg-[#f7f9fb] text-[0.7rem] font-semibold tracking-wide text-[#5a6b7d] uppercase">
                 <tr>
@@ -574,7 +707,7 @@ function CustomersPageInner() {
                       colSpan={7}
                       className="px-3 py-8 text-center text-[#5a6b7d]"
                     >
-                      Loading customersâ€¦
+                      Loading customers…
                     </td>
                   </tr>
                 ) : list.isError ? (
@@ -637,20 +770,20 @@ function CustomersPageInner() {
                           {c.phone}
                         </td>
                         <td className="px-3 py-2.5 text-[#475569]">
-                          {c.email ?? "â€”"}
+                          {c.email ?? "—"}
                         </td>
                         <td className="px-3 py-2.5 text-right tabular-nums text-[#475569]">
                           {typeof c.loyaltyPoints === "number"
                             ? `${c.loyaltyPoints} pts`
-                            : "â€”"}
+                            : "—"}
                         </td>
                         <td className="px-3 py-2.5 text-right tabular-nums text-[#475569]">
                           {c.storeCreditBalance != null
                             ? money(Number(c.storeCreditBalance))
-                            : "â€”"}
+                            : "—"}
                         </td>
                         <td className="px-3 py-2.5 text-[#5a6b7d]">
-                          {c.eventDate ? formatDate(c.eventDate) : "â€”"}
+                          {c.eventDate ? formatDate(c.eventDate) : "—"}
                         </td>
                         <td
                           className="px-3 py-2.5 text-right"
@@ -663,7 +796,7 @@ function CustomersPageInner() {
                                 ? () => {
                                     if (
                                       confirm(
-                                        `Remove customer â€œ${c.fullName}â€? This is a soft delete.`,
+                                        `Remove customer "${c.fullName}"? This is a soft delete.`,
                                       )
                                     ) {
                                       softDelete.mutate(c.id);
@@ -681,6 +814,57 @@ function CustomersPageInner() {
                 )}
               </tbody>
             </table>
+          </div>
+
+          <div className="space-y-2 md:hidden">
+            {list.isLoading ? (
+              <p className="rounded-lg border border-[#e4e9f0] bg-white px-4 py-8 text-center text-sm text-[#5a6b7d]">
+                Loading customers…
+              </p>
+            ) : list.isError ? (
+              <p className="rounded-lg border border-[#e4e9f0] bg-white px-4 py-8 text-center text-sm text-[#c81e1e]">
+                Could not load customers.{" "}
+                <button
+                  type="button"
+                  className="font-semibold underline"
+                  onClick={() => void list.refetch()}
+                >
+                  Retry
+                </button>
+              </p>
+            ) : !items.length ? (
+              <div className="rounded-lg border border-[#e4e9f0] bg-white px-4 py-10 text-center text-sm text-[#5a6b7d]">
+                No customers yet.{" "}
+                <button
+                  type="button"
+                  className="font-semibold text-[#1a56db] hover:underline"
+                  onClick={openNewCustomer}
+                >
+                  Add your first customer
+                </button>
+              </div>
+            ) : (
+              items.map((c) => (
+                <CustomerMobileCard
+                  key={c.id}
+                  customer={c}
+                  active={selectedId === c.id}
+                  money={money}
+                  canLead={canLead}
+                  onSelect={() => selectCustomer(c.id)}
+                  onEdit={() => startEdit(c)}
+                  onSoftDelete={() => {
+                    if (
+                      confirm(
+                        `Remove customer "${c.fullName}"? This is a soft delete.`,
+                      )
+                    ) {
+                      softDelete.mutate(c.id);
+                    }
+                  }}
+                />
+              ))
+            )}
           </div>
 
           {total ? (
@@ -769,7 +953,7 @@ function CustomersPageInner() {
                     size="sm"
                     disabled={addMeasurement.isPending}
                   >
-                    {addMeasurement.isPending ? "Savingâ€¦" : "Save measurement"}
+                    {addMeasurement.isPending ? "Saving…" : "Save measurement"}
                   </Button>
                 </form>
 
@@ -798,7 +982,7 @@ function CustomersPageInner() {
                       </li>
                     ))}
                     {measurements.isLoading ? (
-                      <li className="text-sm text-[#5a6b7d]">Loadingâ€¦</li>
+                      <li className="text-sm text-[#5a6b7d]">Loading…</li>
                     ) : null}
                     {!measurements.isLoading &&
                     !(measurements.data ?? []).length ? (
@@ -819,7 +1003,7 @@ function CustomersPageInner() {
           title={editingId ? "Edit customer" : "New customer"}
           subtitle="Name and phone are required. Used at POS and for loyalty."
           onClose={closeForm}
-          className="max-w-lg"
+          className="max-w-lg sm:rounded-xl"
           bodyScroll
           footer={
             <div className="flex gap-2">
@@ -840,7 +1024,7 @@ function CustomersPageInner() {
                 )}
               >
                 {create.isPending || update.isPending
-                  ? "Savingâ€¦"
+                  ? "Saving…"
                   : editingId
                     ? "Save changes"
                     : "Create customer"}
@@ -926,7 +1110,7 @@ function CustomersPageInner() {
               </p>
             </div>
             <CustomFieldsSection
-              hint="From Settings â†’ Custom fields (Customer)."
+              hint="From Settings → Custom fields (Customer)."
               fields={customerFormFields}
               loading={customerFieldsQ.isLoading}
               values={extraFields}

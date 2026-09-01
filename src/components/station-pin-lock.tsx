@@ -137,7 +137,7 @@ export function StationPinLock({
       setOtpSent(true);
       setDevCode(res.devCode ?? null);
       setMaskedEmail(res.maskedEmail ?? null);
-      toast.success(res.message);
+      toast.success("OTP sent");
       if (res.devCode) {
         toast.message("Dev OTP", { description: res.devCode });
       }

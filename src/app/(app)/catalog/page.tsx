@@ -31,7 +31,7 @@ import { ProductThumb } from "@/components/product-thumb";
 import { PageHeader } from "@/components/page-header";
 import { FoodTypeBadge } from "@/components/food-type-badge";
 import { ImageLightbox } from "@/components/image-lightbox";
-import { catalogStockOnHandLabel, productKindLabel } from "@/lib/product-kind";
+import { catalogStockOnHandLabel, catalogTypeLabel } from "@/lib/product-kind";
 import { FieldError } from "@/components/ui/form";
 import { Select } from "@/components/ui/select";
 import { useAuthStore } from "@/lib/auth-store";
@@ -88,6 +88,8 @@ function CatalogPageInner() {
   const router = useRouter();
   const { hasMode, hasScreen } = useBootstrap();
   const [importOpen, setImportOpen] = useState(false);
+  const hasSale = hasMode("sale");
+  const hasRental = hasMode("rental");
   const showStockTab = hasMode("sale") && hasScreen("inventory");
   const [tab, setTab] = useState<Tab>(() => {
     const parsed = parseTab(search.get("tab"));
@@ -145,6 +147,18 @@ function CatalogPageInner() {
           ) : undefined
         }
       />
+
+      {hasRental && hasSale && tab === "products" ? (
+        <div className="rounded-xl border border-[#dbeafe] bg-[#eff6ff] px-4 py-3 text-sm text-[#1e40af]">
+          <strong className="font-semibold">Selling vs renting:</strong> Items
+          here are for retail (Counter · Sell). Outfits you rent — with a
+          barcode per size — go in{" "}
+          <Link href="/rental" className="font-medium underline underline-offset-2">
+            Rental desk → Stock
+          </Link>
+          .
+        </div>
+      ) : null}
 
       <div className="flex flex-wrap gap-1 border-b border-[#eef1f4]">
         {catalogTabs.map(([id, label]) => (
@@ -560,7 +574,7 @@ function ProductsPanel({
                     {p.category?.name ?? "—"}
                   </td>
                   <td className="px-3 py-2 text-[#5a6b7d]">
-                    {productKindLabel(p.kind) || p.kind}
+                    {catalogTypeLabel(p.kind, p.fulfillmentMode) || p.kind}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">
                     {Number(p.basePrice).toFixed(2)}

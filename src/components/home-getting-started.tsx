@@ -3,8 +3,10 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Check,
+  ChevronLeft,
   ChevronRight,
   FileSpreadsheet,
   Lightbulb,
@@ -16,29 +18,31 @@ import {
   Users,
   Wallet,
 } from "lucide-react";
-import { catalogApi, posApi, resourcesApi, subscriptionsApi } from "@/lib/api";
+import { catalogApi, customersApi, ordersApi, posApi, resourcesApi, subscriptionsApi } from "@/lib/api";
 import { useBootstrap } from "@/lib/bootstrap";
 import { useAuthStore } from "@/lib/auth-store";
 import { Button } from "@/components/ui/button";
 import { ItemsImportDialog } from "@/components/items-import-dialog";
 import { cn } from "@/lib/utils";
 import {
+  gettingStartedPath,
   readSetupStepParam,
   withGettingStartedReturn,
 } from "@/lib/setup-return";
-import { useSearchParams } from "next/navigation";
 
 type StepId =
   | "store"
   | "tax"
   | "build"
   | "stockup"
+  | "rentalunits"
   | "resources"
   | "services"
   | "plans"
   | "prefs"
   | "register"
-  | "customers";
+  | "customers"
+  | "livesell";
 
 type StepDef = {
   id: StepId;
@@ -98,6 +102,11 @@ export function HomeGettingStarted() {
   const resourcesCount = useQuery({
     queryKey: ["resources-setup-count"],
     queryFn: () => resourcesApi.list({ limit: 1 }),
+    enabled: hasRental && !hasSale,
+  });
+  const rentalFloor = useQuery({
+    queryKey: ["pos-rental-floor-setup"],
+    queryFn: () => posApi.rentalFloor(),
     enabled: hasRental,
   });
   const plansCount = useQuery({
@@ -110,6 +119,8 @@ export function HomeGettingStarted() {
     catalogCount.data?.meta?.total ?? floor.data?.counts?.products ?? 0;
   const inStock = floor.data?.counts?.inStock ?? 0;
   const resourceTotal = resourcesCount.data?.meta?.total ?? 0;
+  const rentalUnitTotal = rentalFloor.data?.counts?.units ?? 0;
+  const rentalStyleTotal = rentalFloor.data?.counts?.products ?? 0;
   const planTotal =
     plansCount.data?.counts?.plans ?? plansCount.data?.items?.length ?? 0;
 
@@ -173,18 +184,24 @@ export function HomeGettingStarted() {
       },
     ];
 
-    const buildTitle = hasSale
-      ? "Build your inventory"
-      : hasService
-        ? "Add services you bill"
-        : hasRental
-          ? "Add rentable items"
-          : hasPlans
-            ? "Add plans to your catalog"
-            : "Add items to your catalog";
-    const buildDetail = hasSale
-      ? "Bulk import your items/services using a file, or create them one by one — same catalog for every industry."
-      : "Create catalog items for this shop (goods, services, rentals, or plans). Import a file or add them one by one.";
+    const buildTitle =
+      hasSale && hasRental
+        ? "Add items to sell & rent"
+        : hasSale
+          ? "Build your inventory"
+          : hasService
+            ? "Add services you bill"
+            : hasRental
+              ? "Add rentable outfits"
+              : hasPlans
+                ? "Add plans to your catalog"
+                : "Add items to your catalog";
+    const buildDetail =
+      hasSale && hasRental
+        ? "Retail accessories (ties, bags, kits) via Items import or New Item. Formal wear sizes & barcodes go in the rental stock step next."
+        : hasSale
+          ? "Bulk import your items/services using a file, or create them one by one — same catalog for every industry."
+          : "Create catalog items for this shop (goods, services, rentals, or plans). Import a file or add them one by one.";
 
     list.push({
       id: "build",
@@ -238,18 +255,61 @@ export function HomeGettingStarted() {
 
     if (hasRental) {
       list.push({
+        id: "rentalunits",
+        n: list.length + 1,
+        title: hasSale
+          ? "Add rental outfits (sizes & barcodes)"
+          : "Add rental units",
+        detail: hasSale
+          ? "Each tuxedo, gown, or jacket gets a barcode per size — scan at Counter · Rent. Deposits and return dates apply here, not on sale items."
+          : "Add styles with rental price, deposit, and unit barcodes (size/variant). Same flow for formal wear, gear, or any rentable SKU.",
+        tip: "Use Rental desk → Stock tab, then Counter · Rent to scan barcodes.",
+        primary: {
+          label: "Rental desk",
+          href: withGettingStartedReturn("/rental", "rentalunits"),
+        },
+        secondary: {
+          label: "Counter · Rent",
+          href: withGettingStartedReturn("/counter?view=rental", "rentalunits"),
+        },
+        done: rentalUnitTotal > 0 || rentalStyleTotal > 0,
+      });
+    }
+
+    if (hasRental && hasSale) {
+      list.push({
+        id: "livesell",
+        n: list.length + 1,
+        title: "Sell accessories live",
+        detail:
+          "Use Counter · Sell for retail items (bow ties, bags, kits). Use Counter · Rent for outfits — two tabs, same shop.",
+        tip: "Mixed rent + sale on one receipt is not supported yet; complete as two orders if needed.",
+        primary: {
+          label: "Counter · Sell",
+          href: withGettingStartedReturn("/counter?view=sale", "livesell"),
+        },
+        secondary: {
+          label: "Items to sell",
+          href: withGettingStartedReturn("/catalog", "livesell"),
+        },
+        done: products > 0 && inStock > 0,
+      });
+    }
+
+    if (hasRental && !hasSale) {
+      list.push({
         id: "resources",
         n: list.length + 1,
         title: "Set up bookable resources",
         detail:
-          "Add rooms, tables, vehicles, or other assets you assign at the counter. Same resource list for every rental-style business.",
-        tip: "Operational status (available / occupied / out of service) is generic — not restaurant-only.",
+          "Optional: rooms, tables, vehicles, or other assets you assign at the counter — in addition to unit barcodes.",
+        tip: "Formal wear shops usually skip this and use rental units only.",
         primary: {
           label: "Resources",
           href: withGettingStartedReturn("/resources", "resources"),
         },
         secondary: {
-          label: "Counter",
+          label: "Counter · Rent",
           href: withGettingStartedReturn("/counter?view=rental", "resources"),
         },
         done: resourceTotal > 0,
@@ -298,10 +358,15 @@ export function HomeGettingStarted() {
         n: list.length + 1,
         title: "Setup POS register",
         detail:
-          "Open the counter, run a sales register for the shift, and take your first payment.",
+          hasSale && hasRental
+            ? "Open the counter — Sell tab for retail, Rent tab for outfits. Open a sales register on the Sell tab for shift cash tracking."
+            : "Open the counter, run a sales register for the shift, and take your first payment.",
         primary: {
-          label: "Open counter",
-          href: withGettingStartedReturn("/counter", "register"),
+          label: hasSale && hasRental ? "Open counter (Sell / Rent)" : "Open counter",
+          href: withGettingStartedReturn(
+            hasSale ? "/counter?view=sale" : "/counter?view=rental",
+            "register",
+          ),
         },
         secondary: {
           label: "All orders",
@@ -336,6 +401,8 @@ export function HomeGettingStarted() {
     products,
     inStock,
     resourceTotal,
+    rentalUnitTotal,
+    rentalStyleTotal,
     planTotal,
     taxConfigured,
     prefsConfigured,

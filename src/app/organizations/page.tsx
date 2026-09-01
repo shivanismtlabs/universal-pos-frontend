@@ -279,8 +279,8 @@ const BUSINESS_TYPES: Array<{
   },
   {
     id: "rental",
-    label: "Rental",
-    detail: "Issue / return with deposits — not a permanent sale",
+    label: "Clothes / gear rental",
+    detail: "Rent outfits with deposits — also sell accessories live at the counter",
     Icon: Package,
   },
   {

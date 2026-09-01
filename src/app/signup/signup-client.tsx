@@ -88,7 +88,6 @@ export default function SignupClient() {
     },
   ] as const;
   const signupScore = passwordRules.filter((r) => r.ok).length;
-  const strengthPct = Math.round((signupScore / passwordRules.length) * 100);
   const passwordOk = signupScore === passwordRules.length && password.length > 0;
 
   async function onSubmit(values: SignupIdentityInput) {
@@ -215,19 +214,6 @@ export default function SignupClient() {
                   </li>
                 ))}
               </ul>
-              <div className="mt-2 h-1 overflow-hidden rounded-full bg-[#eef2f8]">
-                <div
-                  className={cn(
-                    "h-full rounded-full transition-all",
-                    passwordOk
-                      ? "bg-[#16a34a]"
-                      : signupScore <= 2
-                        ? "bg-[#ef4444]"
-                        : "bg-[#f59e0b]",
-                  )}
-                  style={{ width: `${strengthPct}%` }}
-                />
-              </div>
               {passwordOk ? (
                 <p className="mt-1 text-[0.75rem] text-[#15803d]">
                   Password looks good

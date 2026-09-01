@@ -372,6 +372,7 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
   categories,
   brands,
   unitOptions,
+  countryUnitHint,
   imagePickerRef,
   onGenerateSku,
   onGenerateBarcode,
@@ -405,6 +406,8 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
   categories: CategoryRow[];
   brands: BrandRow[];
   unitOptions: UnitRow[];
+  /** Country-suggested units hint (New Item only). */
+  countryUnitHint?: string;
   imagePickerRef: Ref<ProductImagePickerHandle>;
   onGenerateSku: () => void;
   onGenerateBarcode: () => void;
@@ -731,6 +734,14 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                       <Link href="/settings/units" className="text-[#1a56db]">
                         Settings → Units
                       </Link>
+                      {countryUnitHint ? (
+                        <>
+                          {" "}
+                          <span className="mt-1 block text-[#1d4ed8]">
+                            {countryUnitHint}
+                          </span>
+                        </>
+                      ) : null}
                     </p>
                   )
                 }

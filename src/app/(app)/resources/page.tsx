@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -61,7 +62,9 @@ function statusMeta(row: {
 }
 
 export default function ResourcesPage() {
-  const { hasCapability, hasModule } = useBootstrap();
+  const { hasCapability, hasModule, hasMode } = useBootstrap();
+  const hasRental = hasMode("rental");
+  const hasSale = hasMode("sale");
   const qc = useQueryClient();
   const [page, setPage] = useState(1);
   const [q, setQ] = useState("");
@@ -175,6 +178,24 @@ export default function ResourcesPage() {
           </Button>
         }
       />
+
+      {hasRental && hasSale ? (
+        <div className="rounded-xl border border-[#fef3c7] bg-[#fffbeb] px-4 py-3 text-sm text-[#92400e]">
+          Clothes and sized outfits use{" "}
+          <strong className="font-semibold">Rental desk → Stock</strong> (barcode
+          per size), not Resources. Resources are for rooms, tables, vehicles,
+          and similar bookable assets.
+        </div>
+      ) : hasRental && !hasSale ? (
+        <div className="rounded-xl border border-[#e5e7eb] bg-[#f8fafc] px-4 py-3 text-sm text-[#4b5563]">
+          Optional for venue rental (rooms, halls, vehicles). For clothing sizes
+          and barcodes, use{" "}
+          <Link href="/rental" className="font-medium text-[#1a56db] underline">
+            Rental desk → Stock
+          </Link>
+          .
+        </div>
+      ) : null}
 
       {showAdd ? (
         <section className="rounded-2xl border border-[#e5e7eb] bg-white p-4">
