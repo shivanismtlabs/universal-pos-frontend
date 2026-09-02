@@ -795,9 +795,8 @@ export default function PosWorkstation() {
           <h1 className="mt-1 text-2xl font-bold tracking-tight text-[#0b1f33]">
             Tickets
           </h1>
-          <p className="mt-1 max-w-md text-sm text-[#5a6b7d]">
-            Browse units with photos, or scan barcodes onto a ticket — then
-            collect payment and hand over.
+          <p className="mt-0.5 text-sm text-[#5a6b7d]">
+            Manage rental tickets and checkout.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -1336,8 +1335,28 @@ export default function PosWorkstation() {
                 </table>
               </div>
 
-              {nextLifecycles.length ? (
-                <div className="flex flex-wrap gap-1 border-t border-[#e5e7eb] px-3 py-2">
+              {nextLifecycles.length || ["quote", "reserved", "fitted", "ready"].includes(lifecycle) ? (
+                <div className="flex flex-wrap items-center gap-1.5 border-t border-[#e5e7eb] px-3 py-2">
+                  {["quote", "reserved", "fitted", "ready"].includes(lifecycle) ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="h-7 bg-emerald-600 text-xs text-white hover:bg-emerald-700"
+                      disabled={advance.isPending}
+                      onClick={() => {
+                        if (!selectedId) return;
+                        void posApi
+                          .rentalPickup({ orderId: selectedId, pickupCondition: "good" })
+                          .then(() => {
+                            toast.success("Rental active — handed over to customer!");
+                            invalidate();
+                          })
+                          .catch((e) => toast.error(errMsg(e)));
+                      }}
+                    >
+                      Handover &amp; Pickup (Active)
+                    </Button>
+                  ) : null}
                   {nextLifecycles.map((s) => (
                     <Button
                       key={s}

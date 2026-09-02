@@ -23,10 +23,20 @@ export function productKindLabel(kind?: string | null): string {
 export function catalogTypeLabel(
   kind?: string | null,
   fulfillmentMode?: string | null,
+  meta?: Record<string, unknown> | null,
+  skuCode?: string | null,
 ): string {
+  const metaType = typeof meta?.itemType === "string" ? meta.itemType.toLowerCase() : "";
+  if (metaType === "rental") return "Rental";
+  if (metaType === "service") return "Service";
+  if (metaType === "goods") return "Goods";
   const fm = (fulfillmentMode ?? "").toLowerCase();
   if (fm === "rental") return "Rental";
   if (fm === "service") return "Service";
+  const k = (kind ?? "").toLowerCase();
+  if (k === "rental") return "Rental";
+  if (k === "service") return "Service";
+  if (skuCode && skuCode.toUpperCase().startsWith("RNT-")) return "Rental";
   return productKindLabel(kind) || "Goods";
 }
 

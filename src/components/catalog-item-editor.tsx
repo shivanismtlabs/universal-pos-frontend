@@ -9,6 +9,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { Trash2, X } from "lucide-react";
 import {
   catalogApi,
   customFieldsApi,
@@ -406,6 +407,7 @@ export function CatalogItemEditor() {
   const [extraFields, setExtraFields] = useState<Record<string, string>>({});
   const [hydrated, setHydrated] = useState(!isEdit);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const [existingPhotosList, setExistingPhotosList] = useState<string[]>([]);
   const [form, setForm] = useState<CatalogItemShopValues>(emptyCatalogItemForm);
   const [unitPricing, setUnitPricing] = useState<UnitPricingValue>({
     unitGroupId: "",
@@ -562,6 +564,14 @@ export function CatalogItemEditor() {
       multiUnitBaseUnit: packed?.baseUnit || "pcs",
       returnable: resolveReturnableFromMeta(meta, p.kind),
     });
+    const existingImgs = (
+      p.images?.length
+        ? p.images
+        : p.photoUrl
+          ? [p.photoUrl]
+          : []
+    ).filter(Boolean) as string[];
+    setExistingPhotosList(existingImgs);
     setPhotoUrl(p.photoUrl ?? "");
     setHydrated(true);
   }, [
@@ -724,13 +734,7 @@ export function CatalogItemEditor() {
       }
 
       const uploaded = imagePickerRef.current?.getUploadDataUrls() ?? [];
-      const existingPhotos = isEdit
-        ? product.data?.images?.length
-          ? product.data.images
-          : photoUrl.trim()
-            ? [photoUrl.trim()]
-            : []
-        : [];
+      const existingPhotos = isEdit ? existingPhotosList : [];
       const uniquePhotos = [
         ...new Set([...uploaded, ...existingPhotos.filter(Boolean)]),
       ];
@@ -764,8 +768,8 @@ export function CatalogItemEditor() {
         unitOfMeasure: form.unitOfMeasure,
         ...catalogUnitPricingPayload(unitPricing, form.basePrice),
         photoUrl:
-          uniquePhotos[0] || (isEdit ? photoUrl.trim() || null : undefined),
-        images: uniquePhotos.length ? uniquePhotos : undefined,
+          uniquePhotos[0] || (isEdit ? null : undefined),
+        images: isEdit ? uniquePhotos : uniquePhotos.length ? uniquePhotos : undefined,
         trackInventory,
         trackSerial,
         trackBatch,
@@ -899,16 +903,6 @@ export function CatalogItemEditor() {
     );
   }
 
-  const existingImages = (
-    isEdit
-      ? product.data?.images?.length
-        ? product.data.images
-        : photoUrl
-          ? [photoUrl]
-          : []
-      : []
-  ).filter(Boolean) as string[];
-
   const stockOnHand =
     product.data?.inventoryByLocation?.find(
       (l) => l.locationId === (defaultLocationId || currentLocationId),
@@ -1013,18 +1007,45 @@ export function CatalogItemEditor() {
         onUnitPricingChange={setUnitPricing}
         commerceModes={commerceModes}
         photosExtra={
-          existingImages.length ? (
-            <div className="mb-4 flex flex-wrap gap-2">
-              {existingImages.slice(0, 8).map((src, i) => (
-                <ProductThumb
-                  key={src}
-                  src={src}
-                  label={form.name}
-                  className="rounded-lg border border-[#d9e0ea]"
-                  count={i === 0 ? existingImages.length : undefined}
-                  onClick={() => setLightboxIndex(i)}
-                />
-              ))}
+          existingPhotosList.length ? (
+            <div className="mb-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-[0.7rem] font-semibold text-[#5a6b7d]">
+                  Saved photos ({existingPhotosList.length})
+                </p>
+                <button
+                  type="button"
+                  className="text-[0.68rem] font-semibold text-rose-600 hover:text-rose-700 hover:underline inline-flex items-center gap-1"
+                  onClick={() => setExistingPhotosList([])}
+                >
+                  <Trash2 className="size-3" />
+                  Remove all
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2.5">
+                {existingPhotosList.slice(0, 8).map((src, i) => (
+                  <div key={src} className="group relative h-16 w-16">
+                    <ProductThumb
+                      src={src}
+                      label={form.name}
+                      className="h-16 w-16 rounded-lg border border-[#d9e0ea] object-cover"
+                      onClick={() => setLightboxIndex(i)}
+                    />
+                    <button
+                      type="button"
+                      title="Remove saved photo"
+                      aria-label="Remove photo"
+                      className="absolute -top-1.5 -right-1.5 grid h-6 w-6 place-items-center rounded-full bg-rose-600 text-white shadow-md hover:bg-rose-700 transition"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setExistingPhotosList((prev) => prev.filter((_, idx) => idx !== i));
+                      }}
+                    >
+                      <X className="size-3.5 stroke-[2.5]" />
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
           ) : null
         }
@@ -1032,7 +1053,7 @@ export function CatalogItemEditor() {
 
       <ImageLightbox
         open={lightboxIndex != null}
-        images={existingImages}
+        images={existingPhotosList}
         startIndex={lightboxIndex ?? 0}
         label={form.name}
         onClose={() => setLightboxIndex(null)}

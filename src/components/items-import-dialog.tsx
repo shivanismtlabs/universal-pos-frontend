@@ -9,7 +9,7 @@ import { ApiError } from "@/lib/api/client";
 import { downloadCsv } from "@/lib/csv";
 import { Button } from "@/components/ui/button";
 import { useBootstrap } from "@/lib/bootstrap";
-import { X } from "lucide-react";
+import { FileSpreadsheet, Trash2, X } from "lucide-react";
 
 export type ImportableRow = {
   title: string;
@@ -25,8 +25,8 @@ export type ImportableRow = {
   reorderPoint?: number;
   hsnOrSac?: string;
   trackInventory?: boolean;
-  /** goods (default) | service */
-  itemType?: "goods" | "service";
+  /** goods (default) | service | rental */
+  itemType?: "goods" | "service" | "rental";
   durationMinutes?: number;
   image?: string;
 };
@@ -98,37 +98,69 @@ function mapHeader(h: string): string | null {
     title: "title",
     item_name: "title",
     product: "title",
+    product_name: "title",
+    item: "title",
+    particulars: "title",
     service_name: "title",
+    description_name: "title",
     sku: "sku",
     item_sku: "sku",
+    item_code: "sku",
+    product_code: "sku",
+    code: "sku",
+    part_no: "sku",
+    part_number: "sku",
     category: "categoryName",
     category_name: "categoryName",
+    item_group: "categoryName",
+    group: "categoryName",
+    department: "categoryName",
     unit: "sellUnit",
     sell_unit: "sellUnit",
     uom: "sellUnit",
+    unit_of_measure: "sellUnit",
+    base_unit: "sellUnit",
     selling_price: "price",
     price: "price",
     rate: "price",
+    sale_price: "price",
+    sales_rate: "price",
+    unit_price: "price",
+    mrp: "price",
     opening_stock: "qty",
     qty: "qty",
     quantity: "qty",
     stock: "qty",
     stock_on_hand: "qty",
+    opening_qty: "qty",
+    balance_qty: "qty",
     cost_price: "costPrice",
     cost: "costPrice",
+    purchase_price: "costPrice",
+    purchase_rate: "costPrice",
+    buy_price: "costPrice",
     barcode: "barcode",
     upc: "barcode",
+    ean: "barcode",
+    gtin: "barcode",
     manufacturer: "manufacturer",
     brand: "manufacturer",
+    make: "manufacturer",
+    company: "manufacturer",
     hsn: "hsnOrSac",
     hsn_sac: "hsnOrSac",
+    hsn_code: "hsnOrSac",
+    sac: "hsnOrSac",
     hsnorsac: "hsnOrSac",
+    tax_code: "hsnOrSac",
     description: "description",
+    details: "description",
     track_inventory: "trackInventory",
     track_stock: "trackInventory",
     inventory_tracked: "trackInventory",
     reorder_point: "reorderPoint",
     reorder: "reorderPoint",
+    min_stock: "reorderPoint",
     type: "itemType",
     item_type: "itemType",
     kind: "itemType",
@@ -152,34 +184,68 @@ function mapHeader(h: string): string | null {
 function parseItemType(
   raw: string | undefined,
   unitRaw: string,
-  rowNum?: number,
-): "goods" | "service" {
+  _rowNum?: number,
+  titleRaw?: string,
+  skuRaw?: string,
+): "goods" | "service" | "rental" {
   const t = (raw ?? "").trim().toLowerCase();
-  const where = rowNum ? `Row ${rowNum}: ` : "";
+  
+  // Rental keywords
   if (
     t === "rental" ||
     t === "rent" ||
     t === "rentals" ||
-    t === "hire"
+    t === "hire" ||
+    t === "costume" ||
+    t === "outfit" ||
+    t === "gear" ||
+    t === "equipment" ||
+    t === "lease"
   ) {
-    throw new Error(
-      `${where}type "rental" is not supported in CSV import — add outfits via Rental desk → Stock (barcode per size).`,
-    );
+    return "rental";
   }
+  
+  // Service keywords
   if (
     t === "service" ||
     t === "services" ||
     t === "svc" ||
     t === "serv" ||
     t === "labour" ||
-    t === "labor"
+    t === "labor" ||
+    t === "repair" ||
+    t === "maintenance" ||
+    t === "salon" ||
+    t === "spa" ||
+    t === "consulting" ||
+    t === "therapy" ||
+    t === "treatment" ||
+    t === "class" ||
+    t === "session"
   ) {
     return "service";
   }
-  if (t === "goods" || t === "good" || t === "product" || t === "physical") {
+  
+  // Goods keywords
+  if (
+    t === "goods" ||
+    t === "good" ||
+    t === "product" ||
+    t === "products" ||
+    t === "physical" ||
+    t === "item" ||
+    t === "retail" ||
+    t === "grocery" ||
+    t === "food" ||
+    t === "drink" ||
+    t === "apparel" ||
+    t === "merchandise" ||
+    t === "parts"
+  ) {
     return "goods";
   }
-  // Infer from unit when type column missing
+
+  // Infer from unit
   const u = unitRaw.trim().toLowerCase();
   if (
     u === "service" ||
@@ -188,10 +254,31 @@ function parseItemType(
     u === "minutes" ||
     u === "hour" ||
     u === "hr" ||
-    u === "session"
+    u === "session" ||
+    u === "visit"
   ) {
     return "service";
   }
+  if (u === "day" || u === "rental" || u === "night" || u === "week" || u === "month") {
+    return "rental";
+  }
+
+  // Smart auto-detect from SKU (e.g. RNT-0050, SVC-001) or Title (e.g. "Cricket Bat Rental")
+  const sku = (skuRaw ?? "").trim().toUpperCase();
+  if (sku.startsWith("RNT-") || sku.startsWith("RENT-") || sku.startsWith("RNT_")) {
+    return "rental";
+  }
+  if (sku.startsWith("SVC-") || sku.startsWith("SERV-") || sku.startsWith("SVC_")) {
+    return "service";
+  }
+  const title = (titleRaw ?? "").trim().toLowerCase();
+  if (/\b(rental|renting|for rent|on rent|hire|costume|outfit)\b/i.test(title)) {
+    return "rental";
+  }
+  if (/\b(servicing|repair|installation|labour|consulting|treatment|therapy|session)\b/i.test(title)) {
+    return "service";
+  }
+
   return "goods";
 }
 
@@ -212,7 +299,13 @@ export function rowsFromTable(table: string[][]): ImportableRow[] {
     });
     if (!obj.title?.trim() && !obj.sku?.trim()) continue;
     const unitRaw = (obj.sellUnit || "").toLowerCase();
-    const itemType = parseItemType(obj.itemType, unitRaw, r + 1);
+    const itemType = parseItemType(
+      obj.itemType,
+      unitRaw,
+      r + 1,
+      obj.title,
+      obj.sku,
+    );
     const unitMap: Record<string, string> = {
       pcs: "pcs",
       piece: "pcs",
@@ -337,6 +430,22 @@ export function downloadItemsTemplate() {
       "",
     ],
     [
+      "Black Velvet Tuxedo",
+      "TUX-BLK-01",
+      "rental",
+      "Formal Wear",
+      "pcs",
+      "1200",
+      "4",
+      "",
+      "3000",
+      "8901234567999",
+      "Velvet Co",
+      "6203",
+      "false",
+      "",
+    ],
+    [
       "AC Servicing",
       "AC-SVC-001",
       "service",
@@ -388,8 +497,7 @@ export function downloadItemsTemplate() {
 }
 
 /**
- * Zoho-style bulk import — items to **sell** at Counter Sell tab (goods or service).
- * Rental outfits: use Rental desk → Stock, not this import.
+ * Bulk import — items for Goods, Services, or Rentals.
  */
 export function ItemsImportDialog({
   open,
@@ -456,6 +564,15 @@ export function ItemsImportDialog({
 
   if (!open) return null;
 
+  function clearSelectedFile() {
+    setPreview(null);
+    setFileName("");
+    setParseError(null);
+    if (fileRef.current) {
+      fileRef.current.value = "";
+    }
+  }
+
   async function onFile(file: File | null) {
     if (!file) return;
     setParseError(null);
@@ -490,23 +607,14 @@ export function ItemsImportDialog({
               Import items
             </h2>
             <p className="mt-1 text-[0.8rem] text-[#5a6b7d]">
-              Bulk import from Excel (.xlsx) or CSV. Creates items to{" "}
-              <strong>sell</strong> (Type = Goods or Service). Use column{" "}
+              Bulk import from Excel (.xlsx) or CSV. Creates items for{" "}
+              <strong>Goods</strong>, <strong>Services</strong>, or <strong>Rentals</strong>. Use column{" "}
               <code className="text-[0.75rem]">type</code>:{" "}
-              <code className="text-[0.75rem]">goods</code> or{" "}
-              <code className="text-[0.75rem]">service</code> — empty defaults
+              <code className="text-[0.75rem]">goods</code>,{" "}
+              <code className="text-[0.75rem]">service</code>, or{" "}
+              <code className="text-[0.75rem]">rental</code> — empty defaults
               to Goods.
             </p>
-            {hasRental ? (
-              <p className="mt-2 rounded-lg border border-[#dbeafe] bg-[#eff6ff] px-3 py-2 text-[0.75rem] text-[#1e40af]">
-                <strong>Rental shop:</strong> CSV import is for accessories /
-                retail stock only. Rent outfits (sizes + barcodes) via{" "}
-                <Link href="/rental" className="font-medium underline">
-                  Rental desk → Stock
-                </Link>
-                , then use Counter → Rent tab.
-              </p>
-            ) : null}
           </div>
           <button
             type="button"
@@ -543,9 +651,34 @@ export function ItemsImportDialog({
             />
           </div>
           {fileName ? (
-            <p className="text-[0.8rem] text-[#5a6b7d]">
-              Selected: <span className="font-medium text-[#0b1f33]">{fileName}</span>
-            </p>
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-[#d9e0ea] bg-[#f8fafc] px-3.5 py-2.5">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <FileSpreadsheet className="h-5 w-5 shrink-0 text-[#1a56db]" />
+                <div className="min-w-0">
+                  <p className="truncate text-[0.8125rem] font-medium text-[#0b1f33]">
+                    {fileName}
+                  </p>
+                  {preview ? (
+                    <p className="text-[0.7rem] font-semibold text-[#059669]">
+                      {preview.length} item{preview.length === 1 ? "" : "s"} ready to import
+                    </p>
+                  ) : parseError ? (
+                    <p className="text-[0.7rem] font-semibold text-[#c81e1e]">
+                      Error reading file
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={clearSelectedFile}
+                className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-[#c81e1e] hover:bg-[#fee2e2] transition"
+                title="Remove selected file"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                <span>Remove</span>
+              </button>
+            </div>
           ) : null}
           {parseError ? (
             <p className="rounded-lg border border-[#fecaca] bg-[#fff6f6] px-3 py-2 text-[0.8rem] text-[#c81e1e]">

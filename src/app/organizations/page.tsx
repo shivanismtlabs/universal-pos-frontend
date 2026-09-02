@@ -48,7 +48,7 @@ import { TotpChallengeForm, is2faChallenge } from "@/components/totp-challenge-f
 import { cn } from "@/lib/utils";
 import { clearLoginFormPersistence } from "@/lib/auth-form";
 import { geoStates, isKnownGeoState, splitE164 } from "@/lib/geo";
-import { phoneHasLocalDigits, validatePhoneForCountry } from "@/lib/phone";
+import { phoneHasLocalDigits, validatePhoneE164 } from "@/lib/phone";
 import { CountryStateFields } from "@/components/country-state-fields";
 import { PhoneCountryInput } from "@/components/phone-country-input";
 import { citiesForState, isPostalValidForIndianCity } from "@/lib/india-locations";
@@ -163,11 +163,11 @@ const createOrgSchema = z
         message: "Enter your business type (at least 2 characters)",
       });
     }
-    if (v.phone.trim() && !validatePhoneForCountry(v.phone, v.countryCode)) {
+    if (v.phone.trim() && !validatePhoneE164(v.phone, v.countryCode)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["phone"],
-        message: "Enter a valid phone number for the selected country",
+        message: "Enter a valid phone number",
       });
     }
     if (!isKnownGeoState(v.countryCode, v.state) && geoStates(v.countryCode).length) {

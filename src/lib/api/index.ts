@@ -2849,7 +2849,7 @@ export const posApi = {
       reorderPoint?: number;
       hsnOrSac?: string;
       trackInventory?: boolean;
-      itemType?: "goods" | "service";
+      itemType?: "goods" | "service" | "rental";
       durationMinutes?: number;
       image?: string;
       photoUrl?: string;
@@ -3834,10 +3834,23 @@ export const posApi = {
     description?: string;
     categoryId: string;
     sku: string;
-    rentalPrice: number;
+    rentalPrice?: number;
+    ratePeriod?: "hour" | "day" | "week" | "month" | string;
+    minDuration?: number;
     deposit?: number;
-    barcode: string;
+    lateFeePerDay?: number;
+    lateFeePerHour?: number;
+    lateFeeEnabled?: boolean;
+    cleaningFee?: number;
+    damageFeeDefault?: number;
+    replacementValue?: number;
+    canRent?: boolean;
+    canSell?: boolean;
+    salePrice?: number;
+    trackSerial?: boolean;
+    barcode?: string;
     variant?: string;
+    size?: string;
     locationId?: string;
   }) {
     return apiRequest<{
@@ -3853,6 +3866,18 @@ export const posApi = {
       description?: string;
       categoryId?: string;
       rentalPrice?: number;
+      ratePeriod?: string;
+      minDuration?: number;
+      deposit?: number;
+      lateFeePerDay?: number;
+      lateFeePerHour?: number;
+      lateFeeEnabled?: boolean;
+      cleaningFee?: number;
+      damageFeeDefault?: number;
+      replacementValue?: number;
+      canRent?: boolean;
+      canSell?: boolean;
+      salePrice?: number;
       isActive?: boolean;
     },
   ) {
@@ -3901,6 +3926,8 @@ export const posApi = {
       variant?: string;
       rentalPrice?: number;
       deposit?: number;
+      status?: string;
+      condition?: string;
       isActive?: boolean;
     },
   ) {
@@ -3927,6 +3954,105 @@ export const posApi = {
     return apiRequest<RentalUnitRow>(`/pos/rental/lookup?${qs}`, {
       token: token(),
     });
+  },
+  checkRentalAvailability(body: {
+    productId?: string;
+    stockUnitId?: string;
+    startDate: string;
+    endDate: string;
+    quantity?: number;
+    locationId?: string;
+  }) {
+    return apiRequest<{
+      available: boolean;
+      availableCount: number;
+      requestedQuantity: number;
+      startDate: string;
+      endDate: string;
+      items: RentalUnitRow[];
+    }>("/pos/rental/check-availability", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  rentalPickup(body: {
+    orderId: string;
+    stockUnitIds?: string[];
+    pickupCondition?: string;
+    accessories?: string;
+    pickupNotes?: string;
+  }) {
+    return apiRequest<Record<string, unknown>>("/pos/rental/pickup", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  rentalReturnSettle(body: {
+    orderId: string;
+    items: Array<{
+      stockUnitId: string;
+      condition: string;
+      damageCharge?: number;
+      missingCharge?: number;
+      notes?: string;
+      cleaningRequired?: boolean;
+    }>;
+    lateFeeOverride?: number;
+    damageCharges?: number;
+    depositRefundAmount?: number;
+    depositForfeitAmount?: number;
+    refundMethod?: string;
+    notes?: string;
+  }) {
+    return apiRequest<Record<string, unknown>>("/pos/rental/return-settle", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  rentalCancel(body: {
+    orderId: string;
+    reason?: string;
+    cancellationFee?: number;
+    refundMethod?: string;
+  }) {
+    return apiRequest<Record<string, unknown>>("/pos/rental/cancel", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+  rentalCalendar(params?: { from?: string; to?: string }) {
+    const qs = new URLSearchParams();
+    if (params?.from) qs.set("from", params.from);
+    if (params?.to) qs.set("to", params.to);
+    const q = qs.toString();
+    return apiRequest<{
+      from: string;
+      to: string;
+      events: Array<{
+        id: string;
+        orderId: string;
+        orderNumber: string;
+        customerName: string;
+        customerPhone: string | null;
+        pickupDate: string;
+        returnDueDate: string;
+        lifecycle: string;
+        status: string;
+        isOverdue: boolean;
+        totalAmount: number | string;
+        balanceDue: number | string;
+        items: Array<{
+          name: string;
+          sku: string | null;
+          barcode: string | null;
+          quantity: number;
+        }>;
+      }>;
+    }>(`/pos/rental/calendar${q ? `?${q}` : ""}`, { token: token() });
   },
   lateFeePreview(orderId: string) {
     return apiRequest<{
@@ -8604,6 +8730,17 @@ export const catalogApi = {
       deleted?: boolean;
       softDeleted?: boolean;
     }>(`/catalog/products/${id}`, {
+      method: "DELETE",
+      token: token(),
+    });
+  },
+  deleteAll() {
+    return apiRequest<{
+      ok: boolean;
+      deletedCount: number;
+      archivedCount: number;
+      total: number;
+    }>("/catalog/products/purge/all", {
       method: "DELETE",
       token: token(),
     });

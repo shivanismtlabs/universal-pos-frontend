@@ -66,6 +66,7 @@ import {
   cashChangeDue,
   lineTaxAmount,
   roundOffForDisplay,
+  shouldApplyCashRoundOff,
 } from "@/lib/bill-summary";
 
 type CartLine = {
@@ -668,9 +669,13 @@ export default function RetailPosWorkstation({
     Math.round((ticketNet + diningExtras) * 100) / 100,
   );
   const paymentRound = roundOffForDisplay(exactDue);
-  /** Collectable total — half-up to nearest ₹ (paisa ≥ 50 → up). */
-  const totalDue = paymentRound.roundedTotal;
-  const paymentRoundOff = paymentRound.roundOff;
+  const applyCashRound = shouldApplyCashRoundOff(payMethod, {
+    splitPay,
+    splitSession: Boolean(splitSession),
+  });
+  /** Collectable total — half-up to nearest ₹ for sole cash, exactDue for digital/UPI/QR/card. */
+  const totalDue = applyCashRound ? paymentRound.roundedTotal : exactDue;
+  const paymentRoundOff = applyCashRound ? paymentRound.roundOff : 0;
   const splitPart = splitSession?.parts[splitSession.index] ?? null;
   const splitFollowUp = Boolean(splitSession?.orderId);
   const splitRemaining = splitSession
@@ -744,6 +749,7 @@ export default function RetailPosWorkstation({
     fees: diningFeeLines,
     taxInclusive: taxSettings.inclusive,
     lines: billTaxLines,
+    applyRoundOff: applyCashRound,
     amountDue: totalDue,
   });
   const payMethodConfirmLabel = (() => {
@@ -1734,7 +1740,7 @@ export default function RetailPosWorkstation({
           ...(l.modifiers?.length ? { modifiers: l.modifiers } : {}),
         })),
         ...(discountNum > 0 ? { discountAmount: discountNum } : {}),
-        ...(Math.abs(paymentRoundOff) >= 0.005
+        ...(applyCashRound && Math.abs(paymentRoundOff) >= 0.005
           ? { roundOffAmount: paymentRoundOff }
           : {}),
         ...(couponApplied
@@ -1756,7 +1762,7 @@ export default function RetailPosWorkstation({
           ...(deliveryAddress.trim()
             ? { deliveryAddress: deliveryAddress.trim() }
             : {}),
-          ...(Math.abs(paymentRoundOff) >= 0.005
+          ...(applyCashRound && Math.abs(paymentRoundOff) >= 0.005
             ? {
                 roundOff: paymentRoundOff,
                 exactTotal: exactDue,
@@ -3461,9 +3467,17 @@ export default function RetailPosWorkstation({
                     "Universal POS";
                   if (!vpa) {
                     return (
-                      <p className="text-[0.7rem] text-amber-800">
-                        Set UPI ID in Settings → Counter first.
-                      </p>
+                      <div className="flex items-center justify-between gap-2 rounded border border-amber-200 bg-amber-50 px-2.5 py-1.5">
+                        <p className="text-[0.7rem] font-medium text-amber-800">
+                          Set UPI ID in Counter Settings first.
+                        </p>
+                        <Link
+                          href="/settings/counter"
+                          className="shrink-0 rounded bg-amber-600 px-2 py-0.5 text-[0.68rem] font-semibold text-white hover:bg-amber-700 transition"
+                        >
+                          Set UPI ID →
+                        </Link>
+                      </div>
                     );
                   }
                   const upiUri = `upi://pay?pa=${encodeURIComponent(vpa)}&pn=${encodeURIComponent(payee)}&am=${chargeAmount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(productName || "Universal POS")}`;

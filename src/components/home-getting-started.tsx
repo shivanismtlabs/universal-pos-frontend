@@ -114,6 +114,20 @@ export function HomeGettingStarted() {
     queryFn: () => subscriptionsApi.listPlans(),
     enabled: hasPlans,
   });
+  const customersCount = useQuery({
+    queryKey: ["customers-setup-count"],
+    queryFn: () => customersApi.list({ limit: 1 }),
+  });
+  const ordersCount = useQuery({
+    queryKey: ["orders-setup-count"],
+    queryFn: () => ordersApi.list({ limit: 1 }),
+  });
+  const locationId = boot?.locations?.[0]?.id;
+  const registerSession = useQuery({
+    queryKey: ["pos-register-session-setup", locationId],
+    queryFn: () => posApi.currentRegister(locationId),
+    enabled: Boolean(locationId),
+  });
 
   const products =
     catalogCount.data?.meta?.total ?? floor.data?.counts?.products ?? 0;
@@ -123,12 +137,16 @@ export function HomeGettingStarted() {
   const rentalStyleTotal = rentalFloor.data?.counts?.products ?? 0;
   const planTotal =
     plansCount.data?.counts?.plans ?? plansCount.data?.items?.length ?? 0;
+  const hasCustomers =
+    (customersCount.data?.meta?.total ?? customersCount.data?.items?.length ?? 0) > 0;
+  const hasOrders =
+    (ordersCount.data?.meta?.total ?? ordersCount.data?.items?.length ?? 0) > 0;
+  const hasRegister = Boolean(registerSession.data?.session?.id) || hasOrders;
 
   const taxConfigured = useMemo(() => {
     const t = boot?.tenant;
     if (!t) return false;
     if (t.taxId || t.gstin) return true;
-    if (t.taxMode === "none") return true;
     const settings =
       t.settings && typeof t.settings === "object"
         ? (t.settings as Record<string, unknown>)
@@ -143,16 +161,23 @@ export function HomeGettingStarted() {
     ) {
       return true;
     }
-    // Tenant already has a tax mode from signup/settings — treat as configured
-    return Boolean(t.taxMode);
+    return Boolean(t.taxMode && t.taxMode !== "none");
   }, [boot?.tenant]);
 
   const prefsConfigured = useMemo(() => {
     const branding = boot?.tenant?.branding;
+    const settings =
+      boot?.tenant?.settings && typeof boot.tenant.settings === "object"
+        ? (boot.tenant.settings as Record<string, unknown>)
+        : {};
     return Boolean(
-      branding?.productName?.trim() || branding?.tagline?.trim(),
+      branding?.logoUrl ||
+        branding?.tagline?.trim() ||
+        (settings.pos &&
+          typeof settings.pos === "object" &&
+          (settings.pos as Record<string, unknown>).receiptFooter),
     );
-  }, [boot?.tenant?.branding]);
+  }, [boot?.tenant]);
 
   const steps = useMemo((): StepDef[] => {
     const list: StepDef[] = [
@@ -292,7 +317,7 @@ export function HomeGettingStarted() {
           label: "Items to sell",
           href: withGettingStartedReturn("/catalog", "livesell"),
         },
-        done: products > 0 && inStock > 0,
+        done: hasOrders,
       });
     }
 
@@ -372,7 +397,7 @@ export function HomeGettingStarted() {
           label: "All orders",
           href: withGettingStartedReturn("/orders", "register"),
         },
-        done: prefsConfigured,
+        done: hasRegister,
       },
       {
         id: "customers",
@@ -388,7 +413,7 @@ export function HomeGettingStarted() {
           label: "Reports",
           href: withGettingStartedReturn("/reports", "customers"),
         },
-        done: prefsConfigured,
+        done: hasCustomers || hasOrders,
       },
     );
 
@@ -406,6 +431,9 @@ export function HomeGettingStarted() {
     planTotal,
     taxConfigured,
     prefsConfigured,
+    hasRegister,
+    hasCustomers,
+    hasOrders,
   ]);
 
   const firstOpen =

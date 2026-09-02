@@ -8,7 +8,7 @@ import {
   useState,
 } from "react";
 import { toast } from "sonner";
-import { Sparkles } from "lucide-react";
+import { Sparkles, Trash2, X, RefreshCw, Plus } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import {
@@ -98,6 +98,13 @@ export const ProductImagePicker = forwardRef<
       }
       return prev.filter((_, i) => i !== index);
     });
+  }
+
+  function clearAll() {
+    revokeAll(slotsRef.current);
+    slotsRef.current = [];
+    setSlots([]);
+    if (inputRef.current) inputRef.current.value = "";
   }
 
   function pushPrepared(
@@ -263,6 +270,53 @@ export const ProductImagePicker = forwardRef<
     onPick: () => void;
     onClear?: () => void;
   }) {
+    if (slot) {
+      return (
+        <div
+          className={[
+            "group relative flex w-full flex-col items-center justify-center overflow-hidden rounded-lg border border-[#d9e0ea] bg-white p-2 text-center shadow-xs transition hover:border-[#1a56db]/40",
+            tall ? "min-h-[11.5rem]" : "min-h-[7.5rem]",
+          ].join(" ")}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={slot.previewUrl}
+            alt={title}
+            className="h-full max-h-32 w-full rounded object-contain bg-[#f8fafc]"
+          />
+
+          {/* Action overlay bar */}
+          <div className="mt-2 flex w-full items-center justify-between gap-1.5 border-t border-[#f1f5f9] pt-1.5">
+            <span className="truncate text-left text-[0.65rem] font-semibold text-[#5a6b7d]">
+              {title}
+            </span>
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                type="button"
+                title="Replace with another image"
+                className="inline-flex items-center gap-1 rounded bg-[#f1f5f9] px-2 py-0.5 text-[0.68rem] font-medium text-[#0b1f33] hover:bg-[#e2e8f0] transition"
+                onClick={onPick}
+              >
+                <RefreshCw className="size-3 text-[#5a6b7d]" />
+                <span>Change</span>
+              </button>
+              {onClear ? (
+                <button
+                  type="button"
+                  title="Remove this image"
+                  className="inline-flex items-center gap-1 rounded bg-rose-50 px-2 py-0.5 text-[0.68rem] font-semibold text-rose-600 hover:bg-rose-100 transition"
+                  onClick={onClear}
+                >
+                  <Trash2 className="size-3 text-rose-600" />
+                  <span>Remove</span>
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <button
         type="button"
@@ -287,58 +341,32 @@ export const ProductImagePicker = forwardRef<
             : undefined
         }
         className={[
-          "relative flex w-full flex-col items-center justify-center rounded-md border border-dashed border-[#c5d0e0] bg-[#fafbfc] px-3 text-center transition hover:border-[#1a56db]/40 hover:bg-[#f4f7ff] disabled:opacity-50",
-          tall ? "min-h-[11.5rem]" : "min-h-[5.5rem]",
+          "relative flex w-full flex-col items-center justify-center rounded-lg border border-dashed border-[#c5d0e0] bg-[#fafbfc] px-3 py-4 text-center transition hover:border-[#1a56db]/50 hover:bg-[#f4f7ff] disabled:opacity-50 cursor-pointer",
+          tall ? "min-h-[11.5rem]" : "min-h-[7.5rem]",
         ].join(" ")}
       >
-        {slot ? (
-          <>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={slot.previewUrl}
-              alt=""
-              className="h-full max-h-28 w-full object-contain"
-            />
-            {onClear ? (
-              <span
-                role="button"
-                tabIndex={0}
-                className="absolute top-1 right-1 grid h-5 w-5 place-items-center rounded-full bg-[#c81e1e] text-[0.65rem] font-bold text-white"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onClear();
-                }}
-              >
-                ×
-              </span>
-            ) : null}
-          </>
-        ) : (
-          <>
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              className="text-[#1a56db]"
-              aria-hidden
-            >
-              <path
-                d="M12 16V8M8.5 11.5 12 8l3.5 3.5M5 19h14"
-                stroke="currentColor"
-                strokeWidth="1.7"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-            <p className="mt-1.5 text-[0.75rem] font-semibold text-[#1a56db]">
-              {title}
-            </p>
-            <p className="mt-0.5 max-w-[14rem] text-[0.65rem] leading-snug text-[#8b9bb0]">
-              {subtitle}
-            </p>
-          </>
-        )}
+        <svg
+          width="22"
+          height="22"
+          viewBox="0 0 24 24"
+          fill="none"
+          className="text-[#1a56db]"
+          aria-hidden
+        >
+          <path
+            d="M12 16V8M8.5 11.5 12 8l3.5 3.5M5 19h14"
+            stroke="currentColor"
+            strokeWidth="1.7"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+        <p className="mt-1.5 text-[0.75rem] font-semibold text-[#1a56db]">
+          {title}
+        </p>
+        <p className="mt-0.5 max-w-[14rem] text-[0.65rem] leading-snug text-[#8b9bb0]">
+          {subtitle}
+        </p>
       </button>
     );
   }
@@ -346,20 +374,34 @@ export const ProductImagePicker = forwardRef<
   if (variant === "item") {
     const extras = slots.slice(2);
     return (
-      <div className="space-y-2">
-        <Label>{label}</Label>
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <Label className="text-sm font-semibold text-[#0b1f33]">
+            {label || "Product images"}
+          </Label>
+          {slots.length > 0 ? (
+            <button
+              type="button"
+              className="text-[0.72rem] font-semibold text-rose-600 hover:text-rose-700 hover:underline inline-flex items-center gap-1"
+              onClick={clearAll}
+            >
+              <Trash2 className="size-3" />
+              Remove all ({slots.length})
+            </button>
+          ) : null}
+        </div>
         <AiGenerateBar />
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-2.5">
           <Zone
-            title="Upload Front Image"
-            subtitle="Cover"
+            title="Front Image"
+            subtitle="Cover photo"
             slot={slots[0]}
             onPick={() => openPicker(0, false)}
             onClear={slots[0] ? () => removeAt(0) : undefined}
           />
           <Zone
-            title="Upload Rear Image"
-            subtitle="Optional"
+            title="Rear Image"
+            subtitle="Optional back view"
             slot={slots[1]}
             onPick={() => openPicker(1, false)}
             onClear={slots[1] ? () => removeAt(1) : undefined}
@@ -374,24 +416,31 @@ export const ProductImagePicker = forwardRef<
           onPick={() => openPicker("append", true)}
         />
         {extras.length ? (
-          <div className="flex flex-wrap gap-2">
-            {extras.map((slot, i) => (
-              <div key={slot.id} className="relative h-14 w-14">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={slot.previewUrl}
-                  alt=""
-                  className="h-14 w-14 rounded-md border border-[#d9e0ea] object-cover"
-                />
-                <button
-                  type="button"
-                  className="absolute -top-1 -right-1 grid h-5 w-5 place-items-center rounded-full bg-[#c81e1e] text-[0.65rem] font-bold text-white"
-                  onClick={() => removeAt(i + 2)}
-                >
-                  ×
-                </button>
-              </div>
-            ))}
+          <div className="space-y-1.5">
+            <p className="text-[0.7rem] font-semibold text-[#5a6b7d]">
+              Additional images ({extras.length})
+            </p>
+            <div className="flex flex-wrap gap-2.5">
+              {extras.map((slot, i) => (
+                <div key={slot.id} className="group relative h-16 w-16">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={slot.previewUrl}
+                    alt=""
+                    className="h-16 w-16 rounded-lg border border-[#d9e0ea] object-cover bg-white shadow-2xs"
+                  />
+                  <button
+                    type="button"
+                    title="Remove this photo"
+                    aria-label="Remove photo"
+                    className="absolute -top-1.5 -right-1.5 grid h-6 w-6 place-items-center rounded-full bg-rose-600 text-white shadow-md hover:bg-rose-700 transition"
+                    onClick={() => removeAt(i + 2)}
+                  >
+                    <X className="size-3.5 stroke-[2.5]" />
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
         ) : null}
         <input
@@ -409,27 +458,40 @@ export const ProductImagePicker = forwardRef<
 
   return (
     <div className="field-shell">
-      <Label>{label}</Label>
+      <div className="flex items-center justify-between">
+        <Label>{label}</Label>
+        {slots.length > 0 ? (
+          <button
+            type="button"
+            className="text-[0.72rem] font-semibold text-rose-600 hover:text-rose-700 hover:underline inline-flex items-center gap-1"
+            onClick={clearAll}
+          >
+            <Trash2 className="size-3" />
+            Remove all
+          </button>
+        ) : null}
+      </div>
       <p className="mb-2 text-[0.7rem] text-[#8b9bb0]">{hint}</p>
       <div className="mb-2">
         <AiGenerateBar />
       </div>
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-2.5">
         {slots.map((slot, idx) => (
-          <div key={slot.id} className="relative h-14 w-14 shrink-0">
+          <div key={slot.id} className="group relative h-16 w-16 shrink-0">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={slot.previewUrl}
               alt=""
-              className="h-14 w-14 rounded-lg border border-[#d9e0ea] object-cover bg-[#f4f6fa]"
+              className="h-16 w-16 rounded-lg border border-[#d9e0ea] object-cover bg-[#f4f6fa] shadow-2xs"
             />
             <button
               type="button"
-              className="absolute -right-1 -top-1 grid h-5 w-5 place-items-center rounded-full bg-[#c81e1e] text-[0.65rem] font-bold text-white"
+              className="absolute -right-1.5 -top-1.5 grid h-6 w-6 place-items-center rounded-full bg-rose-600 text-white shadow-md hover:bg-rose-700 transition"
               onClick={() => removeAt(idx)}
               aria-label="Remove photo"
+              title="Remove photo"
             >
-              ×
+              <X className="size-3.5 stroke-[2.5]" />
             </button>
           </div>
         ))}
@@ -438,9 +500,10 @@ export const ProductImagePicker = forwardRef<
             type="button"
             disabled={busy || aiBusy}
             onClick={() => inputRef.current?.click()}
-            className="grid h-14 w-14 place-items-center rounded-lg border border-dashed border-[#cfd8e6] text-xs font-semibold text-[#1a56db] hover:bg-[#e8eefb] disabled:opacity-50"
+            className="grid h-16 w-16 place-items-center rounded-lg border border-dashed border-[#cfd8e6] text-sm font-semibold text-[#1a56db] hover:border-[#1a56db] hover:bg-[#e8eefb] transition disabled:opacity-50 cursor-pointer"
+            title="Add photo"
           >
-            {busy || aiBusy ? "…" : "+"}
+            {busy || aiBusy ? "…" : <Plus className="size-5" />}
           </button>
         ) : null}
         <input
@@ -454,11 +517,11 @@ export const ProductImagePicker = forwardRef<
         />
       </div>
       {busy || aiBusy ? (
-        <p className="mt-1 text-[0.7rem] text-[#5a6b7d]">
+        <p className="mt-1.5 text-[0.7rem] text-[#5a6b7d]">
           {aiBusy ? "Generating AI image…" : "Preparing photo…"}
         </p>
       ) : (
-        <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+        <p className="mt-1.5 text-[0.7rem] text-[#8b9bb0]">
           {slots.length
             ? `${slots.length} photo${slots.length === 1 ? "" : "s"} ready`
             : "JPEG, PNG, WebP, or GIF · resized automatically"}
@@ -467,3 +530,4 @@ export const ProductImagePicker = forwardRef<
     </div>
   );
 });
+

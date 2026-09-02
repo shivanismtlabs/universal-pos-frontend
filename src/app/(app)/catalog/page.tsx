@@ -17,6 +17,7 @@ import {
   Search,
   Tag,
   Layers,
+  Trash2,
 } from "lucide-react";
 import {
   catalogApi,
@@ -344,6 +345,29 @@ function ProductsPanel({
       toast.error(e instanceof ApiError ? e.message : "Delete failed"),
   });
 
+  const [deleteAllOpen, setDeleteAllOpen] = useState(false);
+
+  const deleteAll = useMutation({
+    mutationFn: () => catalogApi.deleteAll(),
+    onSuccess: (res) => {
+      void qc.invalidateQueries({ queryKey: ["catalog-products"] });
+      void qc.invalidateQueries({ queryKey: ["catalog-products-home"] });
+      void qc.invalidateQueries({ queryKey: ["inv-levels"] });
+      void qc.invalidateQueries({ queryKey: ["pos-sale-products"] });
+      void qc.invalidateQueries({ queryKey: ["pos-sale-floor"] });
+      void qc.invalidateQueries({ queryKey: ["pos-sale-catalog"] });
+      void qc.invalidateQueries({ queryKey: ["services-catalog"] });
+      toast.success(
+        `Deleted ${res.deletedCount} items${
+          res.archivedCount ? ` · ${res.archivedCount} archived` : ""
+        }`,
+      );
+      setDeleteAllOpen(false);
+    },
+    onError: (e: Error) =>
+      toast.error(e instanceof ApiError ? e.message : "Delete all failed"),
+  });
+
   const items = list.data?.items ?? [];
   const meta = list.data?.meta;
   const total = meta?.total ?? items.length;
@@ -449,11 +473,25 @@ function ProductsPanel({
             );
           })}
         </div>
-        <p className="ml-auto text-[0.75rem] text-[#5a6b7d]">
-          {list.isLoading
-            ? "Loading…"
-            : `${total.toLocaleString()} item${total === 1 ? "" : "s"}`}
-        </p>
+        <div className="ml-auto flex items-center gap-2">
+          {total > 0 ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setDeleteAllOpen(true)}
+              className="h-8 gap-1.5 border-red-200 text-red-600 hover:border-red-300 hover:bg-red-50 hover:text-red-700 text-xs font-semibold"
+            >
+              <Trash2 className="size-3.5" />
+              Delete all
+            </Button>
+          ) : null}
+          <p className="text-[0.75rem] text-[#5a6b7d]">
+            {list.isLoading
+              ? "Loading…"
+              : `${total.toLocaleString()} item${total === 1 ? "" : "s"}`}
+          </p>
+        </div>
       </div>
 
       <div className="overflow-x-auto rounded-lg border border-[#e4e9f0] bg-white">
@@ -576,7 +614,7 @@ function ProductsPanel({
                     {p.category?.name ?? "—"}
                   </td>
                   <td className="px-3 py-2 text-[#5a6b7d]">
-                    {catalogTypeLabel(p.kind, p.fulfillmentMode) || p.kind}
+                    {catalogTypeLabel(p.kind, p.fulfillmentMode, (p as { meta?: Record<string, unknown> }).meta, p.skuCode) || p.kind}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">
                     {Number(p.basePrice).toFixed(2)}
@@ -716,6 +754,58 @@ function ProductsPanel({
         label={lightbox?.label}
         onClose={() => setLightbox(null)}
       />
+
+      {deleteAllOpen ? (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <button
+            type="button"
+            className="absolute inset-0 bg-[#0b1f33]/50 backdrop-blur-[2px]"
+            aria-label="Close"
+            onClick={() => !deleteAll.isPending && setDeleteAllOpen(false)}
+          />
+          <div className="relative z-10 w-full max-w-md rounded-2xl border border-red-100 bg-white p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-red-100 text-red-600">
+                <Trash2 className="size-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold text-[#0b1f33]">
+                  Delete all catalog items?
+                </h3>
+                <p className="text-xs text-[#5a6b7d]">
+                  Are you sure you want to delete all {total} items from your catalog?
+                </p>
+              </div>
+            </div>
+
+            <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 leading-relaxed">
+              This will permanently remove unsold products, stock counts, and rental units. Any products linked to past sales receipts or invoices will be safely archived to protect audit history.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={deleteAll.isPending}
+                onClick={() => setDeleteAllOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="danger"
+                size="sm"
+                disabled={deleteAll.isPending}
+                onClick={() => deleteAll.mutate()}
+                className="bg-red-600 hover:bg-red-700 text-white font-semibold"
+              >
+                {deleteAll.isPending ? "Deleting all…" : "Yes, delete all items"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

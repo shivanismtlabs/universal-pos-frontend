@@ -18,6 +18,7 @@ import { FieldError } from "@/components/ui/form";
 import { Select } from "@/components/ui/select";
 import { CategorySelectCombobox } from "@/components/category-select-combobox";
 import { BrandSelectCombobox } from "@/components/brand-select-combobox";
+import { UnitSelectCombobox } from "@/components/unit-select-combobox";
 import {
   UnitPricingFields,
   type UnitPricingValue,
@@ -752,26 +753,15 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                   )
                 }
               >
-                <Select
-                  className={fieldSelect}
+                <UnitSelectCombobox
                   value={form.unitOfMeasure}
-                  onChange={(e) => {
+                  unitOptions={unitOptions}
+                  onChange={(code) => {
                     clearFieldError("unitOfMeasure");
                     clearFieldError("multiUnitBaseQty");
-                    setForm((f) => applyCatalogUnitChange(f, e.target.value));
+                    setForm((f) => applyCatalogUnitChange(f, code));
                   }}
-                >
-                  {unitOptions.some((u) => u.code === form.unitOfMeasure) ? null : (
-                    <option value={form.unitOfMeasure}>
-                      {form.unitOfMeasure}
-                    </option>
-                  )}
-                  {unitOptions.map((u) => (
-                    <option key={u.code} value={u.code}>
-                      {u.name} ({u.code})
-                    </option>
-                  ))}
-                </Select>
+                />
               </ShopField>
 
               {form.kind === "service" ? (
@@ -908,21 +898,18 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                         }));
                       }}
                     />
-                    <Select
-                      className={cn(fieldSelect, "w-28 shrink-0")}
+                    <UnitSelectCombobox
+                      compact
+                      className="w-32 shrink-0 h-10"
                       value={form.multiUnitBaseUnit || "pcs"}
-                      onChange={(e) =>
+                      unitOptions={unitOptions}
+                      onChange={(code) =>
                         setForm((f) => ({
                           ...f,
-                          multiUnitBaseUnit: e.target.value,
+                          multiUnitBaseUnit: code,
                         }))
                       }
-                    >
-                      <option value="pcs">pcs</option>
-                      <option value="g">g</option>
-                      <option value="ml">ml</option>
-                      <option value="kg">kg</option>
-                    </Select>
+                    />
                   </div>
                 </ShopField>
               ) : null}
