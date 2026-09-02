@@ -1,7 +1,7 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { useBootstrap } from "@/lib/bootstrap";
@@ -22,48 +22,30 @@ type CounterView = "sale" | "rental" | "service" | "subscription";
 function PosGate() {
   const { isLoading, hasMode, commerceModes } = useBootstrap();
   const params = useSearchParams();
-  const router = useRouter();
 
   const hasSale = hasMode("sale");
   const hasRent = hasMode("rental");
   const hasSvc = hasMode("service");
   const hasSub = hasMode("subscription");
 
+  // Determine initial tab from ?view= param or smart default
   const viewParam = params.get("view");
-
-  const defaultFallback = useCallback((): CounterView => {
+  function defaultView(): CounterView {
+    if (viewParam === "rental" || viewParam === "rent")
+      return hasRent ? "rental" : defaultFallback();
+    if (viewParam === "service") return hasSvc ? "service" : defaultFallback();
+    if (viewParam === "subscription") return hasSub ? "subscription" : defaultFallback();
+    return defaultFallback();
+  }
+  function defaultFallback(): CounterView {
     if (hasSale) return "sale";
     if (hasRent) return "rental";
     if (hasSvc) return "service";
     if (hasSub) return "subscription";
     return "sale";
-  }, [hasSale, hasRent, hasSvc, hasSub]);
+  }
 
-  const resolveView = useCallback((): CounterView => {
-    if (viewParam === "sale") return hasSale ? "sale" : defaultFallback();
-    if (viewParam === "rental" || viewParam === "rent")
-      return hasRent ? "rental" : defaultFallback();
-    if (viewParam === "service") return hasSvc ? "service" : defaultFallback();
-    if (viewParam === "subscription")
-      return hasSub ? "subscription" : defaultFallback();
-    return defaultFallback();
-  }, [viewParam, hasSale, hasRent, hasSvc, hasSub, defaultFallback]);
-
-  const [view, setView] = useState<CounterView>(() => resolveView());
-
-  useEffect(() => {
-    setView(resolveView());
-  }, [resolveView]);
-
-  const selectView = useCallback(
-    (next: CounterView) => {
-      setView(next);
-      const qs = new URLSearchParams(params.toString());
-      qs.set("view", next);
-      router.replace(`/counter?${qs.toString()}`, { scroll: false });
-    },
-    [params, router],
-  );
+  const [view, setView] = useState<CounterView>(defaultView);
 
   if (isLoading) {
     return <p className="text-sm text-[#6b7280]">Opening counter…</p>;
@@ -88,15 +70,16 @@ function PosGate() {
     { id: "subscription" as const, label: "Plans / Memberships", show: hasSub },
   ].filter((t) => t.show);
 
+  // Ensure active view is valid for current modes
   const activeView =
     tabs.some((t) => t.id === view) ? view : (tabs[0]?.id ?? "sale");
 
   const showTabs = tabs.length > 1;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="space-y-0">
       {showTabs ? (
-        <div className="z-10 shrink-0 border-b border-[#d9e0ea] bg-white">
+        <div className="sticky top-0 z-10 border-b border-[#d9e0ea] bg-white">
           <div
             role="tablist"
             aria-label="Counter mode"
@@ -110,7 +93,7 @@ function PosGate() {
                   type="button"
                   role="tab"
                   aria-selected={active}
-                  onClick={() => selectView(t.id)}
+                  onClick={() => setView(t.id)}
                   className={cn(
                     "-mb-px inline-flex items-center border-b-2 px-4 py-3 text-sm font-medium transition",
                     active
@@ -126,20 +109,16 @@ function PosGate() {
         </div>
       ) : null}
 
-      <div className="min-h-0 flex-1 overflow-hidden">
-        {activeView === "sale" && hasSale ? <RetailPosWorkstation /> : null}
-        {activeView === "rental" && hasRent ? <PosWorkstation /> : null}
-        {activeView === "service" && hasSvc ? (
-          <div className="h-full overflow-y-auto p-4">
-            <ServiceDashboard embed />
-          </div>
-        ) : null}
-        {activeView === "subscription" && hasSub ? (
-          <div className="h-full overflow-y-auto p-4">
-            <SubscriptionDashboard />
-          </div>
-        ) : null}
-      </div>
+      {activeView === "sale" && hasSale ? <RetailPosWorkstation /> : null}
+      {activeView === "rental" && hasRent ? <PosWorkstation /> : null}
+      {activeView === "service" && hasSvc ? (
+        <ServiceDashboard embed />
+      ) : null}
+      {activeView === "subscription" && hasSub ? (
+        <div className="p-4">
+          <SubscriptionDashboard />
+        </div>
+      ) : null}
     </div>
   );
 }
