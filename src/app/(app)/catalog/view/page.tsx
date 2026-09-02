@@ -1,12 +1,17 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { catalogApi, tenantsApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
+import { formatQtyWithUnit } from "@/lib/sell-units";
+import {
+  formatPackedContents,
+  parseMultiUnitMeta,
+} from "@/lib/measure-units";
 import { useBootstrap } from "@/lib/bootstrap";
 import { useBranchStore } from "@/lib/branch-store";
 import { resolveOperatingLocationId } from "@/lib/operating-location";
@@ -19,6 +24,9 @@ import { FoodTypeBadge } from "@/components/food-type-badge";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { ProductBarcodePreview } from "@/components/product-barcode-preview";
 import { EntityRowActions } from "@/components/entity-row-actions";
+import { PageBreadcrumb, PageSkeleton } from "@/components/page-header";
+import { cn } from "@/lib/utils";
+import { catalogTypeLabel, productKindLabel } from "@/lib/product-kind";
 
 export default function CatalogProductViewRoute() {
   return (
@@ -61,7 +69,7 @@ function CatalogProductDetailPage() {
     index: number;
   } | null>(null);
   const [serialLoc, setSerialLoc] = useState("");
-  const { data: boot } = useBootstrap();
+  const { data: boot, money } = useBootstrap();
   const currentLocationId = useBranchStore((s) => s.currentLocationId);
 
   useEffect(() => {
@@ -320,26 +328,34 @@ function CatalogProductDetailPage() {
 
   if (!id) {
     return (
-      <p className="p-8 text-sm text-rose-600">
-        Missing product id.{" "}
-        <Link href="/catalog" className="underline">
-          Back
-        </Link>
-      </p>
+      <div className="px-3 py-8 sm:px-4">
+        <p className="text-sm text-rose-600">
+          Missing item id.{" "}
+          <Link href="/catalog" className="font-semibold underline">
+            Back to Items
+          </Link>
+        </p>
+      </div>
     );
   }
 
   if (product.isLoading) {
-    return <p className="p-8 text-sm text-[#5a6b7d]">Loading product…</p>;
+    return (
+      <div className="px-3 py-6 sm:px-4">
+        <PageSkeleton rows={8} />
+      </div>
+    );
   }
   if (!p) {
     return (
-      <p className="p-8 text-sm text-rose-600">
-        Product not found.{" "}
-        <Link href="/catalog" className="underline">
-          Back
-        </Link>
-      </p>
+      <div className="px-3 py-8 sm:px-4">
+        <p className="text-sm text-rose-600">
+          Item not found.{" "}
+          <Link href="/catalog" className="font-semibold underline">
+            Back to Items
+          </Link>
+        </p>
+      </div>
     );
   }
 
@@ -355,16 +371,47 @@ function CatalogProductDetailPage() {
     p.images?.length ? p.images : p.photoUrl ? [p.photoUrl] : []
   ).filter(Boolean) as string[];
 
+  const kindLabel =
+    catalogTypeLabel(p.kind, p.fulfillmentMode) || productKindLabel(p.kind) || p.kind;
+  const packed = parseMultiUnitMeta(p.meta);
+  const sohHere = p.inventoryByLocation?.[0];
+  const detailTabs: Array<[typeof tab, string]> = [
+    ["overview", "Overview"],
+    ["barcode", "Barcode"],
+  ];
+  if (p.kind !== "service" && p.kind !== "digital") {
+    detailTabs.push(["variants", "Variants"]);
+  }
+  if (p.kind === "bundle" || (p.bundleLines?.length ?? 0) > 0) {
+    detailTabs.push(["bundle", p.kind === "bundle" ? "Combo" : "Components"]);
+  }
+  if (p.trackBatch || (p.batches?.length ?? 0) > 0) {
+    detailTabs.push(["batches", "Batch & expiry"]);
+  }
+  if (p.trackSerial || (p.serials?.length ?? 0) > 0) {
+    detailTabs.push(["serials", "Serials"]);
+  }
+  if (p.trackInventory || (p.inventoryByLocation?.length ?? 0) > 0) {
+    detailTabs.push(["inventory", "Stock on Hand"]);
+  }
+
   return (
-    <div className="space-y-4 pb-12">
-      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-[#eef1f4] pb-3">
-        <div className="flex gap-3">
-          <div className="flex flex-col gap-1.5">
+    <div className="space-y-4 px-3 pb-12 sm:px-4">
+      <PageBreadcrumb
+        items={[
+          { label: "Items", href: "/catalog" },
+          { label: p.name },
+        ]}
+      />
+
+      <header className="flex flex-wrap items-start justify-between gap-4 border-b border-[#eef1f4] pb-4">
+        <div className="flex min-w-0 flex-1 gap-4">
+          <div className="flex shrink-0 flex-col gap-1.5">
             <ProductThumb
               src={gallery[0]}
               label={p.name}
               size="xl"
-              className="rounded border border-[#eef1f4]"
+              className="h-28 w-28 rounded-lg sm:h-32 sm:w-32"
               count={gallery.length}
               onClick={
                 gallery.length
@@ -373,41 +420,57 @@ function CatalogProductDetailPage() {
               }
             />
             {gallery.length > 1 ? (
-              <div className="flex max-w-[11rem] gap-1 overflow-x-auto">
-                {gallery.map((src, i) => (
+              <div className="flex max-w-[8rem] gap-1 overflow-x-auto sm:max-w-[8.5rem]">
+                {gallery.slice(0, 6).map((src, i) => (
                   <ProductThumb
                     key={`${src}-${i}`}
                     src={src}
                     label={p.name}
                     size="sm"
+                    className="h-8 w-8 rounded-md"
                     onClick={() => setLightbox({ images: gallery, index: i })}
                   />
                 ))}
               </div>
             ) : null}
           </div>
-          <div>
-            <p className="eyebrow">
-              {p.kind} · {p.status}
-            </p>
-            <h1 className="page-title mt-1 inline-flex items-center gap-2">
+          <div className="min-w-0">
+            <p className="eyebrow">Inventory · Item</p>
+            <h1 className="page-title mt-1 flex flex-wrap items-center gap-2">
               <FoodTypeBadge value={p.foodType} showLabel />
-              {p.name}
+              <span className="break-words">{p.name}</span>
             </h1>
-            <p className="mt-1 font-mono text-sm font-medium text-[#475569]">
+            <p className="mt-1.5 font-mono text-sm text-[#5a6b7d]">
               SKU {p.skuCode}
-              {p.barcode ? ` · Barcode ${p.barcode}` : ""}
+              {p.barcode ? ` · ${p.barcode}` : ""}
             </p>
+            <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+              <StatusPill status={p.status} />
+              <span className="rounded-md bg-[#eef2f8] px-1.5 py-0.5 text-[0.7rem] font-semibold text-[#475569]">
+                {kindLabel}
+              </span>
+              {p.category?.name ? (
+                <span className="text-[0.75rem] text-[#5a6b7d]">
+                  {p.category.parent
+                    ? `${p.category.parent.name} › ${p.category.name}`
+                    : p.category.name}
+                </span>
+              ) : null}
+            </div>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <Button variant="secondary" asChild>
-            <Link href="/catalog">Back</Link>
+            <Link href="/catalog">Items</Link>
           </Button>
           <Button asChild>
             <Link href={`/catalog/new?id=${p.id}`}>Edit</Link>
           </Button>
-          <Button variant="secondary" onClick={() => dup.mutate()}>
+          <Button
+            variant="secondary"
+            disabled={dup.isPending}
+            onClick={() => dup.mutate()}
+          >
             Duplicate
           </Button>
           {p.status === "active" ? (
@@ -415,14 +478,14 @@ function CatalogProductDetailPage() {
               variant="secondary"
               onClick={() => setStatus.mutate("inactive")}
             >
-              Deactivate
+              Mark inactive
             </Button>
           ) : (
             <Button
               variant="secondary"
               onClick={() => setStatus.mutate("active")}
             >
-              {p.status === "archived" ? "Unarchive" : "Activate"}
+              {p.status === "archived" ? "Unarchive" : "Mark active"}
             </Button>
           )}
           <EntityRowActions
@@ -435,7 +498,7 @@ function CatalogProductDetailPage() {
                   }
                 : undefined
             }
-            softDeleteTitle="Archive (soft delete)"
+            softDeleteTitle="Archive"
             onUnarchive={
               p.status === "archived"
                 ? () => {
@@ -461,27 +524,24 @@ function CatalogProductDetailPage() {
         </div>
       </header>
 
-      <div className="flex flex-wrap gap-1 border-b border-[#eef1f4]">
-        {(
-          [
-            ["overview", "Overview"],
-            ["barcode", "Barcode"],
-            ["variants", "Variants"],
-            ["bundle", "Bundle / recipe"],
-            ["batches", "Batch & expiry"],
-            ["serials", "Serials"],
-            ["inventory", "Inventory (read)"],
-          ] as const
-        ).map(([k, label]) => (
+      <div
+        role="tablist"
+        aria-label="Item detail"
+        className="flex flex-wrap gap-1 border-b border-[#eef1f4]"
+      >
+        {detailTabs.map(([k, label]) => (
           <button
             key={k}
             type="button"
+            role="tab"
+            aria-selected={tab === k}
             onClick={() => setTab(k)}
-            className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px ${
+            className={cn(
+              "-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors",
               tab === k
                 ? "border-[#1a56db] text-[#1a56db]"
-                : "border-transparent text-[#5a6b7d]"
-            }`}
+                : "border-transparent text-[#5a6b7d] hover:text-[#0b1f33]",
+            )}
           >
             {label}
           </button>
@@ -489,71 +549,145 @@ function CatalogProductDetailPage() {
       </div>
 
       {tab === "overview" ? (
-        <div className="grid gap-4 lg:grid-cols-[1fr_200px]">
-          <div className="space-y-3 rounded-md border border-[#e4e9f0] bg-white p-4 text-sm">
-            <Row label="Category" value={p.category?.name} />
-            <Row
-              label="Subcategory path"
-              value={
-                p.category?.parent
-                  ? `${p.category.parent.name} › ${p.category.name}`
-                  : p.category?.name
-              }
-            />
-            <Row label="Brand" value={p.brand?.name ?? "—"} />
-            <Row label="Selling price" value={String(p.basePrice)} />
-            <Row
-              label="Cost / MRP"
-              value={`${p.costPrice ?? "—"} / ${p.mrp ?? "—"}`}
-            />
-            <Row label="Tax ref" value={p.taxCode ?? "—"} />
-            <Row label="UOM" value={p.unitOfMeasure} />
-            <Row
-              label="Track inventory"
-              value={p.trackInventory ? "Yes" : "No"}
-            />
-            <Row label="Serial" value={p.trackSerial ? "Yes" : "No"} />
-            <Row label="Batch" value={p.trackBatch ? "Yes" : "No"} />
-            <Row
-              label="Sell / Purchase / POS"
-              value={`${p.canSell ? "Sell" : "—"} · ${p.canPurchase ? "Buy" : "—"} · ${p.availableInPos ? "POS" : "hidden"}`}
-            />
-            <Row label="Short" value={p.shortDescription ?? "—"} />
-            <div>
-              <p className="text-[0.7rem] font-semibold text-[#5a6b7d] uppercase">
-                Description
-              </p>
-              <p className="mt-1 whitespace-pre-wrap text-[#0b1f33]">
-                {p.description || "—"}
-              </p>
-            </div>
-          </div>
-          <div className="rounded-md border border-[#e4e9f0] bg-white p-3 text-center">
-            <p className="mb-2 text-[0.72rem] font-bold tracking-wide text-[#475569] uppercase">
-              QR code
-            </p>
-            {p.qr?.chartUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={p.qr.chartUrl}
-                alt="Product QR"
-                className="mx-auto size-[160px]"
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_16.5rem]">
+          <div className="space-y-4">
+            <DetailCard title="Primary">
+              <DetailRow label="Name" value={p.name} />
+              <DetailRow label="SKU" value={p.skuCode} mono />
+              <DetailRow label="Type" value={kindLabel} />
+              <DetailRow
+                label="Short name"
+                value={p.shortDescription ?? "—"}
               />
-            ) : null}
-            <p className="mt-2 break-all font-mono text-[0.65rem] text-[#8a9bb0]">
-              {p.qr?.display}
-            </p>
+              {p.description ? (
+                <div className="border-t border-[#f3f5f8] pt-3">
+                  <p className="text-[0.7rem] font-semibold tracking-wide text-[#5a6b7d] uppercase">
+                    Description
+                  </p>
+                  <p className="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed text-[#0b1f33]">
+                    {p.description}
+                  </p>
+                </div>
+              ) : null}
+            </DetailCard>
+            <DetailCard title="Classification">
+              <DetailRow
+                label="Category"
+                value={
+                  p.category?.parent
+                    ? `${p.category.parent.name} › ${p.category.name}`
+                    : (p.category?.name ?? "—")
+                }
+              />
+              <DetailRow label="Brand" value={p.brand?.name ?? "—"} />
+            </DetailCard>
+            <DetailCard title="Pricing">
+              <DetailRow label="Rate" value={money(p.basePrice)} />
+              <DetailRow
+                label="Cost"
+                value={p.costPrice != null ? money(p.costPrice) : "—"}
+              />
+              <DetailRow
+                label="MRP / list"
+                value={p.mrp != null ? money(p.mrp) : "—"}
+              />
+              <DetailRow label="HSN / SAC" value={p.taxCode ?? "—"} />
+              <DetailRow label="Unit" value={p.unitOfMeasure || "pcs"} />
+              {packed ? (
+                <DetailRow
+                  label="Packed contents"
+                  value={formatPackedContents(
+                    p.unitOfMeasure || "box",
+                    packed.baseQty,
+                    packed.baseUnit,
+                  )}
+                />
+              ) : null}
+            </DetailCard>
+            <DetailCard title="Inventory tracking">
+              <DetailRow
+                label="Track inventory"
+                value={p.trackInventory ? "Yes" : "No"}
+              />
+              <DetailRow
+                label="Serial"
+                value={p.trackSerial ? "Yes" : "No"}
+              />
+              <DetailRow
+                label="Batch / expiry"
+                value={p.trackBatch ? "Yes" : "No"}
+              />
+              <DetailRow
+                label="Available in"
+                value={[
+                  p.canSell ? "Sales" : null,
+                  p.canPurchase ? "Purchases" : null,
+                  p.availableInPos ? "POS" : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || "—"}
+              />
+            </DetailCard>
           </div>
+          <aside className="space-y-4">
+            {sohHere ? (
+              <div className="rounded-lg border border-[#e4e9f0] bg-white p-4">
+                <p className="text-[0.7rem] font-semibold tracking-wide text-[#5a6b7d] uppercase">
+                  Stock on Hand
+                </p>
+                <p className="mt-1 text-2xl font-semibold tabular-nums text-[#0b1f33]">
+                  {formatQtyWithUnit(
+                    Number(sohHere.qtyOnHand),
+                    sohHere.sellUnit || p.unitOfMeasure || "pcs",
+                  )}
+                </p>
+                <p className="mt-1 text-xs text-[#8b9bb0]">
+                  {sohHere.location?.name ?? "This location"}
+                </p>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="mt-3 w-full"
+                  asChild
+                >
+                  <Link href="/inventory">Open stock levels</Link>
+                </Button>
+              </div>
+            ) : null}
+            <div className="rounded-lg border border-[#e4e9f0] bg-white p-4 text-center">
+              <p className="mb-3 text-[0.7rem] font-semibold tracking-wide text-[#5a6b7d] uppercase">
+                Item QR
+              </p>
+              {p.qr?.chartUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={p.qr.chartUrl}
+                  alt=""
+                  className="mx-auto size-[148px] rounded-md border border-[#eef1f4] bg-white p-1"
+                />
+              ) : (
+                <p className="py-8 text-sm text-[#8b9bb0]">No QR yet</p>
+              )}
+              {p.qr?.display ? (
+                <p className="mt-2 break-all font-mono text-[0.65rem] text-[#8a9bb0]">
+                  {p.qr.display}
+                </p>
+              ) : null}
+            </div>
+          </aside>
         </div>
       ) : null}
 
       {tab === "barcode" ? (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
-          <div className="space-y-3 rounded-md border border-[#e4e9f0] bg-white p-4">
-            <p className="text-sm text-[#5a6b7d]">
-              Code 128 is the default for internal barcodes. You can also type
-              or scan an existing package barcode (EAN/UPC).
-            </p>
+          <div className="space-y-4 rounded-lg border border-[#e4e9f0] bg-white p-5">
+            <div>
+              <h2 className="text-sm font-semibold text-[#0b1f33]">Barcode</h2>
+              <p className="mt-1 text-sm text-[#5a6b7d]">
+                Code 128 is the default. Type or scan an existing EAN/UPC if the
+                pack already has one.
+              </p>
+            </div>
             <div>
               <Label>Barcode value</Label>
               <div className="mt-1.5 flex flex-wrap gap-2">
@@ -575,7 +709,7 @@ function CatalogProductDetailPage() {
                   disabled={genBarcode.isPending}
                   onClick={() => genBarcode.mutate()}
                 >
-                  Generate barcode
+                  Generate
                 </Button>
                 <Button
                   type="button"
@@ -585,14 +719,17 @@ function CatalogProductDetailPage() {
                     saveBarcode.mutate();
                   }}
                 >
-                  Save barcode
+                  Save
                 </Button>
               </div>
               {barcodeErr ? (
                 <p className="mt-1 text-xs text-rose-600">{barcodeErr}</p>
               ) : null}
             </div>
-            <Row label="Stored type" value={p.barcodeType ?? "—"} />
+            <DetailRow
+              label="Stored type"
+              value={p.barcodeType ?? "—"}
+            />
           </div>
           {(barcodeDraft || p.barcode) ? (
             <ProductBarcodePreview
@@ -604,7 +741,7 @@ function CatalogProductDetailPage() {
               showPrint
             />
           ) : (
-            <div className="rounded-md border border-dashed border-[#e4e9f0] bg-white p-6 text-center text-sm text-[#6b7280]">
+            <div className="rounded-lg border border-dashed border-[#e4e9f0] bg-white p-8 text-center text-sm text-[#6b7280]">
               Generate or enter a barcode to preview the label.
             </div>
           )}
@@ -663,7 +800,7 @@ function CatalogProductDetailPage() {
                   <td className="px-3 py-2">{v.name}</td>
                   <td className="px-3 py-2 font-mono text-xs">{v.skuCode}</td>
                   <td className="px-3 py-2 text-[#5a6b7d]">
-                    {JSON.stringify(v.attributes ?? {})}
+                    {formatVariantAttrs(v.attributes)}
                   </td>
                   <td className="px-3 py-2 text-right">
                     <Button
@@ -676,21 +813,32 @@ function CatalogProductDetailPage() {
                   </td>
                 </tr>
               ))}
+              {!(p.variants ?? []).length ? (
+                <tr>
+                  <td
+                    colSpan={4}
+                    className="px-3 py-8 text-center text-[#8b9bb0]"
+                  >
+                    No variants yet. Size, color, or other options go here.
+                  </td>
+                </tr>
+              ) : null}
             </tbody>
           </table>
         </div>
       ) : null}
 
       {tab === "bundle" ? (
-        <div className="space-y-3 rounded-md border border-[#e4e9f0] bg-white p-4">
+        <div className="space-y-3 rounded-lg border border-[#e4e9f0] bg-white p-5">
           {p.kind === "bundle" ? (
             <p className="text-sm text-[#5a6b7d]">
-              Combo pack components. These do not deduct unless marked consume-on-sale.
+              Combo pack components. Stock comes from these items, not a fake
+              quantity on the pack.
             </p>
           ) : (
             <p className="text-sm text-[#5a6b7d]">
-              Recipe / BOM. Selling this item deducts ingredients at checkout, not the
-              finished dish. KOT does not consume stock.
+              Components used when this item is sold. Checkout deducts these
+              lines — the finished item does not keep its own stock.
             </p>
           )}
               <div className="flex flex-wrap gap-2 items-end">
@@ -800,7 +948,12 @@ function CatalogProductDetailPage() {
                       ? new Date(b.expiresAt).toLocaleDateString()
                       : "—"}
                   </td>
-                  <td className="px-3 py-2 text-right">{b.qtyOnHand}</td>
+                  <td className="px-3 py-2 text-right">
+                    {formatQtyWithUnit(
+                      Number(b.qtyOnHand),
+                      p.unitOfMeasure || "pcs",
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -902,38 +1055,63 @@ function CatalogProductDetailPage() {
       ) : null}
 
       {tab === "inventory" ? (
-        <div className="rounded-md border border-[#e4e9f0] bg-white p-4">
-          <p className="mb-3 text-sm text-[#5a6b7d]">
-            Location quantities are Inventory — not editable here. Use Stock
-            levels / Adjustments for movements.
-          </p>
-          <table className="w-full text-sm">
-            <thead className="text-left text-[0.7rem] uppercase text-[#5a6b7d]">
-              <tr>
-                <th className="py-1">Location</th>
-                <th className="py-1 text-right">Qty on hand</th>
-                <th className="py-1 text-right">Sell price</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(p.inventoryByLocation ?? []).map((row) => (
-                <tr key={row.stockLevelId} className="border-t border-[#eef1f4]">
-                  <td className="py-2">{row.location?.name ?? row.locationId}</td>
-                  <td className="py-2 text-right tabular-nums">
-                    {row.qtyOnHand} {row.sellUnit}
-                  </td>
-                  <td className="py-2 text-right">{row.sellPrice}</td>
-                </tr>
-              ))}
-              {!p.inventoryByLocation?.length ? (
+        <div className="overflow-hidden rounded-lg border border-[#e4e9f0] bg-white">
+          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#eef1f4] px-5 py-4">
+            <div>
+              <h2 className="text-sm font-semibold text-[#0b1f33]">
+                Stock on Hand
+              </h2>
+              <p className="mt-0.5 text-sm text-[#5a6b7d]">
+                Quantities are per location. Change stock from Inventory — not
+                on this item.
+              </p>
+            </div>
+            <Button variant="secondary" size="sm" asChild>
+              <Link href="/inventory">Open stock levels</Link>
+            </Button>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="border-b border-[#eef1f4] bg-[#f7f9fb] text-[0.7rem] font-semibold tracking-wide text-[#5a6b7d] uppercase">
                 <tr>
-                  <td colSpan={3} className="py-4 text-[#5a6b7d]">
-                    No stock levels yet
-                  </td>
+                  <th className="px-5 py-2.5">Location</th>
+                  <th className="px-5 py-2.5 text-right">On hand</th>
+                  <th className="px-5 py-2.5 text-right">Rate</th>
                 </tr>
-              ) : null}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {(p.inventoryByLocation ?? []).map((row) => (
+                  <tr
+                    key={row.stockLevelId}
+                    className="border-t border-[#eef1f4]"
+                  >
+                    <td className="px-5 py-2.5 font-medium">
+                      {row.location?.name ?? row.locationId}
+                    </td>
+                    <td className="px-5 py-2.5 text-right tabular-nums">
+                      {formatQtyWithUnit(
+                        Number(row.qtyOnHand),
+                        row.sellUnit || p.unitOfMeasure || "pcs",
+                      )}
+                    </td>
+                    <td className="px-5 py-2.5 text-right tabular-nums">
+                      {money(row.sellPrice)}
+                    </td>
+                  </tr>
+                ))}
+                {!p.inventoryByLocation?.length ? (
+                  <tr>
+                    <td
+                      colSpan={3}
+                      className="px-5 py-10 text-center text-[#5a6b7d]"
+                    >
+                      No stock levels yet. Use Stock In from Inventory.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
         </div>
       ) : null}
 
@@ -948,13 +1126,68 @@ function CatalogProductDetailPage() {
   );
 }
 
-function Row({ label, value }: { label: string; value?: string | null }) {
+function StatusPill({ status }: { status: string }) {
+  const styles: Record<string, string> = {
+    active: "bg-emerald-50 text-emerald-800",
+    inactive: "bg-slate-100 text-slate-600",
+    draft: "bg-amber-50 text-amber-800",
+    archived: "bg-rose-50 text-rose-800",
+  };
   return (
-    <div className="grid grid-cols-[140px_1fr] gap-2 border-b border-[#f3f5f8] py-1.5">
-      <span className="text-[0.72rem] font-bold tracking-wide text-[#475569] uppercase">
-        {label}
+    <span
+      className={cn(
+        "inline-flex rounded px-1.5 py-0.5 text-[0.7rem] font-semibold capitalize",
+        styles[status] ?? "bg-slate-100 text-slate-600",
+      )}
+    >
+      {status}
+    </span>
+  );
+}
+
+function DetailCard({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="rounded-lg border border-[#e4e9f0] bg-white p-5">
+      <h2 className="mb-3 text-sm font-semibold text-[#0b1f33]">{title}</h2>
+      <div className="space-y-0">{children}</div>
+    </section>
+  );
+}
+
+function DetailRow({
+  label,
+  value,
+  mono,
+}: {
+  label: string;
+  value?: string | null;
+  mono?: boolean;
+}) {
+  return (
+    <div className="grid grid-cols-[8.5rem_minmax(0,1fr)] gap-3 border-b border-[#f3f5f8] py-2 last:border-b-0 last:pb-0 first:pt-0">
+      <span className="text-[0.75rem] text-[#5a6b7d]">{label}</span>
+      <span
+        className={cn(
+          "text-sm font-medium text-[#0b1f33]",
+          mono && "font-mono text-[0.8125rem]",
+        )}
+      >
+        {value || "—"}
       </span>
-      <span className="font-medium text-[#0b1f33]">{value || "—"}</span>
     </div>
   );
+}
+
+function formatVariantAttrs(attrs: unknown): string {
+  if (!attrs || typeof attrs !== "object") return "—";
+  const parts = Object.entries(attrs as Record<string, unknown>)
+    .filter(([, v]) => v != null && String(v).trim() !== "")
+    .map(([k, v]) => `${k}: ${String(v)}`);
+  return parts.length ? parts.join(" · ") : "—";
 }

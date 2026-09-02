@@ -11,12 +11,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  Plus,
   Minus,
+  Plus,
   AlertTriangle,
-  PackagePlus,
-  PackageMinus,
-  SlidersHorizontal,
   RefreshCw,
 } from "lucide-react";
 import {
@@ -27,6 +24,7 @@ import { ApiError } from "@/lib/api/client";
 import { canWriteCatalog } from "@/lib/roles";
 import { useAuthStore } from "@/lib/auth-store";
 import { useBranchStore } from "@/lib/branch-store";
+import { useBootstrap } from "@/lib/bootstrap";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -54,8 +52,6 @@ import { formatQtyWithUnit } from "@/lib/sell-units";
 
 type Tab =
   | "levels"
-  | "in"
-  | "out"
   | "damage"
   | "audit"
   | "ledger"
@@ -65,8 +61,6 @@ type Tab =
 const TAB_IDS: Tab[] = [
   "levels",
   "alerts",
-  "in",
-  "out",
   "damage",
   "audit",
   "ledger",
@@ -101,8 +95,8 @@ function InventoryPageInner() {
   const [importOpen, setImportOpen] = useState(false);
   const tenantId = useAuthStore((s) => s.user?.tenantId);
   const branchId = useBranchStore((s) => s.currentLocationId);
-  const setBranchId = useBranchStore((s) => s.setCurrentLocationId);
 
+  const { hasScreen } = useBootstrap();
   const [stockInOpen, setStockInOpen] = useState(false);
   const [stockOutOpen, setStockOutOpen] = useState(false);
   const [damageOpen, setDamageOpen] = useState(false);
@@ -142,75 +136,85 @@ function InventoryPageInner() {
       <PageHeader
         eyebrow="Stock"
         title="Inventory"
-        subtitle="How much stock you have in this shop. Import an Excel file to add items and opening qty."
-        className="[&>div:last-child]:w-full"
-        action={
-          <div className="flex w-full flex-wrap items-center gap-2">
-            {canWrite ? (
+        subtitle={
+          <>
+            On-hand stock at this location. Use{" "}
+            <span className="font-semibold text-[#0b1f33]">Stock In</span> or{" "}
+            <span className="font-semibold text-[#0b1f33]">Edit</span> on a row
+            to receive stock.{" "}
+            <Link
+              href="/adjustments"
+              className="font-semibold text-[#1a56db] hover:underline"
+            >
+              Adjustments
+            </Link>
+            {" · "}
+            <Link
+              href="/transfers"
+              className="font-semibold text-[#1a56db] hover:underline"
+            >
+              Transfers
+            </Link>
+            {hasScreen("inventory") ? (
               <>
-                <Button
-                  type="button"
-                  onClick={() => setStockInOpen(true)}
-                  className="bg-[#1a56db] hover:bg-[#1546b3]"
+                {" · "}
+                <Link
+                  href="/suppliers/orders"
+                  className="font-semibold text-[#1a56db] hover:underline"
                 >
-                  <Plus className="mr-1 size-4" />
-                  Stock In
-                </Button>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => setStockOutOpen(true)}
-                >
-                  <Minus className="mr-1 size-4" />
-                  Stock Out
-                </Button>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => setDamageOpen(true)}
-                >
-                  <AlertTriangle className="mr-1 size-4 text-amber-600" />
-                  Report Damaged
-                </Button>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  className="ml-auto"
-                  onClick={() => setImportOpen(true)}
-                >
-                  Import Excel / CSV
-                </Button>
+                  Purchase orders
+                </Link>
               </>
             ) : null}
-          </div>
+          </>
+        }
+        action={
+          canWrite ? (
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setStockInOpen(true)}
+              >
+                <Plus className="size-4" />
+                Stock In
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setStockOutOpen(true)}
+              >
+                <Minus className="size-4" />
+                Stock Out
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setDamageOpen(true)}
+              >
+                <AlertTriangle className="size-4 text-amber-600" />
+                Damaged
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setImportOpen(true)}
+              >
+                Import Items
+              </Button>
+            </div>
+          ) : null
         }
       />
 
       <section className={formCard}>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <Label>Location *</Label>
-            <Select
-              className={fieldSelect}
-              value={activeLoc}
-              onChange={(e) => {
-                setBranchId(e.target.value || null);
-              }}
-            >
-              {(locations.data ?? []).map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.name}
-                  {l.type ? ` (${l.type})` : ""}
-                </option>
-              ))}
-            </Select>
-            {locations.data && locations.data.length > 1 ? (
-              <p className="mt-1 text-[0.72rem] text-[#6b7280]">
-                Stock is per location — switch here if this store looks empty.
-              </p>
-            ) : null}
-          </div>
-        </div>
+        <p className="text-sm text-[#5a6b7d]">
+          Showing stock for{" "}
+          <span className="font-medium text-[#0b1f33]">{activeLocName}</span>
+          {locations.data && locations.data.length > 1
+            ? " — switch location from the header."
+            : "."}
+        </p>
 
         <div className="flex flex-wrap gap-1 border-b border-[#e5e7eb]">
           {tabs.map((t) => (
@@ -276,7 +280,7 @@ function LevelsTab({
   locationId: string;
   canWrite: boolean;
 }) {
-  const qc = useQueryClient();
+  const { money } = useBootstrap();
   const [q, setQ] = useState("");
   const [lowOnly, setLowOnly] = useState(false);
   const [page, setPage] = useState(1);
@@ -310,6 +314,10 @@ function LevelsTab({
     sellPrice: number;
     reorderPoint: number | null;
     reorderQty: number | null;
+    qtyOnHand?: number;
+    sellUnit?: string;
+    requiresSerial?: boolean;
+    trackSerial?: boolean;
   } | null>(null);
 
   return (
@@ -338,12 +346,13 @@ function LevelsTab({
         <table className="w-full min-w-[720px] text-sm">
           <thead className="bg-[#f7f9fb] text-left text-[0.7rem] uppercase text-[#5a6b7d]">
             <tr>
-              <th className="px-3 py-2">Product</th>
+              <th className="px-3 py-2">Item</th>
               <th className="px-3 py-2">SKU</th>
               <th className="px-3 py-2 text-right">On hand</th>
-              <th className="px-3 py-2 text-right">Price</th>
+              <th className="px-3 py-2 text-right">Available</th>
               <th className="px-3 py-2 text-right">Damaged</th>
-              <th className="px-3 py-2 text-right">Reorder @</th>
+              <th className="px-3 py-2 text-right">Rate</th>
+              <th className="px-3 py-2 text-right">Reorder</th>
               <th className="px-3 py-2">Status</th>
               <th className="px-3 py-2" />
             </tr>
@@ -354,16 +363,24 @@ function LevelsTab({
                 <td className="px-3 py-2 font-medium">{r.name}</td>
                 <td className="px-3 py-2 font-mono text-xs">{r.sku}</td>
                 <td className="px-3 py-2 text-right tabular-nums">
-                  {r.qtyOnHand} {r.sellUnit}
+                  {formatQtyWithUnit(Number(r.qtyOnHand), r.sellUnit)}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums">
-                  ₹{Number(r.sellPrice ?? 0).toLocaleString("en-IN")}
+                <td className="px-3 py-2 text-right font-semibold tabular-nums text-[#0b1f33]">
+                  {formatQtyWithUnit(
+                    Number(r.sellableQty ?? Number(r.qtyOnHand) - Number(r.qtyReserved ?? 0)),
+                    r.sellUnit,
+                  )}
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums text-amber-800">
-                  {r.qtyDamaged}
+                  {formatQtyWithUnit(Number(r.qtyDamaged ?? 0), r.sellUnit)}
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums">
-                  {r.reorderPoint ?? "—"}
+                  {money(r.sellPrice ?? 0)}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">
+                  {r.reorderPoint != null
+                    ? formatQtyWithUnit(Number(r.reorderPoint), r.sellUnit)
+                    : "—"}
                 </td>
                 <td className="px-3 py-2">
                   {r.isLowStock ? (
@@ -385,9 +402,15 @@ function LevelsTab({
                           sellPrice: Number(r.sellPrice ?? 0),
                           reorderPoint: r.reorderPoint ?? null,
                           reorderQty: r.reorderQty ?? null,
+                          qtyOnHand: Number(r.qtyOnHand ?? 0),
+                          sellUnit: r.sellUnit,
+                          requiresSerial: Boolean(
+                            r.requiresSerial ?? r.trackSerial,
+                          ),
+                          trackSerial: Boolean(r.trackSerial),
                         });
                       }}
-                      editTitle="Edit branch price & reorder"
+                      editTitle="Edit price, reorder & stock in"
                     />
                   ) : null}
                 </td>
@@ -396,7 +419,7 @@ function LevelsTab({
             {levels.isLoading ? (
               <tr>
                 <td
-                  colSpan={8}
+                  colSpan={9}
                   className="px-3 py-8 text-center text-[#5a6b7d]"
                 >
                   Loading stock for this location…
@@ -405,10 +428,11 @@ function LevelsTab({
             ) : !levelRows.length ? (
               <tr>
                 <td
-                  colSpan={8}
+                  colSpan={9}
                   className="px-3 py-8 text-center text-[#5a6b7d]"
                 >
-                  No stock levels at this location
+                  No stock levels at this location. Add items in Catalog, then
+                  use Edit on a row to Stock In opening quantity.
                 </td>
               </tr>
             ) : null}
@@ -441,8 +465,18 @@ function AlertsTab({
     queryFn: () => inventoryApi.lowStock(locationId || undefined),
   });
 
+  type LowStockRow = {
+    stockLevelId: string;
+    name: string;
+    sku: string;
+    sellUnit?: string;
+    qtyOnHand: number;
+    reorderPoint: number | null;
+    location?: { name: string };
+  };
+
   const rows = useMemo(() => {
-    const list = alerts.data?.items ?? [];
+    const list: LowStockRow[] = alerts.data?.items ?? [];
     const needle = q.trim().toLowerCase();
     if (!needle) return list;
     return list.filter(
@@ -497,13 +531,13 @@ function AlertsTab({
                       {i.sku}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums text-amber-800">
-                      {i.qtyOnHand}
+                      {formatQtyWithUnit(Number(i.qtyOnHand), i.sellUnit)}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums text-[#5a6b7d]">
-                      {rp}
+                      {formatQtyWithUnit(Number(rp), i.sellUnit)}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums font-semibold text-[#b45309]">
-                      {gap}
+                      {formatQtyWithUnit(gap, i.sellUnit)}
                     </td>
                     <td className="px-3 py-2 text-[#5a6b7d]">
                       {i.location?.name ?? locationName}
@@ -617,7 +651,8 @@ function MoveTab({
           <option value="">Select item</option>
           {(levels.data?.items ?? []).map((i) => (
             <option key={i.stockLevelId} value={i.stockLevelId}>
-              {i.name} ({i.sku}) — {i.qtyOnHand}
+              {i.name} ({i.sku}) —{" "}
+              {formatQtyWithUnit(Number(i.qtyOnHand), i.sellUnit)}
             </option>
           ))}
         </Select>
@@ -669,18 +704,9 @@ function DamageTab({
   locationId: string;
   canWrite: boolean;
 }) {
-  const levels = useQuery({
-    queryKey: ["inv-levels-picker", locationId],
-    queryFn: () =>
-      inventoryApi.listLevels({
-        locationId,
-        includeZero: true,
-        page: 1,
-        limit: 100,
-      }),
-    enabled: Boolean(locationId),
-  });
   const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
+  const pageSize = 25;
   const [reportOpen, setReportOpen] = useState(false);
   const [restoreTarget, setRestoreTarget] = useState<{
     stockLevelId: string;
@@ -690,17 +716,26 @@ function DamageTab({
     sellUnit?: string;
   } | null>(null);
 
-  const damaged = useMemo(() => {
-    const list = (levels.data?.items ?? []).filter((i) => i.qtyDamaged > 0);
-    const needle = q.trim().toLowerCase();
-    if (!needle) return list;
-    return list.filter(
-      (i) =>
-        i.name.toLowerCase().includes(needle) ||
-        i.sku.toLowerCase().includes(needle) ||
-        i.productSku.toLowerCase().includes(needle),
-    );
-  }, [levels.data, q]);
+  const levels = useQuery({
+    queryKey: ["inv-damaged", locationId, q, page],
+    queryFn: () =>
+      inventoryApi.listLevels({
+        locationId,
+        q: q || undefined,
+        damagedOnly: true,
+        includeZero: true,
+        page,
+        limit: pageSize,
+      }),
+    enabled: Boolean(locationId),
+  });
+
+  useEffect(() => {
+    setPage(1);
+  }, [q, locationId]);
+
+  const damaged = levels.data?.items ?? [];
+  const meta = levels.data?.meta;
 
   return (
     <div className="space-y-4">
@@ -735,7 +770,8 @@ function DamageTab({
           onChange={(e) => setQ(e.target.value)}
         />
         <p className="mt-1 text-[0.72rem] text-[#6b7280]">
-          {damaged.length} damaged item{damaged.length === 1 ? "" : "s"} at this location.
+          {meta?.total ?? damaged.length} damaged item
+          {(meta?.total ?? damaged.length) === 1 ? "" : "s"} at this location.
         </p>
       </div>
 
@@ -765,10 +801,10 @@ function DamageTab({
                     {d.sku}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">
-                    {d.qtyOnHand}
+                    {formatQtyWithUnit(Number(d.qtyOnHand), d.sellUnit)}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums font-semibold text-[#b45309]">
-                    {d.qtyDamaged}
+                    {formatQtyWithUnit(Number(d.qtyDamaged), d.sellUnit)}
                   </td>
                   <td className="px-3 py-2 text-[#5a6b7d]">{d.sellUnit}</td>
                   <td className="px-3 py-2 text-right">
@@ -797,7 +833,16 @@ function DamageTab({
                   </td>
                 </tr>
               ))}
-              {!damaged.length ? (
+              {levels.isLoading ? (
+                <tr>
+                  <td
+                    colSpan={6}
+                    className="px-3 py-10 text-center text-[#8b9bb0]"
+                  >
+                    Loading damaged stock…
+                  </td>
+                </tr>
+              ) : !damaged.length ? (
                 <tr>
                   <td
                     colSpan={6}
@@ -811,6 +856,9 @@ function DamageTab({
           </table>
         </div>
       </div>
+      <TablePager
+        {...pagerFromMeta(meta, page, pageSize, setPage, damaged.length)}
+      />
 
       <DamagedStockModal
         open={reportOpen}

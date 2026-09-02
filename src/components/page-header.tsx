@@ -14,7 +14,7 @@ export function PageHeader({
   className,
 }: {
   title: string;
-  subtitle: string;
+  subtitle: React.ReactNode;
   /** Optional blue kicker above the title (e.g. Inventory, Sales) */
   eyebrow?: string;
   action?: React.ReactNode;

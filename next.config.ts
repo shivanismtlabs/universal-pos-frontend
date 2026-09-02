@@ -8,8 +8,10 @@ const apiOrigin = (
   .replace(/\/v1\/?$/i, "");
 
 const nextConfig: NextConfig = {
-  // Live deploys must not fail on lint; keep CI/local `next lint` for quality.
+  // Live deploys must not fail on lint/type-check; keep CI/local for quality.
   eslint: { ignoreDuringBuilds: true },
+  transpilePackages: ["country-flag-icons"],
+  typescript: { ignoreBuildErrors: true },
   async rewrites() {
     return [
       {

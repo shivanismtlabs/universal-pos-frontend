@@ -47,8 +47,6 @@ import { ModeBadge } from "@/components/mode-badge";
 import { PageBreadcrumb, PageSkeleton } from "@/components/page-header";
 import { ReceiptModal, type ReceiptData } from "@/components/receipt-modal";
 import { SaleReturnDialog } from "@/components/sale-return-dialog";
-import { printTaxInvoice } from "@/lib/tax-invoice-print";
-import { useBootstrap } from "@/lib/bootstrap";
 
 function lineItemName(item: {
   description?: string | null;
@@ -103,10 +101,47 @@ function commerceModeForItem(item: {
 }): string {
   const k = (item.itemKind || item.itemType || "").toLowerCase();
   if (k === "retail" || k === "sale" || k === "product") return "sale";
-  if (k === "rental_unit" || k === "rental") return "rental";
+  // Backend stores rental lines as stock_unit (and legacy rental_unit)
+  if (
+    k === "rental_unit" ||
+    k === "rental" ||
+    k === "stock_unit"
+  ) {
+    return "rental";
+  }
   if (k === "service") return "service";
   if (k === "subscription") return "subscription";
   return "sale";
+}
+
+function lineItemSize(item: {
+  size?: string | null;
+  inventoryUnit?: { size?: string | null } | null;
+  stockUnit?: { variantLabel?: string | null } | null;
+}): string | null {
+  const raw =
+    item.size?.trim() ||
+    item.inventoryUnit?.size?.trim() ||
+    item.stockUnit?.variantLabel?.trim() ||
+    "";
+  return raw || null;
+}
+
+function invoicePartLabel(
+  inv: {
+    taxBreakdown?: Record<string, unknown> | null;
+  } | null,
+): string | null {
+  const b = inv?.taxBreakdown;
+  if (!b || typeof b !== "object") return null;
+  if (typeof b.splitPartLabel === "string" && b.splitPartLabel.trim()) {
+    return b.splitPartLabel.trim();
+  }
+  if (b.splitPart === true || b.splitPartIndex != null) {
+    const idx = Number(b.splitPartIndex);
+    return Number.isFinite(idx) ? `Part ${idx + 1}` : "Split part";
+  }
+  return null;
 }
 
 export default function OrderDetailPage() {
@@ -121,7 +156,6 @@ function OrderDetailInner() {
   const search = useSearchParams();
   const id = search.get("id") ?? "";
   const qc = useQueryClient();
-  const { productName } = useBootstrap();
   const roles = useAuthStore((s) => s.user?.roles ?? EMPTY_ROLES);
   const allowRefund = canRefund(roles);
   const allowFinance = canFinance(roles);
@@ -133,6 +167,11 @@ function OrderDetailInner() {
   const [extendPay, setExtendPay] = useState(true);
   const [receiptOpen, setReceiptOpen] = useState(false);
   const [saleReturnOpen, setSaleReturnOpen] = useState(false);
+  /** Same POS bill as counter payment — highlight this invoice when set */
+  const [receiptFocus, setReceiptFocus] = useState<{
+    invoiceNumber: string;
+    label?: string | null;
+  } | null>(null);
 
   const order = useQuery({
     queryKey: ["order", id],
@@ -288,11 +327,23 @@ function OrderDetailInner() {
   });
 
   const createInvoice = useMutation({
-    mutationFn: () =>
-      billingApi.createInvoice(id, {
+    mutationFn: () => {
+      const settings = (tenant.data as { settings?: Record<string, unknown> } | undefined)
+        ?.settings;
+      const org =
+        settings?.organizationProfile &&
+        typeof settings.organizationProfile === "object"
+          ? (settings.organizationProfile as Record<string, unknown>)
+          : {};
+      const place =
+        (typeof org.state === "string" && org.state.trim()) ||
+        (typeof org.placeOfSupply === "string" && org.placeOfSupply.trim()) ||
+        undefined;
+      return billingApi.createInvoice(id, {
         gstin: tenant.data?.gstin ?? undefined,
-        placeOfSupply: "Maharashtra",
-      }),
+        ...(place ? { placeOfSupply: place } : {}),
+      });
+    },
     onSuccess: () => {
       toast.success("GST invoice created");
       invalidate();
@@ -491,7 +542,10 @@ function OrderDetailInner() {
             type="button"
             variant="secondary"
             size="sm"
-            onClick={() => setReceiptOpen(true)}
+            onClick={() => {
+              setReceiptFocus(null);
+              setReceiptOpen(true);
+            }}
           >
             Print receipt
           </Button>
@@ -600,26 +654,53 @@ function OrderDetailInner() {
       ) : null}
 
       <div className="grid gap-3 sm:grid-cols-4">
-        {[
-          ["Subtotal", formatInr(data.subtotal)],
-          ["Tax", formatInr(data.taxTotal)],
-          [
-            "Deposit left",
-            formatInr(
-              moneyNumber(
-                data.depositDue ??
-                  Math.max(
-                    0,
-                    moneyNumber(data.depositRequired) -
-                      moneyNumber(
-                        data.depositCollected ?? data.depositTotal,
-                      ),
+        {(
+          isRental
+            ? ([
+                ["Subtotal", formatInr(data.subtotal)],
+                ["Tax", formatInr(data.taxTotal)],
+                [
+                  "Deposit left",
+                  formatInr(
+                    moneyNumber(
+                      data.depositDue ??
+                        Math.max(
+                          0,
+                          moneyNumber(data.depositRequired) -
+                            moneyNumber(
+                              data.depositCollected ?? data.depositTotal,
+                            ),
+                        ),
+                    ),
                   ),
-              ),
-            ),
-          ],
-          ["Pickup", formatDate(data.pickupDate)],
-        ].map(([k, v]) => (
+                ],
+                [
+                  "Pickup",
+                  formatDate(
+                    data.rentalExt?.pickupDate ?? data.pickupDate ?? null,
+                  ),
+                ],
+              ] as const)
+            : ([
+                ["Subtotal", formatInr(data.subtotal)],
+                [
+                  "Discount",
+                  formatInr(data.discountTotal ?? 0),
+                ],
+                ["Tax", formatInr(data.taxTotal)],
+                [
+                  "Total",
+                  formatInr(
+                    Math.max(
+                      0,
+                      moneyNumber(data.subtotal) +
+                        moneyNumber(data.taxTotal) -
+                        moneyNumber(data.discountTotal),
+                    ),
+                  ),
+                ],
+              ] as const)
+        ).map(([k, v]) => (
           <div
             key={k}
             className="rounded-xl border border-[#e2e8f0] bg-white px-3.5 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
@@ -640,6 +721,15 @@ function OrderDetailInner() {
                       moneyNumber(data.depositDue),
                 )}{" "}
                 paid
+              </p>
+            ) : null}
+            {k === "Pickup" &&
+            (data.rentalExt?.returnDueDate || data.returnDueDate) ? (
+              <p className="mt-0.5 text-[0.65rem] text-[#94a3b8]">
+                Due{" "}
+                {formatDate(
+                  data.rentalExt?.returnDueDate ?? data.returnDueDate ?? null,
+                )}
               </p>
             ) : null}
           </div>
@@ -682,6 +772,7 @@ function OrderDetailInner() {
                       : rate * qty + tax;
                   const name = lineItemName(item);
                   const sku = lineItemSku(item);
+                  const size = lineItemSize(item);
                   return (
                     <tr key={item.id} className="hover:bg-[#fafbfc]">
                       <td className="px-4 py-3">
@@ -693,8 +784,8 @@ function OrderDetailInner() {
                             </p>
                             <p className="mt-0.5 font-mono text-[0.7rem] text-[#64748b]">
                               {sku ? `SKU ${sku}` : null}
-                              {item.size ? ` · Size ${item.size}` : null}
-                              {!sku && !item.size ? "—" : null}
+                              {size ? `${sku ? " · " : ""}Size ${size}` : null}
+                              {!sku && !size ? "—" : null}
                             </p>
                           </div>
                         </div>
@@ -805,10 +896,17 @@ function OrderDetailInner() {
               </Button>
             </div>
             <ul className="mt-3 divide-y divide-[#f1f5f9] text-sm">
-              {(invoices.data ?? []).map((inv) => (
+              {(invoices.data ?? []).map((inv) => {
+                const partLabel = invoicePartLabel(inv);
+                return (
                 <li key={inv.id} className="py-3">
                   <p className="font-mono text-[0.85rem] font-bold text-[#0b1f33]">
                     {inv.invoiceNumber}
+                    {partLabel ? (
+                      <span className="ml-2 font-sans text-[0.75rem] font-semibold text-[#1a56db]">
+                        {partLabel}
+                      </span>
+                    ) : null}
                   </p>
                   <p className="mt-0.5 text-[0.75rem] font-medium text-[#64748b]">
                     CGST {formatInr(inv.cgst)} · SGST {formatInr(inv.sgst)}
@@ -821,106 +919,18 @@ function OrderDetailInner() {
                     type="button"
                     className="mt-2 text-[0.78rem] font-bold text-[#1a56db] hover:underline"
                     onClick={() => {
-                      const branding = (tenant.data?.branding ??
-                        {}) as Record<string, unknown>;
-                      const settings = (tenant.data as { settings?: Record<string, unknown> } | undefined)?.settings;
-                      const org =
-                        settings?.organizationProfile &&
-                        typeof settings.organizationProfile === "object"
-                          ? (settings.organizationProfile as Record<
-                              string,
-                              unknown
-                            >)
-                          : {};
-                      const shopName =
-                        (typeof branding.productName === "string" &&
-                          branding.productName) ||
-                        productName ||
-                        tenant.data?.name ||
-                        "Universal POS";
-                      const lines = data.items.map((item) => {
-                        const qty = moneyNumber(item.quantity ?? 1);
-                        const rate = moneyNumber(item.unitPrice);
-                        const tax = moneyNumber(item.taxAmount);
-                        const amount =
-                          item.lineTotal != null
-                            ? moneyNumber(item.lineTotal)
-                            : rate * qty + tax;
-                        return {
-                          name: lineItemName(item),
-                          sku: lineItemSku(item),
-                          hsn:
-                            item.product?.taxCode ||
-                            item.stockLevel?.product?.taxCode ||
-                            null,
-                          qty,
-                          rate,
-                          tax,
-                          amount,
-                        };
-                      });
-                      const ok = printTaxInvoice({
+                      setReceiptFocus({
                         invoiceNumber: inv.invoiceNumber,
-                        createdAt: inv.createdAt,
-                        orderNumber: data.orderNumber,
-                        gstin:
-                          inv.taxIdSnapshot ||
-                          inv.gstin ||
-                          tenant.data?.gstin ||
-                          tenant.data?.taxId ||
-                          null,
-                        placeOfSupply:
-                          inv.placeOfSupply ||
-                          (typeof inv.taxBreakdown?.placeOfSupply === "string"
-                            ? inv.taxBreakdown.placeOfSupply
-                            : null),
-                        cgst: moneyNumber(inv.cgst),
-                        sgst: moneyNumber(inv.sgst),
-                        igst: moneyNumber(inv.igst),
-                        grandTotal: moneyNumber(inv.grandTotal),
-                        subtotal: moneyNumber(data.subtotal),
-                        taxTotal: moneyNumber(data.taxTotal),
-                        shop: {
-                          name: shopName,
-                          tagline:
-                            typeof branding.tagline === "string"
-                              ? branding.tagline
-                              : null,
-                          address:
-                            data.location?.address ||
-                            data.store?.address ||
-                            [
-                              typeof org.addressLine1 === "string"
-                                ? org.addressLine1
-                                : "",
-                              typeof org.city === "string" ? org.city : "",
-                              typeof org.state === "string" ? org.state : "",
-                            ]
-                              .filter(Boolean)
-                              .join(", ") ||
-                            null,
-                          phone:
-                            typeof org.phone === "string" ? org.phone : null,
-                          email:
-                            typeof org.email === "string" ? org.email : null,
-                          logoUrl:
-                            typeof branding.logoUrl === "string"
-                              ? branding.logoUrl
-                              : null,
-                        },
-                        customer: {
-                          name: data.customer?.fullName ?? "Walk-in Guest",
-                          phone: data.customer?.phone ?? null,
-                        },
-                        lines,
+                        label: partLabel,
                       });
-                      if (!ok) toast.error("Could not open print preview");
+                      setReceiptOpen(true);
                     }}
                   >
-                    Print tax invoice
+                    Print bill
                   </button>
                 </li>
-              ))}
+                );
+              })}
               {!invoices.data?.length ? (
                 <li className="py-3 text-[#64748b]">No invoices yet — click Generate</li>
               ) : null}
@@ -1034,6 +1044,7 @@ function OrderDetailInner() {
             </>
           ) : null}
 
+          {isRental ? (
           <section className="rounded-2xl border border-[#e2e8f0] bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
             <div className="flex items-center justify-between">
               <h2 className="section-title text-[0.95rem]">Rental agreement</h2>
@@ -1073,6 +1084,7 @@ function OrderDetailInner() {
               ) : null}
             </ul>
           </section>
+          ) : null}
         </div>
       </div>
 
@@ -1156,11 +1168,26 @@ function OrderDetailInner() {
 
       {receiptOpen ? (
         <ReceiptModal
-          data={(receiptQ.data as ReceiptData | undefined) ?? null}
+          data={
+            receiptQ.data
+              ? ({
+                  ...(receiptQ.data as ReceiptData),
+                  ...(receiptFocus
+                    ? {
+                        activeInvoiceNumber: receiptFocus.invoiceNumber,
+                        activeInvoiceLabel: receiptFocus.label ?? null,
+                      }
+                    : {}),
+                } as ReceiptData)
+              : null
+          }
           loading={receiptQ.isLoading}
           change={receiptQ.data?.change}
           cashTendered={receiptQ.data?.cashTendered}
-          onClose={() => setReceiptOpen(false)}
+          onClose={() => {
+            setReceiptOpen(false);
+            setReceiptFocus(null);
+          }}
         />
       ) : null}
 

@@ -43,7 +43,7 @@ import {
   type SellUnit,
 } from "@/lib/sell-units";
 import { cn } from "@/lib/utils";
-import { activeUnitOptions } from "@/lib/measure-units";
+import { activeUnitOptions, catalogNeedsPackedContents, defaultPackedContentsQty } from "@/lib/measure-units";
 
 const EMPTY = {
   title: "",
@@ -699,12 +699,38 @@ export function SaleStockPanel({
                     <Label className="sm:pt-2.5">Unit / UOM *</Label>
                     <Select
                       value={form.sellUnit}
-                      onChange={(e) =>
-                        setForm((f) => ({
-                          ...f,
-                          sellUnit: e.target.value as SellUnit,
-                        }))
-                      }
+                      onChange={(e) => {
+                        const next = e.target.value as SellUnit;
+                        setForm((f) => {
+                          const kind =
+                            f.itemType === "service" ? "service" : "physical";
+                          const nextPacked = catalogNeedsPackedContents(
+                            kind,
+                            next,
+                          );
+                          const prevPacked = catalogNeedsPackedContents(
+                            kind,
+                            f.sellUnit,
+                          );
+                          let qty = f.multiUnitBaseQty;
+                          let base = f.multiUnitBaseUnit || "pcs";
+                          if (!nextPacked) {
+                            qty = "";
+                            base = "pcs";
+                          } else if (!prevPacked || !qty.trim()) {
+                            qty = defaultPackedContentsQty(next);
+                            if (String(next).toLowerCase() === "dozen") {
+                              base = "pcs";
+                            }
+                          }
+                          return {
+                            ...f,
+                            sellUnit: next,
+                            multiUnitBaseQty: qty,
+                            multiUnitBaseUnit: base,
+                          };
+                        });
+                      }}
                     >
                       {unitOptions.map((u) => (
                         <option key={u.code} value={u.code}>
@@ -714,15 +740,25 @@ export function SaleStockPanel({
                     </Select>
                   </div>
 
-                  {(form.sellUnit === "pack") && (
+                  {catalogNeedsPackedContents(
+                    form.itemType === "service" ? "service" : "physical",
+                    form.sellUnit,
+                  ) && (
                     <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-start">
-                      <Label className="sm:pt-2.5">Multi-unit</Label>
+                      <Label className="sm:pt-2.5">
+                        Qty in 1 {form.sellUnit || "box"}
+                      </Label>
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-xs text-[#8b9bb0]">1 pack =</span>
                         <Input
                           className="w-24"
+                          type="number"
+                          min={0.001}
                           inputMode="decimal"
-                          placeholder="12"
+                          placeholder={
+                            String(form.sellUnit).toLowerCase() === "dozen"
+                              ? "12"
+                              : "e.g. 12"
+                          }
                           value={form.multiUnitBaseQty}
                           onChange={(e) =>
                             setForm((f) => ({
@@ -744,6 +780,7 @@ export function SaleStockPanel({
                           <option value="pcs">pcs</option>
                           <option value="g">g</option>
                           <option value="ml">ml</option>
+                          <option value="kg">kg</option>
                         </Select>
                       </div>
                     </div>

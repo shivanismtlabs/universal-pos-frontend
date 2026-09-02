@@ -61,8 +61,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={sans.variable}>
-      <body className="font-sans antialiased">
+    <html lang="en" className={`${sans.variable} h-full`}>
+      <body className="h-full font-sans antialiased">
         <AppProviders>{children}</AppProviders>
       </body>
     </html>

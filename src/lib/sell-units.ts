@@ -124,9 +124,12 @@ export function validateProductTitle(title: string): string | null {
 
 export function formatQtyWithUnit(qty: number, unit: string | null | undefined) {
   const u = normalizeSellUnit(unit);
+  if (!Number.isFinite(Number(qty))) return `— ${u}`;
+  const raw = Number(qty);
   const n = allowsDecimalQty(u)
-    ? Math.round(qty * 1000) / 1000
-    : Math.round(qty);
+    ? Math.round(raw * 1000) / 1000
+    : Math.round(raw);
+  // 10 kg / 10 L / 10.5 kg — never a bare number
   return `${n} ${u}`;
 }
 

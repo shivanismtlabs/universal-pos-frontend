@@ -76,8 +76,18 @@ html {
   background: #f3f5f9;
 }
 
+/* Full-height chain so flex children (e.g. /counter) can shrink and scroll */
 html,
 body {
+  height: 100%;
+  min-height: 100%;
+}
+
+/* App Router has no #__next wrapper — h-full on html/body + shell h-dvh is the chain */
+
+html:has([data-pos-counter]),
+html:has([data-pos-counter]) body {
+  height: 100%;
   min-height: 100%;
 }
 

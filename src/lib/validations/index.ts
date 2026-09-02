@@ -1,28 +1,27 @@
 import { z } from "zod";
+import { validatePhoneE164 } from "@/lib/phone";
+import { validateSellQty, requiresWholeQty, allowsDecimalQty } from "@/lib/sell-units";
+import { catalogNeedsPackedContents } from "@/lib/measure-units";
 
 /** Matches backend IsStrongPassword (8–72, upper, lower, number, special) */
 export const strongPasswordSchema = z
   .string()
-  .min(8, "Password must be at least 8 characters")
-  .max(72, "Password must be at most 72 characters")
-  .regex(/[a-z]/, "Include a lowercase letter")
-  .regex(/[A-Z]/, "Include an uppercase letter")
-  .regex(/\d/, "Include a number")
-  .regex(/[^A-Za-z0-9]/, "Include a special character");
+  .min(8, "Use at least 8 characters")
+  .max(72, "Use at most 72 characters")
+  .regex(/[a-z]/, "Add a lowercase letter")
+  .regex(/[A-Z]/, "Add an uppercase letter")
+  .regex(/\d/, "Add a number")
+  .regex(/[^A-Za-z0-9]/, "Add a special character (!@#$…)");
 
-/** Any country: optional +, then digits only (7–15 digit total). No spaces or symbols. */
+/** Country-aware phone (libphonenumber-js). Expect E.164 from PhoneCountryInput. */
 export const phoneSchema = z
   .string()
   .trim()
+  .min(1, "Please enter your phone number")
   .max(18, "Phone is too long")
-  .refine(
-    (v) => {
-      if (!/^\+?\d+$/.test(v)) return false;
-      const digits = v.replace(/\D/g, "");
-      return digits.length >= 7 && digits.length <= 15;
-    },
-    { message: "Enter digits only (7–15), no spaces or symbols" },
-  );
+  .refine((v) => validatePhoneE164(v), {
+    message: "Enter a valid phone number for the selected country",
+  });
 
 /** @deprecated use phoneSchema — kept for older imports */
 export const indianPhoneSchema = phoneSchema;
@@ -42,16 +41,16 @@ export const tenantSlugSchema = z
 export const personNameSchema = z
   .string()
   .trim()
-  .min(2, "Name must be at least 2 characters")
+  .min(2, "Enter at least 2 characters")
   .max(255, "Name is too long")
-  .refine((v) => v.trim().length >= 2, "Enter a real name (not only spaces)")
+  .refine((v) => v.trim().length >= 2, "Enter your full name")
   .refine(
     (v) => /[A-Za-z\u0900-\u097F]/.test(v),
-    "Name must include letters",
+    "Use letters in your name",
   )
   .refine(
     (v) => /^[A-Za-z\u0900-\u097F]+(?: [A-Za-z\u0900-\u097F]+)*$/.test(v),
-    "Use letters only (no numbers or special characters)",
+    "Use letters and spaces only",
   );
 
 /** Zoho-style identity signup (before organization setup) */
@@ -62,7 +61,6 @@ export const signupIdentitySchema = z
       .string()
       .trim()
       .toLowerCase()
-      .min(1, "Email is required")
       .email("Enter a valid email")
       .max(255),
     password: strongPasswordSchema,
@@ -92,9 +90,10 @@ export const loginSchema = z.object({
     .string()
     .trim()
     .toLowerCase()
-    .email("Enter a valid email")
+    .min(1, "Please enter your email address.")
+    .email("Please enter a valid email address.")
     .max(255),
-  password: z.string().min(1, "Password is required").max(72),
+  password: z.string().min(1, "Please enter your password.").max(72),
 });
 export type LoginInput = z.infer<typeof loginSchema>;
 
@@ -801,8 +800,41 @@ export const createCatalogProductSchema = z
     trackInventory: z.boolean(),
     openingQty: z.string().optional().or(z.literal("")),
     reorderPoint: z.string().optional().or(z.literal("")),
+    multiUnitBaseQty: z.string().optional().or(z.literal("")),
+    multiUnitBaseUnit: z.string().optional().or(z.literal("")),
   })
   .superRefine((v, ctx) => {
+    if (catalogNeedsPackedContents(v.kind, v.unitOfMeasure)) {
+      const raw = (v.multiUnitBaseQty ?? "").trim();
+      const n = Number(raw);
+      const pack = v.unitOfMeasure || "box";
+      if (raw === "" || !Number.isFinite(n) || n <= 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["multiUnitBaseQty"],
+          message: `Enter how many are inside 1 ${pack}`,
+        });
+      } else {
+        const base = (v.multiUnitBaseUnit || "pcs").trim() || "pcs";
+        if (!allowsDecimalQty(base) && !Number.isInteger(n)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["multiUnitBaseQty"],
+            message: `Qty in 1 ${pack} must be a whole number of ${base}`,
+          });
+        } else if (allowsDecimalQty(base)) {
+          const rounded = Math.round(n * 1000) / 1000;
+          if (Math.abs(rounded - n) > 1e-9) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ["multiUnitBaseQty"],
+              message: `Qty in 1 ${pack} can have at most 3 decimal places`,
+            });
+          }
+        }
+      }
+    }
+
     if (v.trackInventory) {
       const raw = (v.openingQty ?? "").trim();
       // Empty allowed — create treats blank as 0 Stock on Hand.
@@ -814,6 +846,15 @@ export const createCatalogProductSchema = z
             path: ["openingQty"],
             message: "Opening quantity cannot be negative",
           });
+        } else {
+          const unitErr = validateSellQty(q, v.unitOfMeasure || "pcs");
+          if (unitErr) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ["openingQty"],
+              message: unitErr,
+            });
+          }
         }
       }
 
@@ -826,12 +867,24 @@ export const createCatalogProductSchema = z
             path: ["reorderPoint"],
             message: "Reorder point cannot be negative",
           });
-        } else if (!Number.isInteger(n)) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ["reorderPoint"],
-            message: "Reorder point must be a whole number",
-          });
+        } else {
+          const unit = v.unitOfMeasure || "pcs";
+          if (requiresWholeQty(unit) && !Number.isInteger(n)) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ["reorderPoint"],
+              message: `Reorder point for ${unit} must be a whole number`,
+            });
+          } else if (!requiresWholeQty(unit)) {
+            const rounded = Math.round(n * 1000) / 1000;
+            if (Math.abs(rounded - n) > 1e-9) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["reorderPoint"],
+                message: `Reorder point for ${unit} can have at most 3 decimal places`,
+              });
+            }
+          }
         }
       }
     }
@@ -889,6 +942,84 @@ export const createSupplierSchema = z.object({
 });
 export type CreateSupplierInput = z.infer<typeof createSupplierSchema>;
 
+const locationTypeSchema = z.enum(
+  ["store", "branch", "warehouse", "clinic", "kitchen", "office", "other"],
+  { message: "Select a location type" },
+);
+
+const locationSharedFields = {
+  name: z
+    .string()
+    .trim()
+    .min(2, "Name must be at least 2 characters")
+    .max(100, "Name is too long"),
+  type: locationTypeSchema,
+  address: z
+    .string()
+    .trim()
+    .max(500, "Address is too long")
+    .optional()
+    .or(z.literal("")),
+  phone: z
+    .string()
+    .trim()
+    .max(32, "Phone is too long")
+    .optional()
+    .or(z.literal(""))
+    .refine((v) => !v || validatePhoneE164(v), {
+      message: "Enter a valid phone number",
+    }),
+  email: optionalEmailSchema,
+  businessHours: z
+    .string()
+    .trim()
+    .max(200, "Business hours is too long")
+    .optional()
+    .or(z.literal("")),
+  timezone: z
+    .string()
+    .trim()
+    .max(64, "Timezone is too long")
+    .optional()
+    .or(z.literal(""))
+    .refine(
+      (v) => !v || /^[A-Za-z_]+\/[A-Za-z_+-]+$/.test(v),
+      "Use a valid timezone (e.g. Asia/Kolkata)",
+    ),
+  currencyCode: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .optional()
+    .or(z.literal(""))
+    .refine(
+      (v) => !v || /^[A-Z]{3}$/.test(v),
+      "Use a 3-letter currency code (e.g. INR)",
+    ),
+  managerUserId: z.string().optional().or(z.literal("")),
+  parentLocationId: z.string().optional().or(z.literal("")),
+  isActive: z.boolean().optional(),
+};
+
+export const createLocationFormSchema = z.object({
+  ...locationSharedFields,
+  code: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .min(2, "Store code must be at least 2 characters")
+    .max(50, "Store code is too long")
+    .regex(
+      /^[A-Z0-9_-]+$/,
+      "Use letters, numbers, hyphen, or underscore only",
+    ),
+});
+
+export const updateLocationFormSchema = z.object(locationSharedFields);
+
+export type CreateLocationFormInput = z.infer<typeof createLocationFormSchema>;
+export type UpdateLocationFormInput = z.infer<typeof updateLocationFormSchema>;
+
 export const createExpenseSchema = z.object({
   amount: moneyAmountSchema,
   spentAt: z
@@ -935,6 +1066,51 @@ export const settingsBrandSchema = z.object({
     .regex(/^[A-Z]{3}$/, "Use a 3-letter currency code (e.g. INR)"),
   locale: z.string().trim().min(2, "Locale is required").max(20),
   timezone: z.string().trim().min(2, "Timezone is required").max(64),
+});
+
+/** Full Business Profile save — branding + contact / location fields */
+export const settingsBusinessProfileSchema = settingsBrandSchema.extend({
+  businessType: z.string().trim().min(1, "Select a business type"),
+  phone: phoneSchema,
+  email: z
+    .string()
+    .trim()
+    .max(120)
+    .refine(
+      (v) => !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v),
+      "Enter a valid email",
+    ),
+  website: z
+    .string()
+    .trim()
+    .max(200)
+    .refine((v) => {
+      if (!v) return true;
+      const normalized = /^https?:\/\//i.test(v) ? v : `https://${v}`;
+      try {
+        const u = new URL(normalized);
+        return Boolean(u.hostname.includes("."));
+      } catch {
+        return false;
+      }
+    }, "Enter a valid website (e.g. yourshop.com)"),
+  countryCode: z.string().trim().min(2, "Select a country"),
+  pan: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .refine(
+      (v) => !v || /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(v),
+      "PAN must be 10 characters (e.g. ABCDE1234F)",
+    ),
+  postalCode: z
+    .string()
+    .trim()
+    .max(12)
+    .refine(
+      (v) => !v || /^[A-Za-z0-9][A-Za-z0-9\s-]{2,11}$/.test(v),
+      "Enter a valid postal code",
+    ),
 });
 
 export const settingsTaxSchema = z.object({

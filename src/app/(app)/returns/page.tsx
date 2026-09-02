@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -37,6 +38,11 @@ import { SaleReturnDialog } from "@/components/sale-return-dialog";
 import { canApproveRefund } from "@/lib/roles";
 import { useAuthStore } from "@/lib/auth-store";
 import { useBranchStore } from "@/lib/branch-store";
+import {
+  formatReturnLine,
+  parseSaleReturnItems,
+  type SaleReturnLineRow,
+} from "@/lib/sale-return-items";
 
 const formCard =
   "rounded-xl border border-[#e4e9f0] bg-white p-4 shadow-sm sm:p-5";
@@ -79,6 +85,52 @@ function statusLabel(status: string) {
     default:
       return status.replace(/_/g, " ");
   }
+}
+
+type ReturnEventRow = {
+  items?: unknown;
+  returnedItems?: SaleReturnLineRow[];
+  replacedItems?: SaleReturnLineRow[];
+  isExchange?: boolean;
+  reasonCode?: string | null;
+};
+
+function ReturnEventLines({ row }: { row: ReturnEventRow }) {
+  const fromApi =
+    row.returnedItems?.length || row.replacedItems?.length
+      ? {
+          returned: row.returnedItems ?? [],
+          replaced: row.replacedItems ?? [],
+          isExchange: Boolean(row.isExchange || row.replacedItems?.length),
+        }
+      : parseSaleReturnItems(row.items);
+
+  if (!fromApi.returned.length && !fromApi.replaced.length) return null;
+
+  return (
+    <div className="mt-1 space-y-1 text-[0.7rem] text-[#5a6b7d]">
+      {fromApi.returned.length ? (
+        <div>
+          <p className="font-semibold text-[#334155]">Returned</p>
+          <ul className="mt-0.5 space-y-0.5">
+            {fromApi.returned.slice(0, 6).map((it, i) => (
+              <li key={`ret-${i}`}>{formatReturnLine(it)}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {fromApi.replaced.length ? (
+        <div>
+          <p className="font-semibold text-[#334155]">Exchanged for</p>
+          <ul className="mt-0.5 space-y-0.5">
+            {fromApi.replaced.slice(0, 6).map((it, i) => (
+              <li key={`rep-${i}`}>{formatReturnLine(it)}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function ModeTabs({
@@ -746,27 +798,16 @@ function SaleReturnsDesk() {
                         {r.orderNumber ?? r.orderId.slice(0, 8)}
                       </p>
                       <p className="text-[0.7rem] text-[#5a6b7d]">
-                        {r.reasonCode ?? "—"}
+                        {r.isExchange || r.reasonCode === "exchange"
+                          ? "Exchange"
+                          : (r.reasonCode ?? "—")}
                       </p>
                     </td>
                     <td className="px-3 py-2.5">
                       <p className="text-[#0b1f33]">
                         {r.customerName ?? "—"}
                       </p>
-                      {Array.isArray(r.items) && r.items.length ? (
-                        <ul className="mt-1 space-y-0.5 text-[0.7rem] text-[#5a6b7d]">
-                          {(r.items as Array<Record<string, unknown>>)
-                            .slice(0, 4)
-                            .map((it, i) => (
-                              <li key={i}>
-                                {String(it.name ?? it.sku ?? "Item")}
-                                {it.quantity != null
-                                  ? ` × ${String(it.quantity)}`
-                                  : ""}
-                              </li>
-                            ))}
-                        </ul>
-                      ) : null}
+                      <ReturnEventLines row={r} />
                       {r.notes ? (
                         <p className="mt-1 text-[0.7rem] text-[#8a9bb0]">
                           {r.notes}
@@ -872,10 +913,15 @@ function SaleReturnsDesk() {
                     </td>
                     <td className="px-3 py-2.5 text-[0.75rem] text-[#5a6b7d]">
                       <p>Reason: {r.reasonCode ?? "—"}</p>
+                      {r.isExchange || r.reasonCode === "exchange" ? (
+                        <p className="mt-0.5 font-semibold text-[#1a56db]">
+                          Exchange
+                        </p>
+                      ) : null}
                       {r.exchangeOrderNumber || r.invoiceNumber ? (
                         <p className="mt-0.5 text-[#1a56db]">
                           {r.exchangeOrderNumber
-                            ? `Exchange ${r.exchangeOrderNumber}`
+                            ? `New sale ${r.exchangeOrderNumber}`
                             : null}
                           {r.exchangeOrderNumber && r.invoiceNumber
                             ? " · "
@@ -885,23 +931,7 @@ function SaleReturnsDesk() {
                             : null}
                         </p>
                       ) : null}
-                      {Array.isArray(r.items) && r.items.length ? (
-                        <ul className="mt-1 space-y-0.5">
-                          {(r.items as Array<Record<string, unknown>>)
-                            .slice(0, 3)
-                            .map((it, i) => (
-                              <li key={i}>
-                                {String(it.name ?? it.sku ?? "Item")}
-                                {it.quantity != null
-                                  ? ` × ${String(it.quantity)}`
-                                  : ""}
-                                {it.condition
-                                  ? ` (${String(it.condition)})`
-                                  : ""}
-                              </li>
-                            ))}
-                        </ul>
-                      ) : null}
+                      <ReturnEventLines row={r} />
                     </td>
                     <td className="px-3 py-2.5 text-[0.75rem] text-[#5a6b7d]">
                       {formatDate(r.createdAt)}
@@ -931,6 +961,10 @@ function SaleReturnsDesk() {
           defaultMode={active.mode ?? "return"}
           onClose={() => setActive(null)}
           onRequested={() => setDeskTab("pending")}
+          onCompleted={() => {
+            setActive(null);
+            setDeskTab("history");
+          }}
         />
       ) : null}
     </div>
@@ -1202,11 +1236,22 @@ function ServiceRefundDesk() {
 }
 
 export default function ReturnsPage() {
+  return (
+    <Suspense fallback={<PageSkeleton rows={8} />}>
+      <ReturnsPageInner />
+    </Suspense>
+  );
+}
+
+function ReturnsPageInner() {
   const { hasMode, isLoading } = useBootstrap();
+  const search = useSearchParams();
+  const router = useRouter();
   const hasSale = hasMode("sale");
   const hasRental = hasMode("rental");
   const hasSvc = hasMode("service");
   const hasSub = hasMode("subscription");
+  const tabFromUrl = search.get("tab");
 
   const availableTabs = useMemo(
     () =>
@@ -1229,9 +1274,26 @@ export default function ReturnsPage() {
 
   useEffect(() => {
     if (!availableTabs.length) return;
+    if (
+      tabFromUrl &&
+      availableTabs.some((t) => t.id === tabFromUrl)
+    ) {
+      setTab(tabFromUrl as ReturnTab);
+      return;
+    }
     if (tab && availableTabs.some((t) => t.id === tab)) return;
     setTab(availableTabs[0]!.id);
-  }, [availableTabs, tab]);
+  }, [availableTabs, tab, tabFromUrl]);
+
+  function selectTab(id: ReturnTab) {
+    setTab(id);
+    const qs = new URLSearchParams(search.toString());
+    const first = availableTabs[0]?.id;
+    if (id === first) qs.delete("tab");
+    else qs.set("tab", id);
+    const next = qs.toString();
+    router.replace(next ? `/returns?${next}` : "/returns", { scroll: false });
+  }
 
   if (isLoading) return <PageSkeleton rows={8} />;
 
@@ -1274,7 +1336,7 @@ export default function ReturnsPage() {
       <ModeTabs
         tabs={availableTabs.map((t) => ({ id: t.id, label: t.label }))}
         active={activeTab}
-        onChange={setTab}
+        onChange={selectTab}
       />
 
       {activeTab === "sale" ? <SaleReturnsDesk /> : null}

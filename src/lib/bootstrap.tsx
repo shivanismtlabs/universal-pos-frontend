@@ -60,12 +60,27 @@ export function BootstrapProvider({ children }: { children: ReactNode }) {
 
   const query = useQuery({
     queryKey: ["tenant-bootstrap"],
-    queryFn: () => appsApi.bootstrap(),
+    queryFn: async ({ signal }) => {
+      const timeoutMs = 15_000;
+      const bootPromise = appsApi.bootstrap();
+      const timed = new Promise<never>((_, reject) => {
+        const t = setTimeout(
+          () => reject(new Error("Shop configuration timed out")),
+          timeoutMs,
+        );
+        signal?.addEventListener("abort", () => {
+          clearTimeout(t);
+          reject(new Error("aborted"));
+        });
+      });
+      return Promise.race([bootPromise, timed]);
+    },
     enabled: Boolean(token),
     staleTime: 5 * 60_000,
     gcTime: 30 * 60_000,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
+    retry: 1,
     placeholderData: (prev) => prev,
   });
 

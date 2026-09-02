@@ -238,7 +238,9 @@ export default function OrdersPage() {
                       {o.customer?.fullName ?? "—"}
                     </td>
                     <td className="px-4 py-3 capitalize">
-                      {String(o.status ?? "").replace(/_/g, " ")}
+                      {o.rentalExt?.lifecycle
+                        ? String(o.rentalExt.lifecycle).replace(/_/g, " ")
+                        : String(o.status ?? "").replace(/_/g, " ")}
                     </td>
                     <td className="px-4 py-3 text-right font-semibold tabular-nums text-[#0b1f33]">
                       {money(total)}

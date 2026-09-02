@@ -12,6 +12,7 @@ import { ApiError } from "@/lib/api/client";
 import { useAuthStore } from "@/lib/auth-store";
 import { defaultHomeForRoles } from "@/lib/roles";
 import { loginSchema, type LoginInput } from "@/lib/validations";
+import { AUTH_FORM_OPTIONS, authFieldError, clearLoginFormPersistence } from "@/lib/auth-form";
 // Google sign-in UI — keep imports/handlers, hide the buttons for now.
 // import {
 //   AuthDivider,
@@ -107,8 +108,10 @@ export default function LoginForm() {
     handleSubmit,
     getValues,
     setValue,
-    formState: { errors, isSubmitting },
+    reset,
+    formState,
   } = useForm<LoginInput>({
+    ...AUTH_FORM_OPTIONS,
     resolver: zodResolver(loginSchema),
     defaultValues: {
       email: "",
@@ -116,10 +119,25 @@ export default function LoginForm() {
     },
   });
 
+  const { isSubmitting } = formState;
+  const signedOut = search.get("signedOut") === "1";
+  const sessionExpiredReason = search.get("reason");
+
   useEffect(() => {
+    if (signedOut) {
+      clearLoginFormPersistence();
+      reset({ email: "", password: "" });
+      router.replace(
+        sessionExpiredReason
+          ? `/login?reason=${sessionExpiredReason}`
+          : "/login",
+        { scroll: false },
+      );
+      return;
+    }
     const remembered = readRememberedBioEmail();
     if (remembered) setValue("email", remembered);
-  }, [setValue]);
+  }, [signedOut, sessionExpiredReason, reset, router, setValue]);
 
   const [bioBusy, setBioBusy] = useState(false);
   const [bioSupported, setBioSupported] = useState(false);
@@ -262,9 +280,10 @@ export default function LoginForm() {
             autoComplete="username webauthn"
             placeholder="name@company.com"
             className="h-11 rounded-lg"
+            aria-invalid={Boolean(authFieldError(formState, "email"))}
             {...register("email")}
           />
-          <FieldError message={errors.email?.message} />
+          <FieldError message={authFieldError(formState, "email")} />
         </div>
 
         <div className="space-y-1.5">
@@ -288,6 +307,7 @@ export default function LoginForm() {
               type={showPassword ? "text" : "password"}
               autoComplete="current-password"
               className="h-11 rounded-lg pr-16"
+              aria-invalid={Boolean(authFieldError(formState, "password"))}
               {...register("password")}
             />
             <button
@@ -298,7 +318,7 @@ export default function LoginForm() {
               {showPassword ? "Hide" : "Show"}
             </button>
           </div>
-          <FieldError message={errors.password?.message} />
+          <FieldError message={authFieldError(formState, "password")} />
         </div>
 
         <Button
@@ -341,7 +361,7 @@ export default function LoginForm() {
             href="/signup"
             className="font-semibold text-[#1a56db] hover:underline"
           >
-            Request Access
+            Sign Up
           </Link>
         </p>
       </form>

@@ -191,7 +191,7 @@ export function DiningTabs() {
       </nav>
       <button
         type="button"
-        className="mb-px shrink-0 rounded-md border border-[#d9e0ea] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#334155] hover:bg-[#f8fafc]"
+        className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-[#5a6b7d] hover:bg-[#f1f5f9] hover:text-[#0b1f33]"
         onClick={() => {
           qc.clear();
           useBranchStore.getState().bindTenant(null);
@@ -203,7 +203,7 @@ export function DiningTabs() {
           router.replace("/organizations");
         }}
       >
-        Switch organization
+        Switch shop
       </button>
     </div>
   );

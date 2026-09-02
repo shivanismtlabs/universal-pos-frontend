@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { customersApi, loyaltyApi, ordersApi, paymentsApi, posApi, resourcesApi, restaurantApi, tenantsApi, billingApi } from "@/lib/api";
+import { customersApi, loyaltyApi, ordersApi, paymentsApi, posApi, resourcesApi, restaurantApi, tenantsApi, billingApi, catalogApi } from "@/lib/api";
 import {
   UPI_PSP_OPTIONS,
   buildUpiPayUri,
@@ -26,6 +26,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { ReceiptModal, type ReceiptData } from "@/components/receipt-modal";
+import { BillTotalsLines } from "@/components/bill-totals-lines";
 import { StripeCheckoutModal } from "@/components/stripe-checkout-modal";
 import { ProductThumb } from "@/components/product-thumb";
 import { FoodTypeBadge } from "@/components/food-type-badge";
@@ -34,6 +35,8 @@ import { CustomerPicker } from "@/components/customer-picker";
 import { CustomFieldsSection } from "@/components/custom-field-inputs";
 import { SplitBillModal } from "@/components/split-bill-modal";
 import { ModalFrame } from "@/components/modal-frame";
+import { PhoneCountryInput } from "@/components/phone-country-input";
+import { canonicalPhoneE164, validatePhoneE164 } from "@/lib/phone";
 import { StationPinLock } from "@/components/station-pin-lock";
 import { BarcodeScanInput } from "@/components/barcode-scan-input";
 import { guardedAction } from "@/components/unsaved-work-guard";
@@ -62,6 +65,7 @@ import {
   buildBillSummary,
   cashChangeDue,
   lineTaxAmount,
+  roundOffForDisplay,
 } from "@/lib/bill-summary";
 
 type CartLine = {
@@ -74,6 +78,9 @@ type CartLine = {
   qty: number;
   maxQty: number;
   sellUnit: SellUnit;
+  sellingUnitId?: string;
+  baseQty?: number;
+  conversionFactor?: number;
   category?: string | null;
   image?: string | null;
   /** Product override % (e.g. 18). null/undefined → tenant rate */
@@ -100,6 +107,43 @@ type CartLine = {
   foodType?: "veg" | "non_veg" | "egg" | null;
   modifiers?: string[];
 };
+
+/** Shelf / list rate for a cart line (before this ticket’s line discount). */
+function cartLineListPrice(line: CartLine): number {
+  return line.listPrice > 0 ? line.listPrice : line.unitPrice;
+}
+
+/** Discount % off list for this line only (0 if none / markup). */
+function cartLineDiscountPercent(line: CartLine): number {
+  const base = cartLineListPrice(line);
+  if (base <= 0 || line.unitPrice >= base - 0.001) return 0;
+  return Math.round(((1 - line.unitPrice / base) * 100) * 10) / 10;
+}
+
+/** ₹ off list × qty for this line (not bill-level coupon). */
+function cartLineDiscountAmount(line: CartLine): number {
+  const base = cartLineListPrice(line);
+  const off = Math.max(0, base - line.unitPrice) * line.qty;
+  return Math.round(off * 100) / 100;
+}
+
+function unitPriceAfterLineDiscount(
+  listPrice: number,
+  opts: { percent?: number; amountOffPerUnit?: number },
+): number {
+  const base = Math.max(0, listPrice);
+  if (opts.amountOffPerUnit != null && Number.isFinite(opts.amountOffPerUnit)) {
+    return Math.max(
+      0,
+      Math.round((base - Math.max(0, opts.amountOffPerUnit)) * 100) / 100,
+    );
+  }
+  const pct = Math.max(0, opts.percent ?? 0);
+  if (pct > 0) {
+    return Math.max(0, Math.round(base * (1 - pct / 100) * 100) / 100);
+  }
+  return Math.round(base * 100) / 100;
+}
 
 type PayMethod =
   | "cash"
@@ -181,9 +225,14 @@ export default function RetailPosWorkstation({
       : mode === "vat"
         ? 20
         : 5;
+    const inclusiveFlag =
+      settings?.tax?.inclusive === true ||
+      (settings as { taxInclusive?: boolean } | undefined)?.taxInclusive ===
+        true;
     return {
       rate: Math.min(40, Math.max(0, ratePercent)) / 100,
-      inclusive: settings?.tax?.inclusive === true,
+      // India GST: listed price is exclusive — add CGST/SGST on Net Payable
+      inclusive: mode === "in_gst" ? false : inclusiveFlag,
     };
   }, [boot?.tenant]);
 
@@ -275,6 +324,16 @@ export default function RetailPosWorkstation({
     row: Parameters<typeof upsertLine>[0];
     value: string;
   } | null>(null);
+  /** Bulk qty: type 455 instead of tapping + hundreds of times */
+  const [qtyPick, setQtyPick] = useState<{
+    row: Parameters<typeof upsertLine>[0];
+    value: string;
+    maxQty: number;
+    tracks: boolean;
+    entryUnitId: string;
+  } | null>(null);
+  /** Draft text while editing cart line qty (allows typing 455 freely) */
+  const [qtyDraft, setQtyDraft] = useState<Record<string, string>>({});
   const [resourceId, setResourceId] = useState("");
   const [guestCount, setGuestCount] = useState("1");
   const [orderNote, setOrderNote] = useState("");
@@ -284,11 +343,11 @@ export default function RetailPosWorkstation({
     label: string;
   } | null>(null);
   const [touchMode, setTouchMode] = useState(false);
-  const [showBillDetails, setShowBillDetails] = useState(false);
   const [busy, setBusy] = useState(false);
   const [offlinePending, setOfflinePending] = useState(0);
   const [online, setOnline] = useState(true);
   const chargeLock = useRef(false);
+  const scanQtyRef = useRef<number | null>(null);
   const [stripeBusy, setStripeBusy] = useState(false);
   const [stripeCheckout, setStripeCheckout] = useState<{
     orderId: string;
@@ -530,6 +589,14 @@ export default function RetailPosWorkstation({
   });
 
   const subtotal = cart.reduce((s, l) => s + l.unitPrice * l.qty, 0);
+  /** Sum of per-item discounts (list − sell) × qty — each product can differ. */
+  const lineDiscountsTotal =
+    Math.round(
+      cart.reduce((s, l) => s + cartLineDiscountAmount(l), 0) * 100,
+    ) / 100;
+  /** Payment “Total” before item discounts (so Discount line can show savings). */
+  const displaySubtotal =
+    Math.round((subtotal + lineDiscountsTotal) * 100) / 100;
   const taxAmount = (() => {
     if (taxSettings.rate <= 0 && !cart.some((l) => (l.taxRatePercent ?? null) != null))
       return 0;
@@ -573,6 +640,9 @@ export default function RetailPosWorkstation({
   const discountCapped =
     discountEntered > discountNum + 0.001 && !canOverrideDiscount;
   const loyaltyOff = loyaltyQuote?.amountOff ?? 0;
+  /** Item discounts + whole-bill discount — shown on payment panel. */
+  const totalDiscountShown =
+    Math.round((lineDiscountsTotal + discountNum) * 100) / 100;
   const ticketNet = Math.max(0, ticketBeforeDiscount - discountNum - loyaltyOff);
   const diningModeForFees =
     orderType === "walk_in" ? (resourceId ? "dine_in" : "") : orderType;
@@ -592,7 +662,15 @@ export default function RetailPosWorkstation({
       })
     : [];
   const diningExtras = diningFeeLines.reduce((s, f) => s + f.amount, 0);
-  const totalDue = ticketNet + diningExtras;
+  /** Exact ticket before nearest-rupee round-off. */
+  const exactDue = Math.max(
+    0,
+    Math.round((ticketNet + diningExtras) * 100) / 100,
+  );
+  const paymentRound = roundOffForDisplay(exactDue);
+  /** Collectable total — half-up to nearest ₹ (paisa ≥ 50 → up). */
+  const totalDue = paymentRound.roundedTotal;
+  const paymentRoundOff = paymentRound.roundOff;
   const splitPart = splitSession?.parts[splitSession.index] ?? null;
   const splitFollowUp = Boolean(splitSession?.orderId);
   const splitRemaining = splitSession
@@ -659,9 +737,9 @@ export default function RetailPosWorkstation({
     };
   });
   const billSummary = buildBillSummary({
-    itemsSubtotal: subtotal,
+    itemsSubtotal: displaySubtotal,
     taxTotal: taxAmount,
-    discount: discountNum,
+    discount: totalDiscountShown,
     loyaltyOff,
     fees: diningFeeLines,
     taxInclusive: taxSettings.inclusive,
@@ -770,6 +848,9 @@ export default function RetailPosWorkstation({
     soldOut?: boolean;
     foodType?: "veg" | "non_veg" | "egg" | null;
     recipeTracked?: boolean;
+    productId?: string;
+    pricingStrategy?: "converted" | "fixed_tier";
+    entryUnits?: Array<{ unitId: string; symbol: string; name: string }>;
     channelPrices?: {
       dine_in?: number;
       takeaway?: number;
@@ -787,7 +868,17 @@ export default function RetailPosWorkstation({
     modifiers?: string[];
     skipModifierPrompt?: boolean;
     serialNumber?: string;
-  }) {
+  },
+    opts?: {
+      setQty?: number;
+      addQty?: number;
+      unitPriceOverride?: number;
+      sellingUnitId?: string;
+      orderedUnitSymbol?: string;
+      baseQty?: number;
+      conversionFactor?: number;
+    },
+  ) {
     if (splitSession) {
       toast.message(
         "Split payment in progress — finish collecting parts before changing the ticket",
@@ -834,7 +925,10 @@ export default function RetailPosWorkstation({
       ? Number(row.channelPrices?.[channelKey])
       : NaN;
     const price =
-      Number.isFinite(channelPrice) && channelPrice > 0
+      opts?.unitPriceOverride != null &&
+      Number.isFinite(opts.unitPriceOverride)
+        ? opts.unitPriceOverride
+        : Number.isFinite(channelPrice) && channelPrice > 0
         ? channelPrice
         : moneyNumber(row.sellPrice) +
           (row.modifiers?.length
@@ -850,18 +944,63 @@ export default function RetailPosWorkstation({
           l.stockLevelId === row.id && (l.modifiers ?? []).join("|") === modKey,
       );
       if (existing) {
-        const next = normalizeQty(existing.qty + step, unit);
-        if (tracks && next > onHand + 1e-9) {
-          toast.error("Not enough stock");
-          return prev;
+        const lineUnit = normalizeSellUnit(
+          opts?.orderedUnitSymbol ?? existing.sellUnit ?? row.sellUnit,
+        );
+        const lineStep = qtyStep(lineUnit);
+        let next: number;
+        if (opts?.setQty != null && Number.isFinite(opts.setQty)) {
+          next = normalizeQty(opts.setQty, lineUnit);
+        } else {
+          const add =
+            opts?.addQty != null && Number.isFinite(opts.addQty)
+              ? opts.addQty
+              : lineStep;
+          next = normalizeQty(existing.qty + add, lineUnit);
+        }
+        if (next <= 0) {
+          return prev.filter(
+            (l) =>
+              !(
+                l.stockLevelId === row.id &&
+                (l.modifiers ?? []).join("|") === modKey
+              ),
+          );
+        }
+        if (tracks) {
+          const factor =
+            opts?.conversionFactor ?? existing.conversionFactor ?? 1;
+          const need = opts?.baseQty ?? next * factor;
+          if (need > onHand + 1e-9) {
+            toast.error(
+              `Only ${formatQtyWithUnit(onHand, row.sellUnit ?? unit)} in stock`,
+            );
+            return prev;
+          }
         }
         return prev.map((l) =>
-          l.stockLevelId === row.id
+          l.stockLevelId === row.id &&
+          (l.modifiers ?? []).join("|") === modKey
             ? {
                 ...l,
                 qty: next,
+                ...(opts?.unitPriceOverride != null
+                  ? { unitPrice: opts.unitPriceOverride }
+                  : {}),
+                ...(opts?.sellingUnitId
+                  ? { sellingUnitId: opts.sellingUnitId }
+                  : {}),
+                ...(opts?.orderedUnitSymbol
+                  ? { sellUnit: opts.orderedUnitSymbol }
+                  : {}),
+                ...(opts?.baseQty != null ? { baseQty: opts.baseQty } : {}),
+                ...(opts?.conversionFactor != null
+                  ? { conversionFactor: opts.conversionFactor }
+                  : {}),
                 maxQty: tracks ? onHand : Math.max(l.maxQty, next + 100),
-                sellUnit: unit,
+                sellUnit: opts?.orderedUnitSymbol
+                  ? normalizeSellUnit(opts.orderedUnitSymbol)
+                  : unit,
                 image: l.image ?? image,
                 listPrice: l.listPrice ?? price,
                 taxRatePercent: l.taxRatePercent ?? taxRatePercent,
@@ -869,11 +1008,11 @@ export default function RetailPosWorkstation({
                 variantOptions: row.variantOptions ?? [],
                 requiresBatch: row.requiresBatch === true,
                 batchOptions: row.batchOptions ?? [],
-          requiresSerial: row.requiresSerial === true,
-          kind: row.kind ?? l.kind,
-          foodType: row.foodType ?? l.foodType,
-          modifiers: row.modifiers ?? l.modifiers,
-        }
+                requiresSerial: row.requiresSerial === true,
+                kind: row.kind ?? l.kind,
+                foodType: row.foodType ?? l.foodType,
+                modifiers: row.modifiers ?? l.modifiers,
+              }
             : l,
         );
       }
@@ -881,7 +1020,23 @@ export default function RetailPosWorkstation({
         toast.error("Out of stock — set opening qty / stock in Inventory first");
         return prev;
       }
-      const startQty = tracks ? Math.min(step, onHand) : step;
+      let startQty =
+        opts?.setQty != null && Number.isFinite(opts.setQty)
+          ? normalizeQty(opts.setQty, unit)
+          : opts?.addQty != null && Number.isFinite(opts.addQty)
+            ? normalizeQty(opts.addQty, unit)
+            : normalizeQty(step, unit);
+        if (tracks) {
+          const need = opts?.baseQty ?? startQty;
+          if (need > onHand + 1e-9) {
+            toast.error(`Only ${formatQtyWithUnit(onHand, unit)} in stock`);
+            return prev;
+          }
+        }
+        if (startQty <= 0) {
+          toast.error("Out of stock — set opening qty / stock in Inventory first");
+          return prev;
+        }
       return [
         ...prev,
         {
@@ -890,9 +1045,14 @@ export default function RetailPosWorkstation({
           name: row.name,
           unitPrice: price,
           listPrice: price,
-          qty: normalizeQty(startQty, unit),
+          qty: startQty,
           maxQty: tracks ? onHand : 999999,
-          sellUnit: unit,
+          sellUnit: opts?.orderedUnitSymbol
+            ? normalizeSellUnit(opts.orderedUnitSymbol)
+            : unit,
+          sellingUnitId: opts?.sellingUnitId,
+          baseQty: opts?.baseQty,
+          conversionFactor: opts?.conversionFactor,
           category: row.category?.name ?? null,
           image,
           taxRatePercent,
@@ -921,12 +1081,22 @@ export default function RetailPosWorkstation({
   const lookup = useMutation({
     mutationFn: (sku: string) => posApi.saleLookup(sku, locationId),
     onSuccess: (row) => {
-      upsertLine(row);
+      const pendingQty = scanQtyRef.current;
+      scanQtyRef.current = null;
+      upsertLine(
+        row,
+        pendingQty != null ? { setQty: pendingQty } : undefined,
+      );
       setScan("");
-      toast.success(`Added ${row.name}`);
+      toast.success(
+        pendingQty != null
+          ? `Added ${formatQtyWithUnit(pendingQty, row.sellUnit)} · ${row.name}`
+          : `Added ${row.name}`,
+      );
       scanRef.current?.focus();
     },
     onError: (e) => {
+      scanQtyRef.current = null;
       toast.error(
         e instanceof ApiError ? e.messages.join(", ") : "SKU not found",
       );
@@ -934,11 +1104,184 @@ export default function RetailPosWorkstation({
     },
   });
 
+  function parseScanQtyCode(raw: string): { code: string; qty?: number } {
+    const trimmed = raw.trim();
+    const lead = trimmed.match(/^(\d+(?:\.\d+)?)\s*[*xX]\s*(.+)$/);
+    if (lead) {
+      const qty = Number(lead[1]);
+      const code = lead[2].trim();
+      if (Number.isFinite(qty) && qty > 0 && code) return { code, qty };
+    }
+    const trail = trimmed.match(/^(.+?)\s*[*xX]\s*(\d+(?:\.\d+)?)$/);
+    if (trail) {
+      const code = trail[1].trim();
+      const qty = Number(trail[2]);
+      if (Number.isFinite(qty) && qty > 0 && code) return { code, qty };
+    }
+    return { code: trimmed };
+  }
+
+  function openQtyPick(row: Parameters<typeof upsertLine>[0]) {
+    if (splitSession) {
+      toast.message(
+        "Split payment in progress — finish collecting parts before changing the ticket",
+      );
+      return;
+    }
+    if (row.soldOut) {
+      toast.error("86 / sold out");
+      return;
+    }
+    const tracks = row.trackQty !== false && row.recipeTracked !== true;
+    const onHand = Number(row.qtyOnHand);
+    if (tracks && onHand <= 0) {
+      toast.error("Out of stock — set opening qty / stock in Inventory first");
+      return;
+    }
+    const inCart = cart.find((l) => l.stockLevelId === row.id);
+    const unit = normalizeSellUnit(row.sellUnit);
+    const entryUnits = row.entryUnits ?? [];
+    const defaultEntry =
+      entryUnits.find(
+        (u) =>
+          u.symbol.toLowerCase() === String(row.sellUnit ?? "").toLowerCase(),
+      )?.unitId ||
+      entryUnits[0]?.unitId ||
+      "";
+    setQtyPick({
+      row,
+      value: inCart
+        ? String(inCart.qty)
+        : String(qtyStep(unit) >= 1 ? 1 : qtyStep(unit)),
+      maxQty: tracks ? onHand : 999999,
+      tracks,
+      entryUnitId: defaultEntry,
+    });
+  }
+
+  async function applyQtyPick() {
+    if (!qtyPick) return;
+    const n = Number(qtyPick.value.trim().replace(",", "."));
+    if (!Number.isFinite(n) || n <= 0) {
+      toast.error("Enter a quantity greater than 0");
+      return;
+    }
+    const row = qtyPick.row;
+    const entryUnitId = qtyPick.entryUnitId;
+    const entrySym =
+      row.entryUnits?.find((u) => u.unitId === entryUnitId)?.symbol ??
+      row.sellUnit;
+
+    // Grocery / multi-unit: quote → cart qty in stock base unit + correct amount
+    if (row.productId && entryUnitId && (row.entryUnits?.length ?? 0) > 0) {
+      try {
+        const quote = await catalogApi.quotePricingLine({
+          productId: row.productId,
+          enteredQty: n,
+          sellingUnitId: entryUnitId,
+        });
+        const qtyBase = Number(quote.qtyBase);
+        if (!(qtyBase > 0)) {
+          toast.error("Quantity converts to zero in stock unit");
+          return;
+        }
+        if (qtyPick.tracks && qtyBase > qtyPick.maxQty + 1e-9) {
+          toast.error(
+            `Only ${formatQtyWithUnit(qtyPick.maxQty, row.sellUnit)} available`,
+          );
+          return;
+        }
+        const unitPrice =
+          quote.unitPrice != null
+            ? Number(quote.unitPrice)
+            : n > 0
+              ? Number(quote.amount) / n
+              : moneyNumber(row.sellPrice);
+        setQtyPick(null);
+        upsertLine(row, {
+          setQty: n,
+          unitPriceOverride: unitPrice,
+          sellingUnitId: entryUnitId,
+          orderedUnitSymbol: entrySym,
+          baseQty: qtyBase,
+          conversionFactor: Number(quote.conversionFactorUsed),
+        });
+        toast.success(
+          `${formatQtyWithUnit(n, entrySym)} · ${money(Number(quote.amount))}`,
+        );
+        return;
+      } catch (e) {
+        // Fall through to plain qty if product has no base unit yet
+        if (!(e instanceof ApiError && /base unit/i.test(e.message))) {
+          toast.error(
+            e instanceof ApiError ? e.messages.join(", ") : "Could not price qty",
+          );
+          return;
+        }
+      }
+    }
+
+    setQtyPick(null);
+    upsertLine(row, { setQty: n });
+    toast.success(
+      `Qty ${formatQtyWithUnit(n, row.sellUnit)} · ${row.name}`,
+    );
+  }
+
+  function commitCartLineQty(line: CartLine, raw: string) {
+    const cleaned = raw.trim().replace(",", ".");
+    if (cleaned === "") {
+      setCart((prev) =>
+        prev.filter((x) => x.stockLevelId !== line.stockLevelId),
+      );
+      setQtyDraft((d) => {
+        const next = { ...d };
+        delete next[line.stockLevelId];
+        return next;
+      });
+      return;
+    }
+    const n = Number(cleaned);
+    if (!Number.isFinite(n) || n < 0) {
+      toast.error("Enter a valid quantity");
+      setQtyDraft((d) => {
+        const next = { ...d };
+        delete next[line.stockLevelId];
+        return next;
+      });
+      return;
+    }
+    let next = normalizeQty(n, line.sellUnit);
+    if (next <= 0) {
+      setCart((prev) =>
+        prev.filter((x) => x.stockLevelId !== line.stockLevelId),
+      );
+    } else {
+      if (next > line.maxQty + 1e-9) {
+        toast.error(
+          `Only ${formatQtyWithUnit(line.maxQty, line.sellUnit)} available`,
+        );
+        next = normalizeQty(line.maxQty, line.sellUnit);
+      }
+      setCart((prev) =>
+        prev.map((x) =>
+          x.stockLevelId === line.stockLevelId ? { ...x, qty: next } : x,
+        ),
+      );
+    }
+    setQtyDraft((d) => {
+      const nextDraft = { ...d };
+      delete nextDraft[line.stockLevelId];
+      return nextDraft;
+    });
+  }
+
   function resolveScan(code: string) {
-    const trimmed = code.trim();
+    const parsed = parseScanQtyCode(code);
+    const trimmed = parsed.code;
     if (!trimmed) return;
+    const qty = parsed.qty;
     const norm = trimmed.toLowerCase();
-    // Prefer local catalog hit for speed (SKU, product SKU, barcode)
     const local = (catalog.data?.items ?? []).find((s) => {
       const sku = s.sku?.toLowerCase();
       const productSku = s.productSku?.toLowerCase();
@@ -946,12 +1289,17 @@ export default function RetailPosWorkstation({
       return sku === norm || productSku === norm || barcode === norm;
     });
     if (local) {
-      upsertLine(local);
+      upsertLine(local, qty != null ? { setQty: qty } : undefined);
       setScan("");
-      toast.success(`Added ${local.name}`);
+      toast.success(
+        qty != null
+          ? `Added ${formatQtyWithUnit(qty, local.sellUnit)} · ${local.name}`
+          : `Added ${local.name}`,
+      );
       scanRef.current?.focus();
       return;
     }
+    scanQtyRef.current = qty ?? null;
     lookup.mutate(trimmed);
   }
 
@@ -962,6 +1310,8 @@ export default function RetailPosWorkstation({
 
   function resetAfterFullSale() {
     setCart([]);
+    setQtyDraft({});
+    setQtyPick(null);
     setDiscountAmount("");
     setCouponCode("");
     setCouponApplied(null);
@@ -1310,6 +1660,12 @@ export default function RetailPosWorkstation({
         return;
       }
     }
+    if (orderType === "delivery" && deliveryPhone.trim()) {
+      if (!validatePhoneE164(deliveryPhone.trim())) {
+        toast.error("Enter a valid delivery phone for the selected country");
+        return;
+      }
+    }
 
     chargeLock.current = true;
     setBusy(true);
@@ -1369,6 +1725,7 @@ export default function RetailPosWorkstation({
           stockLevelId: l.stockLevelId,
           quantity: l.qty,
           unitPrice: l.unitPrice,
+          ...(l.sellingUnitId ? { sellingUnitId: l.sellingUnitId } : {}),
           ...(l.variantId ? { variantId: l.variantId } : {}),
           ...(l.batchId ? { batchId: l.batchId } : {}),
           ...(l.serialNumber?.trim()
@@ -1377,6 +1734,9 @@ export default function RetailPosWorkstation({
           ...(l.modifiers?.length ? { modifiers: l.modifiers } : {}),
         })),
         ...(discountNum > 0 ? { discountAmount: discountNum } : {}),
+        ...(Math.abs(paymentRoundOff) >= 0.005
+          ? { roundOffAmount: paymentRoundOff }
+          : {}),
         ...(couponApplied
           ? { couponCode: couponApplied }
           : couponCode.trim()
@@ -1390,9 +1750,18 @@ export default function RetailPosWorkstation({
             ? { covers: Number(guestCount) }
             : {}),
           ...(guestName.trim() ? { guestName: guestName.trim() } : {}),
-          ...(deliveryPhone.trim() ? { guestPhone: deliveryPhone.trim() } : {}),
+          ...(deliveryPhone.trim()
+            ? { guestPhone: canonicalPhoneE164(deliveryPhone.trim()) }
+            : {}),
           ...(deliveryAddress.trim()
             ? { deliveryAddress: deliveryAddress.trim() }
+            : {}),
+          ...(Math.abs(paymentRoundOff) >= 0.005
+            ? {
+                roundOff: paymentRoundOff,
+                exactTotal: exactDue,
+                roundedTotal: totalDue,
+              }
             : {}),
           ...(Object.keys(orderExtraFields).length
             ? {
@@ -1695,6 +2064,7 @@ export default function RetailPosWorkstation({
             stockLevelId: l.stockLevelId,
             quantity: l.qty,
             unitPrice: l.unitPrice,
+            ...(l.sellingUnitId ? { sellingUnitId: l.sellingUnitId } : {}),
             ...(l.variantId ? { variantId: l.variantId } : {}),
             ...(l.batchId ? { batchId: l.batchId } : {}),
             ...(l.serialNumber?.trim()
@@ -1703,6 +2073,9 @@ export default function RetailPosWorkstation({
             ...(l.modifiers?.length ? { modifiers: l.modifiers } : {}),
           })),
           ...(discountNum > 0 ? { discountAmount: discountNum } : {}),
+          ...(Math.abs(paymentRoundOff) >= 0.005
+            ? { roundOffAmount: paymentRoundOff }
+            : {}),
           ...(orderNote.trim() ? { note: orderNote.trim() } : {}),
           ...(loyaltyQuote && loyaltyQuote.points > 0
             ? { loyaltyPointsToRedeem: loyaltyQuote.points }
@@ -1716,7 +2089,16 @@ export default function RetailPosWorkstation({
               ? { covers: Number(guestCount) }
               : {}),
             ...(guestName.trim() ? { guestName: guestName.trim() } : {}),
-            ...(deliveryPhone.trim() ? { guestPhone: deliveryPhone.trim() } : {}),
+            ...(deliveryPhone.trim()
+            ? { guestPhone: canonicalPhoneE164(deliveryPhone.trim()) }
+            : {}),
+            ...(Math.abs(paymentRoundOff) >= 0.005
+              ? {
+                  roundOff: paymentRoundOff,
+                  exactTotal: exactDue,
+                  roundedTotal: totalDue,
+                }
+              : {}),
             ...(deliveryAddress.trim()
               ? { deliveryAddress: deliveryAddress.trim() }
               : {}),
@@ -1769,6 +2151,7 @@ export default function RetailPosWorkstation({
           stockLevelId: l.stockLevelId,
           quantity: l.qty,
           unitPrice: l.unitPrice,
+          ...(l.sellingUnitId ? { sellingUnitId: l.sellingUnitId } : {}),
           ...(l.variantId ? { variantId: l.variantId } : {}),
           ...(l.batchId ? { batchId: l.batchId } : {}),
           ...(l.serialNumber?.trim()
@@ -1873,6 +2256,8 @@ export default function RetailPosWorkstation({
         qty: l.qty,
         maxQty: Math.max(l.maxQty, l.qty),
         sellUnit: normalizeSellUnit(l.sellUnit ?? "pcs"),
+        sellingUnitId: (l as { sellingUnitId?: string }).sellingUnitId,
+        baseQty: (l as { baseQty?: number }).baseQty,
       }));
       if (!lines.length) {
         toast.error("This draft has no items");
@@ -1914,12 +2299,21 @@ export default function RetailPosWorkstation({
   }
 
   function openRateEdit(line: CartLine) {
-    const base = line.listPrice ?? line.unitPrice;
-    const pct = base > 0 ? ((line.unitPrice / base - 1) * 100) : 0;
+    const base = cartLineListPrice(line);
+    const discPct = cartLineDiscountPercent(line);
+    const markupPct =
+      base > 0 && line.unitPrice > base + 0.001
+        ? Math.round(((line.unitPrice / base - 1) * 100) * 100) / 100
+        : 0;
     setRateEdit({
       stockLevelId: line.stockLevelId,
       amount: String(line.unitPrice),
-      percent: Math.abs(pct) < 0.05 ? "" : String(Math.round(pct * 100) / 100),
+      percent:
+        discPct > 0
+          ? String(-discPct)
+          : markupPct > 0
+            ? String(markupPct)
+            : "",
     });
   }
 
@@ -1938,6 +2332,25 @@ export default function RetailPosWorkstation({
       ),
     );
     setRateEdit(null);
+  }
+
+  function setCartLineDiscount(
+    stockLevelId: string,
+    opts: { percent?: number; amountOffPerUnit?: number; reset?: boolean },
+  ) {
+    setCart((prev) =>
+      prev.map((x) => {
+        if (x.stockLevelId !== stockLevelId) return x;
+        const base = cartLineListPrice(x);
+        if (opts.reset) {
+          return { ...x, unitPrice: Math.round(base * 100) / 100 };
+        }
+        return {
+          ...x,
+          unitPrice: unitPriceAfterLineDiscount(base, opts),
+        };
+      }),
+    );
   }
 
   async function finishStripeSale(paymentIntentId: string) {
@@ -2055,8 +2468,10 @@ export default function RetailPosWorkstation({
   return (
     <div
       className={cn(
-        "relative",
-        compact ? "" : "min-h-[calc(100vh-5rem)]",
+        "relative bg-white",
+        compact
+          ? "rounded-xl p-2"
+          : "min-h-0 -mx-1 px-1 pb-3 sm:-mx-2 sm:px-2",
       )}
     >
       {/* Idle lock is handled in AppShell; this overlay is manual Switch user only */}
@@ -2068,11 +2483,11 @@ export default function RetailPosWorkstation({
         onUnlocked={() => setManualPinSwitch(false)}
       />
       {!compact ? (
-        <header className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <header className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-2xl bg-white px-4 py-2.5">
           <p className="text-sm font-semibold text-[#0b1f33]">
             {productName}
             <span className="ml-2 font-normal text-[#8b9bb0]">
-              Tap · charge
+              Counter · scan &amp; charge
             </span>
           </p>
           <div className="flex flex-wrap items-center gap-2">
@@ -2097,7 +2512,7 @@ export default function RetailPosWorkstation({
               </Link>
             ) : null}
             {actingUser ? (
-              <span className="text-xs font-medium text-[#5a6b7d]">
+              <span className="rounded-full bg-[#f1f5f9] px-2.5 py-1 text-xs font-medium text-[#5a6b7d]">
                 {actingUser.fullName}
               </span>
             ) : null}
@@ -2116,12 +2531,12 @@ export default function RetailPosWorkstation({
       ) : null}
 
       {!online ? (
-        <div className="mb-3 rounded-xl border border-[#f5c2c2] bg-[#fff6f6] px-3 py-2 text-sm text-[#a01818]">
+        <div className="mb-2 shrink-0 rounded-xl border border-[#f5c2c2] bg-[#fff6f6] px-3 py-2 text-sm text-[#a01818]">
           Offline — Sale counter needs internet to charge. Reconnect, then try
           again.
         </div>
       ) : offlinePending > 0 ? (
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#c9d7f5] bg-[#e8eefb] px-3 py-2 text-sm text-[#1341a8]">
+        <div className="mb-2 flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-[#c9d7f5] bg-[#e8eefb] px-3 py-2 text-sm text-[#1341a8]">
           <span>
             Online — {offlinePending} queued offline event(s) waiting to sync
           </span>
@@ -2148,7 +2563,7 @@ export default function RetailPosWorkstation({
               onChange={setScan}
               onScan={resolveScan}
               label=""
-              placeholder="Scan barcode or type SKU"
+              placeholder="Scan barcode / SKU · bulk: 455*SKU"
               disabled={lookup.isPending}
               autoFocus
               inputRef={scanRef}
@@ -2192,7 +2607,7 @@ export default function RetailPosWorkstation({
                 type="button"
                 onClick={() => setLowStockOnly((v) => !v)}
                 className={cn(
-                  "shrink-0 rounded-md px-2.5 py-1.5 text-xs font-semibold transition",
+                  "shrink-0 rounded-lg px-3 py-2 text-xs font-semibold transition",
                   lowStockOnly
                     ? "bg-[#fff7ed] text-[#9a3412] ring-1 ring-[#fdba74]"
                     : "bg-[#f8fafc] text-[#5a6b7d] ring-1 ring-[#e2e8f0] hover:text-[#0b1f33]",
@@ -2221,11 +2636,13 @@ export default function RetailPosWorkstation({
             </div>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto bg-[#f7f8fb]">
+          <div className="min-h-0 flex-1 overflow-y-auto bg-[#f4f6fa]">
             <ul
               className={cn(
-                "grid min-h-full content-start gap-2 p-2.5",
-                compact ? "grid-cols-3" : "grid-cols-4",
+                "grid min-h-full content-start gap-3 p-3",
+                compact
+                  ? "grid-cols-2 sm:grid-cols-3"
+                  : "grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5",
               )}
             >
               {items.map((row) => {
@@ -2243,90 +2660,116 @@ export default function RetailPosWorkstation({
                 const stock = productStockHint({
                   kind: row.kind,
                   trackQty: row.trackQty,
+                  recipeTracked: row.recipeTracked,
                   available,
                   qtyLeftLabel: formatQtyWithUnit(available, row.sellUnit),
                 });
                 return (
                   <li key={row.id} className="min-w-0">
-                    <button
-                      type="button"
-                      onClick={() => upsertLine(row)}
+                    <div
+                      role="button"
+                      tabIndex={stock.tone === "out" ? -1 : 0}
+                      onClick={() => {
+                        if (stock.tone !== "out") upsertLine(row);
+                      }}
+                      onKeyDown={(e) => {
+                        if (
+                          (e.key === "Enter" || e.key === " ") &&
+                          stock.tone !== "out"
+                        ) {
+                          e.preventDefault();
+                          upsertLine(row);
+                        }
+                      }}
                       className={cn(
-                        "flex h-full w-full flex-col overflow-hidden rounded-lg border bg-white text-left transition",
-                        inCart
-                          ? "border-[#1a56db] ring-1 ring-[#1a56db]/20"
-                          : "border-[#e8edf4] hover:border-[#cbd5e1]",
-                        row.foodType === "veg" && "border-l-[3px] border-l-[#15803d]",
-                        row.foodType === "non_veg" &&
-                          "border-l-[3px] border-l-[#b91c1c]",
-                        row.foodType === "egg" && "border-l-[3px] border-l-[#a16207]",
+                        "group flex h-full w-full cursor-pointer flex-col overflow-hidden rounded-xl border border-[#e2e8f0] bg-white text-left shadow-[0_1px_2px_rgba(11,31,51,0.04)] transition hover:border-[#1a56db]/50 hover:shadow-[0_2px_8px_rgba(26,86,219,0.08)]",
+                        inCart &&
+                          "border-[#1a56db] bg-[#f5f8ff] shadow-[0_0_0_1px_rgba(26,86,219,0.2)]",
+                        stock.tone === "out" &&
+                          "cursor-not-allowed opacity-55 hover:border-[#e2e8f0] hover:shadow-[0_1px_2px_rgba(11,31,51,0.04)]",
                       )}
                     >
-                      <div className="relative aspect-[3/2] w-full overflow-hidden bg-[#eef2f7]">
-                        <div className="absolute inset-0">
-                          <ProductThumb
-                            src={src}
-                            label={row.name}
-                            size="fill"
-                            className="h-full w-full rounded-none border-0 shadow-none"
-                            count={gallery.length}
-                            onClick={
-                              gallery.length
-                                ? () =>
-                                    setLightbox({
-                                      images: gallery,
-                                      index: 0,
-                                      label: row.name,
-                                    })
-                                : undefined
-                            }
-                          />
-                        </div>
-                        {stock.tone !== "ok" ? (
-                          <span
-                            className={cn(
-                              "absolute top-1 left-1 z-[1] max-w-[calc(100%-0.5rem)] truncate rounded px-1.5 py-0.5 text-[0.6rem] font-bold",
-                              stock.tone === "out"
-                                ? "bg-[#fef2f2] text-[#c81e1e]"
-                                : "bg-[#fff7ed] text-[#9a3412]",
-                            )}
-                          >
-                            {stock.label}
-                          </span>
-                        ) : null}
+                      <div className="relative aspect-[4/3] w-full shrink-0 overflow-hidden bg-[#f8fafc]">
+                        <ProductThumb
+                          src={src}
+                          label={row.name}
+                          size="fill"
+                          className="!rounded-none border-0 bg-[#f8fafc] shadow-none ring-0"
+                          count={gallery.length}
+                          onClick={
+                            gallery.length
+                              ? () =>
+                                  setLightbox({
+                                    images: gallery,
+                                    index: 0,
+                                    label: row.name,
+                                  })
+                              : undefined
+                          }
+                        />
+                        <span
+                          className={cn(
+                            "absolute top-1.5 left-1.5 z-[1] max-w-[calc(100%-0.75rem)] truncate rounded-md bg-white/95 px-1.5 py-0.5 text-[0.62rem] font-bold shadow-sm",
+                            stock.tone === "out"
+                              ? "text-[#c81e1e]"
+                              : stock.tone === "low"
+                                ? "text-[#9a3412]"
+                                : stock.tone === "info"
+                                  ? "text-[#1a56db]"
+                                  : "text-[#0f766e]",
+                          )}
+                        >
+                          {stock.label}
+                        </span>
                         {row.foodType ? (
                           <span className="absolute top-1.5 right-1.5 z-[1]">
                             <FoodTypeBadge
                               value={row.foodType}
                               showLabel
-                              size="lg"
+                              size="sm"
                             />
-                          </span>
-                        ) : null}
-                        {inCart ? (
-                          <span className="absolute right-1.5 bottom-1.5 z-[1] grid h-6 min-w-6 place-items-center rounded-md bg-[#1a56db] px-1.5 text-[0.7rem] font-bold text-white">
-                            {inCart.qty}
                           </span>
                         ) : null}
                       </div>
-                      <div className="flex min-h-0 flex-1 flex-col gap-0.5 p-2">
-                        <div className="flex items-start gap-1.5">
-                          {row.foodType ? (
-                            <FoodTypeBadge
-                              value={row.foodType}
-                              size="md"
-                              className="mt-0.5 shrink-0"
-                            />
-                          ) : null}
-                          <p className="line-clamp-2 min-w-0 flex-1 text-[0.78rem] leading-snug font-semibold text-[#0b1f33]">
+                      <div className="flex items-end justify-between gap-2 px-2.5 py-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="line-clamp-2 min-h-[2rem] text-[0.8125rem] leading-snug font-semibold text-[#0b1f33]">
                             {row.name}
                           </p>
+                          <p className="mt-1 text-[0.875rem] font-bold tabular-nums leading-none text-[#1a56db]">
+                            {money(row.sellPrice)}
+                          </p>
                         </div>
-                        <p className="mt-auto text-[0.88rem] font-bold tabular-nums text-[#0b1f33]">
-                          {money(row.sellPrice)}
-                        </p>
+                        <span
+                          role="button"
+                          tabIndex={stock.tone === "out" ? -1 : 0}
+                          title="Tap to type quantity (e.g. 455)"
+                          className={cn(
+                            "grid h-8 min-w-8 place-items-center rounded-full px-1.5 text-sm font-bold transition",
+                            stock.tone === "out"
+                              ? "bg-[#f1f5f9] text-[#94a3b8]"
+                              : inCart
+                                ? "bg-[#1a56db] text-white shadow-sm"
+                                : "bg-[#e8eefb] text-[#1a56db] group-hover:bg-[#1a56db] group-hover:text-white",
+                          )}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (stock.tone === "out") return;
+                            openQtyPick(row);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              if (stock.tone !== "out") openQtyPick(row);
+                            }
+                          }}
+                        >
+                          {inCart ? inCart.qty : "+"}
+                        </span>
                       </div>
-                    </button>
+                    </div>
                   </li>
                 );
               })}
@@ -2409,7 +2852,9 @@ export default function RetailPosWorkstation({
                   : "Ticket"}
               </p>
               {!cart.length ? (
-                <p className="text-[0.7rem] text-[#8b9bb0]">Tap a product to add</p>
+                <p className="text-[0.7rem] text-[#8b9bb0]">
+                  Tap a product to add
+                </p>
               ) : null}
             </div>
             {cart.length ? (
@@ -2516,142 +2961,214 @@ export default function RetailPosWorkstation({
             </div>
           ) : null}
 
-          {/* ticket lines */}
+          {/* <div className="border-b border-[#e8edf4] px-4 py-3">
+            
+          </div> */}
 
-          <ul className="max-h-[min(42vh,22rem)] min-h-[8rem] flex-1 space-y-1 overflow-y-auto px-2 py-2">
+          <ul className="max-h-[min(48vh,26rem)] min-h-[8rem] flex-1 space-y-3.5 overflow-y-auto px-3 py-3">
             {cart.map((l) => {
-              const catalogRate = l.listPrice ?? l.unitPrice;
+              const catalogRate = cartLineListPrice(l);
               const rateChanged =
                 Math.abs(l.unitPrice - catalogRate) > 0.001;
+              const discPct = cartLineDiscountPercent(l);
               const ratePct =
                 catalogRate > 0
                   ? Math.round(((l.unitPrice / catalogRate - 1) * 100) * 10) /
                     10
                   : 0;
+              const unitLbl = priceUnitLabel(l.sellUnit);
+              const unitShort = unitLbl.replace(/^per\s+/i, "") || "pcs";
               return (
               <li
                 key={l.stockLevelId}
-                className="rounded-lg bg-[#f8fafc] px-2 py-1.5 ring-1 ring-[#eef2f8]"
+                className="rounded-2xl border border-[#e8edf4] bg-white p-3.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
               >
-                <div className="flex items-start gap-2">
-                <ProductThumb src={l.image} label={l.name} size="sm" />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="flex min-w-0 items-center gap-1.5 truncate text-sm font-semibold text-[#0b1f33]">
-                      {l.foodType ? (
-                        <FoodTypeBadge
-                          value={l.foodType}
-                          showLabel
-                          size="sm"
-                          className="shrink-0"
-                        />
-                      ) : null}
-                      <span className="truncate">{l.name}</span>
-                    </p>
-                    <p className="shrink-0 text-sm font-bold tabular-nums text-[#0b1f33]">
-                      {money(l.unitPrice * l.qty)}
-                    </p>
-                  </div>
-                  <p className="truncate text-[0.65rem] text-[#8b9bb0]">
-                    {money(l.unitPrice)} {priceUnitLabel(l.sellUnit)}
-                  </p>
-                  <div className="mt-1 flex items-center justify-between gap-2">
-                    <div className="flex shrink-0 items-center rounded-md bg-white p-0.5 ring-1 ring-[#e4e9f0]">
-                      <button
-                        type="button"
-                        disabled={Boolean(splitSession)}
-                        className="grid h-7 w-7 place-items-center rounded text-sm font-bold text-[#0b1f33] transition hover:bg-[#e8eefb] disabled:opacity-40"
-                        onClick={() =>
-                          setCart((prev) =>
-                            prev
-                              .map((x) => {
-                                if (x.stockLevelId !== l.stockLevelId) return x;
-                                const step = qtyStep(x.sellUnit);
-                                const next = normalizeQty(
-                                  x.qty - step,
-                                  x.sellUnit,
-                                );
-                                return { ...x, qty: Math.max(0, next) };
-                              })
-                              .filter((x) => x.qty > 0),
-                          )
-                        }
-                      >
-                        −
-                      </button>
-                      {allowsDecimalQty(l.sellUnit) ? (
-                        <input
-                          type="number"
-                          className="w-12 border-0 bg-transparent text-center text-sm font-bold tabular-nums text-[#0b1f33] outline-none disabled:opacity-40"
-                          min={0}
-                          max={l.maxQty}
-                          step={0.001}
-                          value={l.qty}
+                <div className="flex gap-3">
+                  <ProductThumb
+                    src={l.image}
+                    label={l.name}
+                    size="md"
+                    className="h-16 w-16 shrink-0 rounded-xl"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1 pr-1">
+                        <p className="flex min-w-0 items-center gap-1.5 text-[0.875rem] font-semibold text-[#0b1f33]">
+                          {l.foodType ? (
+                            <FoodTypeBadge value={l.foodType} className="shrink-0" />
+                          ) : null}
+                          <span className="truncate">{l.name}</span>
+                        </p>
+                        <p className="mt-1 text-[0.75rem] tabular-nums text-[#8b9bb0]">
+                          {discPct > 0 ? (
+                            <>
+                              <span className="mr-1.5 line-through decoration-[#94a3b8]">
+                                {money(catalogRate)}
+                              </span>
+                              <span className="font-semibold text-[#c2410c]">
+                                {money(l.unitPrice)}
+                              </span>
+                            </>
+                          ) : (
+                            money(l.unitPrice)
+                          )}{" "}
+                          {unitLbl.startsWith("per") ? unitLbl : `per ${unitShort}`}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <p className="text-[0.9375rem] font-bold tabular-nums text-[#0b1f33]">
+                          {money(l.unitPrice * l.qty)}
+                        </p>
+                        <button
+                          type="button"
                           disabled={Boolean(splitSession)}
-                          onChange={(e) => {
-                            const raw = Number(e.target.value);
-                            if (!Number.isFinite(raw)) return;
+                          className="grid h-7 w-7 place-items-center rounded-md text-[#94a3b8] transition hover:bg-[#fff1f1] hover:text-[#c81e1e] disabled:opacity-40"
+                          title="Remove item"
+                          aria-label={`Remove ${l.name}`}
+                          onClick={() =>
                             setCart((prev) =>
-                              prev.map((x) => {
-                                if (x.stockLevelId !== l.stockLevelId) return x;
-                                const next = normalizeQty(raw, x.sellUnit);
-                                if (next < 0 || next > x.maxQty) return x;
-                                return { ...x, qty: next };
-                              }),
-                            );
-                          }}
-                        />
-                      ) : (
-                        <span className="w-7 text-center text-sm font-bold tabular-nums text-[#0b1f33]">
-                          {l.qty}
+                              prev.filter(
+                                (x) => x.stockLevelId !== l.stockLevelId,
+                              ),
+                            )
+                          }
+                        >
+                          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
+                            <path
+                              d="M3 4.5h10M6 4.5V3.5a1 1 0 011-1h2a1 1 0 011 1v1M5.5 4.5l.5 8h4l.5-8"
+                              stroke="currentColor"
+                              strokeWidth="1.4"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2.5">
+                        <div className="flex shrink-0 items-center rounded-lg border border-[#e2e8f0] bg-white">
+                          <button
+                            type="button"
+                            disabled={Boolean(splitSession)}
+                            className="grid h-8 w-8 place-items-center text-sm font-bold text-[#0b1f33] transition hover:bg-[#f8fafc] disabled:opacity-40"
+                            onClick={() =>
+                              setCart((prev) =>
+                                prev
+                                  .map((x) => {
+                                    if (x.stockLevelId !== l.stockLevelId)
+                                      return x;
+                                    const step = qtyStep(x.sellUnit);
+                                    const next = normalizeQty(
+                                      x.qty - step,
+                                      x.sellUnit,
+                                    );
+                                    return { ...x, qty: Math.max(0, next) };
+                                  })
+                                  .filter((x) => x.qty > 0),
+                              )
+                            }
+                          >
+                            −
+                          </button>
+                          <input
+                            type="text"
+                            inputMode={
+                              allowsDecimalQty(l.sellUnit)
+                                ? "decimal"
+                                : "numeric"
+                            }
+                            className="h-8 w-14 border-0 bg-transparent text-center text-sm font-bold tabular-nums text-[#0b1f33] outline-none disabled:opacity-40"
+                            aria-label={`Quantity for ${l.name}`}
+                            title="Type quantity (e.g. 455)"
+                            value={
+                              qtyDraft[l.stockLevelId] !== undefined
+                                ? qtyDraft[l.stockLevelId]
+                                : String(l.qty)
+                            }
+                            disabled={Boolean(splitSession)}
+                            onFocus={(e) => {
+                              setQtyDraft((d) => ({
+                                ...d,
+                                [l.stockLevelId]: String(l.qty),
+                              }));
+                              e.target.select();
+                            }}
+                            onChange={(e) => {
+                              const v = e.target.value.replace(",", ".");
+                              if (v !== "" && !/^\d*\.?\d*$/.test(v)) return;
+                              setQtyDraft((d) => ({
+                                ...d,
+                                [l.stockLevelId]: v,
+                              }));
+                            }}
+                            onBlur={() =>
+                              commitCartLineQty(
+                                l,
+                                qtyDraft[l.stockLevelId] ?? String(l.qty),
+                              )
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                (e.target as HTMLInputElement).blur();
+                              }
+                            }}
+                          />
+                          <button
+                            type="button"
+                            disabled={Boolean(splitSession)}
+                            className="grid h-8 w-8 place-items-center text-sm font-bold text-[#0b1f33] transition hover:bg-[#f8fafc] disabled:opacity-40"
+                            onClick={() =>
+                              setCart((prev) =>
+                                prev.map((x) => {
+                                  if (x.stockLevelId !== l.stockLevelId)
+                                    return x;
+                                  const step = qtyStep(x.sellUnit);
+                                  const next = normalizeQty(
+                                    x.qty + step,
+                                    x.sellUnit,
+                                  );
+                                  if (next > x.maxQty + 1e-9) {
+                                    toast.error(
+                                      `Only ${formatQtyWithUnit(x.maxQty, x.sellUnit)} available`,
+                                    );
+                                    return x;
+                                  }
+                                  return { ...x, qty: next };
+                                }),
+                              )
+                            }
+                          >
+                            +
+                          </button>
+                        </div>
+                        <span className="text-[0.8125rem] font-medium text-[#8b9bb0]">
+                          {unitShort}
                         </span>
-                      )}
+                      </div>
                       <button
                         type="button"
-                        disabled={Boolean(splitSession)}
-                        className="grid h-7 w-7 place-items-center rounded-md text-sm font-bold text-[#0b1f33] transition hover:bg-[#e8eefb] disabled:opacity-40"
-                        onClick={() =>
-                          setCart((prev) =>
-                            prev.map((x) => {
-                              if (x.stockLevelId !== l.stockLevelId) return x;
-                              const step = qtyStep(x.sellUnit);
-                              const next = normalizeQty(
-                                x.qty + step,
-                                x.sellUnit,
-                              );
-                              if (next > x.maxQty + 1e-9) return x;
-                              return { ...x, qty: next };
-                            }),
-                          )
-                        }
+                        className={cn(
+                          "text-[0.8125rem] font-semibold",
+                          discPct > 0
+                            ? "text-[#c2410c] hover:underline"
+                            : rateChanged
+                              ? "text-[#c2410c] hover:underline"
+                              : "text-[#1a56db] hover:underline",
+                        )}
+                        title="Change price or discount for this item only"
+                        onClick={() => openRateEdit(l)}
                       >
-                        +
+                        {discPct > 0
+                          ? `−${discPct}%`
+                          : rateChanged
+                            ? `${ratePct > 0 ? "+" : ""}${ratePct}%`
+                            : "Disc"}
                       </button>
                     </div>
-                    <button
-                      type="button"
-                      className={cn(
-                        "text-[0.68rem] font-semibold",
-                        rateChanged
-                          ? "text-[#c2410c]"
-                          : "text-[#1a56db] hover:underline",
-                      )}
-                      title="Change this item’s price"
-                      onClick={() => openRateEdit(l)}
-                    >
-                      {rateChanged ? (
-                        <span className="tabular-nums">
-                          {money(l.unitPrice)}
-                          <span className="ml-0.5 text-[0.6rem] opacity-80">
-                            ({ratePct > 0 ? "+" : ""}
-                            {ratePct}%)
-                          </span>
-                        </span>
-                      ) : (
-                        "Price"
-                      )}
-                    </button>
-                  </div>
+
                   {(l.requiresVariant || l.requiresBatch || l.requiresSerial) && (
                     <div className="mt-2 grid gap-1">
                       {l.requiresVariant && (
@@ -2716,13 +3233,13 @@ export default function RetailPosWorkstation({
                       )}
                     </div>
                   )}
-                </div>
+                  </div>
                 </div>
               </li>
               );
             })}
             {!cart.length ? (
-              <li className="flex flex-col items-center justify-center gap-2 rounded-[12px] border border-dashed border-[#d9e0ea] bg-[#f8fafc] px-4 py-10 text-center">
+              <li className="flex flex-col items-center justify-center gap-2 px-4 py-10 text-center">
                 <span className="grid h-10 w-10 place-items-center rounded-full bg-[#e8eefb] text-[#1a56db]">
                   <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
                     <path
@@ -2744,115 +3261,17 @@ export default function RetailPosWorkstation({
             ) : null}
           </ul>
 
-          <div className="mt-auto space-y-2 border-t border-[#eef2f8] bg-white p-3">
-            <div className="rounded-lg bg-[#f8fafc] px-3 py-2.5 ring-1 ring-[#eef2f8]">
-              <div className="flex items-baseline justify-between gap-2">
-                <span className="text-sm font-semibold text-[#0b1f33]">
-                  Amount due
-                </span>
-                <span className="text-xl font-bold tabular-nums text-[#0b1f33]">
-                  {money(splitPart ? chargeAmount : totalDue)}
-                </span>
-              </div>
-              {(cart.length > 0 ||
-                splitFollowUp ||
-                discountNum > 0 ||
-                billSummary.taxTotal > 0) && (
-                <button
-                  type="button"
-                  className="mt-1 text-[0.7rem] font-semibold text-[#1a56db] hover:underline"
-                  onClick={() => setShowBillDetails((v) => !v)}
-                >
-                  {showBillDetails ? "Hide details" : "Bill details"}
-                </button>
-              )}
-              {showBillDetails ? (
-                <div className="mt-2 space-y-0.5 border-t border-[#e8edf4] pt-2">
-                  {(cart.length > 0 || splitFollowUp) && (
-                    <div className="flex justify-between text-[0.78rem] text-[#0b1f33]">
-                      <span>Items</span>
-                      <span className="tabular-nums">
-                        {money(billSummary.itemsSubtotal)}
-                      </span>
-                    </div>
-                  )}
-                  {discountNum > 0 ? (
-                    <div className="flex justify-between text-[0.78rem] text-[#0b1f33]">
-                      <span>Discount</span>
-                      <span className="tabular-nums">−{money(discountNum)}</span>
-                    </div>
-                  ) : null}
-                  {loyaltyOff > 0 ? (
-                    <div className="flex justify-between text-[0.78rem] text-[#0b1f33]">
-                      <span>Points</span>
-                      <span className="tabular-nums">−{money(loyaltyOff)}</span>
-                    </div>
-                  ) : null}
-                  {diningFeeLines.map((f) => (
-                    <div
-                      key={f.feeCode}
-                      className="flex justify-between text-[0.78rem] text-[#0b1f33]"
-                    >
-                      <span>{f.reason}</span>
-                      <span className="tabular-nums">{money(f.amount)}</span>
-                    </div>
-                  ))}
-                  {billSummary.taxTotal > 0 ? (
-                    <>
-                      <div className="flex justify-between text-[0.78rem] text-[#0b1f33]">
-                        <span>Taxable</span>
-                        <span className="tabular-nums">
-                          {money(billSummary.taxableValue)}
-                        </span>
-                      </div>
-                      <div className="my-1 space-y-0.5 rounded-md bg-white px-2 py-1.5 text-[0.72rem] ring-1 ring-[#eef2f8]">
-                        {billSummary.taxSlabs.map((s) =>
-                          s.rate <= 0 ? (
-                            <div
-                              key="tax"
-                              className="flex justify-between tabular-nums"
-                            >
-                              <span>Tax</span>
-                              <span>{money(s.tax)}</span>
-                            </div>
-                          ) : (
-                            <div key={s.rate} className="space-y-0.5">
-                              <div className="flex justify-between tabular-nums">
-                                <span className="text-[#15803d]">
-                                  CGST {s.halfRate}%
-                                </span>
-                                <span>{money(s.cgst)}</span>
-                              </div>
-                              <div className="flex justify-between tabular-nums">
-                                <span className="text-[#1a56db]">
-                                  SGST {s.halfRate}%
-                                </span>
-                                <span>{money(s.sgst)}</span>
-                              </div>
-                            </div>
-                          ),
-                        )}
-                      </div>
-                      <p className="text-[0.65rem] text-[#8b9bb0]">
-                        {billSummary.taxInclusive
-                          ? "Prices include tax"
-                          : "Tax added on top"}
-                      </p>
-                    </>
-                  ) : null}
-                  {billSummary.showRoundOff ? (
-                    <div className="flex justify-between text-[0.75rem] text-[#5a6b7d]">
-                      <span>Round off</span>
-                      <span className="tabular-nums">
-                        {billSummary.roundOff > 0 ? "+" : ""}
-                        {money(billSummary.roundOff)}
-                      </span>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
+          <div className="mt-auto space-y-2.5 border-t border-[#eef2f8] bg-[#fafbfc] p-3">
+            <div className="space-y-2 rounded-xl border border-[#e2e8f0] bg-white px-3 py-3 shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
+              <BillTotalsLines
+                summary={billSummary}
+                discount={totalDiscountShown}
+                loyaltyOff={loyaltyOff}
+                formatMoney={money}
+                netAmount={splitPart ? chargeAmount : billSummary.amountDue}
+              />
               {splitPart || stillDueAfter > 0.001 ? (
-                <p className="mt-1 text-[0.7rem] text-[#1341a8]">
+                <p className="text-sm text-[#1341a8]">
                   Collecting {money(chargeAmount)}
                   {stillDueAfter > 0.001
                     ? ` · still due ${money(stillDueAfter)}`
@@ -2861,22 +3280,24 @@ export default function RetailPosWorkstation({
               ) : null}
             </div>
 
-            <div className="grid grid-cols-3 gap-1.5">
+            <div className="grid grid-cols-4 gap-1.5">
               <Button
                 type="button"
                 variant="secondary"
                 size="sm"
-                className="h-9 text-[0.72rem]"
+                className="h-9 px-1 text-[0.7rem]"
                 disabled={!cart.length && !splitFollowUp}
                 onClick={() => setPayModal("discount")}
               >
-                {discountNum > 0 ? `−${money(discountNum)}` : "Discount"}
+                {totalDiscountShown > 0
+                  ? `−${money(totalDiscountShown)}`
+                  : "Discount"}
               </Button>
               <Button
                 type="button"
                 variant="secondary"
                 size="sm"
-                className="h-9 text-[0.72rem]"
+                className="h-9 px-1 text-[0.7rem]"
                 disabled={
                   !canSplitBill ||
                   (!cart.length && !splitFollowUp) ||
@@ -2898,7 +3319,17 @@ export default function RetailPosWorkstation({
                 type="button"
                 variant="secondary"
                 size="sm"
-                className="h-9 text-[0.72rem]"
+                className="h-9 px-1 text-[0.7rem]"
+                disabled={busy || !cart.length || Boolean(splitSession)}
+                onClick={() => setPayModal("draft")}
+              >
+                Save
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="h-9 px-1 text-[0.7rem]"
                 onClick={() => setPayModal("more")}
               >
                 More
@@ -2933,13 +3364,27 @@ export default function RetailPosWorkstation({
               const byMethod = new Map(
                 catalogItems.map((m) => [m.method, m] as const),
               );
-              const frontRow = ["cash", "upi", "card"] as const;
+              const frontRow = [
+                "cash",
+                "qr",
+                "store_credit",
+                "card",
+                "upi",
+              ] as const;
               const shownPrimary = frontRow.map((method) => {
                 const m = byMethod.get(method);
-                const alwaysOn = method === "cash";
+                const alwaysOn =
+                  method === "cash" ||
+                  method === "qr" ||
+                  method === "store_credit";
                 return {
                   method,
-                  displayName: m?.displayName ?? method,
+                  displayName:
+                    method === "qr"
+                      ? "QR"
+                      : method === "store_credit"
+                        ? "Wallet"
+                        : m?.displayName ?? method,
                   available: alwaysOn || Boolean(m?.available),
                   reason: m?.reason,
                 };
@@ -2949,53 +3394,38 @@ export default function RetailPosWorkstation({
                 if (method === "wallet") return "App pay";
                 if (method === "gift_card") return "Gift";
                 if (method === "bank_transfer") return "Bank";
-                if (method === "upi") return "UPI";
-                if (method === "collect_later") return "Pay later";
                 return displayName;
               };
               return (
-                <div className="space-y-1.5">
-                  <div className="grid grid-cols-3 gap-1 rounded-lg bg-[#eef2f8] p-1">
-                    {shownPrimary.map((m) => (
-                      <button
-                        key={m.method}
-                        type="button"
-                        disabled={!m.available}
-                        title={m.reason}
-                        data-active={payMethod === m.method ? "true" : "false"}
-                        onClick={() => {
-                          if (!m.available) {
-                            toast.message(
-                              m.reason || `${m.displayName} is not configured`,
-                            );
-                            return;
-                          }
-                          setPayMethod(m.method as PayMethod);
-                          if (m.method !== "cash") setSplitPay(false);
-                        }}
-                        className={cn(
-                          "rounded-md py-2 text-[0.75rem] font-semibold transition",
-                          !m.available && "cursor-not-allowed opacity-40",
-                          payMethod === m.method
-                            ? "bg-[#1a56db] text-white shadow-sm"
-                            : "text-[#5a6b7d] hover:bg-white/80 hover:text-[#0b1f33]",
-                        )}
-                      >
-                        {methodLabel(m.method, m.displayName)}
-                      </button>
-                    ))}
-                  </div>
-                  <button
-                    type="button"
-                    className="w-full text-center text-[0.7rem] font-semibold text-[#1a56db] hover:underline"
-                    onClick={() => setPayModal("more")}
-                  >
-                    {["qr", "store_credit", "wallet", "gift_card", "bank_transfer", "emi", "collect_later"].includes(
-                      payMethod,
-                    )
-                      ? `Paying with ${methodLabel(payMethod, payMethod)} · change`
-                      : "QR · Wallet · Pay on pickup · more"}
-                  </button>
+                <div className="grid grid-cols-5 gap-0.5 rounded-lg bg-[#eef2f8] p-0.5">
+                  {shownPrimary.map((m) => (
+                    <button
+                      key={m.method}
+                      type="button"
+                      disabled={!m.available}
+                      title={m.reason}
+                      data-active={payMethod === m.method ? "true" : "false"}
+                      onClick={() => {
+                        if (!m.available) {
+                          toast.message(
+                            m.reason || `${m.displayName} is not configured`,
+                          );
+                          return;
+                        }
+                        setPayMethod(m.method as PayMethod);
+                        if (m.method !== "cash") setSplitPay(false);
+                      }}
+                      className={cn(
+                        "rounded-md py-1.5 text-[0.62rem] font-semibold tracking-wide uppercase transition",
+                        !m.available && "cursor-not-allowed opacity-40",
+                        payMethod === m.method
+                          ? "bg-[#1a56db] text-white"
+                          : "text-[#5a6b7d] hover:bg-white/80 hover:text-[#0b1f33]",
+                      )}
+                    >
+                      {methodLabel(m.method, m.displayName)}
+                    </button>
+                  ))}
                 </div>
               );
             })()}
@@ -3011,84 +3441,45 @@ export default function RetailPosWorkstation({
               </button>
             ) : null}
             {payMethod === "qr" ? (
-              <div className="space-y-2 rounded-lg border border-[#d9e0ea] bg-white p-2">
+              <div className="rounded-lg border border-[#d9e0ea] bg-white p-2">
                 {(() => {
-                  if (activeQrVpa && isValidUpiVpa(activeQrVpa)) {
-                    const upiUri = buildUpiPayUri({
-                      vpa: activeQrVpa,
-                      payeeName: activeQrPayee,
-                      amount: chargeAmount,
-                      note: productName || "Universal POS",
-                    });
+                  const posSettings =
+                    boot?.tenant?.settings &&
+                    typeof boot.tenant.settings === "object"
+                      ? (boot.tenant.settings as Record<string, unknown>).pos
+                      : undefined;
+                  const pos =
+                    posSettings && typeof posSettings === "object"
+                      ? (posSettings as Record<string, unknown>)
+                      : {};
+                  const vpa =
+                    typeof pos.upiVpa === "string" ? pos.upiVpa.trim() : "";
+                  const payee =
+                    (typeof pos.upiPayeeName === "string" &&
+                      pos.upiPayeeName.trim()) ||
+                    productName ||
+                    "Universal POS";
+                  if (!vpa) {
                     return (
-                      <div className="flex items-center gap-2">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          alt="Pay QR"
-                          className="h-20 w-20 shrink-0 rounded border border-[#eef2f8] bg-white"
-                          src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(upiUri)}`}
-                        />
-                        <p className="text-[0.65rem] leading-snug text-[#5a6b7d]">
-                          Customer scans in GPay / PhonePe / Paytm, then Charge.
-                          <br />
-                          <span className="font-medium text-[#0b1f33]">
-                            {activeQrVpa}
-                          </span>
-                          {!configuredUpi?.vpa ? (
-                            <span className="mt-1 block text-[0.6rem] text-amber-800">
-                              From shop mobile · set a permanent UPI ID in
-                              Settings → Counter when ready.
-                            </span>
-                          ) : null}
-                        </p>
-                      </div>
+                      <p className="text-[0.7rem] text-amber-800">
+                        Set UPI ID in Settings → Counter first.
+                      </p>
                     );
                   }
-
+                  const upiUri = `upi://pay?pa=${encodeURIComponent(vpa)}&pn=${encodeURIComponent(payee)}&am=${chargeAmount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(productName || "Universal POS")}`;
                   return (
-                    <div className="space-y-2">
-                      <p className="text-[0.7rem] font-medium text-[#0b1f33]">
-                        Collect via UPI QR
-                      </p>
-                      <p className="text-[0.65rem] text-[#5a6b7d]">
-                        No UPI ID in settings — use the shop mobile number
-                        (same pattern many POS apps use with PhonePe / Paytm).
-                      </p>
-                      <div className="flex gap-1.5">
-                        <Input
-                          className="h-8 flex-1 text-sm tabular-nums"
-                          inputMode="tel"
-                          placeholder="10-digit mobile"
-                          value={qrPhone}
-                          onChange={(e) => setQrPhone(e.target.value)}
-                        />
-                        <select
-                          className="h-8 max-w-[7.5rem] rounded-md border border-[#d9e0ea] bg-white px-1 text-[0.65rem] font-medium text-[#0b1f33]"
-                          value={qrPsp}
-                          onChange={(e) =>
-                            setQrPsp(e.target.value as UpiPspSuffix)
-                          }
-                        >
-                          {UPI_PSP_OPTIONS.map((o) => (
-                            <option key={o.id} value={o.id}>
-                              {o.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <Input
-                        className="h-8 text-sm"
-                        placeholder="Or full UPI ID · shop@okaxis"
-                        value={qrCustomVpa}
-                        onChange={(e) => setQrCustomVpa(e.target.value)}
-                        autoComplete="off"
+                    <div className="flex items-center gap-2">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        alt="Pay QR"
+                        className="h-20 w-20 shrink-0 rounded border border-[#eef2f8] bg-white"
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(upiUri)}`}
                       />
-                      <Link
-                        href="/settings/counter"
-                        className="block text-[0.65rem] font-semibold text-[#1a56db] hover:underline"
-                      >
-                        Save permanent UPI ID in Settings → Counter
-                      </Link>
+                      <p className="text-[0.65rem] leading-snug text-[#5a6b7d]">
+                        Customer scans, then Charge.
+                        <br />
+                        <span className="font-medium text-[#0b1f33]">{vpa}</span>
+                      </p>
                     </div>
                   );
                 })()}
@@ -3163,7 +3554,7 @@ export default function RetailPosWorkstation({
 
             <Button
               size="sm"
-              className="h-11 w-full text-base font-semibold"
+              className="h-11 w-full rounded-xl text-[0.95rem] font-bold shadow-[0_4px_12px_rgba(26,86,219,0.28)]"
               disabled={
                 busy ||
                 stripeBusy ||
@@ -3171,27 +3562,23 @@ export default function RetailPosWorkstation({
                 (!online &&
                   payMethod !== "cash" &&
                   payMethod !== "qr" &&
-                  payMethod !== "wallet" &&
-                  payMethod !== "store_credit" &&
-                  payMethod !== "gift_card") ||
+                  payMethod !== "wallet") ||
                 ((payMethod === "card" || payMethod === "upi") &&
                   !stripeConfig.data?.enabled) ||
                 (payMethod === "emi" &&
-                  (!customerId || !emiProvider.trim())) ||
-                (payMethod === "collect_later" && !customerId) ||
-                (payMethod === "qr" && !activeQrVpa)
+                  (!customerId || !emiProvider.trim()))
               }
               onClick={() => void checkout()}
             >
               {busy || stripeBusy
-                ? "Processing…"
+                ? payMethod === "card" || payMethod === "upi"
+                  ? "Opening…"
+                  : "Processing…"
                 : splitPart
                   ? `Collect ${splitPart.label} · ${money(chargeAmount)}`
                   : allowPartial && chargeAmount < totalDue - 0.001
                     ? `Collect ${money(chargeAmount)}`
-                    : payMethod === "collect_later"
-                      ? `Book · pay later · ${money(chargeAmount)}`
-                      : `Charge · ${money(chargeAmount)}`}
+                    : `Charge · ${payMethodConfirmLabel} · ${money(chargeAmount)}`}
             </Button>
           </div>
         </aside>
@@ -3331,6 +3718,89 @@ export default function RetailPosWorkstation({
         </div>
       ) : null}
 
+      {qtyPick ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-[#0b1f33]/40 p-4">
+          <div className="w-full max-w-sm rounded-xl border border-[#e2e8f0] bg-white p-4 shadow-lg">
+            <h3 className="text-sm font-semibold text-[#0b1f33]">
+              Quantity · {qtyPick.row.name}
+            </h3>
+            <p className="mt-1 text-xs text-[#5a6b7d]">
+              Type how many to put on the bill
+              {qtyPick.tracks
+                ? ` · max ${formatQtyWithUnit(qtyPick.maxQty, qtyPick.row.sellUnit)}`
+                : ""}
+              {(qtyPick.row.entryUnits?.length ?? 0) > 1
+                ? " · pick entry unit (e.g. g or kg)"
+                : ""}
+              .
+            </p>
+            {(qtyPick.row.entryUnits?.length ?? 0) > 1 ? (
+              <div className="mt-3">
+                <Label className="text-[0.65rem] uppercase text-[#8b9bb0]">
+                  Enter as
+                </Label>
+                <Select
+                  className="mt-1 h-9 w-full rounded-md border border-[#d9e0ea] bg-white px-2 text-sm"
+                  value={qtyPick.entryUnitId}
+                  onChange={(e) =>
+                    setQtyPick((cur) =>
+                      cur ? { ...cur, entryUnitId: e.target.value } : cur,
+                    )
+                  }
+                >
+                  {qtyPick.row.entryUnits!.map((u) => (
+                    <option key={u.unitId} value={u.unitId}>
+                      {u.symbol} — {u.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            ) : null}
+            <Input
+              className="mt-3 text-center text-lg font-bold tabular-nums"
+              autoFocus
+              inputMode="decimal"
+              placeholder="e.g. 500"
+              value={qtyPick.value}
+              onChange={(e) => {
+                const v = e.target.value.replace(",", ".");
+                if (v !== "" && !/^\d*\.?\d*$/.test(v)) return;
+                setQtyPick((cur) => (cur ? { ...cur, value: v } : cur));
+              }}
+              onFocus={(e) => e.target.select()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void applyQtyPick();
+                }
+              }}
+            />
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {[1, 5, 10, 25, 50, 100, 250, 500].map((q) => (
+                <button
+                  key={q}
+                  type="button"
+                  className="rounded-md border border-[#e2e8f0] bg-[#f8fafc] px-2.5 py-1 text-xs font-semibold text-[#0b1f33] hover:border-[#1a56db] hover:text-[#1a56db]"
+                  onClick={() =>
+                    setQtyPick((cur) =>
+                      cur ? { ...cur, value: String(q) } : cur,
+                    )
+                  }
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setQtyPick(null)}>
+                Cancel
+              </Button>
+              <Button onClick={() => void applyQtyPick()}>Set qty</Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {receipt ? (
         <ReceiptModal
           data={receipt.data}
@@ -3342,8 +3812,8 @@ export default function RetailPosWorkstation({
 
       {rateEdit ? (
         <ModalFrame
-          title="Change price"
-          subtitle="Type a new price, or add urgent extra % on this item only."
+          title="Price & discount"
+          subtitle="Discount or change price for this item only — other cart lines stay as they are."
           onClose={() => setRateEdit(null)}
           footer={
             <div className="flex gap-2">
@@ -3355,7 +3825,7 @@ export default function RetailPosWorkstation({
                 Cancel
               </Button>
               <Button className="flex-1" onClick={applyRateEdit}>
-                Apply price
+                Apply
               </Button>
             </div>
           }
@@ -3365,7 +3835,7 @@ export default function RetailPosWorkstation({
               (x) => x.stockLevelId === rateEdit.stockLevelId,
             );
             if (!line) return <p className="text-sm">Item is gone.</p>;
-            const base = line.listPrice ?? line.unitPrice;
+            const base = cartLineListPrice(line);
             const draft = moneyNumber(rateEdit.amount || 0);
             const applyPct = (pct: number) => {
               const amount = Math.round(base * (1 + pct / 100) * 100) / 100;
@@ -3385,7 +3855,7 @@ export default function RetailPosWorkstation({
                   {" · "}qty {line.qty}
                 </p>
                 <div className="field-shell">
-                  <Label>New price</Label>
+                  <Label>Selling price</Label>
                   <Input
                     className="mt-1 text-lg tabular-nums"
                     inputMode="decimal"
@@ -3407,11 +3877,11 @@ export default function RetailPosWorkstation({
                   />
                 </div>
                 <div className="field-shell">
-                  <Label>Extra % (optional)</Label>
+                  <Label>Discount / markup % (this item)</Label>
                   <Input
                     className="mt-1 text-lg tabular-nums"
                     inputMode="decimal"
-                    placeholder="e.g. 20"
+                    placeholder="e.g. −10 or 20"
                     value={rateEdit.percent}
                     onChange={(e) => {
                       const percentStr = e.target.value;
@@ -3426,10 +3896,21 @@ export default function RetailPosWorkstation({
                     }}
                   />
                   <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
-                    20 = 20% more than list price. Use minus for less, e.g. −10.
+                    −10 = 10% off list. +20 = 20% above list. Applies only to this
+                    product.
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
+                  {[-5, -10, -20, -50].map((pct) => (
+                    <button
+                      key={pct}
+                      type="button"
+                      className="rounded-lg border border-[#fed7aa] bg-[#fff7ed] px-2.5 py-1.5 text-xs font-semibold text-[#c2410c] hover:border-[#ea580c]"
+                      onClick={() => applyPct(pct)}
+                    >
+                      {pct}%
+                    </button>
+                  ))}
                   {[10, 20, 50].map((pct) => (
                     <button
                       key={pct}
@@ -3456,6 +3937,11 @@ export default function RetailPosWorkstation({
                 </div>
                 <p className="text-sm font-semibold text-[#1a56db]">
                   Line total: {money(Math.max(0, draft) * line.qty)}
+                  {draft < base - 0.001 ? (
+                    <span className="ml-2 text-[#c2410c]">
+                      (save {money((base - draft) * line.qty)})
+                    </span>
+                  ) : null}
                 </p>
               </div>
             );
@@ -3639,14 +4125,10 @@ export default function RetailPosWorkstation({
                   />
                 </div>
                 <div className="field-shell">
-                  <Label className="text-[0.65rem] font-semibold tracking-[0.12em] text-[#8b9bb0] uppercase">
-                    Phone
-                  </Label>
-                  <Input
-                    className="mt-1 h-10"
+                  <PhoneCountryInput
+                    label="Phone"
                     value={deliveryPhone}
-                    onChange={(e) => setDeliveryPhone(e.target.value)}
-                    placeholder="Mobile"
+                    onChange={setDeliveryPhone}
                   />
                 </div>
                 <div className="field-shell sm:col-span-2">
@@ -3680,101 +4162,240 @@ export default function RetailPosWorkstation({
       {payModal === "discount" ? (
         <ModalFrame
           title="Discount"
-          subtitle="Type an amount, or apply a coupon. Then tap Done."
+          subtitle="Set a different discount on each product, and/or an amount off the whole bill."
           onClose={() => setPayModal(null)}
+          className="max-w-md"
+          bodyScroll
           footer={
             <Button className="w-full" onClick={() => setPayModal(null)}>
               Done
             </Button>
           }
         >
-          <div className="space-y-4">
-            <div className="field-shell">
-              <Label>How much off?</Label>
-              <Input
-                className="mt-1 text-lg tabular-nums"
-                inputMode="decimal"
-                placeholder="0"
-                value={discountAmount}
-                onChange={(e) => {
-                  setDiscountAmount(e.target.value);
-                  setCouponApplied(null);
-                }}
-              />
-              {discountNum > 0 ? (
-                <p className="mt-1 text-sm font-semibold text-[#1a56db]">
-                  Off the bill: {money(discountNum)}
-                </p>
-              ) : null}
-              {discountCapped ? (
-                <p className="mt-1 text-xs text-amber-800">
-                  Cashier max is {money(maxDiscountAmount)} (
-                  {maxCashierDiscountPercent}%). Ask a manager for more.
-                </p>
-              ) : (
-                <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
-                  Ticket before discount: {money(ticketBeforeDiscount)}
-                </p>
-              )}
-            </div>
-            <div className="field-shell">
-              <Label>Coupon code</Label>
-              <div className="mt-1 flex gap-2">
+          <div className="space-y-5">
+            {cart.length ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[0.65rem] font-semibold tracking-[0.1em] text-[#8b9bb0] uppercase">
+                    Per item
+                  </p>
+                  {lineDiscountsTotal > 0 ? (
+                    <p className="text-xs font-semibold text-[#c2410c]">
+                      Items save {money(lineDiscountsTotal)}
+                    </p>
+                  ) : null}
+                </div>
+                <ul className="max-h-[min(40vh,16rem)] space-y-2.5 overflow-y-auto">
+                  {cart.map((l) => {
+                    const base = cartLineListPrice(l);
+                    const discPct = cartLineDiscountPercent(l);
+                    const offUnit = Math.max(0, base - l.unitPrice);
+                    return (
+                      <li
+                        key={l.stockLevelId}
+                        className="rounded-xl border border-[#e8edf4] bg-[#fafbfc] p-3"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-[#0b1f33]">
+                              {l.name}
+                            </p>
+                            <p className="mt-0.5 text-[0.7rem] tabular-nums text-[#8b9bb0]">
+                              List {money(base)} · qty {l.qty}
+                              {discPct > 0 ? (
+                                <span className="ml-1 font-semibold text-[#c2410c]">
+                                  · −{discPct}%
+                                </span>
+                              ) : null}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            className="shrink-0 text-[0.7rem] font-semibold text-[#1a56db] hover:underline"
+                            onClick={() =>
+                              setCartLineDiscount(l.stockLevelId, {
+                                reset: true,
+                              })
+                            }
+                          >
+                            Reset
+                          </button>
+                        </div>
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          <div>
+                            <Label className="text-[0.65rem] text-[#8b9bb0]">
+                              Disc %
+                            </Label>
+                            <Input
+                              className="mt-0.5 h-9 tabular-nums"
+                              inputMode="decimal"
+                              placeholder="0"
+                              value={discPct > 0 ? String(discPct) : ""}
+                              onChange={(e) => {
+                                const raw = e.target.value;
+                                if (raw === "") {
+                                  setCartLineDiscount(l.stockLevelId, {
+                                    reset: true,
+                                  });
+                                  return;
+                                }
+                                const pct = Math.max(
+                                  0,
+                                  Math.min(100, moneyNumber(raw || 0)),
+                                );
+                                setCartLineDiscount(l.stockLevelId, {
+                                  percent: pct,
+                                });
+                              }}
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-[0.65rem] text-[#8b9bb0]">
+                              Off ₹ / unit
+                            </Label>
+                            <Input
+                              className="mt-0.5 h-9 tabular-nums"
+                              inputMode="decimal"
+                              placeholder="0"
+                              value={offUnit > 0.001 ? String(offUnit) : ""}
+                              onChange={(e) => {
+                                const raw = e.target.value;
+                                if (raw === "") {
+                                  setCartLineDiscount(l.stockLevelId, {
+                                    reset: true,
+                                  });
+                                  return;
+                                }
+                                const amt = Math.max(0, moneyNumber(raw || 0));
+                                setCartLineDiscount(l.stockLevelId, {
+                                  amountOffPerUnit: amt,
+                                });
+                              }}
+                            />
+                          </div>
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {[5, 10, 15, 20].map((pct) => (
+                            <button
+                              key={pct}
+                              type="button"
+                              className={cn(
+                                "rounded-md border px-2 py-0.5 text-[0.7rem] font-semibold",
+                                discPct === pct
+                                  ? "border-[#c2410c] bg-[#fff7ed] text-[#c2410c]"
+                                  : "border-[#e2e8f0] bg-white text-[#475569] hover:border-[#c2410c]",
+                              )}
+                              onClick={() =>
+                                setCartLineDiscount(l.stockLevelId, {
+                                  percent: pct,
+                                })
+                              }
+                            >
+                              −{pct}%
+                            </button>
+                          ))}
+                        </div>
+                        <p className="mt-2 text-xs font-semibold tabular-nums text-[#0b1f33]">
+                          Now {money(l.unitPrice)} · line {money(l.unitPrice * l.qty)}
+                        </p>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ) : null}
+
+            <div className="space-y-3 border-t border-[#eef2f8] pt-4">
+              <p className="text-[0.65rem] font-semibold tracking-[0.1em] text-[#8b9bb0] uppercase">
+                Whole bill
+              </p>
+              <div className="field-shell">
+                <Label>How much off the bill?</Label>
                 <Input
-                  className="uppercase"
-                  placeholder="CODE"
-                  value={couponCode}
+                  className="mt-1 text-lg tabular-nums"
+                  inputMode="decimal"
+                  placeholder="0"
+                  value={discountAmount}
                   onChange={(e) => {
-                    setCouponCode(e.target.value);
+                    setDiscountAmount(e.target.value);
                     setCouponApplied(null);
                   }}
                 />
-                {couponApplied ? (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => {
-                      setCouponCode("");
-                      setCouponApplied(null);
-                      setDiscountAmount("");
-                    }}
-                  >
-                    Clear
-                  </Button>
+                {discountNum > 0 ? (
+                  <p className="mt-1 text-sm font-semibold text-[#1a56db]">
+                    Off the bill: {money(discountNum)}
+                  </p>
+                ) : null}
+                {discountCapped ? (
+                  <p className="mt-1 text-xs text-amber-800">
+                    Cashier max is {money(maxDiscountAmount)} (
+                    {maxCashierDiscountPercent}%). Ask a manager for more.
+                  </p>
                 ) : (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    disabled={!couponCode.trim() || ticketBeforeDiscount <= 0}
-                    onClick={async () => {
-                      try {
-                        const v = await loyaltyApi.validateCoupon(
-                          couponCode.trim(),
-                          ticketBeforeDiscount,
-                        );
-                        setDiscountAmount(String(v.amountOff));
-                        setCouponApplied(v.code);
-                        toast.success(
-                          `Coupon ${v.code}: −${money(v.amountOff)}`,
-                        );
-                      } catch (e) {
-                        toast.error(
-                          e instanceof ApiError
-                            ? e.messages.join(", ")
-                            : "Invalid coupon",
-                        );
-                      }
-                    }}
-                  >
-                    Apply
-                  </Button>
+                  <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+                    Ticket before bill discount: {money(ticketBeforeDiscount)}
+                  </p>
                 )}
               </div>
-              {couponApplied ? (
-                <p className="mt-1 text-xs text-[#1a56db]">
-                  Coupon {couponApplied} applied
-                </p>
-              ) : null}
+              <div className="field-shell">
+                <Label>Coupon code</Label>
+                <div className="mt-1 flex gap-2">
+                  <Input
+                    className="uppercase"
+                    placeholder="CODE"
+                    value={couponCode}
+                    onChange={(e) => {
+                      setCouponCode(e.target.value);
+                      setCouponApplied(null);
+                    }}
+                  />
+                  {couponApplied ? (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => {
+                        setCouponCode("");
+                        setCouponApplied(null);
+                        setDiscountAmount("");
+                      }}
+                    >
+                      Clear
+                    </Button>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={!couponCode.trim() || ticketBeforeDiscount <= 0}
+                      onClick={async () => {
+                        try {
+                          const v = await loyaltyApi.validateCoupon(
+                            couponCode.trim(),
+                            ticketBeforeDiscount,
+                          );
+                          setDiscountAmount(String(v.amountOff));
+                          setCouponApplied(v.code);
+                          toast.success(
+                            `Coupon ${v.code}: −${money(v.amountOff)}`,
+                          );
+                        } catch (e) {
+                          toast.error(
+                            e instanceof ApiError
+                              ? e.messages.join(", ")
+                              : "Invalid coupon",
+                          );
+                        }
+                      }}
+                    >
+                      Apply
+                    </Button>
+                  )}
+                </div>
+                {couponApplied ? (
+                  <p className="mt-1 text-xs text-[#1a56db]">
+                    Coupon {couponApplied} applied
+                  </p>
+                ) : null}
+              </div>
             </div>
           </div>
         </ModalFrame>

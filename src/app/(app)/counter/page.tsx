@@ -79,7 +79,7 @@ function PosGate() {
   return (
     <div className="space-y-0">
       {showTabs ? (
-        <div className="sticky top-0 z-10 border-b border-[#d9e0ea] bg-[#f7f9fc]">
+        <div className="sticky top-0 z-10 border-b border-[#d9e0ea] bg-white">
           <div
             role="tablist"
             aria-label="Counter mode"
@@ -112,9 +112,7 @@ function PosGate() {
       {activeView === "sale" && hasSale ? <RetailPosWorkstation /> : null}
       {activeView === "rental" && hasRent ? <PosWorkstation /> : null}
       {activeView === "service" && hasSvc ? (
-        <div className="p-4">
-          <ServiceDashboard />
-        </div>
+        <ServiceDashboard embed />
       ) : null}
       {activeView === "subscription" && hasSub ? (
         <div className="p-4">

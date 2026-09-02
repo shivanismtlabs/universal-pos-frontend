@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Search, Eye, Edit3 } from "lucide-react";
-import { posApi, type StockAdjustment } from "@/lib/api";
+import { type StockAdjustment } from "@/lib/api";
+import { listStockAdjustments } from "@/lib/api/stock-adjustments";
 import { canWriteCatalog } from "@/lib/roles";
 import { useAuthStore } from "@/lib/auth-store";
 import { useBootstrap } from "@/lib/bootstrap";
@@ -14,6 +15,7 @@ import { EmptyState, PageSkeleton } from "@/components/page-header";
 import { TablePager } from "@/components/table-pager";
 import { StockAdjustmentFormDialog } from "@/components/stock-adjustment-form-dialog";
 import { StockAdjustmentDetailDialog } from "@/components/stock-adjustment-detail-dialog";
+import { ApiError } from "@/lib/api/client";
 import { cn } from "@/lib/utils";
 
 type StatusTab = "all" | "draft" | "pending" | "adjusted" | "cancelled";
@@ -97,7 +99,7 @@ export default function InventoryAdjustmentsPage() {
       limit,
     ],
     queryFn: () =>
-      posApi.listStockAdjustments({
+      listStockAdjustments({
         locationId: selectedLocationId || undefined,
         status: statusTab === "all" ? undefined : statusTab,
         type: typeFilter === "all" ? undefined : typeFilter,
@@ -107,13 +109,13 @@ export default function InventoryAdjustmentsPage() {
       }),
   });
 
-  function handleRefresh() {
-    void qc.invalidateQueries({ queryKey: ["stock-adjustments-list"] });
-    void qc.invalidateQueries({ queryKey: ["pos-sale-stock-adjustments"] });
-    void qc.invalidateQueries({ queryKey: ["catalog-products"] });
-    void qc.invalidateQueries({ queryKey: ["inventory-stock"] });
+  async function handleRefresh() {
+    await qc.invalidateQueries({ queryKey: ["stock-adjustments-list"] });
+    await qc.invalidateQueries({ queryKey: ["pos-sale-stock-adjustments"] });
+    await qc.invalidateQueries({ queryKey: ["catalog-products"] });
+    await qc.invalidateQueries({ queryKey: ["inventory-stock"] });
     if (detailAdjId) {
-      void qc.invalidateQueries({
+      await qc.invalidateQueries({
         queryKey: ["stock-adjustment", detailAdjId],
       });
     }
@@ -141,6 +143,12 @@ export default function InventoryAdjustmentsPage() {
     statusTab !== "all" ||
     typeFilter !== "all" ||
     Boolean(selectedLocationId);
+  const loadError =
+    adjustmentsQuery.error instanceof ApiError
+      ? adjustmentsQuery.error.messages.join(", ")
+      : adjustmentsQuery.isError
+        ? "Could not load adjustments."
+        : null;
 
   return (
     <div className="flex min-h-0 flex-col gap-4 pb-10">
@@ -241,7 +249,17 @@ export default function InventoryAdjustmentsPage() {
         </div>
       </div>
 
-      {!items.length ? (
+      {loadError ? (
+        <EmptyState
+          title="Could not load adjustments"
+          detail={loadError}
+          action={
+            <Button type="button" variant="secondary" onClick={() => void adjustmentsQuery.refetch()}>
+              Retry
+            </Button>
+          }
+        />
+      ) : !items.length ? (
         <EmptyState
           title="No adjustments found"
           detail={
@@ -367,14 +385,14 @@ export default function InventoryAdjustmentsPage() {
         locations={locations}
         defaultLocationId={selectedLocationId || locations[0]?.id}
         onClose={() => setFormOpen(false)}
-        onSaved={handleRefresh}
+        onSaved={() => void handleRefresh()}
       />
 
       <StockAdjustmentDetailDialog
         adjustmentId={detailAdjId}
         canWrite={canWrite}
         onClose={() => setDetailAdjId(null)}
-        onRefresh={handleRefresh}
+        onRefresh={() => void handleRefresh()}
         onEdit={(adj) => {
           setDetailAdjId(null);
           handleOpenEdit(adj);

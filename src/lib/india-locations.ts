@@ -207,3 +207,122 @@ export function citiesForState(state: string): string[] {
 export function isKnownIndianState(state: string): boolean {
   return (INDIAN_STATES as readonly string[]).includes(state);
 }
+
+/**
+ * First 2–3 digits of India PIN for major cities (district / sorting district).
+ * Used to ensure postal matches the selected city (not only “any 6 digits”).
+ */
+const CITY_PIN_PREFIXES: Record<string, string[]> = {
+  Visakhapatnam: ["530"],
+  Vijayawada: ["520"],
+  Guntur: ["522"],
+  Nellore: ["524"],
+  Tirupati: ["517"],
+  Kakinada: ["533"],
+  Rajahmundry: ["533"],
+  Anantapur: ["515"],
+  Itanagar: ["791"],
+  Guwahati: ["781"],
+  Silchar: ["788"],
+  Dibrugarh: ["786"],
+  Jorhat: ["785"],
+  Patna: ["800"],
+  Gaya: ["823"],
+  Bhagalpur: ["812"],
+  Muzaffarpur: ["842"],
+  Raipur: ["492"],
+  Bhilai: ["490"],
+  Bilaspur: ["495"],
+  "New Delhi": ["110"],
+  "Central Delhi": ["110"],
+  "South Delhi": ["110"],
+  "East Delhi": ["110"],
+  "West Delhi": ["110"],
+  "North Delhi": ["110"],
+  Dwarka: ["110"],
+  Rohini: ["110"],
+  Panaji: ["403"],
+  Margao: ["403"],
+  Ahmedabad: ["380"],
+  Surat: ["394", "395"],
+  Vadodara: ["390"],
+  Rajkot: ["360"],
+  Gandhinagar: ["382"],
+  Gurugram: ["122"],
+  Faridabad: ["121"],
+  Panipat: ["132"],
+  Ambala: ["133", "134"],
+  Shimla: ["171"],
+  Ranchi: ["834"],
+  Jamshedpur: ["831"],
+  Bengaluru: ["560"],
+  Mysuru: ["570"],
+  Mangaluru: ["575"],
+  Hubballi: ["580"],
+  Thiruvananthapuram: ["695"],
+  Kochi: ["682"],
+  Kozhikode: ["673"],
+  Thrissur: ["680"],
+  Bhopal: ["462"],
+  Indore: ["452"],
+  Gwalior: ["474"],
+  Jabalpur: ["482"],
+  Mumbai: ["400"],
+  Pune: ["411"],
+  Nagpur: ["440"],
+  Nashik: ["422"],
+  Aurangabad: ["431"],
+  Thane: ["400", "401"],
+  Imphal: ["795"],
+  Shillong: ["793"],
+  Aizawl: ["796"],
+  Kohima: ["797"],
+  Bhubaneswar: ["751"],
+  Cuttack: ["753"],
+  Amritsar: ["143"],
+  Ludhiana: ["141"],
+  Jalandhar: ["144"],
+  Chandigarh: ["160"],
+  Jaipur: ["302"],
+  Jodhpur: ["342"],
+  Udaipur: ["313"],
+  Kota: ["324"],
+  Gangtok: ["737"],
+  Chennai: ["600"],
+  Coimbatore: ["641"],
+  Madurai: ["625"],
+  Tiruchirappalli: ["620"],
+  Hyderabad: ["500"],
+  Warangal: ["506"],
+  Agartala: ["799"],
+  Lucknow: ["226"],
+  Kanpur: ["208"],
+  Varanasi: ["221"],
+  Agra: ["282"],
+  Noida: ["201"],
+  Ghaziabad: ["201"],
+  Dehradun: ["248"],
+  Haridwar: ["249"],
+  Kolkata: ["700"],
+  Howrah: ["711"],
+  Durgapur: ["713"],
+  Siliguri: ["734"],
+};
+
+/** Validate India PIN against selected city when we know that city’s prefixes. */
+export function isPostalValidForIndianCity(
+  city: string,
+  postal: string,
+): { ok: boolean; message?: string } {
+  const p = postal.trim();
+  if (!/^\d{6}$/.test(p)) {
+    return { ok: false, message: "PIN code must be exactly 6 digits" };
+  }
+  const prefixes = CITY_PIN_PREFIXES[city.trim()];
+  if (!prefixes?.length) return { ok: true };
+  if (prefixes.some((pre) => p.startsWith(pre))) return { ok: true };
+  return {
+    ok: false,
+    message: `PIN code does not match ${city} (expected starting with ${prefixes.join(" / ")})`,
+  };
+}

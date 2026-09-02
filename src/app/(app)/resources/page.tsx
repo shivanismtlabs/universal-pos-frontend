@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -61,7 +62,9 @@ function statusMeta(row: {
 }
 
 export default function ResourcesPage() {
-  const { hasCapability, hasModule } = useBootstrap();
+  const { hasCapability, hasModule, hasMode } = useBootstrap();
+  const hasRental = hasMode("rental");
+  const hasSale = hasMode("sale");
   const qc = useQueryClient();
   const [page, setPage] = useState(1);
   const [q, setQ] = useState("");
@@ -175,6 +178,32 @@ export default function ResourcesPage() {
           </Button>
         }
       />
+
+      {hasRental && hasSale ? (
+        <p className="text-sm text-[#5a6b7d]">
+          Sized outfits and barcodes belong on{" "}
+          <Link
+            href="/rental?tab=stock"
+            className="font-medium text-[#1a56db] hover:underline"
+          >
+            Rental desk
+          </Link>
+          . Resources are for rooms, tables, vehicles, and similar bookable
+          assets.
+        </p>
+      ) : hasRental && !hasSale ? (
+        <p className="text-sm text-[#5a6b7d]">
+          Optional for rooms, halls, and vehicles. For clothing sizes and
+          barcodes, use{" "}
+          <Link
+            href="/rental?tab=stock"
+            className="font-medium text-[#1a56db] hover:underline"
+          >
+            Rental desk
+          </Link>
+          .
+        </p>
+      ) : null}
 
       {showAdd ? (
         <section className="rounded-2xl border border-[#e5e7eb] bg-white p-4">

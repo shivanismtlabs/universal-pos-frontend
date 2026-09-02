@@ -1,3 +1,5 @@
+import { formatQtyWithUnit } from "@/lib/sell-units";
+
 /** Plain-language labels so cashier / shop staff can tell product types apart. */
 
 export function productKindLabel(kind?: string | null): string {
@@ -17,16 +19,36 @@ export function productKindLabel(kind?: string | null): string {
   }
 }
 
+/** Items list Type column — rental outfits use fulfillmentMode, not kind alone. */
+export function catalogTypeLabel(
+  kind?: string | null,
+  fulfillmentMode?: string | null,
+): string {
+  const fm = (fulfillmentMode ?? "").toLowerCase();
+  if (fm === "rental") return "Rental";
+  if (fm === "service") return "Service";
+  return productKindLabel(kind) || "Goods";
+}
+
 export type StockHintTone = "ok" | "low" | "out" | "info";
 
 export function productStockHint(opts: {
   kind?: string | null;
   trackQty?: boolean;
+  /** When true, finished item stock is driven by recipe / ingredients */
+  recipeTracked?: boolean;
   available: number;
   qtyLeftLabel: string;
 }): { label: string; tone: StockHintTone } {
   const kind = (opts.kind ?? "").toLowerCase();
-  const tracks = opts.trackQty !== false;
+  const tracks = opts.trackQty !== false && opts.recipeTracked !== true;
+
+  if (opts.recipeTracked) {
+    return {
+      label: "From recipe · can sell",
+      tone: "info",
+    };
+  }
 
   if (tracks) {
     if (opts.available <= 0) {
@@ -50,23 +72,28 @@ export function productStockHint(opts: {
   if (kind === "digital") {
     return { label: "No stock needed (digital)", tone: "info" };
   }
-  return { label: "Stock not counted", tone: "info" };
+  return { label: "Stock not counted · can sell", tone: "info" };
 }
 
 export function catalogStockOnHandLabel(opts: {
   kind?: string | null;
   trackInventory?: boolean;
   stockOnHand?: number | null;
+  /** Always pass unit so grocery kg/L show as "12.5 kg" */
+  unit?: string | null;
 }): string {
+  const unit = opts.unit?.trim() || "pcs";
   if (opts.trackInventory === false) {
     const kind = (opts.kind ?? "").toLowerCase();
     if (kind === "bundle") return "From items inside";
     if (kind === "service") return "No stock (service)";
     if (kind === "digital") return "No stock (digital)";
     // Prefer a real On Hand figure when a stock row exists (e.g. CSV set track off by mistake).
-    if (opts.stockOnHand != null) return String(opts.stockOnHand);
+    if (opts.stockOnHand != null) {
+      return formatQtyWithUnit(Number(opts.stockOnHand), unit);
+    }
     return "Stock off";
   }
   if (opts.stockOnHand == null) return "—";
-  return String(opts.stockOnHand);
+  return formatQtyWithUnit(Number(opts.stockOnHand), unit);
 }

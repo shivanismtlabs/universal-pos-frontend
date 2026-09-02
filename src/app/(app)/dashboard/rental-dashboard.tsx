@@ -17,7 +17,34 @@ import { StripeCheckoutModal } from "@/components/stripe-checkout-modal";
 import { FloorTabs } from "@/components/getting-started";
 import { RentalStockPanel } from "./rental-stock-panel";
 
-type Tab = "rent" | "stock" | "returns" | "exchange" | "recent";
+type Tab =
+  | "overview"
+  | "products"
+  | "units"
+  | "active"
+  | "overdue"
+  | "calendar"
+  | "returns"
+  | "exchange";
+
+function normalizeDeskTab(raw?: string): Tab {
+  const map: Record<string, Tab> = {
+    overview: "overview",
+    products: "products",
+    units: "units",
+    active: "active",
+    overdue: "overdue",
+    calendar: "calendar",
+    reservations: "calendar",
+    returns: "returns",
+    exchange: "exchange",
+    // legacy deep links
+    rent: "overview",
+    stock: "products",
+    recent: "active",
+  };
+  return (raw && map[raw]) || "overview";
+}
 type StripePay = {
   orderId: string;
   orderNumber: string;
@@ -39,16 +66,25 @@ function errMsg(e: unknown) {
  * Universal rental floor — same ops for any rentable item.
  * Categories/products are dynamic; return + exchange are first-class.
  */
-export function RentalDashboard() {
+export function RentalDashboard({
+  embed = false,
+  initialTab,
+}: {
+  embed?: boolean;
+  initialTab?: string;
+} = {}) {
   const { productName, money } = useBootstrap();
   const qc = useQueryClient();
-  const [tab, setTab] = useState<Tab>("stock");
+  const [tab, setTab] = useState<Tab>(() => normalizeDeskTab(initialTab));
 
   const [returnOrderId, setReturnOrderId] = useState("");
   const [returnUnitId, setReturnUnitId] = useState("");
   const [cleaningRequired, setCleaningRequired] = useState(false);
   const [returnNotes, setReturnNotes] = useState("");
   const [returnScan, setReturnScan] = useState("");
+  const [depositRefund, setDepositRefund] = useState("");
+  const [depositReason, setDepositReason] = useState("");
+  const [lateFeeHint, setLateFeeHint] = useState<string | null>(null);
 
   const [exOrderId, setExOrderId] = useState("");
   const [exFromId, setExFromId] = useState("");
@@ -95,7 +131,7 @@ export function RentalDashboard() {
   const recent = useQuery({
     queryKey: ["pos-rental-recent"],
     queryFn: () => posApi.listRecentRentals(25),
-    enabled: tab === "recent",
+    enabled: tab === "active" || tab === "overview" || tab === "calendar",
   });
 
   const openOrders = useMemo(() => {
@@ -106,6 +142,33 @@ export function RentalDashboard() {
       return !closed.has(o.status);
     });
   }, [orders.data]);
+
+  const overdueOrders = useMemo(() => {
+    const now = Date.now();
+    return openOrders.filter((o) => {
+      const due = o.rentalExt?.returnDueDate;
+      if (!due) return false;
+      const lc = o.rentalExt?.lifecycle;
+      if (!lc || !["checked_out", "ready", "fitted"].includes(lc)) return false;
+      return new Date(due).getTime() < now;
+    });
+  }, [openOrders]);
+
+  const todayPickups = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    return openOrders.filter((o) => {
+      const p = o.rentalExt?.pickupDate;
+      return p && String(p).slice(0, 10) === today;
+    });
+  }, [openOrders]);
+
+  const todayReturns = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    return openOrders.filter((o) => {
+      const d = o.rentalExt?.returnDueDate;
+      return d && String(d).slice(0, 10) === today;
+    });
+  }, [openOrders]);
 
   const dueBalance = openOrders.reduce(
     (s, o) => s + moneyNumber(o.balanceDue),
@@ -140,14 +203,22 @@ export function RentalDashboard() {
       balanceDue: string | number;
       orderNumber: string;
     }) => {
-      const amt = moneyNumber(order.balanceDue);
-      if (amt <= 0) throw new Error("Nothing due");
+      const { applyRentalCashRoundOff } = await import(
+        "@/lib/rental-payment-round"
+      );
+      const raw = moneyNumber(order.balanceDue);
+      if (raw <= 0) throw new Error("Nothing due");
+      const { amount: amt, roundOffAmount } = applyRentalCashRoundOff(
+        raw,
+        "cash",
+      );
       await paymentsApi.create({
         orderId: order.id,
         method: "cash",
         amount: amt,
         type: "payment",
         idempotencyKey: `rent-cash-${order.id}-${Date.now()}`,
+        ...(roundOffAmount !== 0 ? { roundOffAmount } : {}),
       });
       return order.orderNumber;
     },
@@ -273,6 +344,52 @@ export function RentalDashboard() {
     onError: (e) => toast.error(errMsg(e)),
   });
 
+  const settleDeposit = useMutation({
+    mutationFn: async () => {
+      if (!returnOrderId) throw new Error("Pick a rental ticket");
+      const refundAmount = Number(depositRefund);
+      if (!Number.isFinite(refundAmount) || refundAmount < 0) {
+        throw new Error("Enter a valid refund amount (0 = forfeit all)");
+      }
+      return returnsApi.settleDeposit(returnOrderId, {
+        refundAmount,
+        reason: depositReason.trim() || undefined,
+        idempotencyKey: `dep-settle-${returnOrderId}-${Date.now()}`,
+      });
+    },
+    onSuccess: (res) => {
+      toast.success(
+        `Deposit settled · refunded ${money(res.refunded)} · forfeited ${money(res.forfeited)}`,
+      );
+      setDepositRefund("");
+      setDepositReason("");
+      void qc.invalidateQueries({ queryKey: ["orders"] });
+      void qc.invalidateQueries({ queryKey: ["returns-candidates"] });
+    },
+    onError: (e) => toast.error(errMsg(e)),
+  });
+
+  const previewLateFee = useMutation({
+    mutationFn: async () => {
+      if (!returnOrderId) throw new Error("Pick a rental ticket");
+      return posApi.lateFeePreview(returnOrderId);
+    },
+    onSuccess: (res) => {
+      if (!res.applicable) {
+        setLateFeeHint("No late fee (on time or late fees disabled)");
+        toast.message("No late fee due");
+        return;
+      }
+      setLateFeeHint(
+        `${res.daysLate} day(s) late · suggested ${money(res.suggestedLateFee)}`,
+      );
+      toast.message(
+        `Late fee preview: ${money(res.suggestedLateFee)} (${res.daysLate}d)`,
+      );
+    },
+    onError: (e) => toast.error(errMsg(e)),
+  });
+
   const inspect = useMutation({
     mutationFn: ({
       id,
@@ -357,22 +474,33 @@ export function RentalDashboard() {
 
   return (
     <div className="space-y-5">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="display text-2xl sm:text-3xl">{productName}</h1>
-          <p className="mt-1 text-sm text-[#5a6b7d]">
-            Manage rental stock, rent out, and process returns
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button asChild>
-            <Link href="/counter?view=rent&new=1">Start new rental</Link>
+      {!embed ? (
+        <header className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 className="display text-2xl sm:text-3xl">{productName}</h1>
+            <p className="mt-1 text-sm text-[#5a6b7d]">
+              Manage rental stock, rent out, and process returns
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild>
+              <Link href="/counter?view=rental&new=1">Start new rental</Link>
+            </Button>
+            <Button asChild variant="secondary">
+              <Link href="/counter?view=rental">Open rent counter</Link>
+            </Button>
+          </div>
+        </header>
+      ) : (
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button asChild size="sm">
+            <Link href="/counter?view=rental&new=1">Start new rental</Link>
           </Button>
-          <Button asChild variant="secondary">
-            <Link href="/counter?view=rent">Open rent counter</Link>
+          <Button asChild size="sm" variant="secondary">
+            <Link href="/counter?view=rental">Open counter</Link>
           </Button>
         </div>
-      </header>
+      )}
 
       <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-5">
         {[
@@ -396,51 +524,82 @@ export function RentalDashboard() {
         ))}
       </div>
 
-      {!hasUnits && tab === "rent" ? (
+      {!hasUnits && (tab === "overview" || tab === "active") ? (
         <p className="rounded-lg border border-[#fde68a] bg-[#fffbeb] px-3 py-2 text-sm text-[#92400e]">
-          No units yet — open <strong>Inventory</strong> (step 1) and add a
-          product with barcodes before renting.
+          No rental units yet — open <strong>Products</strong> or{" "}
+          <strong>Units</strong> and add barcodes before renting at the counter.
         </p>
       ) : null}
 
       <FloorTabs
         value={tab}
-        onChange={setTab}
+        onChange={(id) => setTab(normalizeDeskTab(id))}
         tabs={[
-          {
-            id: "stock",
-            label: "Inventory",
-            hint: "Products & barcodes",
-          },
-          {
-            id: "rent",
-            label: "Open tickets",
-            hint: "Active rentals",
-          },
-          {
-            id: "returns",
-            label: "Returns",
-            hint: "Items coming back",
-          },
-          {
-            id: "exchange",
-            label: "Swap unit",
-            hint: "Replace on ticket",
-          },
-          {
-            id: "recent",
-            label: "History",
-            hint: "Past rentals",
-          },
+          { id: "overview", label: "Overview", hint: "KPIs" },
+          { id: "products", label: "Products", hint: "Styles" },
+          { id: "units", label: "Units", hint: "Barcodes" },
+          { id: "active", label: "Active", hint: "On hire" },
+          { id: "overdue", label: "Overdue", hint: "Past due" },
+          { id: "calendar", label: "Calendar", hint: "Schedule" },
+          { id: "returns", label: "Returns", hint: "Receive" },
+          { id: "exchange", label: "Exchange", hint: "Swap unit" },
         ]}
       />
 
-      {tab === "rent" ? (
+      {tab === "overview" ? (
+        <section className="space-y-3 rounded-xl border border-[#d9e0ea] bg-white p-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {[
+              { label: "Active rentals", value: openOrders.length },
+              { label: "Today pickups", value: todayPickups.length },
+              { label: "Today returns", value: todayReturns.length },
+              { label: "Overdue", value: overdueOrders.length },
+              { label: "Available units", value: counts?.available ?? 0 },
+              { label: "Checked out", value: counts?.checkedOut ?? 0 },
+              { label: "Balances due", value: money(dueBalance) },
+              {
+                label: "Units total",
+                value: counts?.units ?? 0,
+              },
+            ].map((c) => (
+              <div
+                key={c.label}
+                className="rounded-lg border border-[#eef2f6] bg-[#f8fafc] px-3 py-2"
+              >
+                <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-[#8b9bb0]">
+                  {c.label}
+                </p>
+                <p className="mt-0.5 text-lg font-bold tabular-nums text-[#0b1f33]">
+                  {c.value}
+                </p>
+              </div>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild size="sm">
+              <Link href="/counter?view=rental&new=1">Start new rental</Link>
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => setTab("overdue")}
+            >
+              View overdue ({overdueOrders.length})
+            </Button>
+            <Button asChild size="sm" variant="secondary">
+              <Link href="/reports/rental">Rental Reports</Link>
+            </Button>
+          </div>
+        </section>
+      ) : null}
+
+      {tab === "active" || tab === "overdue" ? (
         <section className="rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm sm:p-5">
           <div className="flex flex-wrap items-end justify-between gap-2">
             <div>
               <h2 className="text-lg font-semibold text-[#0b1f33]">
-                Open tickets
+                {tab === "overdue" ? "Overdue rentals" : "Active rentals"}
               </h2>
               <p className="mt-0.5 text-sm text-[#6b7280]">
                 Balance due {money(dueBalance)}
@@ -450,11 +609,11 @@ export function RentalDashboard() {
               </p>
             </div>
             <Button asChild>
-              <Link href="/counter?new=1">New rental</Link>
+              <Link href="/counter?view=rental&new=1">New rental</Link>
             </Button>
           </div>
           <ul className="mt-4 divide-y divide-[#f3f4f6]">
-            {openOrders.map((o) => {
+            {(tab === "overdue" ? overdueOrders : openOrders).map((o) => {
               const lc = o.rentalExt?.lifecycle ?? o.status;
               const due = moneyNumber(o.balanceDue);
               const paying = stripeBusyId === o.id;
@@ -574,7 +733,73 @@ export function RentalDashboard() {
         </section>
       ) : null}
 
-      {tab === "stock" ? <RentalStockPanel /> : null}
+      {tab === "products" || tab === "units" ? <RentalStockPanel /> : null}
+
+      {tab === "calendar" ? (
+        <section className="rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm sm:p-5">
+          <h2 className="text-lg font-semibold text-[#0b1f33]">
+            Rental schedule
+          </h2>
+          <p className="mt-0.5 text-sm text-[#6b7280]">
+            Upcoming pickups and return dues from open tickets.
+          </p>
+          <ul className="mt-4 divide-y divide-[#f3f4f6]">
+            {[...openOrders]
+              .sort((a, b) => {
+                const da = String(
+                  a.rentalExt?.pickupDate ?? a.rentalExt?.returnDueDate ?? "",
+                );
+                const db = String(
+                  b.rentalExt?.pickupDate ?? b.rentalExt?.returnDueDate ?? "",
+                );
+                return da.localeCompare(db);
+              })
+              .map((o) => {
+                const lc = o.rentalExt?.lifecycle ?? o.status;
+                const isOverdue = overdueOrders.some((x) => x.id === o.id);
+                return (
+                  <li
+                    key={o.id}
+                    className="flex flex-wrap items-center justify-between gap-2 py-3 text-sm"
+                  >
+                    <div>
+                      <p className="font-semibold text-[#0b1f33]">
+                        {o.orderNumber}{" "}
+                        <span
+                          className={cn(
+                            "rounded px-1.5 py-0.5 text-[0.65rem] font-medium uppercase",
+                            isOverdue
+                              ? "bg-red-50 text-red-700"
+                              : "bg-[#f3f4f6] text-[#6b7280]",
+                          )}
+                        >
+                          {isOverdue ? "overdue" : lc.replaceAll("_", " ")}
+                        </span>
+                      </p>
+                      <p className="text-xs text-[#6b7280]">
+                        {o.customer?.fullName ?? "Walk-in"}
+                        {o.rentalExt?.pickupDate
+                          ? ` · pickup ${formatDate(o.rentalExt.pickupDate)}`
+                          : ""}
+                        {o.rentalExt?.returnDueDate
+                          ? ` · due ${formatDate(o.rentalExt.returnDueDate)}`
+                          : ""}
+                      </p>
+                    </div>
+                    <Button asChild size="sm" variant="secondary">
+                      <Link href={`/counter?view=rental&orderId=${o.id}`}>
+                        Open
+                      </Link>
+                    </Button>
+                  </li>
+                );
+              })}
+            {!openOrders.length ? (
+              <li className="py-6 text-sm text-[#6b7280]">No scheduled rentals</li>
+            ) : null}
+          </ul>
+        </section>
+      ) : null}
 
       {tab === "returns" ? (
         <div className="grid gap-4 lg:grid-cols-2">
@@ -652,6 +877,64 @@ export function RentalDashboard() {
               >
                 {doReturn.isPending ? "Saving…" : "Record return"}
               </Button>
+              <div className="rounded-lg border border-[#e8eef5] bg-[#f8fafc] p-3 space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[#8b9bb0]">
+                  Deposit settlement
+                </p>
+                <p className="text-xs text-[#6b7280]">
+                  Refund part or all of the held deposit after return/inspect.
+                  Remaining amount is forfeited with an audit record.
+                </p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div>
+                    <Label>Refund amount</Label>
+                    <Input
+                      className="mt-1"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={depositRefund}
+                      onChange={(e) => setDepositRefund(e.target.value)}
+                      placeholder="0 = forfeit all"
+                    />
+                  </div>
+                  <div>
+                    <Label>Reason</Label>
+                    <Input
+                      className="mt-1"
+                      value={depositReason}
+                      onChange={(e) => setDepositReason(e.target.value)}
+                      placeholder="Damage / cleaning / full refund"
+                    />
+                  </div>
+                </div>
+                {lateFeeHint ? (
+                  <p className="text-xs font-medium text-[#92400e]">{lateFeeHint}</p>
+                ) : null}
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    disabled={!returnOrderId || previewLateFee.isPending}
+                    onClick={() => previewLateFee.mutate()}
+                  >
+                    Preview late fee
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={
+                      !returnOrderId ||
+                      settleDeposit.isPending ||
+                      depositRefund === ""
+                    }
+                    onClick={() => settleDeposit.mutate()}
+                  >
+                    {settleDeposit.isPending ? "Settling…" : "Settle deposit"}
+                  </Button>
+                </div>
+              </div>
             </div>
           </section>
 
@@ -868,13 +1151,13 @@ export function RentalDashboard() {
         </section>
       ) : null}
 
-      {tab === "recent" ? (
+      {tab === "overview" && (recent.data?.items?.length ?? 0) > 0 ? (
         <section className="rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm sm:p-5">
           <h2 className="text-lg font-semibold text-[#0b1f33]">
-            Recent rentals
+            Recent tickets
           </h2>
           <ul className="mt-3 divide-y divide-[#f3f4f6]">
-            {(recent.data?.items ?? []).map((o) => (
+            {(recent.data?.items ?? []).slice(0, 8).map((o) => (
               <li
                 key={o.id}
                 className="flex flex-wrap items-center justify-between gap-2 py-2.5 text-sm"
@@ -892,15 +1175,12 @@ export function RentalDashboard() {
                   </p>
                 </div>
                 <Button size="sm" variant="secondary" asChild>
-                  <Link href={`/counter?order=${o.id}`}>Counter</Link>
+                  <Link href={`/counter?view=rental&orderId=${o.id}`}>
+                    Counter
+                  </Link>
                 </Button>
               </li>
             ))}
-            {!recent.data?.items?.length && !recent.isLoading ? (
-              <li className="py-8 text-center text-sm text-[#6b7280]">
-                No rental tickets yet.
-              </li>
-            ) : null}
           </ul>
         </section>
       ) : null}
@@ -911,6 +1191,7 @@ export function RentalDashboard() {
           clientSecret={stripePay.clientSecret}
           amount={stripePay.amount}
           description={stripePay.description}
+          method={stripePay.method}
           onSuccess={finishStripeRental}
           onClose={() => setStripePay(null)}
         />

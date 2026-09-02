@@ -13,6 +13,8 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { useSetupReturn } from "@/lib/use-setup-return";
+import { CountryStateFields } from "@/components/country-state-fields";
+import { geoCountry } from "@/lib/geo";
 
 const STATUSES = [
   { id: "active", label: "Active" },
@@ -80,8 +82,8 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-xl border border-[#e2e8f0] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
-      <div className="mb-4 border-b border-[#f1f5f9] pb-3">
+    <section className="rounded-xl border border-[#d9e0ea] bg-white p-5 shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
+      <div className="mb-4 border-b border-[#eef1f4] pb-3">
         <h2 className="section-title text-[0.95rem]">{title}</h2>
         {hint ? (
           <p className="mt-1 text-[0.8rem] font-medium text-[#64748b]">{hint}</p>
@@ -96,6 +98,11 @@ function NewSupplierPageInner() {
   const qc = useQueryClient();
   const { fromSetupFlow, returnTo, redirectAfterSetupSave } = useSetupReturn();
   const [form, setForm] = useState<SupplierWriteBody>(emptyForm);
+  const [addrLine, setAddrLine] = useState("");
+  const [addrCity, setAddrCity] = useState("");
+  const [addrPostal, setAddrPostal] = useState("");
+  const [addrState, setAddrState] = useState("");
+  const [addrCountry, setAddrCountry] = useState("IN");
 
   const set = (
     k: keyof SupplierWriteBody,
@@ -103,10 +110,10 @@ function NewSupplierPageInner() {
   ) => setForm((f) => ({ ...f, [k]: v }));
 
   const save = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       const name = (form.name ?? "").trim();
       if (!name) throw new Error("Supplier name is required");
-      return suppliersApi.create({
+      const row = await suppliersApi.create({
         ...form,
         name,
         code: form.code?.trim() || undefined,
@@ -120,6 +127,21 @@ function NewSupplierPageInner() {
             ? Number(form.creditLimit)
             : undefined,
       });
+      const line1 = addrLine.trim();
+      if (row?.id && line1) {
+        await suppliersApi.addAddress(row.id, {
+          kind: "billing",
+          line1,
+          city: addrCity.trim() || undefined,
+          state: addrState.trim() || undefined,
+          postalCode: addrPostal.trim() || undefined,
+          country:
+            geoCountry(addrCountry)?.name ??
+            (addrCountry.trim() || undefined),
+          isDefault: true,
+        });
+      }
+      return row;
     },
     onSuccess: (row) => {
       toast.success(
@@ -143,12 +165,12 @@ function NewSupplierPageInner() {
   });
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5 pb-16">
-      <header className="sticky top-0 z-10 -mx-1 flex flex-wrap items-center justify-between gap-3 border-b border-[#e8ecf1] bg-[#f3f5f9]/95 px-1 py-3 backdrop-blur-sm">
+    <div className="space-y-5 pb-16">
+      <header className="flex flex-wrap items-end justify-between gap-3 border-b border-[#eef1f4] pb-3">
         <div className="min-w-0">
           <p className="eyebrow">Purchases</p>
           <h1 className="page-title mt-1">New supplier</h1>
-          <p className="page-subtitle mt-1">
+          <p className="page-subtitle mt-1.5">
             Vendor profile for POs, GRN, and payables — any business type.
           </p>
         </div>
@@ -460,6 +482,45 @@ function NewSupplierPageInner() {
         </div>
       </Section>
 
+      <Section
+        title="Billing address"
+        hint="Optional — used on POs and payables"
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="sm:col-span-2">
+            <Label>Address line</Label>
+            <Input
+              className="mt-1.5"
+              value={addrLine}
+              onChange={(e) => setAddrLine(e.target.value)}
+              placeholder="Street, warehouse, building"
+            />
+          </div>
+          <div>
+            <Label>City</Label>
+            <Input
+              className="mt-1.5"
+              value={addrCity}
+              onChange={(e) => setAddrCity(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label>Postal code</Label>
+            <Input
+              className="mt-1.5"
+              value={addrPostal}
+              onChange={(e) => setAddrPostal(e.target.value)}
+            />
+          </div>
+          <CountryStateFields
+            countryCode={addrCountry}
+            state={addrState}
+            onCountry={setAddrCountry}
+            onState={setAddrState}
+          />
+        </div>
+      </Section>
+
       <Section title="Internal notes">
         <textarea
           className={cn(
@@ -472,7 +533,7 @@ function NewSupplierPageInner() {
         />
       </Section>
 
-      <div className="flex justify-end gap-2 border-t border-[#e8ecf1] pt-4">
+      <div className="flex justify-end gap-2 border-t border-[#eef1f4] pt-4">
         <Button variant="secondary" asChild>
           <Link href={returnTo ?? "/suppliers"}>Cancel</Link>
         </Button>

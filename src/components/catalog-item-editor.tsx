@@ -32,20 +32,46 @@ import {
   zodFieldErrors,
   zodMessages,
 } from "@/lib/validations";
-import { activeUnitOptions } from "@/lib/measure-units";
+import {
+  activeUnitOptions,
+  catalogNeedsPackedContents,
+  parseMultiUnitMeta,
+} from "@/lib/measure-units";
+import {
+  defaultUnitForCreate,
+  findUnitInGroups,
+  orderUnitsForCountry,
+  type CatalogUnitGroupRow,
+} from "@/lib/country-uom";
 import {
   CUSTOM_FIELD_QUERY,
   mergeProductFormFields,
 } from "@/lib/product-form-fields";
 import {
   CatalogItemShopForm,
+  DEFAULT_SERVICE_DURATION_MINUTES,
+  defaultReturnableForKind,
   type CatalogItemShopValues,
 } from "@/components/catalog-item-shop-form";
+import type { UnitPricingValue } from "@/components/unit-pricing-fields";
+import { formatQtyWithUnit, normalizeQty } from "@/lib/sell-units";
+import type { MetaFieldDef } from "@/lib/business-config";
 import {
   GETTING_STARTED_PATH,
   readReturnToParam,
   resolveSetupReturnTo,
 } from "@/lib/setup-return";
+
+function resolveReturnableFromMeta(
+  meta: unknown,
+  kind: CatalogProductKind,
+): boolean {
+  if (meta && typeof meta === "object" && !Array.isArray(meta)) {
+    const v = (meta as Record<string, unknown>).returnable;
+    if (typeof v === "boolean") return v;
+  }
+  return defaultReturnableForKind(kind);
+}
 
 export function emptyCatalogItemForm(): CatalogItemShopValues {
   return {
@@ -73,8 +99,11 @@ export function emptyCatalogItemForm(): CatalogItemShopValues {
     canSell: true,
     canPurchase: true,
     availableInPos: true,
-    openingQty: "0",
+    openingQty: "",
     reorderPoint: "",
+    multiUnitBaseQty: "",
+    multiUnitBaseUnit: "pcs",
+    returnable: true,
   };
 }
 
@@ -85,6 +114,7 @@ function buildExtraFieldsPayload(
   opts?: { clearEmpty?: boolean },
 ): Record<string, unknown> | undefined {
   const out: Record<string, unknown> = {};
+  out.returnable = form.returnable;
   const rate = Number(form.taxRatePercent);
   if (Number.isFinite(rate) && rate >= 0) {
     out.taxRatePercent = rate;
@@ -98,16 +128,167 @@ function buildExtraFieldsPayload(
     }
   }
   for (const f of productFormFields) {
+    if (f.key === "multiUnit") continue;
     const v = (extraFields[f.key] ?? "").trim();
     if (f.key === "foodType") {
       if (v) out.foodType = v;
       else if (opts?.clearEmpty) out.foodType = null;
       continue;
     }
+    if (f.key === "durationMinutes") {
+      const n = Number(v);
+      if (v && Number.isFinite(n) && n > 0) {
+        out.durationMinutes = Math.round(n);
+      } else if (opts?.clearEmpty) {
+        out.durationMinutes = null;
+      }
+      continue;
+    }
     if (v) out[f.key] = v;
     else if (opts?.clearEmpty) out[f.key] = null;
   }
+  // Service duration even if field list omitted it
+  if (form.kind === "service" && out.durationMinutes === undefined) {
+    const n = Number((extraFields.durationMinutes ?? "").trim());
+    if (Number.isFinite(n) && n > 0) out.durationMinutes = Math.round(n);
+    else if (opts?.clearEmpty) out.durationMinutes = null;
+  }
+  if (catalogNeedsPackedContents(form.kind, form.unitOfMeasure)) {
+    const n = Number(form.multiUnitBaseQty);
+    if (form.multiUnitBaseQty.trim() !== "" && Number.isFinite(n) && n > 0) {
+      out.multiUnit = {
+        baseQty: n,
+        baseUnit: form.multiUnitBaseUnit.trim() || "pcs",
+      };
+    }
+  } else if (opts?.clearEmpty) {
+    out.multiUnit = null;
+  }
   return Object.keys(out).length ? out : undefined;
+}
+
+/** Opening stock is optional. Do not POST 0 — older APIs used `@Min(1)` and reject it. */
+function createOpeningQtyPayload(
+  trackInventory: boolean,
+  trackSerial: boolean,
+  raw: string,
+  unit: string,
+): number | undefined {
+  if (!trackInventory || trackSerial) return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  const normalized = normalizeQty(n, unit || "pcs");
+  if (!Number.isFinite(normalized) || normalized <= 0) return undefined;
+  return normalized;
+}
+
+/** Wire baseUnitId + optional pack conversion so POS/inventory math works on create. */
+function buildUnitPricingForCreate(
+  form: CatalogItemShopValues,
+  groups: CatalogUnitGroupRow[] | undefined,
+  basePrice: string,
+): UnitPricingValue {
+  const empty: UnitPricingValue = {
+    unitGroupId: "",
+    baseUnitId: "",
+    pricingUnitId: "",
+    pricingStrategy: "converted",
+    pricePerPricingUnit: basePrice || "",
+    sellingUnits: [],
+  };
+  if (!groups?.length) return empty;
+
+  const sellSymbol = form.unitOfMeasure.trim();
+  const sellResolved = findUnitInGroups(groups, sellSymbol);
+  if (!sellResolved) return empty;
+
+  const packed = catalogNeedsPackedContents(form.kind, sellSymbol);
+  const packQty = Number(form.multiUnitBaseQty);
+  const innerSymbol = (form.multiUnitBaseUnit || "pcs").trim();
+
+  if (packed && Number.isFinite(packQty) && packQty > 0) {
+    const baseResolved = findUnitInGroups(groups, innerSymbol) ?? sellResolved;
+    if (baseResolved.unitId === sellResolved.unitId) {
+      return {
+        unitGroupId: baseResolved.groupId,
+        baseUnitId: baseResolved.unitId,
+        pricingUnitId: baseResolved.unitId,
+        pricingStrategy: "converted",
+        pricePerPricingUnit: basePrice || "",
+        sellingUnits: [],
+      };
+    }
+    return {
+      unitGroupId: baseResolved.groupId,
+      baseUnitId: baseResolved.unitId,
+      pricingUnitId: sellResolved.unitId,
+      pricingStrategy: "converted",
+      pricePerPricingUnit: basePrice || "",
+      sellingUnits: [
+        {
+          unitId: sellResolved.unitId,
+          conversionToBase: String(packQty),
+          fixedPrice: "",
+          isDefaultSellingUnit: true,
+          isPurchaseUnit: true,
+        },
+      ],
+    };
+  }
+
+  return {
+    unitGroupId: sellResolved.groupId,
+    baseUnitId: sellResolved.unitId,
+    pricingUnitId: sellResolved.unitId,
+    pricingStrategy: "converted",
+    pricePerPricingUnit: basePrice || "",
+    sellingUnits: [],
+  };
+}
+
+/** Only attach unit-pricing keys when the shop actually configured them.
+ * Live APIs that predate unit pricing reject pricingStrategy / pricePerPricingUnit / productUnits. */
+function catalogUnitPricingPayload(
+  unitPricing: UnitPricingValue,
+  basePrice: string,
+): Record<string, unknown> {
+  const productUnits = unitPricing.sellingUnits
+    .filter((r) => r.unitId && Number(r.conversionToBase) > 0)
+    .map((r) => ({
+      unitId: r.unitId,
+      conversionToBase: Number(r.conversionToBase),
+      fixedPrice:
+        unitPricing.pricingStrategy === "fixed_tier"
+          ? Number(r.fixedPrice) || 0
+          : null,
+      isDefaultSellingUnit: r.isDefaultSellingUnit,
+      isPurchaseUnit: r.isPurchaseUnit,
+    }));
+
+  if (
+    !unitPricing.baseUnitId &&
+    !unitPricing.pricingUnitId &&
+    productUnits.length === 0
+  ) {
+    return {};
+  }
+
+  return {
+    ...(unitPricing.baseUnitId ? { baseUnitId: unitPricing.baseUnitId } : {}),
+    ...(unitPricing.pricingUnitId
+      ? { pricingUnitId: unitPricing.pricingUnitId }
+      : {}),
+    pricingStrategy: unitPricing.pricingStrategy,
+    ...(unitPricing.pricingStrategy === "converted"
+      ? {
+          pricePerPricingUnit:
+            Number(unitPricing.pricePerPricingUnit || basePrice) || undefined,
+        }
+      : {}),
+    ...(productUnits.length ? { productUnits } : {}),
+  };
 }
 
 function taxCodeFromForm(form: CatalogItemShopValues): string | null {
@@ -150,7 +331,8 @@ export function CatalogItemEditor() {
       : "/catalog";
 
   const imagePickerRef = useRef<ProductImagePickerHandle>(null);
-  const { data: boot, itemMetaFields } = useBootstrap();
+  const { data: boot, itemMetaFields, businessType, commerceModes } =
+    useBootstrap();
   const currentLocationId = useBranchStore((s) => s.currentLocationId);
   const authStoreId = useAuthStore((s) => s.user?.storeId);
   const defaultLocationId = resolveOperatingLocationId({
@@ -166,10 +348,19 @@ export function CatalogItemEditor() {
     queryFn: () => customFieldsApi.listProductDefinitions(),
     ...CUSTOM_FIELD_QUERY,
   });
-  const productFormFields = useMemo(
-    () => mergeProductFormFields(customFieldsQ.data, itemMetaFields),
-    [customFieldsQ.data, itemMetaFields],
-  );
+  const productFormFields = useMemo(() => {
+    const merged = mergeProductFormFields(customFieldsQ.data, itemMetaFields);
+    if (merged.some((f) => f.key === "durationMinutes")) return merged;
+    const durationField: MetaFieldDef = {
+      key: "durationMinutes",
+      label: "Duration (minutes)",
+      type: "number",
+      required: false,
+      entity: "item",
+      hint: "Typical appointment / service length",
+    };
+    return [...merged, durationField];
+  }, [customFieldsQ.data, itemMetaFields]);
   const cats = useQuery({
     queryKey: ["catalog-categories"],
     queryFn: () => catalogApi.listCategories(),
@@ -182,10 +373,30 @@ export function CatalogItemEditor() {
     queryKey: ["measure-units"],
     queryFn: () => tenantsApi.listUnits(),
   });
-  const unitOptions = useMemo(
-    () => activeUnitOptions(unitsQ.data),
-    [unitsQ.data],
-  );
+  const suggestQ = useQuery({
+    queryKey: ["uom-country-suggest"],
+    queryFn: () => catalogApi.suggestTenantUomUnits(),
+    retry: 1,
+    staleTime: 60_000,
+  });
+  const unitGroupsQ = useQuery({
+    queryKey: ["catalog-unit-groups"],
+    queryFn: async () => {
+      let rows = await catalogApi.listUnitGroups();
+      if (!rows?.length) {
+        await catalogApi.seedUnitGroups();
+        rows = await catalogApi.listUnitGroups();
+      }
+      return rows;
+    },
+    enabled: !isEdit,
+    retry: 1,
+    staleTime: 60_000,
+  });
+  const unitOptions = useMemo(() => {
+    const base = activeUnitOptions(unitsQ.data);
+    return orderUnitsForCountry(base, suggestQ.data?.suggestedSymbols);
+  }, [unitsQ.data, suggestQ.data?.suggestedSymbols]);
   const product = useQuery({
     queryKey: ["catalog-product", id],
     queryFn: () => catalogApi.getProduct(id),
@@ -196,9 +407,86 @@ export function CatalogItemEditor() {
   const [hydrated, setHydrated] = useState(!isEdit);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [form, setForm] = useState<CatalogItemShopValues>(emptyCatalogItemForm);
+  const [unitPricing, setUnitPricing] = useState<UnitPricingValue>({
+    unitGroupId: "",
+    baseUnitId: "",
+    pricingUnitId: "",
+    pricingStrategy: "converted",
+    pricePerPricingUnit: "",
+    sellingUnits: [],
+  });
   const [photoUrl, setPhotoUrl] = useState("");
   const [barcodeError, setBarcodeError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const unitDefaultedRef = useRef(false);
+
+  // New item: country + shop type default unit (India grocery → kg, US grocery → lb, etc.)
+  useEffect(() => {
+    if (isEdit || unitDefaultedRef.current) return;
+    if (form.kind === "physical" && !suggestQ.isFetched && !businessType) return;
+    const preferred = defaultUnitForCreate(
+      suggestQ.data?.countryCode,
+      businessType,
+      form.kind,
+    );
+    unitDefaultedRef.current = true;
+    setForm((prev) =>
+      prev.unitOfMeasure === preferred
+        ? prev
+        : { ...prev, unitOfMeasure: preferred },
+    );
+  }, [
+    isEdit,
+    businessType,
+    form.kind,
+    suggestQ.data?.countryCode,
+    suggestQ.isFetched,
+  ]);
+
+  // New item: link unit master (baseUnitId) so checkout/inventory calculations work
+  useEffect(() => {
+    if (isEdit || !unitGroupsQ.data?.length) return;
+    const next = buildUnitPricingForCreate(
+      form,
+      unitGroupsQ.data,
+      form.basePrice,
+    );
+    setUnitPricing((prev) => {
+      if (
+        prev.baseUnitId === next.baseUnitId &&
+        prev.pricingUnitId === next.pricingUnitId &&
+        prev.sellingUnits.length === next.sellingUnits.length &&
+        (prev.sellingUnits[0]?.conversionToBase ?? "") ===
+          (next.sellingUnits[0]?.conversionToBase ?? "")
+      ) {
+        return prev;
+      }
+      return next;
+    });
+  }, [
+    isEdit,
+    form.unitOfMeasure,
+    form.multiUnitBaseQty,
+    form.multiUnitBaseUnit,
+    form.kind,
+    form.basePrice,
+    unitGroupsQ.data,
+  ]);
+
+  // New service: default duration 30 min when empty (salon / any service item)
+  useEffect(() => {
+    if (isEdit) return;
+    if (form.kind !== "service") return;
+    setExtraFields((prev) =>
+      (prev.durationMinutes ?? "").trim()
+        ? prev
+        : { ...prev, durationMinutes: DEFAULT_SERVICE_DURATION_MINUTES },
+    );
+  }, [isEdit, form.kind]);
+
+  useEffect(() => {
+    if (!isEdit) unitDefaultedRef.current = false;
+  }, [isEdit]);
 
   const clearFieldError = (key: string) => {
     setFieldErrors((prev) => {
@@ -242,6 +530,7 @@ export function CatalogItemEditor() {
       levelAtBranch?.reorderPoint != null
         ? String(levelAtBranch.reorderPoint)
         : "";
+    const packed = parseMultiUnitMeta(meta);
     setForm({
       name: p.name ?? "",
       shortName: p.shortName ?? "",
@@ -269,6 +558,9 @@ export function CatalogItemEditor() {
       availableInPos: p.availableInPos !== false,
       openingQty: "0",
       reorderPoint: reorderFromMeta || reorderFromLevel,
+      multiUnitBaseQty: packed?.baseQty != null ? String(packed.baseQty) : "",
+      multiUnitBaseUnit: packed?.baseUnit || "pcs",
+      returnable: resolveReturnableFromMeta(meta, p.kind),
     });
     setPhotoUrl(p.photoUrl ?? "");
     setHydrated(true);
@@ -294,7 +586,7 @@ export function CatalogItemEditor() {
     const extras: Record<string, string> = {};
     for (const f of productFormFields) {
       const v = bag[f.key];
-      if (v != null && f.key !== "taxRatePercent" && f.key !== "reorderPoint") {
+      if (v != null && f.key !== "taxRatePercent" && f.key !== "reorderPoint" && f.key !== "multiUnit") {
         extras[f.key] = String(v);
       }
     }
@@ -364,11 +656,20 @@ export function CatalogItemEditor() {
     mutationFn: async () => {
       if (barcodeError) throw new Error(barcodeError);
 
-      // Serial / batch always imply inventory tracking
-      const trackInventory =
-        form.trackInventory || form.trackSerial || form.trackBatch;
-      const trackSerial = form.trackSerial && trackInventory;
-      const trackBatch = form.trackBatch && trackInventory;
+      // Serial / batch always imply inventory tracking; non-stock kinds never track
+      const nonStock =
+        form.kind === "service" ||
+        form.kind === "digital" ||
+        form.kind === "bundle";
+      const trackInventory = nonStock
+        ? false
+        : form.trackInventory || form.trackSerial || form.trackBatch;
+      const trackSerial = !nonStock && form.trackSerial && trackInventory;
+      const trackBatch = !nonStock && form.trackBatch && trackInventory;
+      const canPurchase =
+        form.kind === "service" || form.kind === "digital"
+          ? false
+          : form.canPurchase;
 
       const parsed = createCatalogProductSchema.safeParse({
         name: form.name,
@@ -393,6 +694,8 @@ export function CatalogItemEditor() {
             : ""
           : form.openingQty,
         reorderPoint: form.reorderPoint,
+        multiUnitBaseQty: form.multiUnitBaseQty,
+        multiUnitBaseUnit: form.multiUnitBaseUnit,
       });
       if (!parsed.success) {
         setFieldErrors(zodFieldErrors(parsed.error));
@@ -459,6 +762,7 @@ export function CatalogItemEditor() {
         mrp: form.mrp ? Number(form.mrp) : isEdit ? null : undefined,
         taxCode: taxCodeFromForm(form) ?? (isEdit ? null : undefined),
         unitOfMeasure: form.unitOfMeasure,
+        ...catalogUnitPricingPayload(unitPricing, form.basePrice),
         photoUrl:
           uniquePhotos[0] || (isEdit ? photoUrl.trim() || null : undefined),
         images: uniquePhotos.length ? uniquePhotos : undefined,
@@ -466,7 +770,7 @@ export function CatalogItemEditor() {
         trackSerial,
         trackBatch,
         canSell: form.canSell,
-        canPurchase: form.canPurchase,
+        canPurchase,
         availableInPos: form.availableInPos,
         extraFields: buildExtraFieldsPayload(
           { ...form, trackInventory, trackSerial, trackBatch },
@@ -477,8 +781,6 @@ export function CatalogItemEditor() {
       };
 
       if (isEdit) {
-        // Live / older APIs reject top-level reorderPoint on PATCH (forbidNonWhitelisted).
-        // Reorder lives in extraFields → product meta (and stock sync when API supports it).
         return catalogApi.updateProduct(id, shared);
       }
 
@@ -495,11 +797,12 @@ export function CatalogItemEditor() {
         taxCode: taxCodeFromForm(form) || undefined,
         photoUrl: uniquePhotos[0],
         locationId: defaultLocationId || undefined,
-        openingQty: trackInventory
-          ? form.trackSerial
-            ? 0
-            : Math.max(0, Number(form.openingQty) || 0)
-          : undefined,
+        openingQty: createOpeningQtyPayload(
+          trackInventory,
+          form.trackSerial,
+          form.openingQty,
+          form.unitOfMeasure || "pcs",
+        ),
         reorderPoint: (() => {
           if (!trackInventory) return undefined;
           const n = Number(form.reorderPoint);
@@ -509,8 +812,28 @@ export function CatalogItemEditor() {
         })(),
       });
     },
-    onSuccess: (saved) => {
-      invalidateCatalogQueries(qc, saved?.id || id);
+    onSuccess: async (saved) => {
+      const pid = saved?.id || id;
+      if (pid && unitPricing.sellingUnits.length) {
+        for (const row of unitPricing.sellingUnits) {
+          if (!row.unitId || !(Number(row.conversionToBase) > 0)) continue;
+          try {
+            await catalogApi.upsertProductUnit(pid, {
+              unitId: row.unitId,
+              conversionToBase: Number(row.conversionToBase),
+              fixedPrice:
+                unitPricing.pricingStrategy === "fixed_tier"
+                  ? Number(row.fixedPrice) || 0
+                  : null,
+              isDefaultSellingUnit: row.isDefaultSellingUnit,
+              isPurchaseUnit: row.isPurchaseUnit,
+            });
+          } catch {
+            /* create already wrote units; edit upsert best-effort */
+          }
+        }
+      }
+      invalidateCatalogQueries(qc, pid);
       if (isEdit) {
         toast.success("Item updated");
         router.push(`/catalog/view?id=${id}`);
@@ -522,7 +845,7 @@ export function CatalogItemEditor() {
           : form.trackSerial
             ? "Product created — register serials to build Stock on Hand"
             : form.trackInventory && Number(form.openingQty) > 0
-              ? `Product created · Stock on Hand ${Number(form.openingQty)}`
+              ? `Product created · Stock on Hand ${formatQtyWithUnit(Number(form.openingQty), form.unitOfMeasure || "pcs")}`
               : "Product created",
       );
       if (returnTo) {
@@ -543,7 +866,11 @@ export function CatalogItemEditor() {
       router.push(afterSaveHref);
     },
     onError: (e: Error) =>
-      toast.error(e instanceof ApiError ? e.message : e.message || "Save failed"),
+      toast.error(
+        e instanceof ApiError
+          ? e.messages?.join(", ") || e.message
+          : e.message || "Save failed",
+      ),
   });
 
   if (isEdit && !id) {
@@ -646,6 +973,14 @@ export function CatalogItemEditor() {
           return list;
         })()}
         unitOptions={unitsForForm}
+        countryUnitHint={
+          !isEdit && suggestQ.data
+            ? `Suggested for ${suggestQ.data.label}: ${suggestQ.data.suggestedUnits
+                .slice(0, 8)
+                .map((u) => u.symbol)
+                .join(", ")}. Default unit is set for correct stock & billing math.`
+            : undefined
+        }
         imagePickerRef={imagePickerRef}
         onGenerateSku={() => genSku.mutate()}
         onGenerateBarcode={() => genBarcode.mutate()}
@@ -656,7 +991,14 @@ export function CatalogItemEditor() {
         stockReadOnly={isEdit}
         stockLocationName={stockLocationName}
         stockOnHandDisplay={
-          isEdit ? (stockOnHand == null ? "—" : String(stockOnHand)) : undefined
+          isEdit
+            ? stockOnHand == null
+              ? "—"
+              : formatQtyWithUnit(
+                  Number(stockOnHand),
+                  form.unitOfMeasure || "pcs",
+                )
+            : undefined
         }
         defaultShowMore={hasOptionalDetails}
         categorySelectedLabel={
@@ -666,6 +1008,10 @@ export function CatalogItemEditor() {
               : product.data.category.name
             : null
         }
+        brandSelectedLabel={product.data?.brand?.name ?? null}
+        unitPricing={unitPricing}
+        onUnitPricingChange={setUnitPricing}
+        commerceModes={commerceModes}
         photosExtra={
           existingImages.length ? (
             <div className="mb-4 flex flex-wrap gap-2">

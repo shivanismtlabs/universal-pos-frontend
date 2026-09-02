@@ -3,6 +3,7 @@
 /**
  * Zoho-style signup — personal identity only.
  * Organization setup happens on /organizations after this.
+ * Validation matches Sign In: submit-time FieldError, no live borders/toasts.
  */
 import { useState } from "react";
 import { useForm } from "react-hook-form";
@@ -17,18 +18,22 @@ import { FieldError } from "@/components/ui/form";
 import { AuthShell } from "@/components/auth-shell";
 import { PhoneCountryInput } from "@/components/phone-country-input";
 import {
+  AUTH_FORM_OPTIONS,
+  SIGNUP_PASSWORD_RULES,
+  authFieldError,
+} from "@/lib/auth-form";
+import {
   signupIdentitySchema,
   passwordStrength,
   type SignupIdentityInput,
 } from "@/lib/validations";
-import { filterPersonNameInput } from "@/lib/input-guards";
+import { phoneHasLocalDigits } from "@/lib/phone";
 import { authApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { applyPortalResponse } from "@/lib/auth-portal";
 import { cn } from "@/lib/utils";
 
-const fieldErr =
-  "border-[#fca5a5] focus:border-[#dc2626] focus:shadow-[0_0_0_3px_rgba(220,38,38,0.12)]";
+const authLabel = "text-[0.8125rem] font-semibold text-[#111827]";
 
 export default function SignupClient() {
   const router = useRouter();
@@ -39,11 +44,12 @@ export default function SignupClient() {
     handleSubmit,
     watch,
     setValue,
-    formState: { errors, isSubmitting, isValid },
+    clearErrors,
+    getValues,
+    formState,
   } = useForm<SignupIdentityInput>({
+    ...AUTH_FORM_OPTIONS,
     resolver: zodResolver(signupIdentitySchema),
-    mode: "onChange",
-    reValidateMode: "onChange",
     defaultValues: {
       fullName: "",
       email: "",
@@ -53,31 +59,15 @@ export default function SignupClient() {
     },
   });
 
+  const { errors, isSubmitting, isSubmitted, touchedFields } = formState;
   const password = watch("password") ?? "";
   const email = watch("email") ?? "";
   const phone = watch("phone") ?? "";
   const strength = passwordStrength(password, { email });
-  /** Signup has 6 rules (no shop slug). */
-  const signupScore = [
-    strength.checks.length,
-    strength.checks.lower,
-    strength.checks.upper,
-    strength.checks.number,
-    strength.checks.special,
-    strength.checks.noEmailPart,
-  ].filter(Boolean).length;
-  const strengthPct = Math.round((signupScore / 6) * 100);
-  const passwordMissing = [
-    !strength.checks.length && "At least 8 characters (max 72)",
-    !strength.checks.lower && "One lowercase letter (a–z)",
-    !strength.checks.upper && "One uppercase letter (A–Z)",
-    !strength.checks.number && "One number (0–9)",
-    !strength.checks.special && "One special character (!@#$…)",
-    !strength.checks.noEmailPart && "Must not contain your email name",
-  ].filter(Boolean) as string[];
-  const passwordOk = passwordMissing.length === 0 && password.length > 0;
-  const showPasswordHints =
-    password.length > 0 || Boolean(errors.password);
+  const passwordOk =
+    SIGNUP_PASSWORD_RULES.every((r) => strength.checks[r.key]) &&
+    password.length > 0;
+  const showPasswordHints = isSubmitted || touchedFields.password;
 
   async function onSubmit(values: SignupIdentityInput) {
     try {
@@ -109,86 +99,81 @@ export default function SignupClient() {
       subtitle="Create your account, then set up your company and store."
     >
       <form
-        onSubmit={handleSubmit(onSubmit, () =>
-          toast.error("Please fix the highlighted fields"),
-        )}
-        className="space-y-4"
+        onSubmit={handleSubmit(onSubmit)}
+        className="space-y-5"
         noValidate
       >
         <div className="space-y-1.5">
-          <Label
-            htmlFor="fullName"
-            className="text-[0.8125rem] font-semibold text-[#111827]"
-          >
-            Full name *
+          <Label htmlFor="fullName" className={authLabel}>
+            Full name
           </Label>
           <Input
             id="fullName"
             autoComplete="name"
-            placeholder="Your name"
-            className={cn("h-11 rounded-lg", errors.fullName && fieldErr)}
-            aria-invalid={Boolean(errors.fullName)}
-            {...register("fullName", {
-              onChange: (e) => {
-                const next = filterPersonNameInput(e.target.value);
-                setValue("fullName", next, { shouldValidate: true });
-              },
-            })}
+            className="h-11 rounded-lg"
+            aria-invalid={Boolean(authFieldError(formState, "fullName"))}
+            {...register("fullName")}
           />
-          <FieldError message={errors.fullName?.message} />
-          <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
-            Letters only — no numbers or special characters
-          </p>
+          <FieldError message={authFieldError(formState, "fullName")} />
         </div>
 
         <div className="space-y-1.5">
-          <Label
-            htmlFor="email"
-            className="text-[0.8125rem] font-semibold text-[#111827]"
-          >
-            Email *
+          <Label htmlFor="email" className={authLabel}>
+            Email
           </Label>
           <Input
             id="email"
             type="email"
             autoComplete="email"
             placeholder="name@company.com"
-            className={cn("h-11 rounded-lg", errors.email && fieldErr)}
-            aria-invalid={Boolean(errors.email)}
+            className="h-11 rounded-lg"
+            aria-invalid={Boolean(authFieldError(formState, "email"))}
             {...register("email")}
           />
-          <FieldError message={errors.email?.message} />
+          <FieldError message={authFieldError(formState, "email")} />
         </div>
 
         <div className="space-y-1.5">
           <PhoneCountryInput
-            label="Phone *"
-            required
+            label="Phone"
+            labelClassName={authLabel}
+            liveValidate={false}
+            autoComplete="off"
             value={phone}
-            onChange={(v) =>
-              setValue("phone", v, { shouldValidate: true, shouldDirty: true })
-            }
+            error={authFieldError(formState, "phone")}
+            onBlur={() => {
+              setValue("phone", getValues("phone"), {
+                shouldTouch: true,
+                shouldValidate: isSubmitted,
+              });
+            }}
+            onChange={(v) => {
+              const hasLocal = phoneHasLocalDigits(v);
+              setValue("phone", v, {
+                shouldDirty: true,
+                shouldTouch: hasLocal || isSubmitted,
+                shouldValidate:
+                  isSubmitted ||
+                  (hasLocal && Boolean(touchedFields.phone)),
+              });
+              if (!hasLocal && !isSubmitted) {
+                clearErrors("phone");
+              }
+            }}
           />
-          <FieldError message={errors.phone?.message} />
         </div>
 
         <div className="space-y-1.5">
-          <Label
-            htmlFor="password"
-            className="text-[0.8125rem] font-semibold text-[#111827]"
-          >
-            Password *
+          <Label htmlFor="password" className={authLabel}>
+            Password
           </Label>
           <div className="relative">
             <Input
               id="password"
               type={showPassword ? "text" : "password"}
               autoComplete="new-password"
-              className={cn(
-                "h-11 rounded-lg pr-16",
-                errors.password && fieldErr,
-              )}
-              aria-invalid={Boolean(errors.password)}
+              className="h-11 rounded-lg pr-16"
+              aria-invalid={Boolean(authFieldError(formState, "password"))}
               {...register("password")}
             />
             <button
@@ -199,59 +184,52 @@ export default function SignupClient() {
               {showPassword ? "Hide" : "Show"}
             </button>
           </div>
-          {showPasswordHints ? (
-            <>
-              <div className="h-1 overflow-hidden rounded-full bg-[#eef2f8]">
-                <div
+          <FieldError message={authFieldError(formState, "password")} />
+          <p className="mt-1.5 text-[0.7rem] font-medium text-[#64748b]">
+            Password must include:
+          </p>
+          <ul className="mt-1 space-y-0.5 text-[0.75rem]" aria-live="polite">
+            {SIGNUP_PASSWORD_RULES.map((rule) => {
+              const ok = strength.checks[rule.key];
+              return (
+                <li
+                  key={rule.id}
                   className={cn(
-                    "h-full rounded-full transition-all",
-                    passwordOk
-                      ? "bg-[#16a34a]"
-                      : signupScore <= 2
-                        ? "bg-[#ef4444]"
-                        : "bg-[#f59e0b]",
+                    ok
+                      ? "text-[#15803d]"
+                      : showPasswordHints && errors.password
+                        ? "text-[#b91c1c]"
+                        : "text-[#64748b]",
                   )}
-                  style={{ width: `${strengthPct}%` }}
-                />
-              </div>
-              {passwordOk ? (
-                <p className="mt-1 text-[0.75rem] text-[#15803d]">
-                  Password looks good
-                </p>
-              ) : (
-                <ul
-                  className="mt-1 space-y-0.5 text-[0.75rem] text-[#b91c1c]"
-                  role="alert"
                 >
-                  {passwordMissing.map((line) => (
-                    <li key={line}>{line}</li>
-                  ))}
-                </ul>
-              )}
-            </>
+                  <span aria-hidden="true" className="mr-1.5">
+                    {ok ? "✓" : "•"}
+                  </span>
+                  {rule.label}
+                </li>
+              );
+            })}
+          </ul>
+          {passwordOk ? (
+            <p className="mt-1 text-[0.75rem] text-[#15803d]">
+              Password looks good
+            </p>
           ) : null}
-          <FieldError message={errors.password?.message} />
         </div>
 
         <div className="space-y-1.5">
-          <Label
-            htmlFor="confirmPassword"
-            className="text-[0.8125rem] font-semibold text-[#111827]"
-          >
-            Confirm password *
+          <Label htmlFor="confirmPassword" className={authLabel}>
+            Confirm password
           </Label>
           <Input
             id="confirmPassword"
             type={showPassword ? "text" : "password"}
             autoComplete="new-password"
-            className={cn(
-              "h-11 rounded-lg",
-              errors.confirmPassword && fieldErr,
-            )}
-            aria-invalid={Boolean(errors.confirmPassword)}
+            className="h-11 rounded-lg"
+            aria-invalid={Boolean(authFieldError(formState, "confirmPassword"))}
             {...register("confirmPassword")}
           />
-          <FieldError message={errors.confirmPassword?.message} />
+          <FieldError message={authFieldError(formState, "confirmPassword")} />
         </div>
 
         <p className="text-[0.75rem] leading-relaxed text-[#8b9bb0]">
@@ -262,7 +240,7 @@ export default function SignupClient() {
         <Button
           type="submit"
           className="h-11 w-full rounded-lg text-[0.9375rem] font-semibold"
-          disabled={isSubmitting || !isValid}
+          disabled={isSubmitting}
         >
           {isSubmitting ? "Creating account…" : "Create workspace"}
         </Button>

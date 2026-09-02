@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, Suspense } from "react";
+import { useEffect, useMemo, useRef, useState, Suspense } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -28,7 +28,7 @@ import { canUseBiometrics, biometricBlockReason, registerDeviceBiometric } from 
 import { useSetupReturn } from "@/lib/use-setup-return";
 import {
   expenseCategoryNameSchema,
-  settingsBrandSchema,
+  settingsBusinessProfileSchema,
   settingsCounterSchema,
   settingsTaxSchema,
   zodFieldErrors,
@@ -37,6 +37,12 @@ import {
 import { geoDial, joinE164, splitE164 } from "@/lib/geo";
 import { CountryStateFields } from "@/components/country-state-fields";
 import { PhoneCountryInput } from "@/components/phone-country-input";
+import { citiesForState } from "@/lib/india-locations";
+import {
+  FISCAL_YEAR_OPTIONS,
+  fiscalYearSettingsPatch,
+  fiscalMonthNameToNumber,
+} from "@/lib/fiscal-year";
 
 export type SettingsSection =
   | "branding"
@@ -84,13 +90,6 @@ const SECTION_META: Record<
   },
 };
 
-
-const FISCAL_YEAR_OPTIONS = [
-  { id: "April", label: "April – March" },
-  { id: "January", label: "January – December" },
-  { id: "July", label: "July – June" },
-  { id: "October", label: "October – September" },
-] as const;
 
 const DATE_FORMAT_OPTIONS = [
   { id: "dd MMM yyyy", label: "dd MMM yyyy  [ 17 Aug 2026 ]" },
@@ -182,6 +181,14 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
     timezone: "Asia/Kolkata",
   });
   const [profile, setProfile] = useState(emptyProfileExtras);
+
+  const cityOptions = useMemo(() => {
+    if (profile.countryCode !== "IN") return [] as string[];
+    const list = citiesForState(profile.state || "");
+    const current = profile.city.trim();
+    if (current && !list.includes(current)) return [current, ...list];
+    return list;
+  }, [profile.countryCode, profile.state, profile.city]);
 
   const [tax, setTax] = useState({
     gstin: "",
@@ -296,11 +303,13 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
         typeof orgProfile.website === "string" ? orgProfile.website : "",
       logoUrl:
         typeof t.branding?.logoUrl === "string" ? t.branding.logoUrl : "",
-      fiscalYearStart:
-        typeof orgProfile.fiscalYearStart === "string" &&
-        orgProfile.fiscalYearStart
-          ? orgProfile.fiscalYearStart
-          : "April",
+      fiscalYearStart: (() => {
+        const raw =
+          typeof orgProfile.fiscalYearStart === "string"
+            ? orgProfile.fiscalYearStart.trim()
+            : "";
+        return raw && fiscalMonthNameToNumber(raw) ? raw : "April";
+      })(),
       dateFormat:
         typeof orgProfile.dateFormat === "string" && orgProfile.dateFormat
           ? orgProfile.dateFormat
@@ -397,7 +406,20 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
 
   const saveBrand = useMutation({
     mutationFn: async () => {
-      const parsed = settingsBrandSchema.safeParse(branding);
+      const phoneFull = joinE164(
+        profile.phoneCountryCode,
+        profile.phone.trim(),
+      );
+      const parsed = settingsBusinessProfileSchema.safeParse({
+        ...branding,
+        businessType: selectedBusinessType,
+        phone: phoneFull.replace(/\s/g, "") || profile.phone.trim(),
+        email: profile.email,
+        website: profile.website,
+        countryCode: profile.countryCode,
+        pan: profile.pan,
+        postalCode: profile.postalCode,
+      });
       if (!parsed.success) {
         setBrandErrors(zodFieldErrors(parsed.error));
         for (const m of zodMessages(parsed.error)) toast.error(m);
@@ -439,6 +461,7 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
           ...(logoTrimmed ? { logoUrl: logoTrimmed } : {}),
         },
         settings: {
+          ...fiscalYearSettingsPatch(profile.fiscalYearStart),
           organizationProfile: {
             phone: phone || null,
             phoneCountryCode: profile.phoneCountryCode,
@@ -520,7 +543,8 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
         tax: {
           ratePercent:
             parsed.data.taxMode === "none" ? 0 : parsed.data.ratePercent,
-          inclusive: parsed.data.inclusive,
+          inclusive:
+            parsed.data.taxMode === "in_gst" ? false : parsed.data.inclusive,
           receiptFooter: receiptFooter.trim(),
         },
       });
@@ -752,7 +776,7 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4 px-3 sm:px-4">
+    <div className="space-y-4 px-3 sm:px-4">
         <PageHeader
           title={meta.title}
           eyebrow="Business settings"
@@ -765,53 +789,43 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
           }
           action={
             tab === "branding" ? (
-              <div className="flex flex-wrap gap-2">
-                <Button asChild size="sm" variant="secondary">
-                  <Link href="/organizations">Your organizations</Link>
-                </Button>
-                <Button asChild size="sm">
-                  <Link href="/organizations?create=1">Create organization</Link>
-                </Button>
+              <div className="flex flex-col items-stretch gap-1.5 sm:items-end">
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <Button asChild variant="secondary">
+                    <Link href="/organizations">My shops</Link>
+                  </Button>
+                  <Button asChild>
+                    <Link href="/organizations?create=1">Add another shop</Link>
+                  </Button>
+                </div>
+                <p className="max-w-[16rem] text-right text-[0.72rem] leading-snug text-[#6b7280]">
+                  Same login — switch to another shop, or start a new one.
+                </p>
               </div>
             ) : undefined
           }
         />
 
       {tab === "branding" ? (
-        <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#d9e0ea] bg-[#f8fafc] px-4 py-3.5">
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-[#0b1f33]">
-              Organizations
-            </p>
-            <p className="mt-0.5 text-[0.8rem] text-[#5a6b7d]">
-              Create another shop or switch between organizations under the same
-              login.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button asChild size="sm" variant="secondary">
-              <Link href="/organizations">Manage</Link>
-            </Button>
-            <Button asChild size="sm">
-              <Link href="/organizations?create=1">+ Create organization</Link>
-            </Button>
-          </div>
-        </section>
-      ) : null}
-
-      {tab === "branding" ? (
-        <section className="space-y-5 rounded-2xl border border-[#e5e7eb] bg-white p-5">
-          <div className="grid gap-5 lg:grid-cols-[1fr_220px]">
+        <section className="w-full space-y-5 rounded-2xl border border-[#e5e7eb] bg-white p-5 sm:p-6">
+          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
             <div className="space-y-3">
               <div>
                 <Label>Business name *</Label>
                 <Input
                   className="mt-1"
                   value={branding.productName}
-                  onChange={(e) =>
-                    setBranding((b) => ({ ...b, productName: e.target.value }))
-                  }
+                  onChange={(e) => {
+                    setBranding((b) => ({ ...b, productName: e.target.value }));
+                    setBrandErrors((err) => {
+                      if (!err.productName) return err;
+                      const next = { ...err };
+                      delete next.productName;
+                      return next;
+                    });
+                  }}
                   placeholder="Your business name"
+                  aria-invalid={Boolean(brandErrors.productName)}
                 />
                 <FieldError message={brandErrors.productName} />
               </div>
@@ -820,9 +834,15 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
                 <Input
                   className="mt-1"
                   value={branding.tagline}
-                  onChange={(e) =>
-                    setBranding((b) => ({ ...b, tagline: e.target.value }))
-                  }
+                  onChange={(e) => {
+                    setBranding((b) => ({ ...b, tagline: e.target.value }));
+                    setBrandErrors((err) => {
+                      if (!err.tagline) return err;
+                      const next = { ...err };
+                      delete next.tagline;
+                      return next;
+                    });
+                  }}
                   placeholder="Short line under the shop name"
                 />
                 <FieldError message={brandErrors.tagline} />
@@ -832,7 +852,16 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
                 <Select
                 className="mt-1 w-full rounded-lg border border-[#e5e7eb] bg-white px-3 py-2 text-sm"
                 value={selectedBusinessType}
-                onChange={(e) => setSelectedBusinessType(e.target.value)}
+                onChange={(e) => {
+                  setSelectedBusinessType(e.target.value);
+                  setBrandErrors((err) => {
+                    if (!err.businessType) return err;
+                    const next = { ...err };
+                    delete next.businessType;
+                    return next;
+                  });
+                }}
+                aria-invalid={Boolean(brandErrors.businessType)}
               >
                 {BUSINESS_TYPES.some((bt) => bt.id === selectedBusinessType) ? null : (
                   <option value={selectedBusinessType}>
@@ -845,6 +874,7 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
                     </option>
                   ))}
                 </Select>
+                <FieldError message={brandErrors.businessType} />
                 <p className="mt-1 text-[0.72rem] text-[#6b7280]">
                   Same setup template as when the shop was created. Changing type
                   reapplies that template’s modes &amp; capabilities.{" "}
@@ -856,6 +886,7 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
                 required
                 fallbackCountry={profile.countryCode || "IN"}
                 value={joinE164(profile.phoneCountryCode, profile.phone)}
+                error={brandErrors.phone}
                 onChange={(full) => {
                   const parts = splitE164(full, profile.countryCode || "IN");
                   setProfile((p) => ({
@@ -863,6 +894,12 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
                     phoneCountryCode: parts.dial || p.phoneCountryCode,
                     phone: parts.local,
                   }));
+                  setBrandErrors((err) => {
+                    if (!err.phone) return err;
+                    const next = { ...err };
+                    delete next.phone;
+                    return next;
+                  });
                 }}
               />
               <div>
@@ -871,22 +908,38 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
                   className="mt-1"
                   type="email"
                   value={profile.email}
-                  onChange={(e) =>
-                    setProfile((p) => ({ ...p, email: e.target.value }))
-                  }
+                  onChange={(e) => {
+                    setProfile((p) => ({ ...p, email: e.target.value }));
+                    setBrandErrors((err) => {
+                      if (!err.email) return err;
+                      const next = { ...err };
+                      delete next.email;
+                      return next;
+                    });
+                  }}
                   placeholder="shop@example.com"
+                  aria-invalid={Boolean(brandErrors.email)}
                 />
+                <FieldError message={brandErrors.email} />
               </div>
               <div>
                 <Label>Website</Label>
                 <Input
                   className="mt-1"
                   value={profile.website}
-                  onChange={(e) =>
-                    setProfile((p) => ({ ...p, website: e.target.value }))
-                  }
+                  onChange={(e) => {
+                    setProfile((p) => ({ ...p, website: e.target.value }));
+                    setBrandErrors((err) => {
+                      if (!err.website) return err;
+                      const next = { ...err };
+                      delete next.website;
+                      return next;
+                    });
+                  }}
                   placeholder="e.g. yourshop.com"
+                  aria-invalid={Boolean(brandErrors.website)}
                 />
+                <FieldError message={brandErrors.website} />
               </div>
             </div>
             <div>
@@ -1004,49 +1057,97 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
                 state={profile.state}
                 countryRequired
                 countryLabel="Business location"
-                onCountry={(code) =>
+                countryError={brandErrors.countryCode}
+                onCountry={(code) => {
                   setProfile((p) => ({
                     ...p,
                     countryCode: code,
                     phoneCountryCode: geoDial(code) || p.phoneCountryCode,
-                  }))
+                    state: "",
+                    city: "",
+                  }));
+                  setBrandErrors((err) => {
+                    if (!err.countryCode) return err;
+                    const next = { ...err };
+                    delete next.countryCode;
+                    return next;
+                  });
+                }}
+                onState={(state) =>
+                  setProfile((p) => ({ ...p, state, city: "" }))
                 }
-                onState={(state) => setProfile((p) => ({ ...p, state }))}
               />
             </div>
             <div>
               <Label>City</Label>
-              <Input
-                className="mt-1"
-                value={profile.city}
-                onChange={(e) =>
-                  setProfile((p) => ({ ...p, city: e.target.value }))
-                }
-              />
+              {cityOptions.length ? (
+                <Select
+                  className="mt-1"
+                  value={profile.city}
+                  disabled={!profile.state}
+                  onChange={(e) =>
+                    setProfile((p) => ({ ...p, city: e.target.value }))
+                  }
+                >
+                  <option value="">
+                    {profile.state ? "Select city" : "Select state first"}
+                  </option>
+                  {cityOptions.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </Select>
+              ) : (
+                <Input
+                  className="mt-1"
+                  value={profile.city}
+                  placeholder="City"
+                  onChange={(e) =>
+                    setProfile((p) => ({ ...p, city: e.target.value }))
+                  }
+                />
+              )}
             </div>
             <div>
               <Label>Postal code</Label>
               <Input
                 className="mt-1"
                 value={profile.postalCode}
-                onChange={(e) =>
-                  setProfile((p) => ({ ...p, postalCode: e.target.value }))
-                }
+                onChange={(e) => {
+                  setProfile((p) => ({ ...p, postalCode: e.target.value }));
+                  setBrandErrors((err) => {
+                    if (!err.postalCode) return err;
+                    const next = { ...err };
+                    delete next.postalCode;
+                    return next;
+                  });
+                }}
+                aria-invalid={Boolean(brandErrors.postalCode)}
               />
+              <FieldError message={brandErrors.postalCode} />
             </div>
             <div>
               <Label>PAN</Label>
               <Input
                 className="mt-1"
                 value={profile.pan}
-                onChange={(e) =>
+                onChange={(e) => {
                   setProfile((p) => ({
                     ...p,
                     pan: e.target.value.toUpperCase(),
-                  }))
-                }
+                  }));
+                  setBrandErrors((err) => {
+                    if (!err.pan) return err;
+                    const next = { ...err };
+                    delete next.pan;
+                    return next;
+                  });
+                }}
                 maxLength={10}
+                aria-invalid={Boolean(brandErrors.pan)}
               />
+              <FieldError message={brandErrors.pan} />
             </div>
             <div>
               <Label>Organization type</Label>
@@ -1183,9 +1284,7 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
           </div>
 
           <Button
-            disabled={
-              saveBrand.isPending || branding.productName.trim().length < 2
-            }
+            disabled={saveBrand.isPending}
             onClick={() => saveBrand.mutate()}
           >
             {saveBrand.isPending ? "Saving…" : "Save"}
@@ -1246,17 +1345,18 @@ function SettingsPageInner({ lockedSection }: { lockedSection: Tab }) {
               <label className="flex items-center gap-2 text-sm text-[#0b1f33]">
                 <input
                   type="checkbox"
-                  checked={tax.inclusive}
+                  checked={tax.taxMode === "in_gst" ? false : tax.inclusive}
                   onChange={(e) =>
                     setTax((t) => ({ ...t, inclusive: e.target.checked }))
                   }
-                  disabled={tax.taxMode === "none"}
+                  disabled={tax.taxMode === "none" || tax.taxMode === "in_gst"}
                 />
                 Catalog prices include tax
               </label>
               <p className="text-[0.75rem] text-[#8b9bb0]">
-                Off = tax is added on top of ticket due (recommended). On =
-                prices already include tax, so Due matches Subtotal.
+                {tax.taxMode === "in_gst"
+                  ? "India GST is added on the listed price (CGST + SGST). Net Payable = Total + tax."
+                  : "Off = tax is added on top of ticket due (recommended). On = prices already include tax, so Due matches Subtotal."}
               </p>
           <Button
             disabled={saveTax.isPending}

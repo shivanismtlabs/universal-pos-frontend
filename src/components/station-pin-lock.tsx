@@ -137,7 +137,7 @@ export function StationPinLock({
       setOtpSent(true);
       setDevCode(res.devCode ?? null);
       setMaskedEmail(res.maskedEmail ?? null);
-      toast.success(res.message);
+      toast.success("OTP sent");
       if (res.devCode) {
         toast.message("Dev OTP", { description: res.devCode });
       }
@@ -314,8 +314,11 @@ export function StationPinLock({
                   <p className="text-xs text-[#5a6b7d]">Email: {maskedEmail}</p>
                 ) : null}
                 {devCode ? (
-                  <p className="text-xs font-medium text-[#1a56db]">
-                    Dev OTP: {devCode}
+                  <p className="mt-2 rounded-md border border-[#c5d4f5] bg-[#eef3fc] px-2.5 py-2 text-xs text-[#0b1f33]">
+                    On-screen OTP (demo mailboxes cannot receive email):{" "}
+                    <span className="font-semibold tracking-widest text-[#1a56db]">
+                      {devCode}
+                    </span>
                   </p>
                 ) : null}
               </div>

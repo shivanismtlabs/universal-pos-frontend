@@ -1,19 +1,21 @@
 "use client";
 
 import { useRef, useState } from "react";
+import Link from "next/link";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { posApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { downloadCsv } from "@/lib/csv";
 import { Button } from "@/components/ui/button";
+import { useBootstrap } from "@/lib/bootstrap";
 import { X } from "lucide-react";
 
 export type ImportableRow = {
   title: string;
   sku: string;
   categoryName?: string;
-  sellUnit?: "pcs" | "pack" | "kg" | "g" | "L" | "ml";
+  sellUnit?: string;
   price: number;
   qty?: number;
   description?: string;
@@ -23,16 +25,21 @@ export type ImportableRow = {
   reorderPoint?: number;
   hsnOrSac?: string;
   trackInventory?: boolean;
+  /** goods (default) | service */
+  itemType?: "goods" | "service";
+  durationMinutes?: number;
   image?: string;
 };
 
 const TEMPLATE_HEADERS = [
   "name",
   "sku",
+  "type",
   "category",
   "unit",
   "selling_price",
   "opening_stock",
+  "duration_minutes",
   "cost_price",
   "barcode",
   "manufacturer",
@@ -91,6 +98,7 @@ function mapHeader(h: string): string | null {
     title: "title",
     item_name: "title",
     product: "title",
+    service_name: "title",
     sku: "sku",
     item_sku: "sku",
     category: "categoryName",
@@ -121,6 +129,14 @@ function mapHeader(h: string): string | null {
     inventory_tracked: "trackInventory",
     reorder_point: "reorderPoint",
     reorder: "reorderPoint",
+    type: "itemType",
+    item_type: "itemType",
+    kind: "itemType",
+    product_type: "itemType",
+    duration_minutes: "durationMinutes",
+    duration: "durationMinutes",
+    duration_min: "durationMinutes",
+    minutes: "durationMinutes",
     image_url: "image",
     image: "image",
     photo_url: "image",
@@ -131,6 +147,52 @@ function mapHeader(h: string): string | null {
     img_url: "image",
   };
   return aliases[n] ?? null;
+}
+
+function parseItemType(
+  raw: string | undefined,
+  unitRaw: string,
+  rowNum?: number,
+): "goods" | "service" {
+  const t = (raw ?? "").trim().toLowerCase();
+  const where = rowNum ? `Row ${rowNum}: ` : "";
+  if (
+    t === "rental" ||
+    t === "rent" ||
+    t === "rentals" ||
+    t === "hire"
+  ) {
+    throw new Error(
+      `${where}type "rental" is not supported in CSV import — add outfits via Rental desk → Stock (barcode per size).`,
+    );
+  }
+  if (
+    t === "service" ||
+    t === "services" ||
+    t === "svc" ||
+    t === "serv" ||
+    t === "labour" ||
+    t === "labor"
+  ) {
+    return "service";
+  }
+  if (t === "goods" || t === "good" || t === "product" || t === "physical") {
+    return "goods";
+  }
+  // Infer from unit when type column missing
+  const u = unitRaw.trim().toLowerCase();
+  if (
+    u === "service" ||
+    u === "min" ||
+    u === "minute" ||
+    u === "minutes" ||
+    u === "hour" ||
+    u === "hr" ||
+    u === "session"
+  ) {
+    return "service";
+  }
+  return "goods";
 }
 
 export function rowsFromTable(table: string[][]): ImportableRow[] {
@@ -149,8 +211,9 @@ export function rowsFromTable(table: string[][]): ImportableRow[] {
       if (key) obj[key] = String(cells[i] ?? "");
     });
     if (!obj.title?.trim() && !obj.sku?.trim()) continue;
-    const unitRaw = (obj.sellUnit || "pcs").toLowerCase();
-    const unitMap: Record<string, ImportableRow["sellUnit"]> = {
+    const unitRaw = (obj.sellUnit || "").toLowerCase();
+    const itemType = parseItemType(obj.itemType, unitRaw, r + 1);
+    const unitMap: Record<string, string> = {
       pcs: "pcs",
       piece: "pcs",
       pieces: "pcs",
@@ -162,28 +225,43 @@ export function rowsFromTable(table: string[][]): ImportableRow[] {
       liter: "L",
       litre: "L",
       ml: "ml",
+      service: "service",
+      min: "min",
+      minute: "min",
+      minutes: "min",
+      hour: "hour",
+      hr: "hour",
+      day: "day",
+      session: "service",
     };
     const qty =
       obj.qty !== undefined && obj.qty !== "" ? Number(obj.qty) : 0;
     const trackRaw = (obj.trackInventory ?? "").trim().toLowerCase();
-    // CSV goods default to tracking ON. Only explicit false/no/off/0 turns it off.
-    // Do not treat single-letter "n" as off (misaligned cells caused "Not counted").
     let trackInventory = !["false", "no", "off", "0"].includes(trackRaw);
-    // Any opening stock value (including 0 in the opening_stock column) ⇒ count stock.
     if (obj.qty !== undefined && obj.qty !== "" && Number.isFinite(qty) && qty >= 0) {
       trackInventory = true;
+    }
+    if (itemType === "service") {
+      trackInventory = false;
     }
     const price = Number(obj.price);
     if (!(price > 0)) {
       throw new Error(`Row ${r + 1}: selling_price must be > 0`);
     }
+    const durationRaw = (obj.durationMinutes ?? "").trim();
+    const durationMinutes =
+      durationRaw !== "" && Number.isFinite(Number(durationRaw))
+        ? Number(durationRaw)
+        : undefined;
     out.push({
       title: obj.title?.trim() || "",
       sku: obj.sku?.trim() || "",
       categoryName: obj.categoryName?.trim() || undefined,
-      sellUnit: unitMap[unitRaw] ?? "pcs",
+      sellUnit:
+        unitMap[unitRaw] ??
+        (itemType === "service" ? "service" : unitRaw || "pcs"),
       price,
-      qty: Number.isFinite(qty) ? qty : 0,
+      qty: itemType === "service" ? 0 : Number.isFinite(qty) ? qty : 0,
       description: obj.description?.trim() || undefined,
       manufacturer: obj.manufacturer?.trim() || undefined,
       barcode: obj.barcode?.trim() || undefined,
@@ -197,6 +275,13 @@ export function rowsFromTable(table: string[][]): ImportableRow[] {
           : undefined,
       hsnOrSac: obj.hsnOrSac?.trim() || undefined,
       trackInventory,
+      itemType,
+      durationMinutes:
+        itemType === "service" &&
+        durationMinutes != null &&
+        durationMinutes > 0
+          ? durationMinutes
+          : undefined,
       image: obj.image?.trim() || undefined,
     });
   }
@@ -236,38 +321,75 @@ async function rowsFromExcelFile(file: File): Promise<ImportableRow[]> {
 export function downloadItemsTemplate() {
   downloadCsv("universal-pos-items-template.csv", TEMPLATE_HEADERS, [
     [
+      "Silk Bow Tie",
+      "BOW-TIE-001",
+      "goods",
+      "Accessories",
+      "pcs",
+      "499",
+      "20",
+      "",
+      "180",
+      "8901000000001",
+      "Velvet Co",
+      "6214",
+      "true",
+      "",
+    ],
+    [
+      "AC Servicing",
+      "AC-SVC-001",
+      "service",
+      "Home Services",
+      "service",
+      "600",
+      "0",
+      "60",
+      "",
+      "",
+      "",
+      "",
+      "false",
+      "",
+    ],
+    [
+      "Hair Styling",
+      "HAIR-30",
+      "service",
+      "Hair",
+      "service",
+      "799",
+      "0",
+      "30",
+      "",
+      "",
+      "",
+      "",
+      "false",
+      "",
+    ],
+    [
       "USB-C Cable 1m",
       "USBC-1M",
-      "Accessories",
+      "goods",
+      "Electronics",
       "pcs",
       "199",
       "25",
+      "",
       "90",
       "8901234567890",
       "Generic",
       "8544",
       "true",
-      "https://images.unsplash.com/photo-1583394838336-acd977736f90",
-    ],
-    [
-      "Organic Almond Milk 1L",
-      "ALM-MILK-1L",
-      "Beverages",
-      "L",
-      "145",
-      "12.5",
-      "98",
       "",
-      "Farm Co",
-      "",
-      "true",
-      "https://images.unsplash.com/photo-1550583724-b2692b85b150",
     ],
   ]);
 }
 
 /**
- * Zoho-style bulk import items dialog — Universal POS (sale mode).
+ * Zoho-style bulk import — items to **sell** at Counter Sell tab (goods or service).
+ * Rental outfits: use Rental desk → Stock, not this import.
  */
 export function ItemsImportDialog({
   open,
@@ -281,6 +403,8 @@ export function ItemsImportDialog({
   locationId?: string;
 }) {
   const qc = useQueryClient();
+  const { hasMode } = useBootstrap();
+  const hasRental = hasMode("rental");
   const fileRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<ImportableRow[] | null>(null);
   const [fileName, setFileName] = useState("");
@@ -304,6 +428,9 @@ export function ItemsImportDialog({
       void qc.invalidateQueries({ queryKey: ["catalog-products"] });
       void qc.invalidateQueries({ queryKey: ["catalog-products-home"] });
       void qc.invalidateQueries({ queryKey: ["pos-sale-catalog"] });
+      void qc.invalidateQueries({ queryKey: ["services-catalog"] });
+      void qc.invalidateQueries({ queryKey: ["services-summary"] });
+      void qc.invalidateQueries({ queryKey: ["catalog-services-for-rental"] });
       toast.success(
         `Imported ${res.imported} item${res.imported === 1 ? "" : "s"}${
           res.failed ? ` · ${res.failed} failed` : ""
@@ -363,9 +490,23 @@ export function ItemsImportDialog({
               Import items
             </h2>
             <p className="mt-1 text-[0.8rem] text-[#5a6b7d]">
-              Bulk import from Excel (.xlsx) or CSV. First row must be headers
-              like name, sku, selling_price. Stock is added for this shop.
+              Bulk import from Excel (.xlsx) or CSV. Creates items to{" "}
+              <strong>sell</strong> (Type = Goods or Service). Use column{" "}
+              <code className="text-[0.75rem]">type</code>:{" "}
+              <code className="text-[0.75rem]">goods</code> or{" "}
+              <code className="text-[0.75rem]">service</code> — empty defaults
+              to Goods.
             </p>
+            {hasRental ? (
+              <p className="mt-2 rounded-lg border border-[#dbeafe] bg-[#eff6ff] px-3 py-2 text-[0.75rem] text-[#1e40af]">
+                <strong>Rental shop:</strong> CSV import is for accessories /
+                retail stock only. Rent outfits (sizes + barcodes) via{" "}
+                <Link href="/rental" className="font-medium underline">
+                  Rental desk → Stock
+                </Link>
+                , then use Counter → Rent tab.
+              </p>
+            ) : null}
           </div>
           <button
             type="button"
@@ -420,8 +561,10 @@ export function ItemsImportDialog({
               <ul className="mt-2 max-h-36 space-y-1 overflow-y-auto text-[#5a6b7d]">
                 {preview.slice(0, 8).map((r) => (
                   <li key={r.sku} className="truncate">
-                    {r.title} · <span className="font-mono">{r.sku}</span> · ₹
+                    {r.title} · <span className="font-mono">{r.sku}</span> ·{" "}
+                    {r.itemType === "service" ? "service" : "goods"} · ₹
                     {r.price}
+                    {r.durationMinutes ? ` · ${r.durationMinutes}m` : ""}
                     {r.image ? " · photo" : ""}
                   </li>
                 ))}
@@ -432,9 +575,11 @@ export function ItemsImportDialog({
             </div>
           ) : (
             <p className="text-[0.78rem] leading-relaxed text-[#8b9bb0]">
-              Required columns: <strong>name</strong>, <strong>sku</strong>,{" "}
-              <strong>selling_price</strong>. Optional: category, unit,
-              opening_stock, cost_price, barcode, manufacturer, hsn,
+              Required: <strong>name</strong>, <strong>sku</strong>,{" "}
+              <strong>selling_price</strong>. For services set{" "}
+              <strong>type</strong>=<code>service</code> (or unit{" "}
+              <code>service</code> / <code>min</code>). Optional: category,
+              unit, opening_stock, duration_minutes, cost_price, barcode,
               track_inventory, image_url.
             </p>
           )}

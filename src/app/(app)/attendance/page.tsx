@@ -14,6 +14,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { PageHeader } from "@/components/page-header";
+import { formatWorkedDuration, formatAttendanceClockTime, attendanceClockInputValue } from "@/lib/attendance-time";
+import { useBootstrap } from "@/lib/bootstrap";
+import {
+  attendanceStatusFilterOptions,
+  attendanceStatusLabel,
+  exportAttendanceCsv,
+  matchesAttendanceStatusFilter,
+} from "@/lib/attendance-display";
 
 const STATUSES = [
   { value: "present", label: "Present" },
@@ -37,6 +45,7 @@ type FormState = {
   breakMinutes: string;
   status: string;
   notes: string;
+  correctionReason: string;
 };
 
 const emptyForm = (): FormState => ({
@@ -48,11 +57,30 @@ const emptyForm = (): FormState => ({
   breakMinutes: "0",
   status: "present",
   notes: "",
+  correctionReason: "",
 });
 
-function statusLabel(v: string) {
-  return STATUSES.find((s) => s.value === v)?.label ?? v;
+type RangePreset = "today" | "week" | "month" | "all";
+
+function rangeForPreset(preset: RangePreset): { from?: string; to?: string } {
+  const today = todayYmd();
+  if (preset === "today") return { from: today, to: today };
+  if (preset === "week") {
+    const d = new Date();
+    const day = d.getDay();
+    const mondayOffset = day === 0 ? -6 : 1 - day;
+    const monday = new Date(d);
+    monday.setDate(d.getDate() + mondayOffset);
+    return { from: monday.toISOString().slice(0, 10), to: today };
+  }
+  if (preset === "month") {
+    const d = new Date();
+    const from = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+    return { from, to: today };
+  }
+  return {};
 }
+
 
 function calcPreviewHours(form: FormState): string {
   if (NO_TIME.has(form.status) || !form.clockIn || !form.clockOut) return "—";
@@ -67,6 +95,8 @@ function calcPreviewHours(form: FormState): string {
 
 export default function AttendancePage() {
   const qc = useQueryClient();
+  const { data: boot } = useBootstrap();
+  const shopTz = boot?.tenant?.timezone ?? undefined;
   const roles = useAuthStore((s) => s.user?.roles);
   const permissions = useAuthStore((s) => s.user?.permissions);
   const canManage =
@@ -79,6 +109,7 @@ export default function AttendancePage() {
     userId: "",
     shiftId: "",
     status: "",
+    range: "week" as RangePreset,
   });
   const [panel, setPanel] = useState<"closed" | "add" | "edit" | "view">(
     "closed",
@@ -90,15 +121,27 @@ export default function AttendancePage() {
     queryKey: ["attendance-open"],
     queryFn: () => iamApi.openAttendance(),
   });
+  const range = rangeForPreset(filters.range);
   const listQ = useQuery({
     queryKey: ["attendance-list", filters],
     queryFn: () =>
       iamApi.listAttendance({
         workDate: filters.workDate || undefined,
+        from: filters.workDate ? undefined : range.from,
+        to: filters.workDate ? undefined : range.to,
         userId: filters.userId || undefined,
         shiftId: filters.shiftId || undefined,
-        status: filters.status || undefined,
+        status:
+          filters.status &&
+          !["checked_in", "checked_out"].includes(filters.status)
+            ? filters.status
+            : undefined,
       }),
+  });
+  const historyQ = useQuery({
+    queryKey: ["attendance-history", editingId],
+    queryFn: () => iamApi.attendanceHistory(editingId!),
+    enabled: panel === "view" && Boolean(editingId),
   });
   const staffQ = useQuery({
     queryKey: ["users-staff"],
@@ -145,12 +188,16 @@ export default function AttendancePage() {
         notes: form.notes.trim() || undefined,
       };
       if (panel === "edit" && editingId) {
+        if (!form.correctionReason.trim()) {
+          throw new Error("Correction reason is required");
+        }
         return iamApi.updateAttendance(editingId, {
           ...body,
           shiftId: form.shiftId || null,
           clockIn: form.clockIn || null,
           clockOut: form.clockOut || null,
           notes: form.notes.trim() || null,
+          correctionReason: form.correctionReason.trim(),
         });
       }
       return iamApi.createAttendance(body);
@@ -163,7 +210,13 @@ export default function AttendancePage() {
       void qc.invalidateQueries({ queryKey: ["attendance-list"] });
     },
     onError: (e) =>
-      toast.error(e instanceof ApiError ? e.messages.join(", ") : "Failed"),
+      toast.error(
+        e instanceof ApiError
+          ? e.messages.join(", ")
+          : e instanceof Error
+            ? e.message
+            : "Failed",
+      ),
   });
 
   const remove = useMutation({
@@ -182,6 +235,27 @@ export default function AttendancePage() {
 
   const open = openQ.data;
   const hoursPreview = useMemo(() => calcPreviewHours(form), [form]);
+  const isClockedIn = Boolean(open?.clockInAt && !open?.clockOutAt);
+  const filteredRows = useMemo(() => {
+    const rows = listQ.data ?? [];
+    return rows.filter((r) => matchesAttendanceStatusFilter(r, filters.status));
+  }, [listQ.data, filters.status]);
+
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!isClockedIn) return;
+    const id = window.setInterval(() => setTick((t) => t + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [isClockedIn]);
+
+  const liveElapsed = useMemo(() => {
+    if (!open?.clockInAt || open.clockOutAt) return null;
+    return formatWorkedDuration(
+      open.clockInAt,
+      null,
+      open.breakMinutes ?? 0,
+    );
+  }, [open, tick]);
 
   useEffect(() => {
     if (NO_TIME.has(form.status)) return;
@@ -200,11 +274,12 @@ export default function AttendancePage() {
       userId: row.userId,
       workDate: row.workDate || todayYmd(),
       shiftId: row.shiftId || "",
-      clockIn: row.clockIn || "",
-      clockOut: row.clockOut || "",
+      clockIn: attendanceClockInputValue(row.clockInAt, shopTz) || row.clockIn || "",
+      clockOut: attendanceClockInputValue(row.clockOutAt, shopTz) || row.clockOut || "",
       breakMinutes: String(row.breakMinutes ?? 0),
       status: row.status || "present",
       notes: row.notes || "",
+      correctionReason: "",
     });
     setPanel("edit");
   }
@@ -215,11 +290,12 @@ export default function AttendancePage() {
       userId: row.userId,
       workDate: row.workDate || todayYmd(),
       shiftId: row.shiftId || "",
-      clockIn: row.clockIn || "",
-      clockOut: row.clockOut || "",
+      clockIn: attendanceClockInputValue(row.clockInAt, shopTz) || row.clockIn || "",
+      clockOut: attendanceClockInputValue(row.clockOutAt, shopTz) || row.clockOut || "",
       breakMinutes: String(row.breakMinutes ?? 0),
       status: row.status || "present",
       notes: row.notes || "",
+      correctionReason: "",
     });
     setPanel("view");
   }
@@ -233,29 +309,51 @@ export default function AttendancePage() {
         subtitle="Clock in for your shift, or add manual day entries for the team."
         action={
           canManage ? (
-            <Button type="button" onClick={openAdd}>
-              + Add Attendance
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => exportAttendanceCsv(filteredRows, shopTz)}
+                disabled={!filteredRows.length}
+              >
+                Export CSV
+              </Button>
+              <Button type="button" onClick={openAdd}>
+                + Add Attendance
+              </Button>
+            </div>
           ) : null
         }
       />
 
-      <section className="flex flex-wrap items-center gap-3 rounded-xl border border-[#e5e7eb] bg-white p-5">
+      <section className="flex flex-wrap items-center gap-4 rounded-xl border border-[#e4e9f0] bg-white p-5">
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-[#111827]">Your status</p>
-          <p className="text-sm text-[#6b7280]">
-            {open?.clockInAt
-              ? `Clocked in since ${new Date(open.clockInAt).toLocaleString()}`
-              : "Not clocked in"}
-          </p>
+          <p className="text-sm font-semibold text-[#0b1f33]">Your shift</p>
+          {isClockedIn && liveElapsed ? (
+            <>
+              <p className="mt-1 text-2xl font-bold tabular-nums tracking-tight text-[#1a56db]">
+                {liveElapsed}
+              </p>
+              <p className="mt-1 text-sm text-[#5a6b7d]">
+                Clocked in at{" "}
+                {formatAttendanceClockTime(open!.clockInAt, shopTz)}
+                {" · "}Timer runs until you clock out
+              </p>
+            </>
+          ) : (
+            <p className="mt-1 text-sm text-[#5a6b7d]">
+              Not clocked in — tap Clock in when your shift starts
+            </p>
+          )}
         </div>
-        {open?.clockInAt && !open.clockOutAt ? (
+        {isClockedIn ? (
           <Button
             type="button"
+            variant="secondary"
             disabled={clockOut.isPending}
             onClick={() => clockOut.mutate()}
           >
-            Clock out
+            Check out
           </Button>
         ) : (
           <Button
@@ -263,12 +361,41 @@ export default function AttendancePage() {
             disabled={clockIn.isPending}
             onClick={() => clockIn.mutate()}
           >
-            Clock in
+            Check in
           </Button>
         )}
       </section>
 
       <section className="rounded-xl border border-[#e5e7eb] bg-white p-4">
+        <div className="mb-3 flex flex-wrap gap-2">
+          {(
+            [
+              ["today", "Today"],
+              ["week", "This week"],
+              ["month", "This month"],
+              ["all", "All"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() =>
+                setFilters((f) => ({
+                  ...f,
+                  range: id,
+                  workDate: id === "today" ? todayYmd() : "",
+                }))
+              }
+              className={
+                filters.range === id
+                  ? "rounded-md bg-[#1a56db] px-3 py-1.5 text-xs font-semibold text-white"
+                  : "rounded-md border border-[#e5e7eb] px-3 py-1.5 text-xs font-medium text-[#374151] hover:bg-[#f9fafb]"
+              }
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <div>
             <Label>Date</Label>
@@ -327,7 +454,17 @@ export default function AttendancePage() {
               }
             >
               <option value="">All statuses</option>
-              {STATUSES.map((s) => (
+              {attendanceStatusFilterOptions()
+                .filter((s) => s.value)
+                .map((s) => (
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
+                ))}
+              {STATUSES.filter(
+                (s) =>
+                  !["present", "absent", "late", "half_day"].includes(s.value),
+              ).map((s) => (
                 <option key={s.value} value={s.value}>
                   {s.label}
                 </option>
@@ -345,6 +482,7 @@ export default function AttendancePage() {
                   userId: "",
                   shiftId: "",
                   status: "",
+                  range: "week",
                 })
               }
             >
@@ -501,12 +639,77 @@ export default function AttendancePage() {
                 placeholder="Optional"
               />
             </div>
+            {panel === "edit" ? (
+              <div className="sm:col-span-2 lg:col-span-3">
+                <Label>Correction reason</Label>
+                <Input
+                  className="mt-1"
+                  value={form.correctionReason}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      correctionReason: e.target.value,
+                    }))
+                  }
+                  placeholder="Why is this attendance being corrected?"
+                />
+                <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+                  Required — saved to activity history with old and new values.
+                </p>
+              </div>
+            ) : null}
           </div>
+          {panel === "view" && editingId ? (
+            <div className="mt-4 rounded-lg border border-[#eef1f4] bg-[#f8fafc] p-4">
+              <p className="text-sm font-semibold text-[#0b1f33]">
+                Activity history
+              </p>
+              {historyQ.isLoading ? (
+                <p className="mt-2 text-sm text-[#6b7280]">Loading history…</p>
+              ) : !(historyQ.data ?? []).length ? (
+                <p className="mt-2 text-sm text-[#6b7280]">No history yet.</p>
+              ) : (
+                <ul className="mt-3 space-y-2">
+                  {(historyQ.data ?? []).map((h) => (
+                    <li
+                      key={h.id}
+                      className="rounded-md border border-[#e5e7eb] bg-white px-3 py-2 text-sm"
+                    >
+                      <p className="font-medium text-[#111827]">
+                        {h.action.replace(/\./g, " · ")}
+                      </p>
+                      <p className="text-xs text-[#6b7280]">
+                        {h.actor?.fullName ?? "System"} ·{" "}
+                        {new Date(h.createdAt).toLocaleString()}
+                      </p>
+                      {h.beforeAfter &&
+                      typeof h.beforeAfter === "object" &&
+                      h.beforeAfter !== null &&
+                      "reason" in h.beforeAfter ? (
+                        <p className="mt-1 text-xs text-[#374151]">
+                          Reason:{" "}
+                          {String(
+                            (h.beforeAfter as { reason?: string }).reason ??
+                              "",
+                          )}
+                        </p>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ) : null}
           {!readOnly ? (
             <div className="mt-4 flex flex-wrap gap-2">
               <Button
                 type="button"
-                disabled={save.isPending || !form.userId || !form.workDate}
+                disabled={
+                  save.isPending ||
+                  !form.userId ||
+                  !form.workDate ||
+                  (panel === "edit" && !form.correctionReason.trim())
+                }
                 onClick={() => save.mutate()}
               >
                 {save.isPending ? "Saving…" : "Save"}
@@ -550,7 +753,7 @@ export default function AttendancePage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#f3f4f6]">
-              {(listQ.data ?? []).map((r) => (
+              {(filteredRows).map((r) => (
                 <tr key={r.id}>
                   <td className="px-4 py-2.5">
                     <p className="font-medium text-[#111827]">{r.fullName}</p>
@@ -563,31 +766,34 @@ export default function AttendancePage() {
                     {r.shift?.name ?? "—"}
                   </td>
                   <td className="px-4 py-2.5 tabular-nums text-[#374151]">
-                    {r.clockIn ??
-                      (r.clockInAt
-                        ? new Date(r.clockInAt).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })
-                        : "—")}
+                    {formatAttendanceClockTime(r.clockInAt, shopTz)}
                   </td>
                   <td className="px-4 py-2.5 tabular-nums text-[#374151]">
-                    {r.clockOut ??
-                      (r.clockOutAt
-                        ? new Date(r.clockOutAt).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })
-                        : "—")}
+                    {formatAttendanceClockTime(r.clockOutAt, shopTz)}
                   </td>
                   <td className="px-4 py-2.5 tabular-nums">
                     {r.breakMinutes ?? 0}m
                   </td>
                   <td className="px-4 py-2.5 tabular-nums">
-                    {r.workingHours ??
-                      (r.minutes != null ? `${r.minutes}m` : "—")}
+                    {r.isOpenSession && r.clockInAt ? (
+                      <span className="font-semibold text-[#1a56db]">
+                        {formatWorkedDuration(
+                          r.clockInAt,
+                          null,
+                          r.breakMinutes ?? 0,
+                        )}{" "}
+                        <span className="text-[0.65rem] font-medium text-[#5a6b7d]">
+                          (running)
+                        </span>
+                      </span>
+                    ) : (
+                      r.workingHours ??
+                      (r.minutes != null ? `${r.minutes}m` : "—")
+                    )}
                   </td>
-                  <td className="px-4 py-2.5">{statusLabel(r.status)}</td>
+                  <td className="px-4 py-2.5">
+                    {attendanceStatusLabel(r.displayStatus ?? r.status)}
+                  </td>
                   <td className="px-4 py-2.5 capitalize">{r.method}</td>
                   <td className="px-4 py-2.5">
                     <div className="flex justify-end gap-0.5">
@@ -642,7 +848,7 @@ export default function AttendancePage() {
           </table>
           {listQ.isLoading ? (
             <p className="px-4 py-8 text-sm text-[#6b7280]">Loading…</p>
-          ) : !(listQ.data ?? []).length ? (
+          ) : !filteredRows.length ? (
             <p className="px-4 py-8 text-sm text-[#6b7280]">No entries yet</p>
           ) : null}
         </div>

@@ -29,6 +29,7 @@ import {
   Settings,
   Package,
   ArrowRightLeft,
+  ArrowLeftRight,
   Wallet,
   TicketPercent,
   ChevronDown,
@@ -67,6 +68,7 @@ import { Button } from "@/components/ui/button";
 import { StationPinLock } from "@/components/station-pin-lock";
 import { ShellEntitySearch } from "@/components/shell-entity-search";
 import { BranchSelector } from "@/components/branch-selector";
+import { AttendanceShiftTimer } from "@/components/attendance-shift-timer";
 import { OfflineStatusBanner } from "@/components/offline-status-banner";
 import { SetupReturnBanner } from "@/components/setup-return-banner";
 import { SessionIdleWatcher } from "@/components/session-idle-watcher";
@@ -89,6 +91,7 @@ import {
   hydrateOfflinePendingCount,
 } from "@/lib/offline-queue";
 import { useBranchStore } from "@/lib/branch-store";
+import { clearLoginFormPersistence } from "@/lib/auth-form";
 import {
   canAccessPath,
   defaultHomeForRoles,
@@ -100,11 +103,21 @@ type NavLeaf = {
   icon: LucideIcon;
   module?: string;
   commerce?: string;
+  /** Require at least one of these commerce modes (e.g. unified Counter) */
+  commerceAny?: string[];
   /** Capability code — prefer over businessType gates */
   capability?: string;
   /** Zoho nested folder under secondary panel (e.g. Business → Profile) */
   folder?: string;
 };
+
+/** Commerce modes that share the unified Counter (Sell / Rent / Services / Plans tabs) */
+const COUNTER_COMMERCE_MODES = [
+  "sale",
+  "rental",
+  "service",
+  "subscription",
+] as const;
 
 type NavGroup = {
   id: string;
@@ -189,21 +202,53 @@ const NAV_GROUPS: NavGroup[] = [
     children: [
       {
         href: "/counter",
-        label: "Counter (POS)",
+        label: "Counter",
         icon: CreditCard,
         module: "pos",
+        commerceAny: [...COUNTER_COMMERCE_MODES],
       },
       {
         href: "/orders",
-        label: "All orders",
+        label: "Orders",
         icon: ClipboardList,
         module: "orders",
       },
       {
         href: "/returns",
-        label: "Returns desk",
+        label: "Returns",
         icon: PackageCheck,
         module: "orders",
+        commerceAny: ["sale"],
+      },
+    ],
+  },
+  {
+    id: "rental",
+    label: "Rental",
+    railLabel: "Rent",
+    icon: Repeat,
+    section: "Commerce",
+    commerce: "rental",
+    children: [
+      {
+        href: "/rental",
+        label: "Rental Desk",
+        icon: LayoutGrid,
+        commerce: "rental",
+      },
+      {
+        href: "/returns?tab=rental",
+        label: "Returns & Exchange",
+        icon: PackageCheck,
+        commerce: "rental",
+        module: "orders",
+      },
+      {
+        href: "/reports/rental",
+        label: "Rental Reports",
+        icon: FileLineChart,
+        commerce: "rental",
+        module: "reports",
       },
     ],
   },
@@ -281,35 +326,26 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Purchases",
     icon: Truck,
     section: "Commerce",
-    commerce: "sale",
     children: [
       {
         href: "/suppliers",
         label: "Supplier directory",
         icon: Building2,
-        commerce: "sale",
-        module: "inventory",
       },
       {
         href: "/suppliers/new",
         label: "New supplier",
         icon: Building2,
-        commerce: "sale",
-        module: "inventory",
       },
       {
         href: "/suppliers/orders",
         label: "Purchase orders",
         icon: ClipboardList,
-        commerce: "sale",
-        module: "inventory",
       },
       {
         href: "/purchases",
         label: "GRN & payables",
         icon: Truck,
-        commerce: "sale",
-        module: "inventory",
       },
     ],
   },
@@ -391,12 +427,6 @@ const NAV_GROUPS: NavGroup[] = [
         label: "Resources",
         icon: LayoutGrid,
         capability: "RESOURCE",
-      },
-      {
-        href: "/kitchen",
-        label: "Kitchen / KOT",
-        icon: ClipboardList,
-        capability: "KOT",
       },
       {
         href: "/jobs",
@@ -509,7 +539,7 @@ const NAV_GROUPS: NavGroup[] = [
       },
       {
         href: "/reports/rental",
-        label: "Rental / assets",
+        label: "Rental activity",
         icon: Repeat,
         module: "reports",
         commerce: "rental" as const,
@@ -713,7 +743,20 @@ function leafAllowed(
 ) {
   if (item.module && !hasModule(item.module)) return false;
   if (item.commerce && !hasMode(item.commerce)) return false;
+  if (
+    item.commerceAny &&
+    !item.commerceAny.some((mode) => hasMode(mode))
+  ) {
+    return false;
+  }
   if (item.capability && !hasCapability(item.capability)) return false;
+  if (
+    hrefPath(item.href) === "/resources" &&
+    hasMode("rental") &&
+    hasMode("sale")
+  ) {
+    return false;
+  }
   return canAccessPath(hrefPath(item.href), roles, permissions);
 }
 
@@ -758,6 +801,15 @@ function isLeafActive(pathname: string, search: string, href: string) {
   // Floor dashboard is `/restaurant` only — not Tables, Menus, Reservations.
   if (base === "/restaurant") {
     return pathname === "/restaurant";
+  }
+
+  if (base === "/rental") {
+    return pathname === "/rental";
+  }
+
+  // Unified Counter — any ?view= tab highlights the single Counter nav item
+  if (base === "/counter") {
+    return pathname === "/counter" || pathname.startsWith("/counter/");
   }
 
   // `/suppliers` directory only — not /suppliers/orders or /suppliers/new
@@ -940,7 +992,7 @@ function SidebarBody({
     );
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col bg-[#fafbfc] text-[#0b1f33] print:bg-white">
+    <div className="flex h-full min-h-0 w-full flex-col bg-white text-[#0b1f33] print:bg-white">
       <div className="shrink-0 border-b border-[#e8ecf1] px-4 pt-4 pb-3">
         <div className="flex items-center gap-2.5">
           {logoSrc ? (
@@ -1256,16 +1308,24 @@ function HeaderClock({
 
   return (
     <div
-      className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-[#d9e0ea] bg-white px-2 py-1 tabular-nums text-[#0b1f33]"
-      title={date ? (timeZone ? `${date} · ${time} · ${timeZone}` : `${date} · ${time}`) : time}
+      className="inline-flex shrink-0 items-center gap-2 tabular-nums"
+      title={
+        date
+          ? timeZone
+            ? `${date} · ${time} · ${timeZone}`
+            : `${date} · ${time}`
+          : time
+      }
     >
-      <Clock className="size-3.5 shrink-0 text-[#1a56db]" aria-hidden />
-      <div className="leading-tight">
-        <p className="text-[0.75rem] font-semibold">{time}</p>
-        {!compact && date ? (
-          <p className="text-[0.6rem] text-[#5a6b7d]">{date}</p>
-        ) : null}
-      </div>
+      <Clock className="size-3.5 shrink-0 text-[#94a3b8]" aria-hidden />
+      <p className="text-[0.8125rem] font-medium leading-none text-[#0b1f33]">
+        {time}
+      </p>
+      {!compact && date ? (
+        <p className="hidden text-[0.75rem] leading-none text-[#8b9bb0] sm:block">
+          {date}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -1298,6 +1358,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     pathname.startsWith("/counter/") ||
     pathname === "/pos" ||
     pathname.startsWith("/pos/");
+  const isCounter =
+    pathname === "/counter" || pathname.startsWith("/counter/");
   const roles = useMemo(
     () => user?.roles ?? stationUser?.roles ?? [],
     [user?.roles, stationUser?.roles],
@@ -1411,9 +1473,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       router.replace(home);
       return;
     }
-    const item = NAV_CATALOG.find(
-      (n) => pathname === n.href || pathname.startsWith(`${n.href}/`),
-    );
+    const item = NAV_CATALOG.find((n) => {
+      const base = hrefPath(n.href);
+      return pathname === base || pathname.startsWith(`${base}/`);
+    });
     if (item?.module && !hasModule(item.module)) {
       toast.message("Module not enabled for this shop");
       router.replace("/dashboard");
@@ -1425,6 +1488,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       return;
     }
     if (item?.commerce && !hasMode(item.commerce)) {
+      toast.message("Not enabled for this shop’s commerce modes");
+      router.replace("/dashboard");
+      return;
+    }
+    if (
+      item?.commerceAny &&
+      !item.commerceAny.some((mode) => hasMode(mode))
+    ) {
       toast.message("Not enabled for this shop’s commerce modes");
       router.replace("/dashboard");
     }
@@ -1467,10 +1538,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     } catch {
       /* still clear local session */
     } finally {
+      clearLoginFormPersistence();
       clear();
       qc.removeQueries({ queryKey: ["tenant-bootstrap"] });
       toast.success("Signed out");
-      router.replace("/login");
+      router.replace("/login?signedOut=1");
     }
   }
 
@@ -1532,7 +1604,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <div className="flex h-dvh overflow-hidden bg-[#eef1f5] text-[#0b1f33]">
+    <div
+      className={cn(
+        "flex h-dvh overflow-hidden text-[#0b1f33]",
+        wide ? "bg-white" : "bg-[#eef1f5]",
+      )}
+      {...(isCounter ? { "data-pos-counter": "" } : {})}
+    >
       {pinLocked && stationToken ? (
         <StationPinLock open locationId={acting?.storeId} />
       ) : null}
@@ -1540,21 +1618,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <InboxPopupListener />
       <UnsavedWorkGuard />
       {/* Light expandable sidebar */}
-      <aside className="app-shell-aside hidden h-dvh w-[17.5rem] shrink-0 flex-col border-r border-[#e2e8f0] md:flex print:hidden">
-        <Suspense fallback={<div className="h-full bg-[#fafbfc]" />}>
+      <aside
+        className={cn(
+          "app-shell-aside hidden h-dvh shrink-0 flex-col border-r border-[#e2e8f0] md:flex print:hidden",
+          "w-[17.5rem]",
+        )}
+      >
+        <Suspense fallback={<div className="h-full bg-white" />}>
           <SidebarBody {...sidebarProps} />
         </Suspense>
       </aside>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden print:overflow-visible">
-        <header className="app-shell-mobile-header flex shrink-0 items-center justify-between border-b border-[#d9e0ea] bg-white px-4 py-3 md:hidden print:hidden">
-          <div className="flex min-w-0 items-center gap-2.5">
+        <header className="app-shell-mobile-header flex h-12 shrink-0 items-center justify-between gap-2 border-b border-[#e8edf3] bg-white px-3 md:hidden print:hidden">
+          <div className="flex min-w-0 items-center gap-2">
             {logoSrc ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={logoSrc}
                 alt=""
-                className="h-8 w-8 shrink-0 rounded-md border border-[#e2e8f0] bg-white object-contain p-0.5"
+                className="h-8 w-8 shrink-0 rounded-md border border-[#e8edf3] bg-white object-contain p-0.5"
               />
             ) : (
               <div className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-[#1a56db] text-xs font-semibold text-white">
@@ -1565,28 +1648,31 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <p className="truncate text-sm font-semibold tracking-tight text-[#0b1f33]">
                 {productName}
               </p>
-              <p className="mt-0.5 truncate text-[0.6rem] font-medium tracking-wide text-[#5a6b7d] uppercase">
+              <p className="truncate text-[0.65rem] text-[#8b9bb0]">
                 {modeLabel}
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-0.5">
+            <AttendanceShiftTimer />
             <HeaderClock
               compact
               locale={locale}
               timeZone={boot?.tenant?.timezone}
             />
-            <BranchSelector className="hidden xs:inline-flex sm:inline-flex" />
+            <BranchSelector className="hidden sm:inline-flex" />
             <button
               type="button"
-              className="rounded-md border border-[#d9e0ea] bg-white px-2 py-1 text-[0.7rem] font-semibold text-[#334155] hover:bg-[#f8fafc]"
+              className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-[0.7rem] font-medium text-[#5a6b7d] hover:bg-[#f1f5f9] hover:text-[#0b1f33]"
               onClick={switchOrganization}
+              title="Switch shop"
             >
-              Switch organization
+              <ArrowLeftRight className="size-3.5" />
+              <span className="sr-only">Switch shop</span>
             </button>
             <button
               type="button"
-              className="rounded-lg border border-[#d9e0ea] p-2 text-[#2c3e50]"
+              className="rounded-md p-2 text-[#334155] hover:bg-[#f1f5f9]"
               onClick={() => setOpen(true)}
               aria-label="Open menu"
             >
@@ -1595,22 +1681,29 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <div className="hidden shrink-0 items-center justify-between gap-3 border-b border-[#d9e0ea] bg-white px-4 py-2 sm:px-6 md:flex lg:px-8 print:hidden">
-          <p className="text-[0.75rem] text-[#5a6b7d]">
-            Operating branch — sales, stock, and expenses use this location
-          </p>
-          <div className="flex items-center gap-2">
+        <div className="hidden h-11 shrink-0 items-center gap-3 border-b border-[#e8edf3] bg-white px-4 md:flex lg:px-6 print:hidden">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="hidden text-[0.6875rem] font-medium tracking-wide text-[#94a3b8] uppercase lg:inline">
+              Location
+            </span>
+            <BranchSelector />
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            <AttendanceShiftTimer />
+            <span className="hidden h-4 w-px bg-[#e8edf3] sm:block" aria-hidden />
             <HeaderClock
               locale={locale}
               timeZone={boot?.tenant?.timezone}
             />
-            <BranchSelector />
+            <span className="hidden h-4 w-px bg-[#e8edf3] sm:block" aria-hidden />
             <button
               type="button"
-              className="rounded-md border border-[#d9e0ea] bg-white px-2.5 py-1 text-[0.75rem] font-semibold text-[#334155] hover:bg-[#f8fafc]"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[0.75rem] font-medium text-[#5a6b7d] hover:bg-[#f1f5f9] hover:text-[#0b1f33]"
               onClick={switchOrganization}
+              title="Open another shop"
             >
-              Switch organization
+              <ArrowLeftRight className="size-3.5" />
+              Switch shop
             </button>
           </div>
         </div>
@@ -1646,7 +1739,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   </button>
                 </div>
                 <div className="min-h-0 flex-1">
-                  <Suspense fallback={<div className="h-full bg-[#fafbfc]" />}>
+                  <Suspense fallback={<div className="h-full bg-white" />}>
                     <SidebarBody
                       {...sidebarProps}
                       onNavigate={() => setOpen(false)}
@@ -1660,22 +1753,27 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <main
           className={cn(
-            "min-h-0 flex-1 overflow-y-auto overscroll-contain bg-[#eef1f5]",
+            "flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain",
+            wide ? "bg-white" : "bg-[#eef1f5]",
             "[scrollbar-gutter:stable]",
             "print:overflow-visible print:bg-white print:h-auto print:max-h-none",
           )}
         >
-          <div className="print:hidden">
+          <div className="print:hidden shrink-0">
             <OfflineStatusBanner />
           </div>
           <div
             className={cn(
-              "document-print-root px-4 py-5 sm:px-6 sm:py-6 lg:px-8",
+              "document-print-root",
+              isCounter
+                ? "px-2 py-1 sm:px-3 lg:px-4"
+                : "px-4 py-5 sm:px-6 sm:py-6 lg:px-8",
               "print:max-w-none print:px-0 print:py-0",
-              wide ? "max-w-none" : "mx-auto w-full max-w-[72rem]",
+              wide && !isCounter ? "max-w-none" : "",
+              !wide ? "mx-auto w-full max-w-[72rem]" : "",
             )}
           >
-            <div className="print:hidden">
+            <div className={cn("print:hidden", isCounter && "shrink-0")}>
               <Suspense fallback={null}>
                 <SetupReturnBanner />
               </Suspense>

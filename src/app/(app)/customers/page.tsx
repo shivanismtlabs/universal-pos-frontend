@@ -1,13 +1,14 @@
-"use client";
+﻿"use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { Search } from "lucide-react";
-import { customersApi, customFieldsApi } from "@/lib/api";
+import { Plus, Search } from "lucide-react";
+import { customersApi, customFieldsApi, subscriptionsApi } from "@/lib/api";
 import {
   CUSTOM_FIELD_QUERY,
   customFieldDefsToMeta,
@@ -31,16 +32,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FieldError } from "@/components/ui/form";
-import { formatDate } from "@/lib/utils";
-import { FadeIn } from "@/components/motion";
-import { cn } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 import { useBootstrap } from "@/lib/bootstrap";
 import { useAuthStore } from "@/lib/auth-store";
-import { PageHeader } from "@/components/page-header";
 import { EntityRowActions } from "@/components/entity-row-actions";
 import { TablePager } from "@/components/table-pager";
+import { pagerFromMeta } from "@/lib/use-paged-list";
 import { CustomerCrmPanel } from "@/components/customer-crm-panel";
 import { PhoneCountryInput } from "@/components/phone-country-input";
+import { ModalFrame } from "@/components/modal-frame";
 
 function numOrUndef(v: unknown) {
   if (v === "" || v === undefined || v === null) return undefined;
@@ -55,17 +55,125 @@ function MeasureValue({ label, value }: { label: string; value: unknown }) {
       : String(value);
   return (
     <div className="min-w-0">
-      <p className="text-[0.65rem] font-semibold tracking-wide text-[#9ca3af] uppercase">
+      <p className="text-[0.65rem] font-semibold tracking-wide text-[#8b9bb0] uppercase">
         {label}
       </p>
-      <p className="mt-0.5 truncate text-sm font-medium text-[#111827] tabular-nums">
+      <p className="mt-0.5 truncate text-sm font-medium tabular-nums text-[#0b1f33]">
         {text}
       </p>
     </div>
   );
 }
 
+type CustomerListItem = {
+  id: string;
+  fullName: string;
+  phone: string;
+  email?: string | null;
+  eventDate?: string | null;
+  marketingOptIn?: boolean;
+  loyaltyPoints?: number;
+  storeCreditBalance?: string | number;
+};
+
+function CustomerMobileCard({
+  customer: c,
+  active,
+  money,
+  canLead,
+  onSelect,
+  onEdit,
+  onSoftDelete,
+}: {
+  customer: CustomerListItem;
+  active: boolean;
+  money: (n: number) => string;
+  canLead: boolean;
+  onSelect: () => void;
+  onEdit: () => void;
+  onSoftDelete: () => void;
+}) {
+  return (
+    <article
+      role="button"
+      tabIndex={0}
+      onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
+      className={cn(
+        "rounded-lg border p-3 text-left transition-colors",
+        active
+          ? "border-[#1a56db] bg-[#eef4ff]"
+          : "border-[#e4e9f0] bg-white active:bg-[#fafcfe]",
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold text-[#0b1f33]">{c.fullName}</p>
+          {c.marketingOptIn ? (
+            <p className="mt-0.5 text-[0.65rem] font-medium text-[#1a56db]">
+              Marketing opt-in
+            </p>
+          ) : null}
+          <p className="mt-1 text-sm tabular-nums text-[#475569]">{c.phone}</p>
+          {c.email ? (
+            <p className="truncate text-sm text-[#5a6b7d]">{c.email}</p>
+          ) : null}
+        </div>
+        <div onClick={(e) => e.stopPropagation()}>
+          <EntityRowActions
+            onEdit={onEdit}
+            onSoftDelete={canLead ? onSoftDelete : undefined}
+            softDeleteTitle="Remove"
+            deleteHidden
+          />
+        </div>
+      </div>
+      <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+        <div>
+          <dt className="text-[#8b9bb0]">Loyalty</dt>
+          <dd className="mt-0.5 font-medium tabular-nums text-[#475569]">
+            {typeof c.loyaltyPoints === "number"
+              ? `${c.loyaltyPoints} pts`
+              : "—"}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-[#8b9bb0]">Wallet</dt>
+          <dd className="mt-0.5 font-medium tabular-nums text-[#475569]">
+            {c.storeCreditBalance != null
+              ? money(Number(c.storeCreditBalance))
+              : "—"}
+          </dd>
+        </div>
+        <div className="col-span-2">
+          <dt className="text-[#8b9bb0]">Anniversary</dt>
+          <dd className="mt-0.5 font-medium text-[#5a6b7d]">
+            {c.eventDate ? formatDate(c.eventDate) : "—"}
+          </dd>
+        </div>
+      </dl>
+    </article>
+  );
+}
+
 export default function CustomersPage() {
+  return (
+    <Suspense
+      fallback={
+        <p className="px-4 py-8 text-sm text-[#5a6b7d]">Loading customers…</p>
+      }
+    >
+      <CustomersPageInner />
+    </Suspense>
+  );
+}
+
+function CustomersPageInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const returnTo = readReturnToParam(searchParams);
@@ -74,10 +182,16 @@ export default function CustomersPage() {
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
   const [extraFields, setExtraFields] = useState<Record<string, string>>({});
   const qc = useQueryClient();
-  const { hasModule } = useBootstrap();
+  const { hasModule, hasMode, money } = useBootstrap();
   const rental = hasModule("rental");
+  const hasSub = hasMode("subscription");
+  const pageTab =
+    searchParams.get("tab") === "memberships" && hasSub
+      ? "memberships"
+      : "directory";
   const canLead = useAuthStore((s) =>
     (s.user?.roles ?? []).some((r) => r === "admin" || r === "manager"),
   );
@@ -92,6 +206,14 @@ export default function CustomersPage() {
       setDebouncedQ(qq.trim());
     }
   }, [searchParams]);
+
+  function selectPageTab(id: "directory" | "memberships") {
+    const params = new URLSearchParams(searchParams.toString());
+    if (id === "memberships") params.set("tab", "memberships");
+    else params.delete("tab");
+    const qs = params.toString();
+    router.replace(qs ? `/customers?${qs}` : "/customers", { scroll: false });
+  }
 
   function selectCustomer(id: string | null) {
     setSelectedId(id);
@@ -124,7 +246,12 @@ export default function CustomersPage() {
   const items = list.data?.items ?? [];
   const meta = list.data?.meta;
   const total = meta?.total ?? items.length;
-  const totalPages = meta?.totalPages ?? 1;
+
+  const members = useQuery({
+    queryKey: ["subscriptions-members-customers"],
+    queryFn: () => subscriptionsApi.list({ limit: 80 }),
+    enabled: hasSub && pageTab === "memberships",
+  });
 
   const selectedDetail = useQuery({
     queryKey: ["customer", selectedId],
@@ -211,6 +338,8 @@ export default function CustomersPage() {
       );
       form.reset();
       setExtraFields({});
+      setFormOpen(false);
+      setEditingId(null);
       if (returnTo) {
         router.push(resolveSetupReturnTo(returnTo, GETTING_STARTED_PATH));
         return;
@@ -244,6 +373,7 @@ export default function CustomersPage() {
     onSuccess: () => {
       toast.success("Customer updated");
       setEditingId(null);
+      setFormOpen(false);
       setExtraFields({});
       form.reset({
         fullName: "",
@@ -278,6 +408,38 @@ export default function CustomersPage() {
         e instanceof ApiError ? e.messages.join(", ") : "Remove failed",
       ),
   });
+
+  function closeForm() {
+    setFormOpen(false);
+    setEditingId(null);
+    form.reset({
+      fullName: "",
+      phone: "",
+      email: "",
+      eventDate: "",
+      dateOfBirth: "",
+      notes: "",
+      marketingOptIn: false,
+      creditLimit: "",
+    });
+    setExtraFields({});
+  }
+
+  function openNewCustomer() {
+    setEditingId(null);
+    form.reset({
+      fullName: "",
+      phone: "",
+      email: "",
+      eventDate: "",
+      dateOfBirth: "",
+      notes: "",
+      marketingOptIn: false,
+      creditLimit: "",
+    });
+    setExtraFields({});
+    setFormOpen(true);
+  }
 
   function startEdit(c: {
     id: string;
@@ -320,6 +482,7 @@ export default function CustomersPage() {
       }
     }
     setExtraFields(extras);
+    setFormOpen(true);
   }
 
   const addMeasurement = useMutation({
@@ -347,340 +510,400 @@ export default function CustomersPage() {
   });
 
   return (
-    <div className="mx-auto max-w-6xl space-y-8">
-      <FadeIn>
-        <PageHeader
-          eyebrow="People"
-          title="Customers"
-          subtitle="Customer directory for your shop. Search, add contacts, and review history."
-          action={
-            <p className="text-caption text-[var(--muted)]">
-              {list.isLoading
-                ? "Loading…"
-                : `${total.toLocaleString()} customer${total === 1 ? "" : "s"}`}
-            </p>
-          }
-        />
-      </FadeIn>
+    <div className="space-y-4 px-3 pb-4 sm:px-4">
+      <header className="flex flex-col gap-2 border-b border-[#eef1f4] pb-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between sm:gap-3">
+        <div className="min-w-0">
+          <p className="eyebrow">Customers &amp; Perks</p>
+          <h1 className="page-title mt-1">Customers</h1>
+          <p className="page-subtitle mt-1.5">
+            Directory for any shop — contacts, loyalty, wallet, and purchase
+            history.
+          </p>
+        </div>
+        <p className="text-caption shrink-0 text-[#5a6b7d]">
+          {list.isLoading
+            ? "Loading…"
+            : `${total.toLocaleString()} customer${total === 1 ? "" : "s"}`}
+        </p>
+      </header>
 
-      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)]">
-        {/* Client list — search + pages (never render the whole book) */}
-        <FadeIn delay={0.04}>
-          <section className="overflow-hidden rounded-2xl border border-[#e5e7eb] bg-white">
-            <div className="border-b border-[#e5e7eb] p-4 sm:p-5">
-              <label className="relative block">
-                <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-[#9ca3af]" />
-                <Input
-                  className="pl-10"
-                  placeholder="Search name, phone, or email"
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                />
-              </label>
-              <p className="mt-2 text-[0.7rem] text-[#8b9bb0]">
-                Showing {items.length} of {total.toLocaleString()}
-                {debouncedQ ? ` for “${debouncedQ}”` : ""} · page {page} /{" "}
-                {totalPages}
+      {hasSub ? (
+        <div
+          role="tablist"
+          aria-label="Customers"
+          className="flex flex-wrap gap-1 border-b border-[#eef1f4]"
+        >
+          {(
+            [
+              ["directory", "Directory"],
+              ["memberships", "Memberships"],
+            ] as const
+          ).map(([id, label]) => {
+            const active = pageTab === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => selectPageTab(id)}
+                className={cn(
+                  "-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors",
+                  active
+                    ? "border-[#1a56db] text-[#1a56db]"
+                    : "border-transparent text-[#5a6b7d] hover:text-[#0b1f33]",
+                )}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+
+      {pageTab === "memberships" ? (
+        <section className="overflow-hidden rounded-lg border border-[#e4e9f0] bg-white">
+          <div className="flex flex-col gap-2 border-b border-[#eef1f4] px-3 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:px-4">
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold text-[#0b1f33]">
+                Memberships
+              </h2>
+              <p className="text-xs text-[#5a6b7d]">
+                Active and past subscription plans
               </p>
             </div>
-
-            <ul className="max-h-[28rem] divide-y divide-[#f3f4f6] overflow-y-auto">
-              {items.map((c) => {
-                const active = selectedId === c.id;
-                return (
-                  <li key={c.id}>
-                    <div
-                      className={cn(
-                        "flex w-full items-stretch gap-1 px-2 py-1 sm:px-3",
-                        active ? "bg-[#e8eefb]" : "bg-white hover:bg-[#f9fafb]",
-                      )}
+            <Button asChild size="sm" className="w-full sm:w-auto">
+              <Link href="/counter?view=subscription">Enroll at counter</Link>
+            </Button>
+          </div>
+          <div className="hidden overflow-x-auto md:block">
+            <table className="w-full min-w-[640px] text-left text-sm">
+              <thead className="border-b border-[#eef1f4] bg-[#f7f9fb] text-[0.7rem] font-semibold tracking-wide text-[#5a6b7d] uppercase">
+                <tr>
+                  <th className="px-3 py-2.5">Customer</th>
+                  <th className="px-3 py-2.5">Plan</th>
+                  <th className="px-3 py-2.5">Status</th>
+                  <th className="px-3 py-2.5 text-right">Valid through</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(members.data?.items ?? []).map((m) => (
+                  <tr
+                    key={m.id}
+                    className="border-b border-[#f0f3f7] hover:bg-[#fafcfe]"
+                  >
+                    <td className="px-3 py-2.5 font-medium text-[#0b1f33]">
+                      {m.customer?.fullName ?? "Customer"}
+                    </td>
+                    <td className="px-3 py-2.5 text-[#5a6b7d]">
+                      {m.plan?.title ?? "Plan"}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <span className="rounded bg-[#f1f5f9] px-1.5 py-0.5 text-[0.7rem] font-medium capitalize text-[#475569]">
+                        {m.status}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-[#5a6b7d]">
+                      {formatDate(m.currentPeriodEnd)}
+                    </td>
+                  </tr>
+                ))}
+                {members.isLoading ? (
+                  <tr>
+                    <td
+                      colSpan={4}
+                      className="px-3 py-8 text-center text-[#5a6b7d]"
                     >
+                      Loading memberships…
+                    </td>
+                  </tr>
+                ) : null}
+                {!members.isLoading && !(members.data?.items ?? []).length ? (
+                  <tr>
+                    <td
+                      colSpan={4}
+                      className="px-3 py-10 text-center text-[#5a6b7d]"
+                    >
+                      No memberships yet. Enroll from the counter Plans tab.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+          <ul className="space-y-2 p-3 md:hidden">
+            {(members.data?.items ?? []).map((m) => (
+              <li
+                key={m.id}
+                className="rounded-lg border border-[#eef1f4] bg-[#f8fafc] p-3"
+              >
+                <p className="font-semibold text-[#0b1f33]">
+                  {m.customer?.fullName ?? "Customer"}
+                </p>
+                <p className="mt-0.5 text-sm text-[#5a6b7d]">
+                  {m.plan?.title ?? "Plan"}
+                </p>
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <span className="rounded bg-[#f1f5f9] px-1.5 py-0.5 font-medium capitalize text-[#475569]">
+                    {m.status}
+                  </span>
+                  <span className="tabular-nums text-[#5a6b7d]">
+                    Valid through {formatDate(m.currentPeriodEnd)}
+                  </span>
+                </div>
+              </li>
+            ))}
+            {members.isLoading ? (
+              <li className="py-8 text-center text-sm text-[#5a6b7d]">
+                Loading memberships…
+              </li>
+            ) : null}
+            {!members.isLoading && !(members.data?.items ?? []).length ? (
+              <li className="rounded-lg border border-dashed border-[#dce3ec] px-4 py-10 text-center text-sm text-[#5a6b7d]">
+                No memberships yet. Enroll from the counter Plans tab.
+              </li>
+            ) : null}
+          </ul>
+        </section>
+      ) : (
+        <div className="space-y-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+            <label className="relative min-w-0 flex-1 sm:min-w-[14rem]">
+              <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-[#8b9bb0]" />
+              <Input
+                className="h-9 pl-9"
+                placeholder="Search name, phone, or email"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+              />
+            </label>
+            <Button
+              type="button"
+              className="h-9 w-full shrink-0 sm:w-auto"
+              onClick={openNewCustomer}
+            >
+              <Plus className="mr-1 size-4" />
+              New Customer
+            </Button>
+          </div>
+
+          <div className="hidden overflow-x-auto rounded-lg border border-[#e4e9f0] bg-white md:block">
+            <table className="w-full min-w-[820px] text-left text-sm">
+              <thead className="border-b border-[#eef1f4] bg-[#f7f9fb] text-[0.7rem] font-semibold tracking-wide text-[#5a6b7d] uppercase">
+                <tr>
+                  <th className="px-3 py-2.5">Customer</th>
+                  <th className="px-3 py-2.5">Phone</th>
+                  <th className="px-3 py-2.5">Email</th>
+                  <th className="px-3 py-2.5 text-right">Loyalty</th>
+                  <th className="px-3 py-2.5 text-right">Wallet</th>
+                  <th className="px-3 py-2.5">Anniversary</th>
+                  <th className="px-3 py-2.5 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {list.isLoading ? (
+                  <tr>
+                    <td
+                      colSpan={7}
+                      className="px-3 py-8 text-center text-[#5a6b7d]"
+                    >
+                      Loading customers…
+                    </td>
+                  </tr>
+                ) : list.isError ? (
+                  <tr>
+                    <td
+                      colSpan={7}
+                      className="px-3 py-8 text-center text-[#c81e1e]"
+                    >
+                      Could not load customers.{" "}
                       <button
                         type="button"
-                        onClick={() => selectCustomer(c.id)}
-                        className="flex min-w-0 flex-1 flex-col gap-1 px-2 py-2.5 text-left transition sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+                        className="font-semibold underline"
+                        onClick={() => void list.refetch()}
                       >
-                        <div className="min-w-0">
-                          <p
-                            className={cn(
-                              "truncate text-[0.95rem] font-semibold",
-                              active ? "text-[#0b1f33]" : "text-[#111827]",
-                            )}
-                          >
+                        Retry
+                      </button>
+                    </td>
+                  </tr>
+                ) : !items.length ? (
+                  <tr>
+                    <td
+                      colSpan={7}
+                      className="px-3 py-10 text-center text-[#5a6b7d]"
+                    >
+                      No customers yet.{" "}
+                      <button
+                        type="button"
+                        className="font-semibold text-[#1a56db] hover:underline"
+                        onClick={openNewCustomer}
+                      >
+                        Add your first customer
+                      </button>
+                    </td>
+                  </tr>
+                ) : (
+                  items.map((c) => {
+                    const active = selectedId === c.id;
+                    return (
+                      <tr
+                        key={c.id}
+                        className={cn(
+                          "cursor-pointer border-b border-[#f0f3f7] transition-colors",
+                          active
+                            ? "bg-[#eef4ff]"
+                            : "hover:bg-[#fafcfe]",
+                        )}
+                        onClick={() => selectCustomer(c.id)}
+                      >
+                        <td className="px-3 py-2.5">
+                          <p className="font-semibold text-[#0b1f33]">
                             {c.fullName}
                           </p>
-                          <p className="mt-0.5 text-sm tabular-nums text-[#4b5563]">
-                            {c.phone}
-                          </p>
-                        </div>
-                        <div className="shrink-0 text-left sm:text-right">
-                          <p className="text-sm text-[#6b7280]">
-                            {c.email ?? "—"}
-                          </p>
-                          {c.eventDate ? (
-                            <p className="text-[0.7rem] text-[#8b9bb0]">
-                              Anniv. {formatDate(c.eventDate)}
+                          {c.marketingOptIn ? (
+                            <p className="mt-0.5 text-[0.65rem] font-medium text-[#1a56db]">
+                              Marketing opt-in
                             </p>
                           ) : null}
-                          <p className="mt-1 text-[0.7rem] tabular-nums text-[#6b7280]">
-                            {typeof c.loyaltyPoints === "number"
-                              ? `${c.loyaltyPoints} pts`
-                              : null}
-                            {typeof c.loyaltyPoints === "number" &&
-                            c.storeCreditBalance != null
-                              ? " · "
-                              : null}
-                            {c.storeCreditBalance != null
-                              ? `Wallet ${Number(c.storeCreditBalance).toFixed(2)}`
-                              : null}
-                          </p>
-                        </div>
-                      </button>
-                      <div className="flex shrink-0 items-center pr-1">
-                        <EntityRowActions
-                          onEdit={() => startEdit(c)}
-                          onSoftDelete={
-                            canLead
-                              ? () => {
-                                  if (
-                                    confirm(
-                                      `Remove customer “${c.fullName}”? This is a soft delete.`,
-                                    )
-                                  ) {
-                                    softDelete.mutate(c.id);
+                        </td>
+                        <td className="px-3 py-2.5 tabular-nums text-[#475569]">
+                          {c.phone}
+                        </td>
+                        <td className="px-3 py-2.5 text-[#475569]">
+                          {c.email ?? "—"}
+                        </td>
+                        <td className="px-3 py-2.5 text-right tabular-nums text-[#475569]">
+                          {typeof c.loyaltyPoints === "number"
+                            ? `${c.loyaltyPoints} pts`
+                            : "—"}
+                        </td>
+                        <td className="px-3 py-2.5 text-right tabular-nums text-[#475569]">
+                          {c.storeCreditBalance != null
+                            ? money(Number(c.storeCreditBalance))
+                            : "—"}
+                        </td>
+                        <td className="px-3 py-2.5 text-[#5a6b7d]">
+                          {c.eventDate ? formatDate(c.eventDate) : "—"}
+                        </td>
+                        <td
+                          className="px-3 py-2.5 text-right"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <EntityRowActions
+                            onEdit={() => startEdit(c)}
+                            onSoftDelete={
+                              canLead
+                                ? () => {
+                                    if (
+                                      confirm(
+                                        `Remove customer "${c.fullName}"? This is a soft delete.`,
+                                      )
+                                    ) {
+                                      softDelete.mutate(c.id);
+                                    }
                                   }
-                                }
-                              : undefined
-                          }
-                          softDeleteTitle="Soft delete"
-                          deleteHidden
-                        />
-                      </div>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
+                                : undefined
+                            }
+                            softDeleteTitle="Remove"
+                            deleteHidden
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
 
+          <div className="space-y-2 md:hidden">
             {list.isLoading ? (
-              <p className="px-5 py-8 text-sm text-[#6b7280]">Loading…</p>
-            ) : null}
-            {!list.isLoading && !items.length ? (
-              <p className="px-5 py-8 text-sm text-[#6b7280]">
-                No customers found
+              <p className="rounded-lg border border-[#e4e9f0] bg-white px-4 py-8 text-center text-sm text-[#5a6b7d]">
+                Loading customers…
               </p>
-            ) : null}
-
-            {total ? (
-              <TablePager
-                page={page}
-                totalPages={totalPages}
-                total={total}
-                pageSize={pageSize}
-                onPage={setPage}
-              />
-            ) : null}
-          </section>
-        </FadeIn>
-
-        {/* Add customer */}
-        <FadeIn delay={0.08}>
-          <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5 sm:p-6">
-            <h2 className="display text-2xl text-[#111827]">
-              {editingId ? "Edit customer" : "Add customer"}
-            </h2>
-            <p className="mt-1 text-sm text-[#6b7280]">
-              Name and phone are required
-            </p>
-            <form
-              className="mt-5 space-y-4"
-              onSubmit={form.handleSubmit((v) =>
-                editingId ? update.mutate(v) : create.mutate(v),
-              )}
-              noValidate
-            >
-              <div>
-                <Label>Full name</Label>
-                <Input
-                  className="mt-1.5"
-                  value={form.watch("fullName")}
-                  onChange={(e) =>
-                    form.setValue("fullName", filterPersonNameInput(e.target.value), {
-                      shouldValidate: true,
-                    })
-                  }
-                />
-                <FieldError message={form.formState.errors.fullName?.message} />
-                <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
-                  Letters only — no numbers or special characters
-                </p>
-              </div>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div>
-                  <PhoneCountryInput
-                    required
-                    value={form.watch("phone")}
-                    onChange={(v) =>
-                      form.setValue("phone", v, { shouldValidate: true })
-                    }
-                  />
-                  <FieldError message={form.formState.errors.phone?.message} />
-                </div>
-                <div>
-                  <Label>Email</Label>
-                  <Input
-                    className="mt-1.5"
-                    type="email"
-                    {...form.register("email")}
-                  />
-                  <FieldError message={form.formState.errors.email?.message} />
-                </div>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <Label>Birthday (optional)</Label>
-                  <Input
-                    className="mt-1.5"
-                    type="date"
-                    {...form.register("dateOfBirth")}
-                  />
-                  <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
-                    Used for birthday reminders when marketing is on
-                  </p>
-                </div>
-                <div>
-                  <Label>Anniversary / event (optional)</Label>
-                  <Input
-                    className="mt-1.5"
-                    type="date"
-                    {...form.register("eventDate")}
-                  />
-                  <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
-                    Wedding anniversary, store event, or rental date
-                  </p>
-                </div>
-              </div>
-              <label className="flex items-center gap-2 text-sm text-[#5a6b7d]">
-                <input type="checkbox" {...form.register("marketingOptIn")} />
-                Marketing / birthday opt-in
-              </label>
-              <div>
-                <Label>Notes</Label>
-                <Input className="mt-1.5" {...form.register("notes")} />
-              </div>
-              <div>
-                <Label>Credit limit (optional)</Label>
-                <Input
-                  className="mt-1.5"
-                  inputMode="decimal"
-                  placeholder="Blank = unlimited"
-                  {...form.register("creditLimit")}
-                />
-                <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
-                  Blocks underpay at POS when open dues would exceed this amount
-                </p>
-              </div>
-              <CustomFieldsSection
-                hint="From Settings → Custom fields (choose Customer)."
-                fields={customerFormFields}
-                loading={customerFieldsQ.isLoading}
-                values={extraFields}
-                onChange={(key, value) =>
-                  setExtraFields((prev) => ({ ...prev, [key]: value }))
-                }
-              />
-              <div className="flex gap-2">
-                {editingId ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="w-full"
-                    onClick={() => {
-                      setEditingId(null);
-                      form.reset({
-                        fullName: "",
-                        phone: "",
-                        email: "",
-                        eventDate: "",
-                        dateOfBirth: "",
-                        notes: "",
-                        marketingOptIn: false,
-                        creditLimit: "",
-                      });
-                      setExtraFields({});
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                ) : null}
-                <Button
-                  type="submit"
-                  disabled={create.isPending || update.isPending}
-                  className="w-full"
+            ) : list.isError ? (
+              <p className="rounded-lg border border-[#e4e9f0] bg-white px-4 py-8 text-center text-sm text-[#c81e1e]">
+                Could not load customers.{" "}
+                <button
+                  type="button"
+                  className="font-semibold underline"
+                  onClick={() => void list.refetch()}
                 >
-                  {create.isPending || update.isPending
-                    ? "Saving…"
-                    : editingId
-                      ? "Save changes"
-                      : "Create customer"}
-                </Button>
+                  Retry
+                </button>
+              </p>
+            ) : !items.length ? (
+              <div className="rounded-lg border border-[#e4e9f0] bg-white px-4 py-10 text-center text-sm text-[#5a6b7d]">
+                No customers yet.{" "}
+                <button
+                  type="button"
+                  className="font-semibold text-[#1a56db] hover:underline"
+                  onClick={openNewCustomer}
+                >
+                  Add your first customer
+                </button>
               </div>
-            </form>
-          </section>
-        </FadeIn>
-      </div>
+            ) : (
+              items.map((c) => (
+                <CustomerMobileCard
+                  key={c.id}
+                  customer={c}
+                  active={selectedId === c.id}
+                  money={money}
+                  canLead={canLead}
+                  onSelect={() => selectCustomer(c.id)}
+                  onEdit={() => startEdit(c)}
+                  onSoftDelete={() => {
+                    if (
+                      confirm(
+                        `Remove customer "${c.fullName}"? This is a soft delete.`,
+                      )
+                    ) {
+                      softDelete.mutate(c.id);
+                    }
+                  }}
+                />
+              ))
+            )}
+          </div>
 
-      {selectedId ? (
-        <FadeIn delay={0.08}>
-          <CustomerCrmPanel customerId={selectedId} />
-        </FadeIn>
-      ) : (
-        <FadeIn delay={0.08}>
-          <section className="rounded-2xl border border-dashed border-[#e5e7eb] bg-white px-5 py-10 text-center">
-            <p className="eyebrow text-[#0b1f33]">Customer profile</p>
-            <h2 className="display mt-2 text-2xl text-[#111827]">
-              Select a customer
-            </h2>
-            <p className="mx-auto mt-2 max-w-sm text-sm text-[#6b7280]">
-              Click a name in the list to open purchases, dues, loyalty, wallet,
-              and notes.
-            </p>
-          </section>
-        </FadeIn>
-      )}
+          {total ? (
+            <TablePager
+              {...pagerFromMeta(meta, page, pageSize, setPage, items.length)}
+            />
+          ) : null}
 
-      {/* Measurements — rental module only */}
-      {rental && selectedId ? (
-      <FadeIn delay={0.1}>
-        <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5 sm:p-6">
-          {!selected ? (
-            <div className="py-10 text-center">
-              <p className="eyebrow text-[#0b1f33]">Measurements</p>
-              <h2 className="display mt-2 text-2xl text-[#111827]">
+          {selectedId ? (
+            <CustomerCrmPanel customerId={selectedId} />
+          ) : (
+            <div className="rounded-lg border border-dashed border-[#dce3ec] bg-[#f8fafc] px-5 py-8 text-center">
+              <p className="text-sm font-medium text-[#0b1f33]">
                 Select a customer
-              </h2>
-              <p className="mx-auto mt-2 max-w-sm text-sm text-[#6b7280]">
-                Click a name in the list above to add or review fittings.
+              </p>
+              <p className="mx-auto mt-1 max-w-md text-sm text-[#5a6b7d]">
+                Click a row to view purchases, dues, loyalty, wallet, and notes.
               </p>
             </div>
-          ) : (
-            <>
-              <div className="flex flex-col gap-3 border-b border-[#e5e7eb] pb-5 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="eyebrow text-[#0b1f33]">Measurements</p>
-                  <h2 className="display mt-1 text-2xl text-[#111827] sm:text-[1.75rem]">
-                    {selected.fullName}
-                  </h2>
-                  <p className="mt-1 text-sm tabular-nums text-[#6b7280]">
-                    {selected.phone}
-                    {selected.eventDate
-                      ? ` · Event ${formatDate(selected.eventDate)}`
-                      : ""}
-                  </p>
-                </div>
+          )}
+
+          {rental && selectedId && selected ? (
+            <section className="rounded-lg border border-[#e4e9f0] bg-white p-5">
+              <div className="border-b border-[#eef1f4] pb-4">
+                <p className="text-[0.65rem] font-semibold tracking-[0.1em] text-[#8b9bb0] uppercase">
+                  Measurements
+                </p>
+                <h2 className="mt-1 text-base font-semibold text-[#0b1f33]">
+                  {selected.fullName}
+                </h2>
+                <p className="mt-0.5 text-sm tabular-nums text-[#5a6b7d]">
+                  {selected.phone}
+                  {selected.eventDate
+                    ? ` Â· Event ${formatDate(selected.eventDate)}`
+                    : ""}
+                </p>
               </div>
 
-              <div className="mt-6 grid gap-8 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+              <div className="mt-5 grid gap-8 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
                 <form
                   className="space-y-4"
                   onSubmit={measureForm.handleSubmit((v) =>
@@ -688,7 +911,7 @@ export default function CustomersPage() {
                   )}
                   noValidate
                 >
-                  <h3 className="text-sm font-semibold text-[#111827]">
+                  <h3 className="text-sm font-semibold text-[#0b1f33]">
                     Add measurement
                   </h3>
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -703,9 +926,9 @@ export default function CustomersPage() {
                       ] as const
                     ).map(([name, label]) => (
                       <div key={name}>
-                        <Label>{label}</Label>
+                        <Label className="text-xs">{label}</Label>
                         <Input
-                          className="mt-1.5"
+                          className="mt-1 h-9"
                           type="number"
                           step="0.1"
                           inputMode="decimal"
@@ -714,9 +937,9 @@ export default function CustomersPage() {
                       </div>
                     ))}
                     <div className="col-span-2 sm:col-span-1">
-                      <Label>Shoe size</Label>
+                      <Label className="text-xs">Shoe size</Label>
                       <Input
-                        className="mt-1.5"
+                        className="mt-1 h-9"
                         placeholder="e.g. 9"
                         {...measureForm.register("shoeSize")}
                       />
@@ -727,29 +950,27 @@ export default function CustomersPage() {
                   />
                   <Button
                     type="submit"
+                    size="sm"
                     disabled={addMeasurement.isPending}
-                    className="w-full sm:w-auto"
                   >
-                    {addMeasurement.isPending
-                      ? "Saving…"
-                      : "Save measurement"}
+                    {addMeasurement.isPending ? "Saving…" : "Save measurement"}
                   </Button>
                 </form>
 
                 <div>
-                  <h3 className="text-sm font-semibold text-[#111827]">
+                  <h3 className="text-sm font-semibold text-[#0b1f33]">
                     Fitting history
                   </h3>
-                  <ul className="mt-3 max-h-[22rem] space-y-3 overflow-y-auto pr-1">
+                  <ul className="mt-3 max-h-[20rem] space-y-2 overflow-y-auto">
                     {(measurements.data ?? []).map((m) => (
                       <li
                         key={m.id}
-                        className="rounded-xl border border-[#e5e7eb] bg-[#f9fafb] p-4"
+                        className="rounded-lg border border-[#eef1f4] bg-[#f8fafc] p-3"
                       >
-                        <p className="text-xs font-semibold tracking-wide text-[#0b1f33] uppercase">
+                        <p className="text-[0.65rem] font-semibold tracking-wide text-[#5a6b7d] uppercase">
                           {formatDate(m.takenAt)}
                         </p>
-                        <div className="mt-3 grid grid-cols-3 gap-x-3 gap-y-3 sm:grid-cols-4">
+                        <div className="mt-2 grid grid-cols-3 gap-x-3 gap-y-2 sm:grid-cols-4">
                           <MeasureValue label="Height" value={m.heightCm} />
                           <MeasureValue label="Weight" value={m.weightKg} />
                           <MeasureValue label="Chest" value={m.chest} />
@@ -761,22 +982,146 @@ export default function CustomersPage() {
                       </li>
                     ))}
                     {measurements.isLoading ? (
-                      <li className="text-sm text-[#6b7280]">Loading…</li>
+                      <li className="text-sm text-[#5a6b7d]">Loading…</li>
                     ) : null}
                     {!measurements.isLoading &&
                     !(measurements.data ?? []).length ? (
-                      <li className="rounded-xl border border-dashed border-[#e5e7eb] px-4 py-8 text-center text-sm text-[#6b7280]">
-                        No measurements yet — add the first fitting on the left.
+                      <li className="rounded-lg border border-dashed border-[#dce3ec] px-4 py-6 text-center text-sm text-[#5a6b7d]">
+                        No measurements yet.
                       </li>
                     ) : null}
                   </ul>
                 </div>
               </div>
-            </>
-          )}
-        </section>
-      </FadeIn>
+            </section>
+          ) : null}
+        </div>
+      )}
+
+      {formOpen ? (
+        <ModalFrame
+          title={editingId ? "Edit customer" : "New customer"}
+          subtitle="Name and phone are required. Used at POS and for loyalty."
+          onClose={closeForm}
+          className="max-w-lg sm:rounded-xl"
+          bodyScroll
+          footer={
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                className="flex-1"
+                onClick={closeForm}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                className="flex-1"
+                disabled={create.isPending || update.isPending}
+                onClick={form.handleSubmit((v) =>
+                  editingId ? update.mutate(v) : create.mutate(v),
+                )}
+              >
+                {create.isPending || update.isPending
+                  ? "Saving…"
+                  : editingId
+                    ? "Save changes"
+                    : "Create customer"}
+              </Button>
+            </div>
+          }
+        >
+          <form
+            className="space-y-4"
+            onSubmit={(e) => e.preventDefault()}
+            noValidate
+          >
+            <div>
+              <Label>Full name</Label>
+              <Input
+                className="mt-1.5"
+                value={form.watch("fullName")}
+                onChange={(e) =>
+                  form.setValue("fullName", filterPersonNameInput(e.target.value), {
+                    shouldValidate: true,
+                  })
+                }
+              />
+              <FieldError message={form.formState.errors.fullName?.message} />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <PhoneCountryInput
+                  required
+                  value={form.watch("phone")}
+                  error={form.formState.errors.phone?.message}
+                  onChange={(v) =>
+                    form.setValue("phone", v, { shouldValidate: true })
+                  }
+                />
+              </div>
+              <div>
+                <Label>Email</Label>
+                <Input
+                  className="mt-1.5"
+                  type="email"
+                  {...form.register("email")}
+                />
+                <FieldError message={form.formState.errors.email?.message} />
+              </div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <Label>Birthday</Label>
+                <Input
+                  className="mt-1.5"
+                  type="date"
+                  {...form.register("dateOfBirth")}
+                />
+              </div>
+              <div>
+                <Label>Anniversary / event</Label>
+                <Input
+                  className="mt-1.5"
+                  type="date"
+                  {...form.register("eventDate")}
+                />
+              </div>
+            </div>
+            <label className="flex items-center gap-2 text-sm text-[#5a6b7d]">
+              <input type="checkbox" {...form.register("marketingOptIn")} />
+              Marketing / birthday opt-in
+            </label>
+            <div>
+              <Label>Notes</Label>
+              <Input className="mt-1.5" {...form.register("notes")} />
+            </div>
+            <div>
+              <Label>Credit limit</Label>
+              <Input
+                className="mt-1.5"
+                inputMode="decimal"
+                placeholder="Blank = unlimited"
+                {...form.register("creditLimit")}
+              />
+              <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+                Blocks underpay at POS when open dues would exceed this amount
+              </p>
+            </div>
+            <CustomFieldsSection
+              hint="From Settings → Custom fields (Customer)."
+              fields={customerFormFields}
+              loading={customerFieldsQ.isLoading}
+              values={extraFields}
+              onChange={(key, value) =>
+                setExtraFields((prev) => ({ ...prev, [key]: value }))
+              }
+            />
+          </form>
+        </ModalFrame>
       ) : null}
     </div>
   );
 }
+

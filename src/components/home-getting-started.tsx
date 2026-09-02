@@ -3,8 +3,10 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Check,
+  ChevronLeft,
   ChevronRight,
   FileSpreadsheet,
   Lightbulb,
@@ -16,28 +18,31 @@ import {
   Users,
   Wallet,
 } from "lucide-react";
-import { posApi } from "@/lib/api";
+import { catalogApi, customersApi, ordersApi, posApi, resourcesApi, subscriptionsApi } from "@/lib/api";
 import { useBootstrap } from "@/lib/bootstrap";
 import { useAuthStore } from "@/lib/auth-store";
 import { Button } from "@/components/ui/button";
 import { ItemsImportDialog } from "@/components/items-import-dialog";
 import { cn } from "@/lib/utils";
 import {
+  gettingStartedPath,
   readSetupStepParam,
   withGettingStartedReturn,
 } from "@/lib/setup-return";
-import { useSearchParams } from "next/navigation";
 
 type StepId =
   | "store"
   | "tax"
   | "build"
   | "stockup"
+  | "rentalunits"
   | "resources"
+  | "services"
   | "plans"
   | "prefs"
   | "register"
-  | "customers";
+  | "customers"
+  | "livesell";
 
 type StepDef = {
   id: StepId;
@@ -66,12 +71,19 @@ function firstName(full?: string | null) {
  * commerce-mode aware — sale unlocks inventory steps; never industry-hardcoded.
  */
 export function HomeGettingStarted() {
-  const { hasMode, hasCapability, productName, data: boot } = useBootstrap();
+  const {
+    hasMode,
+    hasCapability,
+    productName,
+    data: boot,
+    businessConfig,
+  } = useBootstrap();
   const user = useAuthStore((s) => s.user);
   const search = useSearchParams();
   const stepFromUrl = readSetupStepParam(search);
   const hasSale = hasMode("sale");
   const hasRental = hasMode("rental") || hasCapability("AVAILABILITY");
+  const hasService = hasMode("service");
   const hasPlans =
     hasMode("subscription") ||
     hasCapability("SUBSCRIPTION") ||
@@ -83,9 +95,34 @@ export function HomeGettingStarted() {
     queryFn: () => posApi.saleFloor(),
     enabled: hasSale,
   });
+  const catalogCount = useQuery({
+    queryKey: ["catalog-setup-count"],
+    queryFn: () => catalogApi.listProducts({ status: "active", limit: 1 }),
+  });
+  const resourcesCount = useQuery({
+    queryKey: ["resources-setup-count"],
+    queryFn: () => resourcesApi.list({ limit: 1 }),
+    enabled: hasRental && !hasSale,
+  });
+  const rentalFloor = useQuery({
+    queryKey: ["pos-rental-floor-setup"],
+    queryFn: () => posApi.rentalFloor(),
+    enabled: hasRental,
+  });
+  const plansCount = useQuery({
+    queryKey: ["subscriptions-plans-setup"],
+    queryFn: () => subscriptionsApi.listPlans(),
+    enabled: hasPlans,
+  });
 
-  const products = floor.data?.counts?.products ?? 0;
+  const products =
+    catalogCount.data?.meta?.total ?? floor.data?.counts?.products ?? 0;
   const inStock = floor.data?.counts?.inStock ?? 0;
+  const resourceTotal = resourcesCount.data?.meta?.total ?? 0;
+  const rentalUnitTotal = rentalFloor.data?.counts?.units ?? 0;
+  const rentalStyleTotal = rentalFloor.data?.counts?.products ?? 0;
+  const planTotal =
+    plansCount.data?.counts?.plans ?? plansCount.data?.items?.length ?? 0;
 
   const taxConfigured = useMemo(() => {
     const t = boot?.tenant;
@@ -147,55 +184,135 @@ export function HomeGettingStarted() {
       },
     ];
 
+    const buildTitle =
+      hasSale && hasRental
+        ? "Add items to sell & rent"
+        : hasSale
+          ? "Build your inventory"
+          : hasService
+            ? "Add services you bill"
+            : hasRental
+              ? "Add rentable outfits"
+              : hasPlans
+                ? "Add plans to your catalog"
+                : "Add items to your catalog";
+    const buildDetail =
+      hasSale && hasRental
+        ? "Retail accessories (ties, bags, kits) via Items import or New Item. Formal wear sizes & barcodes go in the rental stock step next."
+        : hasSale
+          ? "Bulk import your items/services using a file, or create them one by one — same catalog for every industry."
+          : "Create catalog items for this shop (goods, services, rentals, or plans). Import a file or add them one by one.";
+
+    list.push({
+      id: "build",
+      n: list.length + 1,
+      title: buildTitle,
+      detail: buildDetail,
+      tip: "Categories auto-create from CSV when missing. Prefer short universal SKUs.",
+      buildInventory: true,
+      done: products > 0,
+    });
+
     if (hasSale) {
-      list.push(
-        {
-          id: "build",
-          n: 3,
-          title: "Build your inventory",
-          detail:
-            "Bulk import your items/services using a file, or create them one by one — same catalog for every industry.",
-          tip: "Categories auto-create from CSV when missing. Prefer short universal SKUs.",
-          buildInventory: true,
-          done: products > 0,
+      list.push({
+        id: "stockup",
+        n: list.length + 1,
+        title: "Stock up your inventory",
+        detail:
+          "Raise opening stock via purchases or stock adjust so the counter never sells negative quantities.",
+        tip: "Purchases from suppliers restock multiple items at once.",
+        primary: {
+          label: "Add supplier",
+          href: withGettingStartedReturn("/suppliers/new", "stockup"),
         },
-        {
-          id: "stockup",
-          n: 4,
-          title: "Stock up your inventory",
-          detail:
-            "Raise opening stock via purchases or stock adjust so the counter never sells negative quantities.",
-          tip: "Purchases from suppliers restock multiple items at once.",
-          primary: {
-            label: "Add supplier",
-            href: withGettingStartedReturn("/suppliers/new", "stockup"),
-          },
-          secondary: {
-            label: "Stock levels",
-            href: withGettingStartedReturn("/inventory", "stockup"),
-          },
-          done: products > 0 && inStock > 0,
+        secondary: {
+          label: "Stock levels",
+          href: withGettingStartedReturn("/inventory", "stockup"),
         },
-      );
+        done: products > 0 && inStock > 0,
+      });
+    }
+
+    if (hasService) {
+      list.push({
+        id: "services",
+        n: list.length + 1,
+        title: "Charge a service",
+        detail:
+          "Open the counter Services tab and bill a timed or walk-in service — same checkout as retail.",
+        tip: "Appointments stay under the Appointments screen when that capability is on.",
+        primary: {
+          label: "Counter · services",
+          href: withGettingStartedReturn("/counter?view=service", "services"),
+        },
+        secondary: {
+          label: "Appointments",
+          href: withGettingStartedReturn("/appointments", "services"),
+        },
+        done: products > 0 && prefsConfigured,
+      });
     }
 
     if (hasRental) {
+      list.push({
+        id: "rentalunits",
+        n: list.length + 1,
+        title: hasSale
+          ? "Add rental outfits (sizes & barcodes)"
+          : "Add rental units",
+        detail: hasSale
+          ? "Each tuxedo, gown, or jacket gets a barcode per size — scan at the Counter Rent tab. Deposits and return dates apply here, not on sale items."
+          : "Add styles with rental price, deposit, and unit barcodes (size/variant). Same flow for formal wear, gear, or any rentable SKU.",
+        tip: "Use Rental desk → Stock tab, then Counter → Rent tab to scan barcodes.",
+        primary: {
+          label: "Rental desk",
+          href: withGettingStartedReturn("/rental", "rentalunits"),
+        },
+        secondary: {
+          label: "Counter → Rent",
+          href: withGettingStartedReturn("/counter?view=rental", "rentalunits"),
+        },
+        done: rentalUnitTotal > 0 || rentalStyleTotal > 0,
+      });
+    }
+
+    if (hasRental && hasSale) {
+      list.push({
+        id: "livesell",
+        n: list.length + 1,
+        title: "Sell accessories live",
+        detail:
+          "Use the Sell tab for retail items (bow ties, bags, kits). Use the Rent tab for outfits — one counter, two views.",
+        tip: "Mixed rent + sale on one receipt is not supported yet; complete as two orders if needed.",
+        primary: {
+          label: "Counter → Sell",
+          href: withGettingStartedReturn("/counter?view=sale", "livesell"),
+        },
+        secondary: {
+          label: "Items to sell",
+          href: withGettingStartedReturn("/catalog", "livesell"),
+        },
+        done: products > 0 && inStock > 0,
+      });
+    }
+
+    if (hasRental && !hasSale) {
       list.push({
         id: "resources",
         n: list.length + 1,
         title: "Set up bookable resources",
         detail:
-          "Add rooms, tables, vehicles, or other assets you assign at the counter. Same resource list for every rental-style business.",
-        tip: "Operational status (available / occupied / out of service) is generic — not restaurant-only.",
+          "Optional: rooms, tables, vehicles, or other assets you assign at the counter — in addition to unit barcodes.",
+        tip: "Formal wear shops usually skip this and use rental units only.",
         primary: {
           label: "Resources",
           href: withGettingStartedReturn("/resources", "resources"),
         },
         secondary: {
-          label: "Counter",
-          href: withGettingStartedReturn("/counter", "resources"),
+          label: "Counter → Rent",
+          href: withGettingStartedReturn("/counter?view=rental", "resources"),
         },
-        done: prefsConfigured,
+        done: resourceTotal > 0,
       });
     }
 
@@ -209,13 +326,13 @@ export function HomeGettingStarted() {
         tip: "Check-in uses the same membership record for gym, salon, or coworking.",
         primary: {
           label: "Counter · plans",
-          href: withGettingStartedReturn("/counter", "plans"),
+          href: withGettingStartedReturn("/counter?view=subscription", "plans"),
         },
         secondary: {
           label: "Check-in",
           href: withGettingStartedReturn("/check-in", "plans"),
         },
-        done: prefsConfigured,
+        done: planTotal > 0,
       });
     }
 
@@ -238,13 +355,18 @@ export function HomeGettingStarted() {
       },
       {
         id: "register",
-        n: list.length + 2,
+        n: list.length + 1,
         title: "Setup POS register",
         detail:
-          "Open the counter, run a sales register for the shift, and take your first payment.",
+          hasSale && hasRental
+            ? "Open the counter — Sell tab for retail, Rent tab for outfits. Open a sales register on the Sell tab for shift cash tracking."
+            : "Open the counter, run a sales register for the shift, and take your first payment.",
         primary: {
-          label: "Open counter",
-          href: withGettingStartedReturn("/counter", "register"),
+          label: hasSale && hasRental ? "Open counter (Sell / Rent)" : "Open counter",
+          href: withGettingStartedReturn(
+            hasSale ? "/counter?view=sale" : "/counter?view=rental",
+            "register",
+          ),
         },
         secondary: {
           label: "All orders",
@@ -254,7 +376,7 @@ export function HomeGettingStarted() {
       },
       {
         id: "customers",
-        n: list.length + 3,
+        n: list.length + 1,
         title: "Customers & reports",
         detail:
           "Save customers for credit and history. Review sales and export CSV when needed.",
@@ -271,7 +393,20 @@ export function HomeGettingStarted() {
     );
 
     return list.map((s, i) => ({ ...s, n: i + 1 }));
-  }, [hasSale, hasRental, hasPlans, products, inStock, taxConfigured, prefsConfigured]);
+  }, [
+    hasSale,
+    hasService,
+    hasRental,
+    hasPlans,
+    products,
+    inStock,
+    resourceTotal,
+    rentalUnitTotal,
+    rentalStyleTotal,
+    planTotal,
+    taxConfigured,
+    prefsConfigured,
+  ]);
 
   const firstOpen =
     steps.find((s) => !s.done)?.id ?? steps[0]?.id ?? "store";
@@ -303,6 +438,9 @@ export function HomeGettingStarted() {
           <p className="mt-1.5 text-[0.9rem] text-[#5a6b7d]">
             Follow this checklist to get started with{" "}
             {productName || "Universal POS"}.
+            {businessConfig?.gettingStartedHints?.[0]
+              ? ` ${businessConfig.gettingStartedHints[0]}.`
+              : ""}
           </p>
         </div>
         <div className="min-w-[10rem] text-right">
@@ -436,7 +574,7 @@ export function HomeGettingStarted() {
                   <Store className="h-6 w-6" />
                 ) : active?.id === "tax" || active?.id === "prefs" ? (
                   <Settings2 className="h-6 w-6" />
-                ) : active?.id === "register" ? (
+                ) : active?.id === "register" || active?.id === "services" ? (
                   <ShoppingCart className="h-6 w-6" />
                 ) : active?.id === "customers" ? (
                   <Users className="h-6 w-6" />

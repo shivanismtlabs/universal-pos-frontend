@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { tenantsApi } from "@/lib/api";
+import { catalogApi, tenantsApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,6 +29,12 @@ export default function UnitsSettingsPage() {
   const unitsQ = useQuery({
     queryKey: ["measure-units"],
     queryFn: () => tenantsApi.listUnits(),
+  });
+
+  const suggestQ = useQuery({
+    queryKey: ["uom-country-suggest"],
+    queryFn: () => catalogApi.suggestTenantUomUnits(),
+    retry: 1,
   });
 
   const rows = useMemo(() => unwrapUnits(unitsQ.data), [unitsQ.data]);
@@ -94,6 +100,26 @@ export default function UnitsSettingsPage() {
         title="Units"
         subtitle="Units of measure used on Items and POS (piece, kg, hour, bag…). Same list for every shop type."
       />
+
+      {suggestQ.data?.suggestedUnits?.length ? (
+        <section className="rounded-2xl border border-[#dbeafe] bg-[#eff6ff] px-4 py-3 text-sm text-[#1e3a8a]">
+          <p className="font-medium">
+            Suggested for {suggestQ.data.label} ({suggestQ.data.countryCode})
+          </p>
+          <p className="mt-1 text-[#1d4ed8]">
+            Common units:{" "}
+            {suggestQ.data.suggestedUnits
+              .slice(0, 12)
+              .map((u) => u.symbol)
+              .join(", ")}
+            . Configure base unit and conversions per item under{" "}
+            <Link href="/catalog" className="font-medium underline">
+              Items
+            </Link>
+            . Existing items keep working until you set advanced unit pricing.
+          </p>
+        </section>
+      ) : null}
 
       {canEdit ? (
         <section className="space-y-4 rounded-2xl border border-[#e5e7eb] bg-white p-5">

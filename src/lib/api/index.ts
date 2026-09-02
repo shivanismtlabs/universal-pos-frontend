@@ -279,7 +279,7 @@ export const authApi = {
     fullName: string;
     email: string;
     password: string;
-    phone?: string;
+    phone: string;
   }) {
     return apiRequest<PortalSessionResponse>("/auth/signup", {
       method: "POST",
@@ -452,10 +452,10 @@ export const authApi = {
     }>("/auth/refresh", { method: "POST", body: { refreshToken } });
   },
 
-  setOwnPin(pin: string) {
+  setOwnPin(pin: string, currentPin?: string) {
     return apiRequest<{ pinSet: boolean }>("/auth/pin/set", {
       method: "POST",
-      body: { pin },
+      body: { pin, ...(currentPin ? { currentPin } : {}) },
       token: token(),
     });
   },
@@ -1092,10 +1092,78 @@ export const inventoryApi = {
     }>(`/stock-transfers${q ? `?${q}` : ""}`, { token: token() });
   },
 
+  /** Document workflow: draft → issue → receive / cancel */
+  listTransferDocs() {
+    return apiRequest<
+      Array<{
+        id: string;
+        status: string;
+        notes?: string | null;
+        createdAt: string;
+        issuedAt?: string | null;
+        receivedAt?: string | null;
+        fromLocationId: string;
+        toLocationId: string;
+        fromLocationName: string;
+        toLocationName: string;
+        lineCount: number;
+        totalQty: number;
+        actorName: string;
+        lines: Array<{
+          id: string;
+          productId: string;
+          productName: string;
+          sku: string;
+          unit: string;
+          qty: number;
+          qtyReceived: number;
+          qtyDamaged: number;
+        }>;
+      }>
+    >("/inventory/transfers", { token: token() });
+  },
+
+  createTransferDoc(body: {
+    fromLocationId: string;
+    toLocationId: string;
+    notes?: string;
+    lines: Array<{ productId: string; qty: number }>;
+  }) {
+    return apiRequest<{ id: string; status: string }>(
+      "/inventory/transfers",
+      { method: "POST", body, token: token() },
+    );
+  },
+
+  issueTransferDoc(id: string) {
+    return apiRequest<{ id: string; status: string }>(
+      `/inventory/transfers/${id}/issue`,
+      { method: "POST", token: token() },
+    );
+  },
+
+  receiveTransferDoc(
+    id: string,
+    lines: Array<{ lineId: string; qty: number; damagedQty?: number }>,
+  ) {
+    return apiRequest<{ id: string; status: string }>(
+      `/inventory/transfers/${id}/receive`,
+      { method: "POST", body: { lines }, token: token() },
+    );
+  },
+
+  cancelTransferDoc(id: string) {
+    return apiRequest<{ id: string; status: string }>(
+      `/inventory/transfers/${id}/cancel`,
+      { method: "POST", token: token() },
+    );
+  },
+
   listLevels(params?: {
     locationId?: string;
     q?: string;
     lowStock?: boolean;
+    damagedOnly?: boolean;
     includeZero?: boolean;
     page?: number;
     limit?: number;
@@ -1104,6 +1172,7 @@ export const inventoryApi = {
     if (params?.locationId) qs.set("locationId", params.locationId);
     if (params?.q) qs.set("q", params.q);
     if (params?.lowStock) qs.set("lowStock", "true");
+    if (params?.damagedOnly) qs.set("damaged", "true");
     if (params?.includeZero) qs.set("includeZero", "true");
     if (params?.page) qs.set("page", String(params.page));
     if (params?.limit) qs.set("limit", String(params.limit));
@@ -1120,6 +1189,7 @@ export const inventoryApi = {
         qtyOnHand: number;
         qtyDamaged: number;
         sellableQty: number;
+        qtyReserved?: number;
         reorderPoint: number | null;
         reorderQty: number | null;
         isLowStock: boolean;
@@ -1141,6 +1211,7 @@ export const inventoryApi = {
         stockLevelId: string;
         name: string;
         sku: string;
+        sellUnit?: string;
         qtyOnHand: number;
         reorderPoint: number | null;
         location?: { name: string };
@@ -2768,7 +2839,7 @@ export const posApi = {
       sku: string;
       categoryName?: string;
       categoryId?: string;
-      sellUnit?: "pcs" | "pack" | "kg" | "g" | "L" | "ml";
+      sellUnit?: string;
       price: number;
       qty?: number;
       description?: string;
@@ -2778,6 +2849,8 @@ export const posApi = {
       reorderPoint?: number;
       hsnOrSac?: string;
       trackInventory?: boolean;
+      itemType?: "goods" | "service";
+      durationMinutes?: number;
       image?: string;
       photoUrl?: string;
     }>;
@@ -3122,8 +3195,11 @@ export const posApi = {
       },
     );
   },
-  listRecentSales(limit?: number) {
-    const qs = limit ? `?limit=${limit}` : "";
+  listRecentSales(limit?: number, locationId?: string) {
+    const qs = new URLSearchParams();
+    if (limit) qs.set("limit", String(limit));
+    if (locationId) qs.set("locationId", locationId);
+    const q = qs.toString();
     return apiRequest<{
       items: Array<{
         id: string;
@@ -3140,7 +3216,7 @@ export const posApi = {
         productNames?: string[];
         productSummary?: string;
       }>;
-    }>(`/pos/sale/recent${qs}`, { token: token() });
+    }>(`/pos/sale/recent${q ? `?${q}` : ""}`, { token: token() });
   },
   saleCatalog(params?: {
     locationId?: string;
@@ -3207,6 +3283,19 @@ export const posApi = {
         requiresSerial?: boolean;
         recipeTracked?: boolean;
         soldOut?: boolean;
+        productId?: string;
+        pricingStrategy?: "converted" | "fixed_tier";
+        pricePerPricingUnit?: number | null;
+        baseUnitId?: string | null;
+        entryUnits?: Array<{ unitId: string; symbol: string; name: string }>;
+        productUnits?: Array<{
+          unitId: string;
+          symbol: string;
+          name: string;
+          conversionToBase: number;
+          fixedPrice?: number | null;
+          isDefaultSellingUnit?: boolean;
+        }>;
         channelPrices?: {
           dine_in?: number;
           takeaway?: number;
@@ -3299,6 +3388,8 @@ export const posApi = {
     discountAmount?: number;
     couponCode?: string;
     loyaltyPointsToRedeem?: number;
+    /** Nearest-rupee half-up delta (rounded − exact). +fee / −discount write-off. */
+    roundOffAmount?: number;
     allowPartial?: boolean;
     sendReceipt?: boolean;
     sendReceiptChannels?: Array<"email" | "sms" | "whatsapp">;
@@ -3344,6 +3435,8 @@ export const posApi = {
     }>;
     note?: string;
     discountAmount?: number;
+    /** Nearest-rupee half-up delta (rounded − exact). */
+    roundOffAmount?: number;
     meta?: Record<string, unknown>;
   }) {
     return apiRequest<{
@@ -3519,6 +3612,20 @@ export const posApi = {
         exchangeOrderNumber?: string | null;
         invoiceNumber?: string | null;
         items?: unknown;
+        returnedItems?: Array<{
+          kind?: string;
+          name?: string | null;
+          sku?: string | null;
+          quantity?: number | string;
+          condition?: string | null;
+        }>;
+        replacedItems?: Array<{
+          kind?: string;
+          name?: string | null;
+          sku?: string | null;
+          quantity?: number | string;
+        }>;
+        isExchange?: boolean;
       }>;
     }>(`/pos/sale/returns${q ? `?${q}` : ""}`, { token: token() });
   },
@@ -3821,6 +3928,21 @@ export const posApi = {
       token: token(),
     });
   },
+  lateFeePreview(orderId: string) {
+    return apiRequest<{
+      orderId: string;
+      returnDueDate: string | null;
+      daysLate: number;
+      applicable: boolean;
+      suggestedLateFee: number;
+      lines: Array<{
+        stockUnitId: string | null;
+        lateFeePerDay: number;
+        daysLate: number;
+        amount: number;
+      }>;
+    }>(`/pos/rental/orders/${orderId}/late-fee-preview`, { token: token() });
+  },
   listRecentRentals(limit?: number) {
     const qs = limit ? `?limit=${limit}` : "";
     return apiRequest<{
@@ -3955,6 +4077,17 @@ type ReceiptPayload = {
     discountTotal?: string | number;
     depositTotal: string | number;
     balanceDue: string | number;
+    feesTotal?: string | number;
+  };
+  fees?: Array<{
+    feeCode: string;
+    reason?: string | null;
+    amount: string | number;
+  }>;
+  paymentRounding?: {
+    originalAmount?: number;
+    roundOffAmount?: number;
+    finalAmount?: number;
   };
   payments: Array<{
     method: string;
@@ -4712,6 +4845,7 @@ export const servicesCommerceApi = {
         description?: string | null;
         price: string | number;
         durationMinutes?: number | null;
+        taxRatePercent?: number | null;
         isActive: boolean;
         category?: { id: string; name: string } | null;
       }>;
@@ -4726,7 +4860,7 @@ export const servicesCommerceApi = {
     price: number;
     durationMinutes?: number;
   }) {
-    return apiRequest("/services", {
+    return apiRequest<{ id: string }>("/services", {
       method: "POST",
       body,
       token: token(),
@@ -4740,16 +4874,26 @@ export const servicesCommerceApi = {
     });
   },
   bill(body: {
-    customerId: string;
+    customerId?: string;
     productId: string;
     paymentMethod?: "cash" | "card" | "upi";
+    quantity?: number;
     appointmentId?: string;
+    locationId?: string;
     idempotencyKey?: string;
   }) {
     return apiRequest<{
       order: { id: string; orderNumber: string };
       payment: { amount: string | number; method: string };
       service: { title: string; price: string | number };
+      customer?: { id: string; fullName: string } | null;
+      totals?: {
+        subtotal: string;
+        taxTotal: string;
+        grandTotal: string;
+        taxRatePercent: number;
+        quantity: number;
+      };
     }>("/services/bill", {
       method: "POST",
       body,
@@ -6138,13 +6282,20 @@ export const reportsApi = {
       summary: {
         orderCount: number;
         revenue: number;
+        rentalRevenue?: number;
+        orderSubtotal?: number;
         tax: number;
         balanceDue: number;
         overdueCount: number;
         utilizationPct: number | null;
         availableUnits: number;
+        reservedUnits?: number;
         unitsOut: number;
+        maintenanceUnits?: number;
         unitsTotal: number;
+        depositsCollected?: number;
+        depositsRefunded?: number;
+        depositsHeldNet?: number;
         openDeposits: number;
         openDepositUnits: number;
         damageEvents: number;
@@ -7185,6 +7336,7 @@ export const usersApi = {
       phone?: string;
       isActive?: boolean;
       primaryStoreId?: string;
+      roleCode?: string;
     },
   ) {
     return apiRequest(`/users/${id}`, {
@@ -7221,10 +7373,12 @@ export type AttendanceRow = {
   clockOut?: string | null;
   breakMinutes: number;
   status: string;
+  displayStatus?: string;
   method: string;
   notes?: string | null;
   minutes: number | null;
   workingHours?: string | null;
+  isOpenSession?: boolean;
 };
 
 export const iamApi = {
@@ -7289,6 +7443,10 @@ export const iamApi = {
       clockOutAt?: string | null;
       workDate?: string | null;
       status?: string;
+      breakMinutes?: number;
+      minutes?: number | null;
+      workingHours?: string | null;
+      isOpenSession?: boolean;
     } | null>("/iam/attendance/open", { token: token() });
   },
   listAttendance(params?: {
@@ -7343,6 +7501,7 @@ export const iamApi = {
       breakMinutes?: number;
       status?: string;
       notes?: string | null;
+      correctionReason: string;
     },
   ) {
     return apiRequest<AttendanceRow>(`/iam/attendance/${id}`, {
@@ -7350,6 +7509,17 @@ export const iamApi = {
       body,
       token: token(),
     });
+  },
+  attendanceHistory(id: string) {
+    return apiRequest<
+      Array<{
+        id: string;
+        action: string;
+        actor: { id: string; fullName: string; email: string } | null;
+        beforeAfter: unknown;
+        createdAt: string;
+      }>
+    >(`/iam/attendance/${id}/history`, { token: token() });
   },
   deleteAttendance(id: string) {
     return apiRequest<{ ok: boolean }>(`/iam/attendance/${id}`, {
@@ -7697,20 +7867,34 @@ export const suppliersApi = {
     return apiRequest<
       Array<{
         id: string;
+        poNumber?: string | null;
         poType: string;
         status: string;
         expectedDelivery?: string | null;
         linkedOrderId?: string | null;
-        supplier?: { name: string };
+        subtotal?: number;
+        discountAmount?: number;
+        taxPercent?: number;
+        taxTotal?: number;
+        grandTotal?: number;
+        supplier?: {
+          id?: string;
+          name: string;
+          code?: string | null;
+          supplierType?: string | null;
+        };
+        location?: { id: string; name: string; code?: string | null } | null;
         lines?: Array<{
           id: string;
           stockLevelId: string;
           qtyOrdered: number;
           qtyReceived: number;
+          unitCost?: number | null;
           stockLevel?: {
             id: string;
             sku: string;
             qtyOnHand: number;
+            locationId?: string;
             product?: { name: string };
           };
         }>;
@@ -7723,6 +7907,10 @@ export const suppliersApi = {
     linkedOrderId?: string;
     expectedDelivery?: string;
     notes?: string;
+    locationId?: string;
+    discountAmount?: number;
+    taxPercent?: number;
+    serviceSubtotal?: number;
     lines?: Array<{
       stockLevelId: string;
       qtyOrdered: number;
@@ -7744,7 +7932,10 @@ export const suppliersApi = {
   },
   receivePo(
     id: string,
-    body: { lines: Array<{ stockLevelId: string; qty: number }> },
+    body: {
+      lines: Array<{ stockLevelId: string; qty: number }>;
+      idempotencyKey?: string;
+    },
   ) {
     return apiRequest<{
       purchaseOrder: { id: string; status: string };
@@ -8259,6 +8450,7 @@ export type CatalogProductListItem = {
   barcode?: string | null;
   barcodeType?: string | null;
   kind: CatalogProductKind;
+  fulfillmentMode?: string | null;
   status: CatalogProductStatus;
   photoUrl?: string | null;
   images?: string[];
@@ -8457,6 +8649,135 @@ export const catalogApi = {
   },
   createBrand(body: { name: string; description?: string }) {
     return apiRequest("/catalog/brands", {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+
+  seedUnitGroups() {
+    return apiRequest("/catalog/units/seed", {
+      method: "POST",
+      token: token(),
+    });
+  },
+
+  listUnitGroups() {
+    return apiRequest<
+      Array<{
+        id: string;
+        code: string;
+        name: string;
+        units: Array<{
+          id: string;
+          name: string;
+          symbol: string;
+          isBaseUnit: boolean;
+          conversionToGroupBase: string | number;
+        }>;
+      }>
+    >("/catalog/unit-groups", { token: token() });
+  },
+
+  countryUomDefaults(country?: string) {
+    const q = country ? `?country=${encodeURIComponent(country)}` : "";
+    return apiRequest<{
+      countryCode: string;
+      label: string;
+      measureSystem: string;
+      suggestedSymbols: string[];
+      suggestedUnits: Array<{
+        id: string;
+        symbol: string;
+        name: string;
+        category: string;
+        isBaseUnit: boolean;
+      }>;
+    }>(`/catalog/units/country-defaults${q}`, { token: token() });
+  },
+
+  listTenantUomUnits() {
+    return apiRequest<
+      Array<{
+        id: string;
+        symbol: string;
+        name: string;
+        category: string;
+        categoryName: string;
+        isBaseUnit: boolean;
+        isSystem: boolean;
+        measureSystem: string;
+      }>
+    >("/catalog/units/tenant", { token: token() });
+  },
+
+  suggestTenantUomUnits() {
+    return apiRequest<{
+      countryCode: string;
+      label: string;
+      measureSystem: string;
+      suggestedSymbols: string[];
+      suggestedUnits: Array<{
+        id: string;
+        symbol: string;
+        name: string;
+        category: string;
+      }>;
+    }>("/catalog/units/suggest", { token: token() });
+  },
+
+  validateUomConversion(body: {
+    fromUnitId: string;
+    toUnitId: string;
+    productId?: string;
+    quantity?: number;
+  }) {
+    return apiRequest<{ valid: boolean; convertedQty?: string; message?: string }>(
+      "/catalog/units/validate-conversion",
+      { method: "POST", body, token: token() },
+    );
+  },
+
+  listProductUnits(productId: string) {
+    return apiRequest(`/catalog/products/${productId}/units`, {
+      token: token(),
+    });
+  },
+
+  upsertProductUnit(
+    productId: string,
+    body: {
+      unitId: string;
+      conversionToBase: number;
+      fixedPrice?: number | null;
+      isDefaultSellingUnit?: boolean;
+      isPurchaseUnit?: boolean;
+    },
+  ) {
+    return apiRequest(`/catalog/products/${productId}/units`, {
+      method: "POST",
+      body,
+      token: token(),
+    });
+  },
+
+  quotePricingLine(body: {
+    productId: string;
+    enteredQty: number;
+    sellingUnitId: string;
+  }) {
+    return apiRequest<{
+      qtyBase: number;
+      amount: number;
+      conversionFactorUsed: number;
+      orderedQuantity?: string;
+      orderedUnit?: string;
+      baseQuantity?: string;
+      unitPrice?: string;
+      priceSource?: string;
+      grossAmount?: string;
+      finalAmount?: string;
+    }>("/catalog/pricing/quote", {
       method: "POST",
       body,
       token: token(),

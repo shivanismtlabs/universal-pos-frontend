@@ -27,7 +27,7 @@ type CrmTab =
   | "notes";
 
 export function CustomerCrmPanel({ customerId }: { customerId: string }) {
-  const { money } = useBootstrap();
+  const { money, hasMode } = useBootstrap();
   const qc = useQueryClient();
   const [tab, setTab] = useState<CrmTab>("overview");
   const [noteBody, setNoteBody] = useState("");
@@ -158,7 +158,9 @@ export function CustomerCrmPanel({ customerId }: { customerId: string }) {
     { id: "orders", label: "Purchases" },
     { id: "payments", label: "Payments" },
     { id: "dues", label: "Due" },
-    { id: "membership", label: "Membership" },
+    ...(hasMode("subscription")
+      ? [{ id: "membership" as const, label: "Membership" }]
+      : []),
     { id: "activity", label: "Activity" },
     { id: "loyalty", label: "Loyalty" },
     { id: "wallet", label: "Wallet" },
@@ -182,17 +184,17 @@ export function CustomerCrmPanel({ customerId }: { customerId: string }) {
   }
 
   return (
-    <section className="rounded-2xl border border-[#e5e7eb] bg-white">
-      <div className="border-b border-[#eef2f8] px-5 py-4">
+    <section className="overflow-hidden rounded-2xl border border-[#e5e7eb] bg-white">
+      <div className="border-b border-[#eef2f8] px-3 py-4 sm:px-5">
         <div className="flex flex-wrap items-start justify-between gap-2">
-          <div>
+          <div className="min-w-0 flex-1">
             <p className="text-[0.65rem] font-bold tracking-[0.12em] text-[#1a56db] uppercase">
               Customer profile
             </p>
-            <h2 className="mt-1 text-xl font-semibold text-[#0b1f33]">
+            <h2 className="mt-1 text-lg font-semibold break-words text-[#0b1f33] sm:text-xl">
               {detail.data.fullName}
             </h2>
-            <p className="mt-0.5 text-sm text-[#5a6b7d]">
+            <p className="mt-0.5 text-sm break-all text-[#5a6b7d]">
               {detail.data.phone}
               {detail.data.email ? ` · ${detail.data.email}` : ""}
             </p>
@@ -205,11 +207,12 @@ export function CustomerCrmPanel({ customerId }: { customerId: string }) {
               {detail.data.eventDate ? formatDate(detail.data.eventDate) : "—"}
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
             <Button
               type="button"
               size="sm"
               variant="secondary"
+              className="w-full sm:w-auto"
               onClick={() => setModal("message")}
             >
               Message
@@ -218,11 +221,17 @@ export function CustomerCrmPanel({ customerId }: { customerId: string }) {
               type="button"
               size="sm"
               variant="secondary"
+              className="w-full sm:w-auto"
               onClick={() => setModal("feedback")}
             >
               Feedback
             </Button>
-            <Button asChild size="sm" variant="secondary">
+            <Button
+              asChild
+              size="sm"
+              variant="secondary"
+              className="w-full sm:w-auto"
+            >
               <Link href={`/customers/${customerId}`}>Open durable URL</Link>
             </Button>
           </div>
@@ -270,25 +279,33 @@ export function CustomerCrmPanel({ customerId }: { customerId: string }) {
         </p>
       </div>
 
-      <div className="flex flex-wrap gap-1 border-b border-[#eef2f8] px-3 pt-2">
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => setTab(t.id)}
-            className={cn(
-              "px-3 py-2 text-sm font-medium border-b-2 -mb-px",
-              tab === t.id
-                ? "border-[#1a56db] text-[#1a56db]"
-                : "border-transparent text-[#5a6b7d]",
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
+      <div className="-mb-px overflow-x-auto border-b border-[#eef2f8] px-2 pt-2 sm:px-3">
+        <div
+          role="tablist"
+          aria-label="Customer profile sections"
+          className="flex w-max min-w-full gap-0.5"
+        >
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={tab === t.id}
+              onClick={() => setTab(t.id)}
+              className={cn(
+                "shrink-0 border-b-2 px-2.5 py-2 text-xs font-medium whitespace-nowrap sm:px-3 sm:text-sm",
+                tab === t.id
+                  ? "border-[#1a56db] text-[#1a56db]"
+                  : "border-transparent text-[#5a6b7d]",
+              )}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div className="p-4 sm:p-5">
+      <div className="p-3 sm:p-5">
         {tab === "overview" ? (
           <div className="space-y-4 text-sm">
             <p className="text-[#5a6b7d]">

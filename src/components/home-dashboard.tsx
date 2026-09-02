@@ -16,6 +16,7 @@ import {
   reportsApi,
 } from "@/lib/api";
 import { useBootstrap } from "@/lib/bootstrap";
+import { useBranchStore } from "@/lib/branch-store";
 import { Button } from "@/components/ui/button";
 import { ProductThumb } from "@/components/product-thumb";
 import { TablePager } from "@/components/table-pager";
@@ -39,8 +40,11 @@ type DashLens = "sales" | "inventory" | "purchase";
  * Zoho Home → Dashboard: denser summary + product strip + quick links.
  */
 export function HomeDashboard() {
-  const { money, hasMode } = useBootstrap();
+  const { money, hasMode, hasScreen, data: boot } = useBootstrap();
+  const branchId = useBranchStore((s) => s.currentLocationId);
+  const branchName = boot?.locations?.find((l) => l.id === branchId)?.name;
   const hasSale = hasMode("sale");
+  const showInventory = hasSale && hasScreen("inventory");
   const [lens, setLens] = useState<DashLens>("sales");
   const [ticketPage, setTicketPage] = useState(1);
   const ticketPageSize = 5;
@@ -53,38 +57,45 @@ export function HomeDashboard() {
   }, []);
 
   const sales = useQuery({
-    queryKey: ["reports-sales-summary", range.from, range.to],
-    queryFn: () => reportsApi.salesSummary(range.from, range.to),
+    queryKey: ["reports-sales-summary", range.from, range.to, branchId],
+    queryFn: () => reportsApi.salesSummary(range.from, range.to, branchId!),
+    enabled: Boolean(branchId),
   });
   const monthly = useQuery({
-    queryKey: ["reports-monthly-home-spark"],
-    queryFn: () => reportsApi.monthlySales({}),
+    queryKey: ["reports-monthly-home-spark", branchId],
+    queryFn: () =>
+      reportsApi.monthlySales({
+        locationIds: branchId ? [branchId] : undefined,
+      }),
+    enabled: Boolean(branchId),
   });
   const payments = useQuery({
-    queryKey: ["reports-payments-summary", range.from, range.to],
-    queryFn: () => reportsApi.paymentsSummary(range.from, range.to),
+    queryKey: ["reports-payments-summary", range.from, range.to, branchId],
+    queryFn: () =>
+      reportsApi.paymentsSummary(range.from, range.to, branchId!),
+    enabled: Boolean(branchId),
   });
   const recent = useQuery({
-    queryKey: ["pos-sale-recent-home"],
-    queryFn: () => posApi.listRecentSales(25),
-    enabled: hasSale,
+    queryKey: ["pos-sale-recent-home", branchId],
+    queryFn: () => posApi.listRecentSales(25, branchId!),
+    enabled: hasSale && Boolean(branchId),
   });
   const floor = useQuery({
-    queryKey: ["pos-sale-floor"],
-    queryFn: () => posApi.saleFloor(),
-    enabled: hasSale,
+    queryKey: ["pos-sale-floor", branchId],
+    queryFn: () => posApi.saleFloor(branchId!),
+    enabled: hasSale && Boolean(branchId),
   });
   const products = useQuery({
     queryKey: ["catalog-products-home"],
-    queryFn: () => catalogApi.listProducts({ status: "active" }),
-    enabled: hasSale,
+    queryFn: () => catalogApi.listProducts({ status: "active", limit: 8 }),
   });
 
   const revenue =
     moneyNum(sales.data?.totals?.subtotal) +
     moneyNum(sales.data?.totals?.taxTotal);
   const orderCount = sales.data?.totals?.orderCount ?? 0;
-  const productCount = floor.data?.counts?.products ?? 0;
+  const productCount =
+    floor.data?.counts?.products ?? products.data?.meta?.total ?? 0;
   const inStock = floor.data?.counts?.inStock ?? 0;
   const stockRows = floor.data?.counts?.stockRows ?? 0;
 
@@ -133,12 +144,22 @@ export function HomeDashboard() {
 
   const lenses: Array<{ id: DashLens; label: string; show: boolean }> = [
     { id: "sales", label: "Sales", show: true },
-    { id: "inventory", label: "Inventory", show: hasSale },
+    { id: "inventory", label: "Inventory", show: showInventory },
     { id: "purchase", label: "Purchase", show: hasSale },
   ];
+  const visibleLenses = lenses.filter((l) => l.show);
+  const activeLens = visibleLenses.some((l) => l.id === lens)
+    ? lens
+    : (visibleLenses[0]?.id ?? "sales");
 
   return (
     <div className="space-y-4">
+      {branchName ? (
+        <p className="text-[0.75rem] text-[#5a6b7d]">
+          Operating branch ·{" "}
+          <span className="font-semibold text-[#0b1f33]">{branchName}</span>
+        </p>
+      ) : null}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap gap-1.5">
           {lenses
@@ -150,7 +171,7 @@ export function HomeDashboard() {
                 onClick={() => setLens(l.id)}
                 className={cn(
                   "rounded-full px-4 py-1.5 text-[0.8rem] font-semibold transition",
-                  lens === l.id
+                  activeLens === l.id
                     ? "bg-[#1a56db] text-white shadow-sm"
                     : "bg-white text-[#5a6b7d] ring-1 ring-[#e4e9f0] hover:text-[#0b1f33]",
                 )}
@@ -163,9 +184,11 @@ export function HomeDashboard() {
           <Button asChild size="sm" variant="ghost">
             <Link href="/counter">Open counter</Link>
           </Button>
-          <Button asChild size="sm" variant="ghost">
-            <Link href="/transfers">Stock transfer</Link>
-          </Button>
+          {showInventory ? (
+            <Button asChild size="sm" variant="ghost">
+              <Link href="/transfers">Stock transfer</Link>
+            </Button>
+          ) : null}
           <Button asChild size="sm">
             <Link href="/catalog/new">
               <Plus className="size-3.5" />
@@ -186,11 +209,13 @@ export function HomeDashboard() {
           value={String(productCount)}
           hint="Active definitions"
         />
-        <Kpi
-          label="In stock SKUs"
-          value={String(inStock)}
-          hint={`${stockRows} stock rows`}
-        />
+        {showInventory ? (
+          <Kpi
+            label="In stock SKUs"
+            value={String(inStock)}
+            hint={`${stockRows} stock rows`}
+          />
+        ) : null}
         <Kpi
           label="Payments"
           value={String(payMethods.length)}
@@ -202,7 +227,7 @@ export function HomeDashboard() {
         />
       </div>
 
-      {lens === "sales" ? (
+      {activeLens === "sales" ? (
         <section className="rounded-xl border border-[#e4e9f0] bg-white p-4 shadow-[0_1px_2px_rgba(11,31,51,0.04)] sm:p-5">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
@@ -349,7 +374,7 @@ export function HomeDashboard() {
         </section>
       ) : null}
 
-      {lens === "inventory" ? (
+      {activeLens === "inventory" ? (
         <section className="rounded-xl border border-[#e4e9f0] bg-white p-4 sm:p-5">
           <div className="flex items-center gap-2">
             <Package className="h-4 w-4 text-[#1a56db]" />
@@ -370,7 +395,7 @@ export function HomeDashboard() {
         </section>
       ) : null}
 
-      {lens === "purchase" ? (
+      {activeLens === "purchase" ? (
         <section className="rounded-xl border border-[#e4e9f0] bg-white p-4 sm:p-5">
           <div className="flex items-center gap-2">
             <Truck className="h-4 w-4 text-[#1a56db]" />

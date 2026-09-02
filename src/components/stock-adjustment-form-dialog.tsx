@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FieldError } from "@/components/ui/form";
 import { catalogApi, posApi, type StockAdjustment } from "@/lib/api";
+import { createStockAdjustment } from "@/lib/api/stock-adjustments";
 import { ApiError } from "@/lib/api/client";
 import { formatQtyWithUnit } from "@/lib/sell-units";
 import { cn } from "@/lib/utils";
@@ -65,7 +66,7 @@ type Props = {
   locations: Array<{ id: string; name: string }>;
   defaultLocationId?: string;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: () => void | Promise<void>;
 };
 
 export function StockAdjustmentFormDialog({
@@ -195,7 +196,7 @@ export function StockAdjustmentFormDialog({
       };
       return initialData
         ? posApi.updateStockAdjustment(initialData.id, payload)
-        : posApi.createStockAdjustment(payload);
+        : createStockAdjustment(payload);
     },
     onSuccess: (res, asStatus) => {
       toast.success(
@@ -204,8 +205,7 @@ export function StockAdjustmentFormDialog({
           : `Adjustment ${res.adjustmentNo || ""} saved as draft`,
       );
       setConfirmModalOpen(false);
-      onSaved();
-      onClose();
+      void Promise.resolve(onSaved()).finally(() => onClose());
     },
     onError: (e) =>
       toast.error(e instanceof ApiError ? e.messages.join(", ") : "Failed to save adjustment"),

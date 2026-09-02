@@ -4,6 +4,11 @@ import { useEffect, useMemo, useRef, useState, type ComponentType, Suspense } fr
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import {
+  fiscalMonthNameSchema,
+  FISCAL_YEAR_OPTIONS,
+  fiscalYearSettingsPatch,
+} from "@/lib/fiscal-year";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -38,25 +43,15 @@ import { ApiError } from "@/lib/api/client";
 import { useAuthStore } from "@/lib/auth-store";
 import { applyPortalResponse } from "@/lib/auth-portal";
 import { defaultHomeForRoles } from "@/lib/roles";
+import { GETTING_STARTED_PATH } from "@/lib/setup-return";
 import { TotpChallengeForm, is2faChallenge } from "@/components/totp-challenge-form";
 import { cn } from "@/lib/utils";
-import { phoneSchema } from "@/lib/validations";
+import { clearLoginFormPersistence } from "@/lib/auth-form";
 import { geoStates, isKnownGeoState, splitE164 } from "@/lib/geo";
+import { phoneHasLocalDigits, validatePhoneForCountry } from "@/lib/phone";
 import { CountryStateFields } from "@/components/country-state-fields";
 import { PhoneCountryInput } from "@/components/phone-country-input";
-import { citiesForState } from "@/lib/india-locations";
-
-function isValidNationalPhone(e164: string, countryCode: string): boolean {
-  const raw = e164.trim();
-  if (!raw) return true;
-  const { dial, local } = splitE164(raw, countryCode);
-  if (!local) return true;
-  if (dial === "+91") return /^[6-9]\d{9}$/.test(local);
-  if (dial === "+1") return /^\d{10}$/.test(local);
-  if (dial === "+971") return /^\d{8,9}$/.test(local);
-  const digits = raw.replace(/\D/g, "");
-  return digits.length >= 8 && digits.length <= 15;
-}
+import { citiesForState, isPostalValidForIndianCity } from "@/lib/india-locations";
 
 function isValidPostal(countryCode: string, postal: string): boolean {
   const p = postal.trim();
@@ -80,7 +75,7 @@ const createOrgSchema = z
     phone: z
       .string()
       .trim()
-      .min(1, "Phone is required")
+      .min(1, "Please enter your phone number")
       .max(22, "Phone is too long"),
     addressLine1: z
       .string()
@@ -102,14 +97,12 @@ const createOrgSchema = z
     currencyCode: z.enum(["INR", "USD", "EUR", "GBP", "AED"], {
       errorMap: () => ({ message: "Select a currency" }),
     }),
-    fiscalYearStart: z.enum(["January", "April", "July", "October"], {
-      errorMap: () => ({ message: "Select when the fiscal year starts" }),
-    }),
+    fiscalYearStart: fiscalMonthNameSchema,
     inventoryStartDate: z
       .string()
       .min(1, "Inventory start date is required")
       .refine((v) => !Number.isNaN(Date.parse(v)), "Enter a valid date"),
-    taxId: z.string().trim().max(20, "Tax ID is too long"),
+    taxId: z.string().trim().max(15, "GSTIN / Tax ID cannot exceed 15 characters"),
     storeName: z
       .string()
       .trim()
@@ -170,30 +163,12 @@ const createOrgSchema = z
         message: "Enter your business type (at least 2 characters)",
       });
     }
-    if (!v.phone.trim()) {
+    if (v.phone.trim() && !validatePhoneForCountry(v.phone, v.countryCode)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["phone"],
-        message: "Phone is required",
+        message: "Enter a valid phone number for the selected country",
       });
-    } else if (!isValidNationalPhone(v.phone, v.countryCode)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["phone"],
-        message:
-          v.countryCode === "IN" || v.phone.startsWith("+91")
-            ? "Enter a valid 10-digit Indian mobile (starts with 6–9)"
-            : "Enter a valid phone number for the selected country",
-      });
-    } else {
-      const parsed = phoneSchema.safeParse(v.phone);
-      if (!parsed.success) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["phone"],
-          message: parsed.error.issues[0]?.message ?? "Enter a valid phone",
-        });
-      }
     }
     if (!isKnownGeoState(v.countryCode, v.state) && geoStates(v.countryCode).length) {
       ctx.addIssue({
@@ -219,6 +194,15 @@ const createOrgSchema = z
             ? "PIN code must be exactly 6 digits"
             : "Enter a valid postal code for the selected country",
       });
+    } else if (v.countryCode === "IN" && v.city.trim()) {
+      const pinCity = isPostalValidForIndianCity(v.city, v.postalCode);
+      if (!pinCity.ok) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["postalCode"],
+          message: pinCity.message ?? "PIN code does not match the selected city",
+        });
+      }
     }
     if (
       v.countryCode === "IN" &&
@@ -228,7 +212,7 @@ const createOrgSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["taxId"],
-        message: "GSTIN must be 15 characters (letters/numbers)",
+        message: "GSTIN must be exactly 15 characters (letters/numbers)",
       });
     }
     const start = Date.parse(v.inventoryStartDate);
@@ -299,8 +283,8 @@ const BUSINESS_TYPES: Array<{
   },
   {
     id: "rental",
-    label: "Rental",
-    detail: "Issue / return with deposits — not a permanent sale",
+    label: "Clothes / gear rental",
+    detail: "Rent outfits with deposits — also sell accessories live at the counter",
     Icon: Package,
   },
   {
@@ -399,6 +383,8 @@ function OrganizationsPageInner() {
   const [hydrated, setHydrated] = useState(false);
   /** Drop leftover shop JWT only once when opening the identity org picker */
   const clearedStaleShopRef = useRef(false);
+  /** Set before applyPortalResponse so the session effect does not steal /dashboard */
+  const pendingHomeRef = useRef<string | null>(null);
   const [orgs, setOrgs] = useState<
     NonNullable<PortalSessionResponse["organizations"]>
   >([]);
@@ -409,6 +395,11 @@ function OrganizationsPageInner() {
   useEffect(() => {
     if (openCreate) setShowCreate(true);
   }, [openCreate]);
+
+  useEffect(() => {
+    if (!showCreate) return;
+    router.prefetch(GETTING_STARTED_PATH);
+  }, [showCreate, router]);
   const [entering, setEntering] = useState<string | null>(null);
   const [totpToken, setTotpToken] = useState<string | null>(null);
   const [showCustomFields, setShowCustomFields] = useState(false);
@@ -417,7 +408,7 @@ function OrganizationsPageInner() {
 
   const form = useForm<CreateForm>({
     resolver: zodResolver(createOrgSchema),
-    mode: "onChange",
+    mode: "onTouched",
     reValidateMode: "onChange",
     defaultValues: {
       businessType: "",
@@ -464,10 +455,14 @@ function OrganizationsPageInner() {
 
   useEffect(() => {
     if (!hydrated) return;
+    // Prefill only — do not validate the whole form (empty phone would flash "required").
     if (identity?.phone) {
-      form.setValue("phone", identity.phone);
+      form.setValue("phone", identity.phone, { shouldValidate: false });
     }
-  }, [hydrated, identity?.phone, form]);
+    if (identity?.email) {
+      form.setValue("email", identity.email, { shouldValidate: false });
+    }
+  }, [hydrated, identity?.phone, identity?.email, form]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -505,7 +500,12 @@ function OrganizationsPageInner() {
     // Just opened / created a shop — go to app (keep identityToken for Switch org)
     if (accessToken && user) {
       clearedStaleShopRef.current = true;
-      router.replace(defaultHomeForRoles(user.roles, user.permissions));
+      setLoading(false);
+      const dest =
+        pendingHomeRef.current ??
+        defaultHomeForRoles(user.roles, user.permissions);
+      pendingHomeRef.current = null;
+      router.replace(dest);
       return;
     }
 
@@ -545,22 +545,35 @@ function OrganizationsPageInner() {
     }
   }
 
-  async function enterApp(data: PortalSessionResponse) {
+  function warmBootstrap() {
+    void qc.prefetchQuery({
+      queryKey: ["tenant-bootstrap"],
+      queryFn: () => appsApi.bootstrap(),
+      staleTime: 5 * 60_000,
+    });
+  }
+
+  async function enterApp(
+    data: PortalSessionResponse,
+    homeOverride?: string,
+  ) {
+    const home =
+      homeOverride ??
+      defaultHomeForRoles(data.user?.roles, data.user?.permissions);
+    // Set before applyPortalResponse — zustand update retriggers the session effect.
+    pendingHomeRef.current = home;
     const dest = applyPortalResponse(data);
     if (dest === "app") {
       clearedStaleShopRef.current = true;
-      qc.clear();
-      try {
-        const boot = await appsApi.bootstrap();
-        qc.setQueryData(["tenant-bootstrap"], boot);
-      } catch {
-        /* AppShell retries */
-      }
+      setLoading(false);
+      setCreating(false);
       toast.success("Welcome to your shop");
-      const u = useAuthStore.getState().user;
-      router.replace(defaultHomeForRoles(u?.roles, u?.permissions));
+      // Prefetch then navigate — never qc.clear() first (that caused Loading shop…)
+      warmBootstrap();
+      router.replace(home);
       return;
     }
+    pendingHomeRef.current = null;
     toast.message("Select an organization to continue");
   }
 
@@ -611,6 +624,7 @@ function OrganizationsPageInner() {
           timezone: next.timezone || "Asia/Kolkata",
           taxId: next.taxId?.trim() || undefined,
           settings: {
+            ...fiscalYearSettingsPatch(next.fiscalYearStart),
             organizationProfile: {
               phone: next.phone?.trim() || null,
               email: next.email?.trim() || null,
@@ -674,13 +688,11 @@ function OrganizationsPageInner() {
           taxId: values.taxId?.trim() || undefined,
           storeName: values.storeName?.trim() || undefined,
         });
-        applyPortalResponse(data);
-        try {
-          await persistOrgProfile(values);
-        } catch {
+        // Enter Getting Started immediately — extras save in the background.
+        await enterApp(data, GETTING_STARTED_PATH);
+        void persistOrgProfile(values).catch(() => {
           /* extras optional until API is upgraded */
-        }
-        await enterApp(data);
+        });
         return;
       }
 
@@ -697,16 +709,10 @@ function OrganizationsPageInner() {
         businessLabel: values.businessLabel?.trim() || undefined,
       });
 
-      try {
-        const boot = await appsApi.bootstrap();
-        qc.setQueryData(["tenant-bootstrap"], boot);
-      } catch {
-        /* AppShell retries */
-      }
-
       toast.success("Organization profile saved");
-      const u = useAuthStore.getState().user;
-      router.replace(defaultHomeForRoles(u?.roles, u?.permissions));
+      pendingHomeRef.current = GETTING_STARTED_PATH;
+      warmBootstrap();
+      router.replace(GETTING_STARTED_PATH);
     } catch (e) {
       toast.error(
         e instanceof ApiError
@@ -744,8 +750,9 @@ function OrganizationsPageInner() {
   ) : null;
 
   function signOut() {
+    clearLoginFormPersistence();
     clear();
-    router.replace("/login");
+    router.replace("/login?signedOut=1");
   }
 
   /** Zoho-style: left “what you get” · right organization form */
@@ -1018,15 +1025,36 @@ function OrganizationsPageInner() {
                   </div>
                   <div>
                     <PhoneCountryInput
-                      label="Phone *"
+                      label="Phone"
                       required
+                      liveValidate={false}
+                      autoComplete="off"
+                      fallbackCountry={form.watch("countryCode") || "IN"}
                       value={form.watch("phone") ?? ""}
-                      onChange={(v) =>
-                        form.setValue("phone", v, { shouldValidate: true })
+                      error={
+                        form.formState.touchedFields.phone ||
+                        form.formState.isSubmitted
+                          ? form.formState.errors.phone?.message
+                          : undefined
                       }
-                    />
-                    <FieldError
-                      message={form.formState.errors.phone?.message}
+                      onChange={(v) => {
+                        const hasLocal = phoneHasLocalDigits(
+                          v,
+                          form.getValues("countryCode") || "IN",
+                        );
+                        const submitted = form.formState.isSubmitted;
+                        form.setValue("phone", v, {
+                          shouldDirty: true,
+                          shouldTouch: hasLocal || submitted,
+                          shouldValidate:
+                            submitted ||
+                            (hasLocal &&
+                              Boolean(form.formState.touchedFields.phone)),
+                        });
+                        if (!hasLocal && !submitted) {
+                          form.clearErrors("phone");
+                        }
+                      }}
                     />
                   </div>
                   <div>
@@ -1044,6 +1072,11 @@ function OrganizationsPageInner() {
                     <FieldError
                       message={form.formState.errors.email?.message}
                     />
+                    {identity?.email ? (
+                      <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+                        Pre-filled from your signed-in account
+                      </p>
+                    ) : null}
                   </div>
                   <div className="sm:col-span-2">
                     <Label>Website</Label>
@@ -1163,11 +1196,26 @@ function OrganizationsPageInner() {
                         "mt-1",
                         form.formState.errors.postalCode && fieldErr,
                       )}
-                      placeholder="PIN / ZIP"
-                      inputMode="numeric"
-                      maxLength={12}
+                      placeholder={
+                        selectedCountry === "IN"
+                          ? "6-digit PIN for city"
+                          : "Postal code"
+                      }
+                      inputMode={selectedCountry === "IN" ? "numeric" : "text"}
+                      maxLength={selectedCountry === "IN" ? 6 : 12}
                       aria-invalid={Boolean(form.formState.errors.postalCode)}
-                      {...form.register("postalCode")}
+                      {...form.register("postalCode", {
+                        onChange: (e) => {
+                          if (selectedCountry === "IN") {
+                            const digits = e.target.value
+                              .replace(/\D/g, "")
+                              .slice(0, 6);
+                            form.setValue("postalCode", digits, {
+                              shouldValidate: true,
+                            });
+                          }
+                        },
+                      })}
                     />
                     <FieldError
                       message={form.formState.errors.postalCode?.message}
@@ -1181,12 +1229,26 @@ function OrganizationsPageInner() {
                         form.formState.errors.taxId && fieldErr,
                       )}
                       placeholder="29AABCU9603R1ZM"
+                      maxLength={15}
                       aria-invalid={Boolean(form.formState.errors.taxId)}
-                      {...form.register("taxId")}
+                      {...form.register("taxId", {
+                        onChange: (e) => {
+                          const next = e.target.value
+                            .replace(/[^a-zA-Z0-9]/g, "")
+                            .toUpperCase()
+                            .slice(0, 15);
+                          form.setValue("taxId", next, {
+                            shouldValidate: true,
+                          });
+                        },
+                      })}
                     />
                     <FieldError
                       message={form.formState.errors.taxId?.message}
                     />
+                    <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+                      India GSTIN: exactly 15 characters
+                    </p>
                   </div>
                   <div>
                     <Label>PAN</Label>
@@ -1304,9 +1366,9 @@ function OrganizationsPageInner() {
                       )}
                       {...form.register("fiscalYearStart")}
                     >
-                      {["January", "April", "July", "October"].map((m) => (
-                        <option key={m} value={m}>
-                          {m}
+                      {FISCAL_YEAR_OPTIONS.map((o) => (
+                        <option key={o.id} value={o.id}>
+                          {o.label}
                         </option>
                       ))}
                     </Select>

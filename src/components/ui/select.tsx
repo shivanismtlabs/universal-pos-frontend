@@ -3,6 +3,7 @@
 import * as React from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown, Search } from "lucide-react";
+import { CountryFlag } from "@/components/country-flag";
 import { cn } from "@/lib/utils";
 
 export type SelectOption = {
@@ -10,6 +11,10 @@ export type SelectOption = {
   label: string;
   disabled?: boolean;
   group?: string;
+  /** ISO 3166-1 alpha-2 — renders a flag in the trigger and list. */
+  flag?: string;
+  /** Compact trigger text (e.g. `+91` while the list shows `+91 India`). */
+  shortLabel?: string;
 };
 
 export type SelectProps = React.SelectHTMLAttributes<HTMLSelectElement> & {
@@ -17,6 +22,8 @@ export type SelectProps = React.SelectHTMLAttributes<HTMLSelectElement> & {
   wrapperClassName?: string;
   /** Set false to keep a native list (e.g. `multiple`). Default: searchable. */
   searchable?: boolean;
+  /** Minimum dropdown panel width in px (country lists need more than the trigger). */
+  panelMinWidth?: number;
 };
 
 function optionLabel(children: React.ReactNode): string {
@@ -47,6 +54,8 @@ export function parseSelectOptions(
       value?: string | number | readonly string[];
       disabled?: boolean;
       label?: string;
+      "data-flag"?: string;
+      "data-short-label"?: string;
     };
     if (type === React.Fragment) {
       out.push(...parseSelectOptions(props.children, group));
@@ -59,11 +68,15 @@ export function parseSelectOptions(
     if (type === "option") {
       const value =
         props.value != null ? String(props.value) : optionLabel(props.children);
+      const flag = props["data-flag"]?.trim();
+      const shortLabel = props["data-short-label"]?.trim();
       out.push({
         value,
         label: optionLabel(props.children) || value,
         disabled: Boolean(props.disabled),
         group,
+        ...(flag ? { flag } : {}),
+        ...(shortLabel ? { shortLabel } : {}),
       });
     }
   });
@@ -78,7 +91,8 @@ export function filterSelectOptions(
   const q = query.trim().toLowerCase();
   if (!q) return options;
   return options.filter((o) => {
-    const hay = `${o.label} ${o.value} ${o.group ?? ""}`.toLowerCase();
+    const hay =
+      `${o.label} ${o.value} ${o.group ?? ""} ${o.shortLabel ?? ""} ${o.flag ?? ""}`.toLowerCase();
     return hay.includes(q);
   });
 }
@@ -139,6 +153,7 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
       wrapperClassName,
       children,
       searchable = true,
+      panelMinWidth,
       multiple,
       size,
       disabled,
@@ -192,6 +207,7 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
         name={name}
         id={id}
         required={required}
+        panelMinWidth={panelMinWidth}
         {...props}
       >
         {children}
@@ -216,6 +232,7 @@ const SearchableSelect = React.forwardRef<HTMLSelectElement, SelectProps>(
       id,
       required,
       autoFocus,
+      panelMinWidth,
       "aria-label": ariaLabel,
       ...props
     },
@@ -271,7 +288,7 @@ const SearchableSelect = React.forwardRef<HTMLSelectElement, SelectProps>(
     );
 
     const selected = options.find((o) => o.value === current);
-    const selectedLabel = selected?.label ?? "";
+    const selectedLabel = selected?.shortLabel || selected?.label || "";
     const isEmpty = current === "";
 
     const placePanel = React.useCallback(() => {
@@ -283,7 +300,7 @@ const SearchableSelect = React.forwardRef<HTMLSelectElement, SelectProps>(
       const spaceBelow = window.innerHeight - r.bottom - gap;
       const spaceAbove = r.top - gap;
       const openUp = spaceBelow < 200 && spaceAbove > spaceBelow;
-      const width = Math.max(r.width, 180);
+      const width = Math.max(r.width, panelMinWidth ?? 180);
       const left = Math.min(
         Math.max(8, r.left),
         window.innerWidth - width - 8,
@@ -304,7 +321,7 @@ const SearchableSelect = React.forwardRef<HTMLSelectElement, SelectProps>(
               maxHeight: Math.min(maxH, Math.max(160, spaceBelow)),
             }),
       });
-    }, []);
+    }, [panelMinWidth]);
 
     React.useEffect(() => {
       if (!open) return;
@@ -470,11 +487,16 @@ const SearchableSelect = React.forwardRef<HTMLSelectElement, SelectProps>(
         >
           <span
             className={cn(
-              "min-w-0 flex-1 truncate",
+              "flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden",
               isEmpty || !selectedLabel ? "text-[#94a3b8]" : "text-[#0b1f33]",
             )}
           >
-            {selectedLabel || "Select"}
+            {selected?.flag ? (
+              <CountryFlag code={selected.flag} title={selected.label} />
+            ) : null}
+            <span className="min-w-0 truncate">
+              {selectedLabel || "Select"}
+            </span>
           </span>
           <ChevronDown
             aria-hidden
@@ -549,6 +571,12 @@ const SearchableSelect = React.forwardRef<HTMLSelectElement, SelectProps>(
                                   if (!opt.disabled) commit(opt.value);
                                 }}
                               >
+                                {opt.flag ? (
+                                  <CountryFlag
+                                    code={opt.flag}
+                                    title={opt.label}
+                                  />
+                                ) : null}
                                 <span className="min-w-0 flex-1 truncate text-[#0b1f33]">
                                   {opt.label}
                                 </span>
