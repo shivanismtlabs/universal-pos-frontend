@@ -216,7 +216,11 @@ export function ServiceDashboard({ embed = false }: { embed?: boolean }) {
   }
 
   return (
-    <div className={cn(embed ? "flex min-h-0 flex-col" : "space-y-4")}>
+    <div
+      className={cn(
+        embed ? "flex min-h-0 flex-1 flex-col overflow-hidden" : "space-y-4",
+      )}
+    >
       {!embed ? (
         <header className="flex flex-wrap items-end justify-between gap-3 px-1">
           <div>
@@ -239,7 +243,7 @@ export function ServiceDashboard({ embed = false }: { embed?: boolean }) {
       <div
         className={cn(
           "flex flex-wrap items-center justify-between gap-2 border-b border-[#eef1f4]",
-          embed ? "px-4 py-2" : "",
+          embed ? "shrink-0 px-4 py-2" : "",
         )}
       >
         {embed ? (
@@ -281,12 +285,14 @@ export function ServiceDashboard({ embed = false }: { embed?: boolean }) {
       {tab === "charge" ? (
         <div
           className={cn(
-            "grid min-h-0 gap-0 lg:grid-cols-[minmax(0,1fr)_22rem]",
-            embed && "lg:min-h-[calc(100dvh-11rem)]",
+            "grid min-h-0 gap-0 lg:grid-cols-[minmax(0,1fr)_minmax(300px,380px)] lg:grid-rows-[minmax(0,1fr)]",
+            embed
+              ? "min-w-0 flex-1 overflow-hidden"
+              : "lg:min-h-[calc(100dvh-11rem)]",
           )}
         >
-          <section className="flex min-h-0 flex-col bg-[#f4f6fa] p-3 sm:p-4">
-            <div className="flex flex-wrap items-center gap-2">
+          <section className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-[#f4f6fa] p-3 sm:p-4">
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
               <div className="relative min-w-[12rem] flex-1 sm:max-w-sm">
                 <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-[#8a9bb0]" />
                 <Input
@@ -331,7 +337,7 @@ export function ServiceDashboard({ embed = false }: { embed?: boolean }) {
               ) : null}
             </div>
 
-            <div className="mt-3 min-h-0 flex-1 overflow-y-auto">
+            <div className="mt-3 min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain [scrollbar-width:thin]">
               {services.isLoading ? (
                 <p className="py-12 text-center text-sm text-[#5a6b7d]">
                   Loading services…
@@ -395,14 +401,14 @@ export function ServiceDashboard({ embed = false }: { embed?: boolean }) {
             </div>
           </section>
 
-          <aside className="flex min-h-0 flex-col border-t border-[#e8edf3] bg-white lg:border-t-0 lg:border-l">
-            <div className="border-b border-[#eef1f4] px-4 py-3">
+          <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden border-t border-[#e8edf3] bg-white lg:border-t-0 lg:border-l">
+            <div className="shrink-0 border-b border-[#eef1f4] px-4 py-3">
               <h2 className="text-sm font-semibold text-[#0b1f33]">Ticket</h2>
               <p className="text-[0.75rem] text-[#8b9bb0]">
                 Walk-in or booked customer
               </p>
             </div>
-            <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-4 [scrollbar-width:thin]">
               {selected ? (
                 <div className="rounded-lg border border-[#e8edf4] bg-[#f8fafc] px-3 py-3">
                   <p className="text-sm font-semibold text-[#0b1f33]">
@@ -477,7 +483,8 @@ export function ServiceDashboard({ embed = false }: { embed?: boolean }) {
                   </p>
                 </div>
               </div>
-
+            </div>
+            <div className="shrink-0 space-y-4 border-t border-[#eef1f4] bg-[#fafbfc] p-4">
               <div>
                 <Label>Payment</Label>
                 <div className="mt-1.5 grid grid-cols-3 gap-1 rounded-md border border-[#e2e8f0] bg-[#f1f5f9] p-0.5">
@@ -506,7 +513,7 @@ export function ServiceDashboard({ embed = false }: { embed?: boolean }) {
               </div>
 
               {selected ? (
-                <div className="space-y-1.5 border-t border-[#eef1f4] pt-3 text-sm">
+                <div className="space-y-1.5 text-sm">
                   <div className="flex justify-between text-[#5a6b7d]">
                     <span>Subtotal</span>
                     <span className="tabular-nums text-[#0b1f33]">
@@ -531,8 +538,7 @@ export function ServiceDashboard({ embed = false }: { embed?: boolean }) {
                   </div>
                 </div>
               ) : null}
-            </div>
-            <div className="border-t border-[#eef1f4] p-4">
+
               <Button
                 type="button"
                 className="h-11 w-full text-sm font-semibold"
@@ -551,7 +557,14 @@ export function ServiceDashboard({ embed = false }: { embed?: boolean }) {
       ) : null}
 
       {tab === "catalog" ? (
-        <div className={cn("grid gap-4 p-4 lg:grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)]")}>
+        <div
+          className={cn(
+            "grid gap-4 lg:grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)]",
+            embed
+              ? "min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 [scrollbar-width:thin]"
+              : "p-4",
+          )}
+        >
           {canWrite ? (
             <section className="rounded-[14px] border border-[#d9e0ea] bg-white p-4">
               <h2 className="text-[0.9375rem] font-semibold text-[#0b1f33]">

@@ -1609,6 +1609,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         "flex h-dvh overflow-hidden text-[#0b1f33]",
         wide ? "bg-white" : "bg-[#eef1f5]",
       )}
+      {...(isCounter ? { "data-pos-counter": "" } : {})}
     >
       {pinLocked && stationToken ? (
         <StationPinLock open locationId={acting?.storeId} />
@@ -1752,41 +1753,32 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <main
           className={cn(
-            "min-h-0 flex-1 overscroll-contain",
-            isCounter ? "overflow-hidden" : "overflow-y-auto",
+            "flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain",
             wide ? "bg-white" : "bg-[#eef1f5]",
             "[scrollbar-gutter:stable]",
             "print:overflow-visible print:bg-white print:h-auto print:max-h-none",
           )}
         >
-          <div className="print:hidden">
+          <div className="print:hidden shrink-0">
             <OfflineStatusBanner />
           </div>
           <div
             className={cn(
               "document-print-root",
               isCounter
-                ? "flex min-h-0 flex-1 flex-col px-2 py-2 sm:px-3 lg:px-4"
+                ? "px-2 py-1 sm:px-3 lg:px-4"
                 : "px-4 py-5 sm:px-6 sm:py-6 lg:px-8",
               "print:max-w-none print:px-0 print:py-0",
               wide && !isCounter ? "max-w-none" : "",
               !wide ? "mx-auto w-full max-w-[72rem]" : "",
             )}
           >
-            <div className="print:hidden">
+            <div className={cn("print:hidden", isCounter && "shrink-0")}>
               <Suspense fallback={null}>
                 <SetupReturnBanner />
               </Suspense>
             </div>
-            {canAccessPath(pathname, roles, permissions) ? (
-              isCounter ? (
-                <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-                  {children}
-                </div>
-              ) : (
-                children
-              )
-            ) : null}
+            {canAccessPath(pathname, roles, permissions) ? children : null}
           </div>
         </main>
       </div>
