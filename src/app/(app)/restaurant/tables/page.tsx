@@ -319,12 +319,15 @@ export default function RestaurantTablesPage() {
     enabled: Boolean(activeOrderId),
   });
 
-  const refreshFloor = () => {
-    void qc.invalidateQueries({ queryKey: ["restaurant-floors"] });
-    void qc.invalidateQueries({ queryKey: ["restaurant-tables"] });
-    void qc.invalidateQueries({ queryKey: ["dining-reservations"] });
-    void qc.refetchQueries({ queryKey: ["restaurant-tables"] });
-    void qc.refetchQueries({ queryKey: ["dining-reservations"] });
+  const refreshFloor = async () => {
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: ["restaurant-floors"] }),
+      qc.invalidateQueries({ queryKey: ["restaurant-tables"] }),
+      qc.invalidateQueries({ queryKey: ["dining-reservations"] }),
+      qc.refetchQueries({ queryKey: ["restaurant-floors"] }),
+      qc.refetchQueries({ queryKey: ["restaurant-tables"] }),
+      qc.refetchQueries({ queryKey: ["dining-reservations"] }),
+    ]);
   };
 
   const allTables = tables.data ?? [];
@@ -1227,7 +1230,7 @@ function FloorModal({
   categories: Array<{ id: string; name: string; productCount: number }>;
   locationId: string;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (floorId?: string) => void;
 }) {
   const [name, setName] = useState(floor?.name ?? "Main floor");
   const [categoryIds, setCategoryIds] = useState<string[]>(
@@ -1372,7 +1375,7 @@ function TableModal({
   locationId: string;
   defaultFloorId?: string;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (targetFloorId?: string) => void;
 }) {
   const [name, setName] = useState(table?.name ?? "");
   const [capacity, setCapacity] = useState(String(table?.capacity ?? 4));
