@@ -134,12 +134,11 @@ export default function PosWorkstation() {
     queryFn: () => posApi.rentalFloor(locationId || undefined),
   });
 
-  /** Service catalog items (no units) — also fetched when floor API omits services */
+  /** Catalog items & services (no stock units) — also fetched when floor API omits services */
   const serviceCatalog = useQuery({
     queryKey: ["catalog-services-for-rental"],
     queryFn: () =>
       catalogApi.listProducts({
-        kind: "service",
         status: "active",
         availableInPos: true,
         limit: 80,
@@ -291,6 +290,7 @@ export default function PosWorkstation() {
       title: string;
       sku: string;
       rentalPrice: string | number;
+      kind?: string;
       category?: { id: string; name: string } | null;
       image?: string | null;
       photoUrl?: string | null;
@@ -301,6 +301,7 @@ export default function PosWorkstation() {
       title: s.title,
       sku: s.sku,
       rentalPrice: s.rentalPrice,
+      kind: s.kind,
       category: s.category,
       image: s.image,
       photoUrl: s.photoUrl,
@@ -311,6 +312,7 @@ export default function PosWorkstation() {
       title: p.name,
       sku: p.skuCode,
       rentalPrice: p.basePrice,
+      kind: p.kind,
       category: p.category
         ? { id: p.category.id, name: p.category.name }
         : null,
@@ -1028,7 +1030,7 @@ export default function PosWorkstation() {
                   <p className="truncate text-sm font-semibold text-[#0b1f33]">
                     {s.title}
                     <span className="ml-1.5 rounded bg-[#fff7ed] px-1.5 py-0.5 text-[0.6rem] font-semibold text-[#c2410c]">
-                      Service
+                      {s.kind === "service" ? "Service" : "Item"}
                     </span>
                   </p>
                   <p className="font-mono text-[0.65rem] text-[#8b9bb0]">
