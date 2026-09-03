@@ -34,13 +34,33 @@ export function BillTotalsLines({
 }) {
   const row = rowClassName;
   const showDiscount = showZeroDiscount || discount > 0;
+  const hasProdDiscount = summary.hasProductDiscount || (summary.productDiscountTotal > 0);
 
   return (
     <>
-      <div className={row}>
-        <span>Total</span>
-        <span className="tabular-nums">{formatMoney(summary.itemsSubtotal)}</span>
-      </div>
+      {hasProdDiscount ? (
+        <>
+          <div className={row}>
+            <span className="text-[#64748b]">Total MRP</span>
+            <span className="tabular-nums text-[#64748b]">{formatMoney(summary.grossMrp)}</span>
+          </div>
+          <div className={row}>
+            <span className="text-emerald-700 font-medium">Product discount</span>
+            <span className="tabular-nums font-medium text-emerald-700">
+              −{formatMoney(summary.productDiscountTotal)}
+            </span>
+          </div>
+          <div className={row}>
+            <span className="font-semibold">Subtotal (Net)</span>
+            <span className="tabular-nums font-semibold">{formatMoney(summary.productNet)}</span>
+          </div>
+        </>
+      ) : (
+        <div className={row}>
+          <span>Total</span>
+          <span className="tabular-nums">{formatMoney(summary.itemsSubtotal)}</span>
+        </div>
+      )}
       {summary.fees.map((f) => {
         const amt = Number(f.amount);
         return (

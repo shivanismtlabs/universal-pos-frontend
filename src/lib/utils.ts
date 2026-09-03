@@ -16,18 +16,24 @@ export function formatMoney(
   locale = "en-IN",
 ) {
   const n = typeof amount === "string" ? Number(amount) : (amount ?? 0);
+  const val = Number.isFinite(n) ? n : 0;
+  const isSmallFraction = Math.abs(val) > 0 && Math.abs(val) < 1;
+  const maxDigits = isSmallFraction ? 4 : 2;
+  const minDigits = isSmallFraction ? 2 : 2;
   try {
     return new Intl.NumberFormat(locale, {
       style: "currency",
       currency: currencyCode || "INR",
-      maximumFractionDigits: 2,
-    }).format(Number.isFinite(n) ? n : 0);
+      minimumFractionDigits: minDigits,
+      maximumFractionDigits: maxDigits,
+    }).format(val);
   } catch {
     return new Intl.NumberFormat("en-IN", {
       style: "currency",
       currency: "INR",
-      maximumFractionDigits: 2,
-    }).format(Number.isFinite(n) ? n : 0);
+      minimumFractionDigits: minDigits,
+      maximumFractionDigits: maxDigits,
+    }).format(val);
   }
 }
 

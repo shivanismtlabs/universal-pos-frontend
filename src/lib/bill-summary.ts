@@ -22,8 +22,18 @@ export type GstSlab = {
 };
 
 export type BillSummary = {
+  /** Gross MRP across all items (before product discounts) */
+  grossMrp: number;
+  /** Total product/SKU discounts */
+  productDiscountTotal: number;
+  /** Product Net (grossMrp - productDiscountTotal) */
+  productNet: number;
+  /** Items subtotal after product discount */
   itemsSubtotal: number;
+  /** Bill-level / Cashier discount (after product net) */
   discount: number;
+  /** Alias for bill discount */
+  billDiscount: number;
   loyaltyOff: number;
   /** Items − discount − points (before fees / tax add-on). */
   netAmount: number;
@@ -47,6 +57,7 @@ export type BillSummary = {
   amountDue: number;
   /** Alias: same as amountDue. */
   finalAmount: number;
+  hasProductDiscount: boolean;
 };
 
 /**
@@ -149,7 +160,10 @@ export function shouldApplyCashRoundOff(
 export function buildBillSummary(input: {
   itemsSubtotal: number;
   taxTotal: number;
+  grossMrp?: number;
+  productDiscountTotal?: number;
   discount?: number;
+  billDiscount?: number;
   loyaltyOff?: number;
   fees?: BillFeeRow[];
   taxInclusive?: boolean;
@@ -165,7 +179,10 @@ export function buildBillSummary(input: {
 }): BillSummary {
   const itemsSubtotal = Math.max(0, Number(input.itemsSubtotal) || 0);
   const taxTotal = Math.max(0, Math.round((Number(input.taxTotal) || 0) * 100) / 100);
-  const discount = Math.max(0, Number(input.discount) || 0);
+  const productDiscountTotal = Math.max(0, Number(input.productDiscountTotal) || 0);
+  const grossMrp = Math.max(itemsSubtotal, Number(input.grossMrp) || (itemsSubtotal + productDiscountTotal));
+  const productNet = itemsSubtotal;
+  const discount = Math.max(0, Number(input.discount ?? input.billDiscount) || 0);
   const loyaltyOff = Math.max(0, Number(input.loyaltyOff) || 0);
   const fees = input.fees ?? [];
   const feesTotal = fees.reduce((s, f) => s + moneyNumber(f.amount), 0);
@@ -209,8 +226,12 @@ export function buildBillSummary(input: {
   const taxSlabs = slabsToGstBreakup(rawSlabs);
 
   return {
+    grossMrp,
+    productDiscountTotal,
+    productNet,
     itemsSubtotal,
     discount,
+    billDiscount: discount,
     loyaltyOff,
     netAmount,
     fees,
@@ -227,6 +248,7 @@ export function buildBillSummary(input: {
     showRoundOff,
     amountDue,
     finalAmount: amountDue,
+    hasProductDiscount: productDiscountTotal > 0,
   };
 }
 
