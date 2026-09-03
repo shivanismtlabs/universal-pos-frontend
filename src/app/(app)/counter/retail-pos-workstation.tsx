@@ -944,10 +944,11 @@ export default function RetailPosWorkstation({
     const channelPrice = channelKey
       ? Number(row.channelPrices?.[channelKey])
       : NaN;
+    const r = row as Record<string, any>;
     const rawMrp =
-      (row as { mrp?: number | string }).mrp ??
-      (row.product as { mrp?: number | string })?.mrp ??
-      (row.meta as { mrp?: number | string })?.mrp ??
+      r.mrp ??
+      r.product?.mrp ??
+      r.meta?.mrp ??
       null;
     const mrp =
       rawMrp != null && Number(rawMrp) > 0 ? Number(rawMrp) : undefined;
@@ -2774,10 +2775,11 @@ export default function RetailPosWorkstation({
                             {row.name}
                           </p>
                           {(() => {
+                            const r = row as Record<string, any>;
                             const rawMrp =
-                              (row as { mrp?: number | string }).mrp ??
-                              (row.product as { mrp?: number | string })?.mrp ??
-                              (row.meta as { mrp?: number | string })?.mrp ??
+                              r.mrp ??
+                              r.product?.mrp ??
+                              r.meta?.mrp ??
                               null;
                             const mrpNum =
                               rawMrp != null && Number(rawMrp) > 0
@@ -3045,6 +3047,17 @@ export default function RetailPosWorkstation({
               const discPct = hasLineDiscount
                 ? Math.round(((1 - unitSellingPrice / lineMrp) * 100) * 10) / 10
                 : 0;
+              const rateChanged =
+                Math.abs(l.unitPrice - (l.listPrice ?? l.unitPrice)) > 0.005 &&
+                (l.listPrice ?? 0) > 0;
+              const ratePct =
+                rateChanged && (l.listPrice ?? 0) > 0
+                  ? Math.round(
+                      ((l.unitPrice - (l.listPrice ?? l.unitPrice)) /
+                        (l.listPrice ?? l.unitPrice)) *
+                        100,
+                    )
+                  : 0;
               const lineProductDiscount =
                 Math.round(
                   Math.max(0, lineMrp - unitSellingPrice) * l.qty * 100,
@@ -4265,7 +4278,16 @@ export default function RetailPosWorkstation({
         </ModalFrame>
       ) : null}
 
-      {payModal === "discount" ? (
+      {payModal === "discount" ? (() => {
+        const ticketBeforeDiscount =
+          billSummary.productNet > 0
+            ? billSummary.productNet
+            : billSummary.itemsSubtotal;
+        const discountNum = moneyNumber(discountAmount || 0);
+        const maxCashierDiscountPercent = 100;
+        const maxDiscountAmount = ticketBeforeDiscount;
+        const discountCapped = false;
+        return (
         <ModalFrame
           title="Discount"
           subtitle="Set a different discount on each product, and/or an amount off the whole bill."
@@ -4505,7 +4527,8 @@ export default function RetailPosWorkstation({
             </div>
           </div>
         </ModalFrame>
-      ) : null}
+        );
+      })() : null}
 
       {payModal === "draft" ? (
         <ModalFrame
