@@ -246,6 +246,8 @@ export type PortalSessionResponse = {
     slug: string;
     currencyCode: string;
     role?: string;
+    businessType?: string | null;
+    businessLabel?: string | null;
   }>;
   identityToken?: string | null;
   identityRefreshToken?: string | null;

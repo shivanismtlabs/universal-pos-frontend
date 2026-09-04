@@ -307,6 +307,23 @@ const BUSINESS_TYPES: Array<{
   },
 ];
 
+function formatStoreType(o: {
+  businessLabel?: string | null;
+  businessType?: string | null;
+}) {
+  if (o.businessLabel?.trim()) return o.businessLabel.trim();
+  if (o.businessType) {
+    const matched = BUSINESS_TYPES.find((b) => b.id === o.businessType);
+    if (matched && matched.id !== "other") return matched.label;
+    if (o.businessType === "general" || o.businessType === "other")
+      return "General POS";
+    return o.businessType
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+  return null;
+}
+
 /** Left rail — Zoho POS–style “what you get” (commerce-mode agnostic). */
 const PLATFORM_HIGHLIGHTS: Array<{
   title: string;
@@ -1462,34 +1479,38 @@ function OrganizationsPageInner() {
           <>
             {orgs.length ? (
               <ul className="space-y-3">
-                {orgs.map((o) => (
-                  <li key={o.tenantId}>
-                    <button
-                      type="button"
-                      disabled={!!entering}
-                      onClick={() => void onSelect(o.tenantId)}
-                      className={cn(
-                        "flex w-full items-center gap-4 rounded-2xl border border-[#d9e0ea] bg-white p-4 text-left shadow-sm transition",
-                        "hover:border-[#1a56db]/40 hover:shadow-md",
-                        entering === o.tenantId && "opacity-70",
-                      )}
-                    >
-                      <span className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-[#e8eefb] text-[#1a56db]">
-                        <Building2 className="h-5 w-5" />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block font-semibold">{o.name}</span>
-                        <span className="mt-0.5 block text-xs text-[#8b9bb0]">
-                          {o.slug}
-                          {o.role ? ` · ${o.role}` : ""} · {o.currencyCode}
+                {orgs.map((o) => {
+                  const storeType = formatStoreType(o);
+                  return (
+                    <li key={o.tenantId}>
+                      <button
+                        type="button"
+                        disabled={!!entering}
+                        onClick={() => void onSelect(o.tenantId)}
+                        className={cn(
+                          "flex w-full items-center gap-4 rounded-2xl border border-[#d9e0ea] bg-white p-4 text-left shadow-sm transition",
+                          "hover:border-[#1a56db]/40 hover:shadow-md",
+                          entering === o.tenantId && "opacity-70",
+                        )}
+                      >
+                        <span className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-[#e8eefb] text-[#1a56db]">
+                          <Building2 className="h-5 w-5" />
                         </span>
-                      </span>
-                      <span className="text-sm font-semibold text-[#1a56db]">
-                        {entering === o.tenantId ? "Opening…" : "Open →"}
-                      </span>
-                    </button>
-                  </li>
-                ))}
+                        <span className="min-w-0 flex-1">
+                          <span className="block font-semibold">{o.name}</span>
+                          <span className="mt-0.5 block text-xs text-[#8b9bb0]">
+                            {storeType ? `${storeType} · ` : ""}
+                            {o.slug}
+                            {o.role ? ` · ${o.role}` : ""} · {o.currencyCode}
+                          </span>
+                        </span>
+                        <span className="text-sm font-semibold text-[#1a56db]">
+                          {entering === o.tenantId ? "Opening…" : "Open →"}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             ) : (
               <p className="mb-4 rounded-2xl border border-dashed border-[#cfd8e6] bg-white/70 px-5 py-6 text-center text-sm text-[#5a6b7d]">
