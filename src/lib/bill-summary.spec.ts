@@ -67,4 +67,46 @@ describe("buildBillSummary", () => {
     expect(bill.roundOffAmount).toBe(0.25);
     expect(bill.showRoundOff).toBe(true);
   });
+
+  it("calculates MRP ₹199 with 10% OFF + 5% GST cash checkout correctly without duplicate discount", () => {
+    // 1 item: MRP = 199.00, 10% OFF -> Product Net = 179.10, Product Discount = 19.90
+    // GST 5% on 179.10 -> CGST 2.5% (4.48) + SGST 2.5% (4.48) = Total Tax 8.96
+    const halfRate = 0.025;
+    const lineGross = 179.10;
+    const cgst = Math.round((lineGross * halfRate + Number.EPSILON) * 100) / 100; // 4.48
+    const sgst = Math.round((lineGross * halfRate + Number.EPSILON) * 100) / 100; // 4.48
+    const lineTax = Math.round((cgst + sgst) * 100) / 100; // 8.96
+
+    const bill = buildBillSummary({
+      itemsSubtotal: 179.10,
+      grossMrp: 199.00,
+      productDiscountTotal: 19.90,
+      taxTotal: lineTax,
+      discount: 0,
+      billDiscount: 0,
+      lines: [
+        {
+          lineTotal: 179.10,
+          taxAmount: lineTax,
+          taxRatePercent: 5,
+        },
+      ],
+      applyRoundOff: true,
+    });
+
+    expect(bill.grossMrp).toBe(199.00);
+    expect(bill.productDiscountTotal).toBe(19.90);
+    expect(bill.productNet).toBe(179.10);
+    expect(bill.itemsSubtotal).toBe(179.10);
+    expect(bill.billDiscount).toBe(0);
+    expect(bill.taxableValue).toBe(179.10);
+    expect(bill.taxTotal).toBe(8.96);
+    expect(bill.taxSlabs).toHaveLength(1);
+    expect(bill.taxSlabs[0].cgst).toBe(4.48);
+    expect(bill.taxSlabs[0].sgst).toBe(4.48);
+    expect(bill.originalAmount).toBe(188.06);
+    expect(bill.roundOffAmount).toBe(-0.06);
+    expect(bill.finalAmount).toBe(188.00);
+    expect(bill.amountDue).toBe(188.00);
+  });
 });

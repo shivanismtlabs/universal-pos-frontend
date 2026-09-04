@@ -38,8 +38,13 @@ export type TaxInvoicePrintInput = {
   };
   lines: TaxInvoiceLine[];
   subtotal: number;
+  grossMrp?: number;
+  productDiscountTotal?: number;
+  billDiscountTotal?: number;
+  taxableValue?: number;
   taxTotal: number;
   discountTotal?: number;
+  roundOff?: number;
 };
 
 function esc(s: string) {
@@ -82,6 +87,30 @@ function buildHtml(inv: TaxInvoicePrintInput) {
     </tr>`,
     )
     .join("");
+
+  const hasProdDiscount =
+    (inv.productDiscountTotal ?? 0) > 0 ||
+    ((inv.grossMrp ?? 0) > 0 && (inv.grossMrp ?? 0) > inv.subtotal + 0.001);
+  const prodDiscountAmt =
+    (inv.productDiscountTotal ?? 0) > 0
+      ? inv.productDiscountTotal!
+      : (inv.grossMrp ?? 0) > inv.subtotal
+        ? inv.grossMrp! - inv.subtotal
+        : 0;
+  const grossMrpAmt = (inv.grossMrp ?? 0) > 0 ? inv.grossMrp! : inv.subtotal + prodDiscountAmt;
+  const billDiscount =
+    (inv.billDiscountTotal ?? 0) > 0
+      ? inv.billDiscountTotal!
+      : !hasProdDiscount && (inv.discountTotal ?? 0) > 0
+        ? inv.discountTotal!
+        : 0;
+  const taxableVal =
+    inv.taxableValue != null && inv.taxableValue > 0
+      ? inv.taxableValue
+      : inv.taxTotal > 0
+        ? Math.max(0, inv.subtotal - billDiscount)
+        : 0;
+  const ro = inv.roundOff ?? 0;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -224,12 +253,21 @@ function buildHtml(inv: TaxInvoicePrintInput) {
     </table>
 
     <div class="totals">
-      <div class="row"><span>Total</span><span class="mono">${formatInr(inv.subtotal)}</span></div>
-      ${inv.taxTotal > 0 ? `<div class="row label"><span>Taxable value</span></div>` : ""}
+      ${hasProdDiscount ? `
+        <div class="row"><span style="color:#64748b">Total MRP</span><span class="mono" style="color:#64748b">${formatInr(grossMrpAmt)}</span></div>
+        <div class="row"><span style="color:#047857;font-weight:600">Product discount</span><span class="mono" style="color:#047857;font-weight:600">−${formatInr(prodDiscountAmt)}</span></div>
+        <div class="row"><span style="font-weight:700">Subtotal (Net)</span><span class="mono" style="font-weight:700">${formatInr(inv.subtotal)}</span></div>
+      ` : `
+        <div class="row"><span>Total</span><span class="mono">${formatInr(inv.subtotal)}</span></div>
+      `}
+      ${billDiscount > 0 ? `
+        <div class="row"><span style="color:#c2410c;font-weight:600">${hasProdDiscount ? "Bill discount" : "Discount"}</span><span class="mono" style="color:#c2410c;font-weight:600">−${formatInr(billDiscount)}</span></div>
+      ` : ""}
+      ${taxableVal > 0 ? `<div class="row"><span>Taxable value</span><span class="mono">${formatInr(taxableVal)}</span></div>` : ""}
       ${inv.cgst > 0 || inv.sgst > 0 || inv.taxTotal > 0 ? `<div class="row"><span>CGST</span><span class="mono">${formatInr(inv.cgst)}</span></div>` : ""}
       ${inv.cgst > 0 || inv.sgst > 0 || inv.taxTotal > 0 ? `<div class="row"><span>SGST</span><span class="mono">${formatInr(inv.sgst)}</span></div>` : ""}
       ${moneyNumber(inv.igst) > 0 ? `<div class="row"><span>IGST</span><span class="mono">${formatInr(inv.igst)}</span></div>` : ""}
-      ${(inv.discountTotal ?? 0) > 0 ? `<div class="row"><span>Discount</span><span class="mono">−${formatInr(inv.discountTotal!)}</span></div>` : ""}
+      ${Math.abs(ro) >= 0.005 ? `<div class="row"><span>Round off</span><span class="mono">${ro > 0 ? "+" : ""}${formatInr(ro)}</span></div>` : ""}
       <div class="row grand"><span>Net Payable</span><span class="mono">${formatInr(inv.grandTotal)}</span></div>
     </div>
 

@@ -646,7 +646,10 @@ export default function RetailPosWorkstation({
       totalTaxable += taxable;
       totalTax += tax;
     } else {
-      const tax = lineNet * rate;
+      const halfRate = rate / 2;
+      const cgst = Math.round((lineNet * halfRate + Number.EPSILON) * 100) / 100;
+      const sgst = Math.round((lineNet * halfRate + Number.EPSILON) * 100) / 100;
+      const tax = Math.round((cgst + sgst) * 100) / 100;
       totalTaxable += lineNet;
       totalTax += tax;
     }
@@ -745,7 +748,12 @@ export default function RetailPosWorkstation({
         : null;
     const rateFrac =
       productPct != null ? productPct / 100 : taxSettings.rate;
-    const tax = lineTaxAmount(lineGross, rateFrac, taxSettings.inclusive);
+    const halfRate = rateFrac / 2;
+    const cgst = Math.round((lineGross * halfRate + Number.EPSILON) * 100) / 100;
+    const sgst = Math.round((lineGross * halfRate + Number.EPSILON) * 100) / 100;
+    const tax = taxSettings.inclusive
+      ? lineTaxAmount(lineGross, rateFrac, taxSettings.inclusive)
+      : Math.round((cgst + sgst) * 100) / 100;
     return {
       lineTotal: lineGross,
       taxAmount: tax,
@@ -3376,7 +3384,7 @@ export default function RetailPosWorkstation({
             <div className="space-y-2 rounded-xl border border-[#e2e8f0] bg-white px-3 py-3 shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
               <BillTotalsLines
                 summary={billSummary}
-                discount={totalDiscountShown}
+                discount={discountNum}
                 loyaltyOff={loyaltyOff}
                 formatMoney={money}
                 netAmount={splitPart ? chargeAmount : billSummary.amountDue}

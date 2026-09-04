@@ -4,8 +4,8 @@ import { Fragment, type ReactNode } from "react";
 import type { BillSummary } from "@/lib/bill-summary";
 
 /**
- * Payment panel + printed bill share this order:
- * Total → Taxable value → CGST/SGST → Discount → Net Payable
+ * Payment panel + printed bill display order:
+ * Total MRP → Product discount → Subtotal (Net) → Bill discount / Points → Fees → Taxable value → CGST/SGST → Round off → Net Payable
  */
 export function BillTotalsLines({
   summary,
@@ -14,7 +14,6 @@ export function BillTotalsLines({
   formatMoney,
   netAmount,
   netLabel = "Net Payable",
-  showZeroDiscount = true,
   extraAfterTotal,
   extraBeforeNet,
   showZeroTax = true,
@@ -33,8 +32,8 @@ export function BillTotalsLines({
   rowClassName?: string;
 }) {
   const row = rowClassName;
-  const showDiscount = showZeroDiscount || discount > 0;
-  const hasProdDiscount = summary.hasProductDiscount || (summary.productDiscountTotal > 0);
+  const billDiscountAmt = discount > 0 ? discount : summary.billDiscount > 0 ? summary.billDiscount : 0;
+  const hasProdDiscount = summary.hasProductDiscount || summary.productDiscountTotal > 0;
 
   return (
     <>
@@ -45,7 +44,14 @@ export function BillTotalsLines({
             <span className="tabular-nums text-[#64748b]">{formatMoney(summary.grossMrp)}</span>
           </div>
           <div className={row}>
-            <span className="text-emerald-700 font-medium">Product discount</span>
+            <span className="flex items-center gap-1.5 text-emerald-700 font-medium">
+              <span>Product discount</span>
+              {summary.productDiscountPercent > 0 ? (
+                <span className="rounded bg-emerald-100 px-1.5 py-0.2 text-[0.6875rem] font-bold text-emerald-800">
+                  {summary.productDiscountPercent}% OFF
+                </span>
+              ) : null}
+            </span>
             <span className="tabular-nums font-medium text-emerald-700">
               −{formatMoney(summary.productDiscountTotal)}
             </span>
@@ -61,6 +67,28 @@ export function BillTotalsLines({
           <span className="tabular-nums">{formatMoney(summary.itemsSubtotal)}</span>
         </div>
       )}
+
+      {/* Bill / Coupon discount applied to whole ticket */}
+      {billDiscountAmt > 0 ? (
+        <div className={row}>
+          <span className="text-[#c2410c] font-medium">
+            {hasProdDiscount ? "Bill discount" : "Discount"}
+          </span>
+          <span className="tabular-nums font-medium text-[#c2410c]">
+            −{formatMoney(billDiscountAmt)}
+          </span>
+        </div>
+      ) : null}
+
+      {loyaltyOff > 0 ? (
+        <div className={row}>
+          <span className="text-[#1a56db]">Points</span>
+          <span className="tabular-nums font-medium text-[#1a56db]">
+            −{formatMoney(loyaltyOff)}
+          </span>
+        </div>
+      ) : null}
+
       {summary.fees.map((f) => {
         const amt = Number(f.amount);
         return (
@@ -73,6 +101,7 @@ export function BillTotalsLines({
         );
       })}
       {extraAfterTotal}
+
       {summary.taxTotal > 0 ? (
         <>
           <div className={row}>
@@ -107,21 +136,9 @@ export function BillTotalsLines({
           <span className="tabular-nums">{formatMoney(0)}</span>
         </div>
       ) : null}
-      {showDiscount ? (
-        <div className={row}>
-          <span>Discount</span>
-          <span className="tabular-nums">
-            {discount > 0 ? `−${formatMoney(discount)}` : formatMoney(0)}
-          </span>
-        </div>
-      ) : null}
-      {loyaltyOff > 0 ? (
-        <div className={row}>
-          <span>Points</span>
-          <span className="tabular-nums">−{formatMoney(loyaltyOff)}</span>
-        </div>
-      ) : null}
+
       {extraBeforeNet}
+
       {summary.showRoundOff ? (
         <div className={row}>
           <span>Round off</span>
@@ -131,6 +148,7 @@ export function BillTotalsLines({
           </span>
         </div>
       ) : null}
+
       <div className="flex items-baseline justify-between border-t border-[#e8edf4] pt-2 text-[#0b1f33]">
         <span className="text-base font-bold">{netLabel}</span>
         <span className="text-lg font-bold tabular-nums">

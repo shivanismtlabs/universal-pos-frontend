@@ -58,6 +58,7 @@ export type BillSummary = {
   /** Alias: same as amountDue. */
   finalAmount: number;
   hasProductDiscount: boolean;
+  productDiscountPercent: number;
 };
 
 /**
@@ -98,14 +99,14 @@ export function slabsToGstBreakup(
   slabs: Array<{ rate: number; tax: number }>,
 ): GstSlab[] {
   return slabs.map((s) => {
-    const half = Math.round((s.tax / 2) * 100) / 100;
     const halfRate = Math.round((s.rate / 2) * 100) / 100;
-    // Keep second half absorbing 0.01 drift so CGST+SGST = tax
+    const half = Math.round(((s.tax / 2) + Number.EPSILON) * 100) / 100;
     const cgst = half;
-    const sgst = Math.round((s.tax - cgst) * 100) / 100;
+    const sgst = Math.round(((s.tax - half) + Number.EPSILON) * 100) / 100;
+    const tax = Math.round((cgst + sgst) * 100) / 100;
     return {
       rate: s.rate,
-      tax: s.tax,
+      tax,
       halfRate,
       cgst,
       sgst,
@@ -249,6 +250,10 @@ export function buildBillSummary(input: {
     amountDue,
     finalAmount: amountDue,
     hasProductDiscount: productDiscountTotal > 0,
+    productDiscountPercent:
+      grossMrp > 0
+        ? Math.round(((productDiscountTotal / grossMrp) * 100) * 10) / 10
+        : 0,
   };
 }
 
