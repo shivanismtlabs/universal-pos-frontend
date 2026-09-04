@@ -89,7 +89,7 @@ export function PhoneCountryInput({
       <Label className={labelClassName}>
         {labelText}
         {required ? (
-          <span aria-hidden="true"> *</span>
+          <span className="text-[#dc2626]" aria-hidden="true"> *</span>
         ) : null}
       </Label>
       <div className="mt-1.5 flex gap-2">

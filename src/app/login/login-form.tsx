@@ -13,6 +13,7 @@ import { useAuthStore } from "@/lib/auth-store";
 import { defaultHomeForRoles } from "@/lib/roles";
 import { loginSchema, type LoginInput } from "@/lib/validations";
 import { AUTH_FORM_OPTIONS, authFieldError, clearLoginFormPersistence } from "@/lib/auth-form";
+import { preventSpaceKeyDown, stripSpaces } from "@/lib/input-guards";
 // Google sign-in UI — keep imports/handlers, hide the buttons for now.
 // import {
 //   AuthDivider,
@@ -267,6 +268,7 @@ export default function LoginForm() {
         />
       ) : (
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-5" noValidate>
+
         <div className="space-y-1.5">
           <Label
             htmlFor="email"
@@ -281,7 +283,18 @@ export default function LoginForm() {
             placeholder="name@company.com"
             className="h-11 rounded-lg"
             aria-invalid={Boolean(authFieldError(formState, "email"))}
-            {...register("email")}
+            onKeyDown={preventSpaceKeyDown}
+            {...register("email", {
+              onChange: (e) => {
+                const sanitized = stripSpaces(e.target.value);
+                if (sanitized !== e.target.value) {
+                  e.target.value = sanitized;
+                  setValue("email", sanitized, {
+                    shouldValidate: formState.isSubmitted,
+                  });
+                }
+              },
+            })}
           />
           <FieldError message={authFieldError(formState, "email")} />
         </div>
@@ -308,7 +321,18 @@ export default function LoginForm() {
               autoComplete="current-password"
               className="h-11 rounded-lg pr-16"
               aria-invalid={Boolean(authFieldError(formState, "password"))}
-              {...register("password")}
+              onKeyDown={preventSpaceKeyDown}
+              {...register("password", {
+                onChange: (e) => {
+                  const sanitized = stripSpaces(e.target.value);
+                  if (sanitized !== e.target.value) {
+                    e.target.value = sanitized;
+                    setValue("password", sanitized, {
+                      shouldValidate: formState.isSubmitted,
+                    });
+                  }
+                },
+              })}
             />
             <button
               type="button"
