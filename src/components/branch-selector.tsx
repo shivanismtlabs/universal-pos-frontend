@@ -41,7 +41,7 @@ export function BranchSelector({ className }: { className?: string }) {
     if (stillValid) return;
     const prefer =
       active.find((l) => l.id === authStoreId)?.id ??
-      active.find((l) => l.code === "MAIN")?.id ??
+      active.find((l) => l.code?.toUpperCase() === "MAIN")?.id ??
       active[0]?.id ??
       null;
     if (prefer) setCurrentLocationId(prefer);

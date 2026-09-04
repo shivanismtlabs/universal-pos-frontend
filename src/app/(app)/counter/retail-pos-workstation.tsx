@@ -628,14 +628,7 @@ export default function RetailPosWorkstation({
   for (const l of cart) {
     const lineGross = l.unitPrice * l.qty;
     const lineNet = Math.max(0, lineGross * (1 - discountRatio));
-    const productPct =
-      l.taxRatePercent != null &&
-      Number.isFinite(l.taxRatePercent) &&
-      l.taxRatePercent > 0 &&
-      l.taxRatePercent <= 28
-        ? l.taxRatePercent
-        : null;
-    const rate = productPct != null ? productPct / 100 : taxSettings.rate;
+    const rate = taxSettings.rate;
     if (rate <= 0) {
       totalTaxable += lineNet;
       continue;
@@ -739,15 +732,7 @@ export default function RetailPosWorkstation({
       : 0;
   const billTaxLines = cart.map((l) => {
     const lineGross = l.unitPrice * l.qty;
-    const productPct =
-      l.taxRatePercent != null &&
-      Number.isFinite(l.taxRatePercent) &&
-      l.taxRatePercent > 0 &&
-      l.taxRatePercent <= 28
-        ? l.taxRatePercent
-        : null;
-    const rateFrac =
-      productPct != null ? productPct / 100 : taxSettings.rate;
+    const rateFrac = taxSettings.rate;
     const halfRate = rateFrac / 2;
     const cgst = Math.round((lineGross * halfRate + Number.EPSILON) * 100) / 100;
     const sgst = Math.round((lineGross * halfRate + Number.EPSILON) * 100) / 100;

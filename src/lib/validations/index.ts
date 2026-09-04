@@ -632,10 +632,7 @@ export const pinCodeSchema = z
 export const gstinSchema = z
   .string()
   .trim()
-  .refine(
-    (v) => !v || /^[0-9A-Z]{15}$/i.test(v.replace(/\s/g, "")),
-    "GSTIN must be 15 characters (letters/numbers)",
-  );
+  .max(32, "Tax registration number can be at most 32 characters");
 
 export const moneyAmountSchema = z.coerce
   .number({ invalid_type_error: "Enter a valid amount" })
