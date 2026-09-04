@@ -38,6 +38,7 @@ import { geoDial, joinE164, splitE164 } from "@/lib/geo";
 import { CountryStateFields } from "@/components/country-state-fields";
 import { PhoneCountryInput } from "@/components/phone-country-input";
 import { citiesForState } from "@/lib/india-locations";
+import { WORLD_CURRENCIES, WORLD_LOCALES } from "@/lib/currencies";
 import {
   FISCAL_YEAR_OPTIONS,
   fiscalYearSettingsPatch,
@@ -98,11 +99,7 @@ const DATE_FORMAT_OPTIONS = [
   { id: "yyyy-MM-dd", label: "yyyy-MM-dd  [ 2026-08-17 ]" },
 ] as const;
 
-const LANGUAGE_OPTIONS = [
-  { id: "en-IN", label: "English (India)" },
-  { id: "hi-IN", label: "Hindi" },
-  { id: "en-US", label: "English (US)" },
-] as const;
+const LANGUAGE_OPTIONS = WORLD_LOCALES.map((l) => ({ id: l.code, label: l.label }));
 
 const TIMEZONE_OPTIONS = [
   { id: "Asia/Kolkata", label: "(GMT 05:30) India Standard Time" },
@@ -111,7 +108,7 @@ const TIMEZONE_OPTIONS = [
   { id: "America/New_York", label: "(GMT -05:00) Eastern Time" },
 ] as const;
 
-const CURRENCY_OPTIONS = ["INR", "AED", "USD", "GBP", "EUR", "SGD"] as const;
+const CURRENCY_OPTIONS = WORLD_CURRENCIES.map((c) => c.code);
 
 function emptyProfileExtras() {
   return {

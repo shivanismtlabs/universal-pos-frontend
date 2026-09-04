@@ -5,7 +5,7 @@
  * Organization setup happens on /organizations after this.
  * Validation matches Sign In: submit-time FieldError, no live borders/toasts.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
@@ -33,7 +33,18 @@ import { ApiError } from "@/lib/api/client";
 import { applyPortalResponse } from "@/lib/auth-portal";
 import { cn } from "@/lib/utils";
 
+import { preventSpaceKeyDown, stripSpaces, preventLeadingOrDoubleSpaceKeyDown, filterPersonNameInput } from "@/lib/input-guards";
+
 const authLabel = "text-[0.8125rem] font-semibold text-[#111827]";
+const SIGNUP_DRAFT_KEY = "up_signup_draft";
+
+function clearSignupDraft() {
+  try {
+    localStorage.removeItem(SIGNUP_DRAFT_KEY);
+  } catch {
+    /* ignore */
+  }
+}
 
 export default function SignupClient() {
   const router = useRouter();
@@ -63,11 +74,42 @@ export default function SignupClient() {
   const password = watch("password") ?? "";
   const email = watch("email") ?? "";
   const phone = watch("phone") ?? "";
+  const fullName = watch("fullName") ?? "";
   const strength = passwordStrength(password, { email });
   const passwordOk =
     SIGNUP_PASSWORD_RULES.every((r) => strength.checks[r.key]) &&
     password.length > 0;
   const showPasswordHints = isSubmitted || touchedFields.password;
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SIGNUP_DRAFT_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") {
+          if (parsed.fullName) setValue("fullName", parsed.fullName, { shouldValidate: false });
+          if (parsed.email) setValue("email", parsed.email, { shouldValidate: false });
+          if (parsed.phone) setValue("phone", parsed.phone, { shouldValidate: false });
+        }
+      }
+    } catch {
+      /* ignore storage read error */
+    }
+  }, [setValue]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        if (fullName.trim() || email.trim() || phone.trim()) {
+          const payload = { fullName, email, phone };
+          localStorage.setItem(SIGNUP_DRAFT_KEY, JSON.stringify(payload));
+        }
+      } catch {
+        /* ignore storage write error */
+      }
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [fullName, email, phone]);
 
   async function onSubmit(values: SignupIdentityInput) {
     try {
@@ -77,6 +119,7 @@ export default function SignupClient() {
         password: values.password,
         phone: values.phone.trim(),
       });
+      clearSignupDraft();
       const dest = applyPortalResponse(data);
       if (dest === "orgs") {
         toast.success("Account created — set up your organization");
@@ -105,21 +148,32 @@ export default function SignupClient() {
       >
         <div className="space-y-1.5">
           <Label htmlFor="fullName" className={authLabel}>
-            Full name
+            Full name <span className="text-[#dc2626]">*</span>
           </Label>
           <Input
             id="fullName"
             autoComplete="name"
             className="h-11 rounded-lg"
             aria-invalid={Boolean(authFieldError(formState, "fullName"))}
-            {...register("fullName")}
+            onKeyDown={preventLeadingOrDoubleSpaceKeyDown}
+            {...register("fullName", {
+              onChange: (e) => {
+                const sanitized = filterPersonNameInput(e.target.value);
+                if (sanitized !== e.target.value) {
+                  e.target.value = sanitized;
+                  setValue("fullName", sanitized, {
+                    shouldValidate: formState.isSubmitted,
+                  });
+                }
+              },
+            })}
           />
           <FieldError message={authFieldError(formState, "fullName")} />
         </div>
 
         <div className="space-y-1.5">
           <Label htmlFor="email" className={authLabel}>
-            Email
+            Email <span className="text-[#dc2626]">*</span>
           </Label>
           <Input
             id="email"
@@ -128,7 +182,18 @@ export default function SignupClient() {
             placeholder="name@company.com"
             className="h-11 rounded-lg"
             aria-invalid={Boolean(authFieldError(formState, "email"))}
-            {...register("email")}
+            onKeyDown={preventSpaceKeyDown}
+            {...register("email", {
+              onChange: (e) => {
+                const sanitized = stripSpaces(e.target.value);
+                if (sanitized !== e.target.value) {
+                  e.target.value = sanitized;
+                  setValue("email", sanitized, {
+                    shouldValidate: formState.isSubmitted,
+                  });
+                }
+              },
+            })}
           />
           <FieldError message={authFieldError(formState, "email")} />
         </div>
@@ -136,6 +201,7 @@ export default function SignupClient() {
         <div className="space-y-1.5">
           <PhoneCountryInput
             label="Phone"
+            required
             labelClassName={authLabel}
             liveValidate={false}
             autoComplete="off"
@@ -165,7 +231,7 @@ export default function SignupClient() {
 
         <div className="space-y-1.5">
           <Label htmlFor="password" className={authLabel}>
-            Password
+            Password <span className="text-[#dc2626]">*</span>
           </Label>
           <div className="relative">
             <Input
@@ -174,7 +240,18 @@ export default function SignupClient() {
               autoComplete="new-password"
               className="h-11 rounded-lg pr-16"
               aria-invalid={Boolean(authFieldError(formState, "password"))}
-              {...register("password")}
+              onKeyDown={preventSpaceKeyDown}
+              {...register("password", {
+                onChange: (e) => {
+                  const sanitized = stripSpaces(e.target.value);
+                  if (sanitized !== e.target.value) {
+                    e.target.value = sanitized;
+                    setValue("password", sanitized, {
+                      shouldValidate: formState.isSubmitted,
+                    });
+                  }
+                },
+              })}
             />
             <button
               type="button"
@@ -219,7 +296,7 @@ export default function SignupClient() {
 
         <div className="space-y-1.5">
           <Label htmlFor="confirmPassword" className={authLabel}>
-            Confirm password
+            Confirm password <span className="text-[#dc2626]">*</span>
           </Label>
           <Input
             id="confirmPassword"
@@ -227,7 +304,18 @@ export default function SignupClient() {
             autoComplete="new-password"
             className="h-11 rounded-lg"
             aria-invalid={Boolean(authFieldError(formState, "confirmPassword"))}
-            {...register("confirmPassword")}
+            onKeyDown={preventSpaceKeyDown}
+            {...register("confirmPassword", {
+              onChange: (e) => {
+                const sanitized = stripSpaces(e.target.value);
+                if (sanitized !== e.target.value) {
+                  e.target.value = sanitized;
+                  setValue("confirmPassword", sanitized, {
+                    shouldValidate: formState.isSubmitted,
+                  });
+                }
+              },
+            })}
           />
           <FieldError message={authFieldError(formState, "confirmPassword")} />
         </div>

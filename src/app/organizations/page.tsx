@@ -48,10 +48,13 @@ import { TotpChallengeForm, is2faChallenge } from "@/components/totp-challenge-f
 import { cn } from "@/lib/utils";
 import { clearLoginFormPersistence } from "@/lib/auth-form";
 import { geoStates, isKnownGeoState, splitE164 } from "@/lib/geo";
-import { phoneHasLocalDigits, validatePhoneE164 } from "@/lib/phone";
+import { phoneHasLocalDigits, validatePhoneE164, validatePhoneForCountry, phoneValidationMessage } from "@/lib/phone";
+import { emailSchema } from "@/lib/validations";
+import { preventSpaceKeyDown, stripSpaces, preventLeadingOrDoubleSpaceKeyDown, filterRealTextInput } from "@/lib/input-guards";
 import { CountryStateFields } from "@/components/country-state-fields";
 import { PhoneCountryInput } from "@/components/phone-country-input";
 import { citiesForState, isPostalValidForIndianCity } from "@/lib/india-locations";
+import { WORLD_CURRENCIES, WORLD_LOCALES } from "@/lib/currencies";
 
 function isValidPostal(countryCode: string, postal: string): boolean {
   const p = postal.trim();
@@ -94,9 +97,7 @@ const createOrgSchema = z
       .trim()
       .min(3, "Enter postal / PIN code")
       .max(12, "Postal code is too long"),
-    currencyCode: z.enum(["INR", "USD", "EUR", "GBP", "AED"], {
-      errorMap: () => ({ message: "Select a currency" }),
-    }),
+    currencyCode: z.string().min(1, "Select a currency"),
     fiscalYearStart: fiscalMonthNameSchema,
     inventoryStartDate: z
       .string()
@@ -111,12 +112,7 @@ const createOrgSchema = z
         (v) => !v || v.length >= 2,
         "Branch name must be at least 2 characters",
       ),
-    email: z
-      .string()
-      .trim()
-      .min(1, "Business email is required")
-      .max(120, "Email is too long")
-      .email("Enter a valid email (name@domain.com)"),
+    email: emailSchema,
     website: z
       .string()
       .trim()
@@ -129,9 +125,7 @@ const createOrgSchema = z
     timezone: z.enum(["Asia/Kolkata", "Asia/Dubai", "UTC", "America/New_York"], {
       errorMap: () => ({ message: "Select a time zone" }),
     }),
-    locale: z.enum(["en-IN", "hi-IN", "en-US"], {
-      errorMap: () => ({ message: "Select a language" }),
-    }),
+    locale: z.string().min(1, "Select a language"),
     organizationType: z.string().refine(
       (v) =>
         !v ||
@@ -163,11 +157,11 @@ const createOrgSchema = z
         message: "Enter your business type (at least 2 characters)",
       });
     }
-    if (v.phone.trim() && !validatePhoneE164(v.phone, v.countryCode)) {
+    if (v.phone.trim() && !validatePhoneForCountry(v.phone, v.countryCode)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["phone"],
-        message: "Enter a valid phone number",
+        message: phoneValidationMessage(v.countryCode),
       });
     }
     if (!isKnownGeoState(v.countryCode, v.state) && geoStates(v.countryCode).length) {
@@ -355,6 +349,16 @@ const PLATFORM_HIGHLIGHTS: Array<{
   },
 ];
 
+const ORG_CREATE_DRAFT_KEY = "up_create_org_draft";
+
+function clearOrgCreateDraft() {
+  try {
+    localStorage.removeItem(ORG_CREATE_DRAFT_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export default function OrganizationsPage() {
   return (
     <Suspense
@@ -390,7 +394,18 @@ function OrganizationsPageInner() {
   >([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
-  const [showCreate, setShowCreate] = useState(openCreate);
+  const [showCreate, setShowCreate] = useState(() => {
+    if (openCreate) return true;
+    try {
+      const raw =
+        typeof window !== "undefined"
+          ? localStorage.getItem(ORG_CREATE_DRAFT_KEY)
+          : null;
+      return Boolean(raw);
+    } catch {
+      return false;
+    }
+  });
 
   useEffect(() => {
     if (openCreate) setShowCreate(true);
@@ -446,23 +461,99 @@ function OrganizationsPageInner() {
   const isOther = selectedBusinessType === "other";
 
   useEffect(() => {
-    form.setValue("city", "");
-  }, [selectedState, form]);
-
-  useEffect(() => {
     setHydrated(true);
   }, []);
 
+  // Restore draft from localStorage on mount/hydrate
   useEffect(() => {
     if (!hydrated) return;
-    // Prefill only — do not validate the whole form (empty phone would flash "required").
-    if (identity?.phone) {
+    try {
+      const raw = localStorage.getItem(ORG_CREATE_DRAFT_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") {
+          setShowCreate(true);
+          if (Array.isArray(parsed.customFields) && parsed.customFields.length) {
+            setCustomFields(parsed.customFields);
+          }
+          if (typeof parsed.showCustomFields === "boolean") {
+            setShowCustomFields(parsed.showCustomFields);
+          }
+          Object.keys(parsed).forEach((k) => {
+            if (
+              k !== "customFields" &&
+              k !== "showCustomFields" &&
+              parsed[k] !== undefined &&
+              parsed[k] !== null &&
+              parsed[k] !== ""
+            ) {
+              form.setValue(k as keyof CreateForm, parsed[k], {
+                shouldValidate: false,
+              });
+            }
+          });
+        }
+      }
+    } catch {
+      /* ignore read error */
+    }
+  }, [hydrated, form]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    // Prefill only if field is currently empty (not populated by draft).
+    if (identity?.phone && !form.getValues("phone")) {
       form.setValue("phone", identity.phone, { shouldValidate: false });
     }
-    if (identity?.email) {
+    if (identity?.email && !form.getValues("email")) {
       form.setValue("email", identity.email, { shouldValidate: false });
     }
   }, [hydrated, identity?.phone, identity?.email, form]);
+
+  const watchedDraftValues = form.watch();
+  useEffect(() => {
+    if (!hydrated || !showCreate) return;
+    const timer = window.setTimeout(() => {
+      try {
+        const hasInput = Boolean(
+          watchedDraftValues.organizationName?.trim() ||
+            watchedDraftValues.businessType ||
+            watchedDraftValues.storeName?.trim() ||
+            watchedDraftValues.addressLine1?.trim() ||
+            watchedDraftValues.addressLine2?.trim() ||
+            watchedDraftValues.city?.trim() ||
+            watchedDraftValues.state?.trim() ||
+            watchedDraftValues.taxId?.trim() ||
+            watchedDraftValues.pan?.trim() ||
+            watchedDraftValues.website?.trim() ||
+            watchedDraftValues.businessLabel?.trim() ||
+            (watchedDraftValues.phone?.trim() &&
+              watchedDraftValues.phone !== identity?.phone) ||
+            (watchedDraftValues.email?.trim() &&
+              watchedDraftValues.email !== identity?.email),
+        );
+
+        if (hasInput) {
+          const payload = {
+            ...watchedDraftValues,
+            customFields,
+            showCustomFields,
+          };
+          localStorage.setItem(ORG_CREATE_DRAFT_KEY, JSON.stringify(payload));
+        }
+      } catch {
+        /* ignore write error */
+      }
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [
+    hydrated,
+    showCreate,
+    watchedDraftValues,
+    customFields,
+    showCustomFields,
+    identity,
+  ]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -688,6 +779,7 @@ function OrganizationsPageInner() {
           taxId: values.taxId?.trim() || undefined,
           storeName: values.storeName?.trim() || undefined,
         });
+        clearOrgCreateDraft();
         // Enter Getting Started immediately — extras save in the background.
         await enterApp(data, GETTING_STARTED_PATH);
         void persistOrgProfile(values).catch(() => {
@@ -709,6 +801,7 @@ function OrganizationsPageInner() {
         businessLabel: values.businessLabel?.trim() || undefined,
       });
 
+      clearOrgCreateDraft();
       toast.success("Organization profile saved");
       pendingHomeRef.current = GETTING_STARTED_PATH;
       warmBootstrap();
@@ -750,6 +843,7 @@ function OrganizationsPageInner() {
   ) : null;
 
   function signOut() {
+    clearOrgCreateDraft();
     clearLoginFormPersistence();
     clear();
     router.replace("/login?signedOut=1");
@@ -822,7 +916,11 @@ function OrganizationsPageInner() {
                     type="button"
                     size="sm"
                     variant="secondary"
-                    onClick={() => setShowCreate(false)}
+                    onClick={() => {
+                      clearOrgCreateDraft();
+                      setShowCreate(false);
+                      router.replace("/organizations", { scroll: false });
+                    }}
                   >
                     Back to list
                   </Button>
@@ -854,7 +952,7 @@ function OrganizationsPageInner() {
                   noValidate
                 >
                   <div className="sm:col-span-2">
-                    <Label>Starting setup *</Label>
+                    <Label>Starting setup <span className="text-[#dc2626]">*</span></Label>
                     <p className="mb-1.5 mt-0.5 text-[0.7rem] text-[#8b9bb0]">
                       Closest match, or Not listed — POS still runs.
                     </p>
@@ -928,7 +1026,18 @@ function OrganizationsPageInner() {
                             aria-invalid={Boolean(
                               form.formState.errors.businessLabel,
                             )}
-                            {...form.register("businessLabel")}
+                            onKeyDown={preventLeadingOrDoubleSpaceKeyDown}
+                            {...form.register("businessLabel", {
+                              onChange: (e) => {
+                                const sanitized = filterRealTextInput(e.target.value);
+                                if (sanitized !== e.target.value) {
+                                  e.target.value = sanitized;
+                                  form.setValue("businessLabel", sanitized, {
+                                    shouldValidate: form.formState.isSubmitted,
+                                  });
+                                }
+                              },
+                            })}
                           />
                           <FieldError
                             message={form.formState.errors.businessLabel?.message}
@@ -952,9 +1061,10 @@ function OrganizationsPageInner() {
                               maxLength={40}
                               placeholder={`Custom field ${idx + 1}`}
                               value={val}
+                              onKeyDown={preventLeadingOrDoubleSpaceKeyDown}
                               onChange={(e) => {
                                 const next = [...customFields];
-                                next[idx] = e.target.value.slice(0, 40);
+                                next[idx] = filterRealTextInput(e.target.value).slice(0, 40);
                                 setCustomFields(next);
                               }}
                             />
@@ -990,7 +1100,7 @@ function OrganizationsPageInner() {
                   </div>
 
                   <div className="sm:col-span-2">
-                    <Label>Organization name *</Label>
+                    <Label>Organization name <span className="text-[#dc2626]">*</span></Label>
                     <Input
                       className={cn(
                         "mt-1",
@@ -1000,7 +1110,18 @@ function OrganizationsPageInner() {
                       aria-invalid={Boolean(
                         form.formState.errors.organizationName,
                       )}
-                      {...form.register("organizationName")}
+                      onKeyDown={preventLeadingOrDoubleSpaceKeyDown}
+                      {...form.register("organizationName", {
+                        onChange: (e) => {
+                          const sanitized = filterRealTextInput(e.target.value);
+                          if (sanitized !== e.target.value) {
+                            e.target.value = sanitized;
+                            form.setValue("organizationName", sanitized, {
+                              shouldValidate: form.formState.isSubmitted,
+                            });
+                          }
+                        },
+                      })}
                     />
                     <FieldError
                       message={
@@ -1017,7 +1138,18 @@ function OrganizationsPageInner() {
                       )}
                       placeholder="Main Store"
                       aria-invalid={Boolean(form.formState.errors.storeName)}
-                      {...form.register("storeName")}
+                      onKeyDown={preventLeadingOrDoubleSpaceKeyDown}
+                      {...form.register("storeName", {
+                        onChange: (e) => {
+                          const sanitized = filterRealTextInput(e.target.value);
+                          if (sanitized !== e.target.value) {
+                            e.target.value = sanitized;
+                            form.setValue("storeName", sanitized, {
+                              shouldValidate: form.formState.isSubmitted,
+                            });
+                          }
+                        },
+                      })}
                     />
                     <FieldError
                       message={form.formState.errors.storeName?.message}
@@ -1058,7 +1190,7 @@ function OrganizationsPageInner() {
                     />
                   </div>
                   <div>
-                    <Label>Email *</Label>
+                    <Label>Email <span className="text-[#dc2626]">*</span></Label>
                     <Input
                       className={cn(
                         "mt-1",
@@ -1067,7 +1199,18 @@ function OrganizationsPageInner() {
                       type="email"
                       placeholder="billing@shop.com"
                       aria-invalid={Boolean(form.formState.errors.email)}
-                      {...form.register("email")}
+                      onKeyDown={preventSpaceKeyDown}
+                      {...form.register("email", {
+                        onChange: (e) => {
+                          const sanitized = stripSpaces(e.target.value);
+                          if (sanitized !== e.target.value) {
+                            e.target.value = sanitized;
+                            form.setValue("email", sanitized, {
+                              shouldValidate: form.formState.isSubmitted,
+                            });
+                          }
+                        },
+                      })}
                     />
                     <FieldError
                       message={form.formState.errors.email?.message}
@@ -1087,14 +1230,25 @@ function OrganizationsPageInner() {
                       )}
                       placeholder="https://www.example.com"
                       aria-invalid={Boolean(form.formState.errors.website)}
-                      {...form.register("website")}
+                      onKeyDown={preventSpaceKeyDown}
+                      {...form.register("website", {
+                        onChange: (e) => {
+                          const sanitized = stripSpaces(e.target.value);
+                          if (sanitized !== e.target.value) {
+                            e.target.value = sanitized;
+                            form.setValue("website", sanitized, {
+                              shouldValidate: form.formState.isSubmitted,
+                            });
+                          }
+                        },
+                      })}
                     />
                     <FieldError
                       message={form.formState.errors.website?.message}
                     />
                   </div>
                   <div className="sm:col-span-2">
-                    <Label>Address *</Label>
+                    <Label>Address <span className="text-[#dc2626]">*</span></Label>
                     <Input
                       className={cn(
                         "mt-1",
@@ -1104,7 +1258,18 @@ function OrganizationsPageInner() {
                       aria-invalid={Boolean(
                         form.formState.errors.addressLine1,
                       )}
-                      {...form.register("addressLine1")}
+                      onKeyDown={preventLeadingOrDoubleSpaceKeyDown}
+                      {...form.register("addressLine1", {
+                        onChange: (e) => {
+                          const sanitized = filterRealTextInput(e.target.value);
+                          if (sanitized !== e.target.value) {
+                            e.target.value = sanitized;
+                            form.setValue("addressLine1", sanitized, {
+                              shouldValidate: form.formState.isSubmitted,
+                            });
+                          }
+                        },
+                      })}
                     />
                     <FieldError
                       message={form.formState.errors.addressLine1?.message}
@@ -1121,7 +1286,18 @@ function OrganizationsPageInner() {
                       aria-invalid={Boolean(
                         form.formState.errors.addressLine2,
                       )}
-                      {...form.register("addressLine2")}
+                      onKeyDown={preventLeadingOrDoubleSpaceKeyDown}
+                      {...form.register("addressLine2", {
+                        onChange: (e) => {
+                          const sanitized = filterRealTextInput(e.target.value);
+                          if (sanitized !== e.target.value) {
+                            e.target.value = sanitized;
+                            form.setValue("addressLine2", sanitized, {
+                              shouldValidate: form.formState.isSubmitted,
+                            });
+                          }
+                        },
+                      })}
                     />
                     <FieldError
                       message={form.formState.errors.addressLine2?.message}
@@ -1133,6 +1309,8 @@ function OrganizationsPageInner() {
                       stateRequired
                       countryCode={form.watch("countryCode")}
                       state={form.watch("state")}
+                      countryError={form.formState.errors.countryCode?.message}
+                      stateError={form.formState.errors.state?.message}
                       onCountry={(code) => {
                         form.setValue("countryCode", code, {
                           shouldValidate: true,
@@ -1144,15 +1322,9 @@ function OrganizationsPageInner() {
                         form.setValue("state", state, { shouldValidate: true });
                       }}
                     />
-                    <FieldError
-                      message={form.formState.errors.countryCode?.message}
-                    />
-                    <FieldError
-                      message={form.formState.errors.state?.message}
-                    />
                   </div>
                   <div>
-                    <Label>City *</Label>
+                    <Label>City <span className="text-[#dc2626]">*</span></Label>
                     {cityOptions.length ? (
                       <Select
                         className={cn(
@@ -1182,7 +1354,18 @@ function OrganizationsPageInner() {
                         )}
                         placeholder="City"
                         aria-invalid={Boolean(form.formState.errors.city)}
-                        {...form.register("city")}
+                        onKeyDown={preventLeadingOrDoubleSpaceKeyDown}
+                        {...form.register("city", {
+                          onChange: (e) => {
+                            const sanitized = filterRealTextInput(e.target.value);
+                            if (sanitized !== e.target.value) {
+                              e.target.value = sanitized;
+                              form.setValue("city", sanitized, {
+                                shouldValidate: form.formState.isSubmitted,
+                              });
+                            }
+                          },
+                        })}
                       />
                     )}
                     <FieldError
@@ -1190,7 +1373,7 @@ function OrganizationsPageInner() {
                     />
                   </div>
                   <div>
-                    <Label>Postal code *</Label>
+                    <Label>Postal code <span className="text-[#dc2626]">*</span></Label>
                     <Input
                       className={cn(
                         "mt-1",
@@ -1204,13 +1387,17 @@ function OrganizationsPageInner() {
                       inputMode={selectedCountry === "IN" ? "numeric" : "text"}
                       maxLength={selectedCountry === "IN" ? 6 : 12}
                       aria-invalid={Boolean(form.formState.errors.postalCode)}
+                      onKeyDown={preventSpaceKeyDown}
                       {...form.register("postalCode", {
                         onChange: (e) => {
+                          const sanitized = stripSpaces(e.target.value);
                           if (selectedCountry === "IN") {
-                            const digits = e.target.value
-                              .replace(/\D/g, "")
-                              .slice(0, 6);
+                            const digits = sanitized.replace(/\D/g, "").slice(0, 6);
                             form.setValue("postalCode", digits, {
+                              shouldValidate: true,
+                            });
+                          } else {
+                            form.setValue("postalCode", sanitized, {
                               shouldValidate: true,
                             });
                           }
@@ -1231,6 +1418,7 @@ function OrganizationsPageInner() {
                       placeholder="29AABCU9603R1ZM"
                       maxLength={15}
                       aria-invalid={Boolean(form.formState.errors.taxId)}
+                      onKeyDown={preventSpaceKeyDown}
                       {...form.register("taxId", {
                         onChange: (e) => {
                           const next = e.target.value
@@ -1260,7 +1448,18 @@ function OrganizationsPageInner() {
                       placeholder="AAAAA9999A"
                       maxLength={10}
                       aria-invalid={Boolean(form.formState.errors.pan)}
-                      {...form.register("pan")}
+                      onKeyDown={preventSpaceKeyDown}
+                      {...form.register("pan", {
+                        onChange: (e) => {
+                          const sanitized = stripSpaces(e.target.value.toUpperCase().slice(0, 10));
+                          if (sanitized !== e.target.value) {
+                            e.target.value = sanitized;
+                            form.setValue("pan", sanitized, {
+                              shouldValidate: form.formState.isSubmitted,
+                            });
+                          }
+                        },
+                      })}
                     />
                     <FieldError
                       message={form.formState.errors.pan?.message}
@@ -1292,29 +1491,30 @@ function OrganizationsPageInner() {
                     />
                   </div>
                   <div>
-                    <Label>Currency *</Label>
+                    <Label>Currency <span className="text-[#dc2626]">*</span></Label>
                     <Select
                       className={cn(
                         "mt-1",
                         form.formState.errors.currencyCode && fieldErr,
                       )}
+                      panelMinWidth={280}
                       aria-invalid={Boolean(
                         form.formState.errors.currencyCode,
                       )}
                       {...form.register("currencyCode")}
                     >
-                      <option value="INR">INR — Indian Rupee</option>
-                      <option value="USD">USD</option>
-                      <option value="EUR">EUR</option>
-                      <option value="GBP">GBP</option>
-                      <option value="AED">AED</option>
+                      {WORLD_CURRENCIES.map((c) => (
+                        <option key={c.code} value={c.code}>
+                          {c.label}
+                        </option>
+                      ))}
                     </Select>
                     <FieldError
                       message={form.formState.errors.currencyCode?.message}
                     />
                   </div>
                   <div>
-                    <Label>Time zone *</Label>
+                    <Label>Time zone <span className="text-[#dc2626]">*</span></Label>
                     <Select
                       className={cn(
                         "mt-1",
@@ -1337,25 +1537,28 @@ function OrganizationsPageInner() {
                     />
                   </div>
                   <div>
-                    <Label>Language *</Label>
+                    <Label>Language <span className="text-[#dc2626]">*</span></Label>
                     <Select
                       className={cn(
                         "mt-1",
                         form.formState.errors.locale && fieldErr,
                       )}
+                      panelMinWidth={280}
                       aria-invalid={Boolean(form.formState.errors.locale)}
                       {...form.register("locale")}
                     >
-                      <option value="en-IN">English (India)</option>
-                      <option value="hi-IN">Hindi</option>
-                      <option value="en-US">English (US)</option>
+                      {WORLD_LOCALES.map((l) => (
+                        <option key={l.code} value={l.code}>
+                          {l.label}
+                        </option>
+                      ))}
                     </Select>
                     <FieldError
                       message={form.formState.errors.locale?.message}
                     />
                   </div>
                   <div>
-                    <Label>Fiscal year starts *</Label>
+                    <Label>Fiscal year starts <span className="text-[#dc2626]">*</span></Label>
                     <Select
                       className={cn(
                         "mt-1",
@@ -1377,7 +1580,7 @@ function OrganizationsPageInner() {
                     />
                   </div>
                   <div>
-                    <Label>Inventory start date *</Label>
+                    <Label>Inventory start date <span className="text-[#dc2626]">*</span></Label>
                     <Input
                       className={cn(
                         "mt-1",
@@ -1408,7 +1611,11 @@ function OrganizationsPageInner() {
                       <Button
                         type="button"
                         variant="secondary"
-                        onClick={() => setShowCreate(false)}
+                        onClick={() => {
+                          clearOrgCreateDraft();
+                          setShowCreate(false);
+                          router.replace("/organizations", { scroll: false });
+                        }}
                       >
                         Cancel
                       </Button>
@@ -1502,7 +1709,10 @@ function OrganizationsPageInner() {
                 type="button"
                 variant="secondary"
                 className="w-full sm:w-auto"
-                onClick={() => setShowCreate(true)}
+                onClick={() => {
+                  setShowCreate(true);
+                  router.replace("/organizations?create=1", { scroll: false });
+                }}
               >
                 <Plus className="mr-1.5 h-4 w-4" />
                 Create organization
