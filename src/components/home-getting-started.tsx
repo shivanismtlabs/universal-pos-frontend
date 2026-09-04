@@ -57,13 +57,8 @@ type StepDef = {
   secondary?: { label: string; href: string };
 };
 
-function firstName(full?: string | null) {
-  if (!full?.trim()) return "there";
-  const parts = full.trim().split(/\s+/);
-  if (parts[0]?.toLowerCase() === "shop" && parts.length > 1) {
-    return parts.slice(1).join(" ");
-  }
-  return parts[0] ?? "there";
+function userDisplayName(full?: string | null) {
+  return full?.trim() || "User";
 }
 
 /**
@@ -461,7 +456,7 @@ export function HomeGettingStarted() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-[1.65rem] font-semibold tracking-tight text-[#0b1f33] sm:text-[1.85rem]">
-            Welcome, {firstName(user?.fullName)}!
+            Welcome, {userDisplayName(user?.fullName)}!
           </h1>
           <p className="mt-1.5 text-[0.9rem] text-[#5a6b7d]">
             Follow this checklist to get started with{" "}

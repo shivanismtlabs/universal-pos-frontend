@@ -554,7 +554,7 @@ export default function StaffPage() {
                   className="mt-1.5 select-field w-full"
                   {...form.register("primaryStoreId")}
                 >
-                  <option value="">Optional</option>
+                  <option value="">Default (Main Branch)</option>
                   {(stores.data ?? []).map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.name}

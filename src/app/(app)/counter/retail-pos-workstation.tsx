@@ -73,6 +73,7 @@ type CartLine = {
   stockLevelId: string;
   sku: string;
   name: string;
+  mrp?: number;
   unitPrice: number;
   /** Catalog / shelf price when the line was added — used for urgent/special rate UI */
   listPrice: number;
@@ -111,6 +112,7 @@ type CartLine = {
 
 /** Shelf / list rate for a cart line (before this ticket’s line discount). */
 function cartLineListPrice(line: CartLine): number {
+  if (line.mrp && line.mrp > 0) return line.mrp;
   return line.listPrice > 0 ? line.listPrice : line.unitPrice;
 }
 
@@ -589,68 +591,72 @@ export default function RetailPosWorkstation({
       ),
   });
 
-  const subtotal = cart.reduce((s, l) => s + l.unitPrice * l.qty, 0);
-  /** Sum of per-item discounts (list − sell) × qty — each product can differ. */
-  const lineDiscountsTotal =
+  const subtotal = Math.round(cart.reduce((s, l) => s + l.unitPrice * l.qty, 0) * 100) / 100;
+  /** Gross MRP across all items: MRP × qty */
+  const grossMrpTotal =
     Math.round(
-      cart.reduce((s, l) => s + cartLineDiscountAmount(l), 0) * 100,
+      cart.reduce((s, l) => s + cartLineListPrice(l) * l.qty, 0) * 100,
     ) / 100;
-  /** Payment “Total” before item discounts (so Discount line can show savings). */
-  const displaySubtotal =
-    Math.round((subtotal + lineDiscountsTotal) * 100) / 100;
-  const taxAmount = (() => {
-    if (taxSettings.rate <= 0 && !cart.some((l) => (l.taxRatePercent ?? null) != null))
-      return 0;
-    let tax = 0;
-    for (const l of cart) {
-      const lineGross = l.unitPrice * l.qty;
-      // Ignore HSN bleed / absurd product rates; fall back to shop GST %
-      const productPct =
-        l.taxRatePercent != null &&
-        Number.isFinite(l.taxRatePercent) &&
-        l.taxRatePercent > 0 &&
-        l.taxRatePercent <= 28
-          ? l.taxRatePercent
-          : null;
-      const rate =
-        productPct != null ? productPct / 100 : taxSettings.rate;
-      if (rate <= 0) continue;
-      if (taxSettings.inclusive) {
-        const net = lineGross / (1 + rate);
-        tax += lineGross - net;
-      } else {
-        tax += lineGross * rate;
-      }
-    }
-    return Math.round(tax * 100) / 100;
-  })();
-  /** Pre-discount ticket total (matches server discountable base). */
-  const ticketBeforeDiscount = taxSettings.inclusive
-    ? subtotal
-    : subtotal + taxAmount;
+  /** Sum of per-item discounts (MRP − selling price) × qty */
+  const lineDiscountsTotal =
+    Math.round(Math.max(0, grossMrpTotal - subtotal) * 100) / 100;
+  /** Payment “Total” before item discounts (Gross MRP). */
+  const displaySubtotal = grossMrpTotal;
+
   const maxDiscountAmount =
     Math.round(
-      ((ticketBeforeDiscount * maxCashierDiscountPercent) / 100) * 100,
+      ((subtotal * maxCashierDiscountPercent) / 100) * 100,
     ) / 100;
   const discountEntered = Math.max(0, moneyNumber(discountAmount || 0));
   const discountNum = Math.min(
     discountEntered,
-    ticketBeforeDiscount,
-    canOverrideDiscount ? ticketBeforeDiscount : maxDiscountAmount,
+    subtotal,
+    canOverrideDiscount ? subtotal : maxDiscountAmount,
   );
   const discountCapped =
     discountEntered > discountNum + 0.001 && !canOverrideDiscount;
-  const loyaltyOff = loyaltyQuote?.amountOff ?? 0;
+  const loyaltyOff = Math.min(Math.max(0, subtotal - discountNum), loyaltyQuote?.amountOff ?? 0);
   /** Item discounts + whole-bill discount — shown on payment panel. */
   const totalDiscountShown =
     Math.round((lineDiscountsTotal + discountNum) * 100) / 100;
-  const ticketNet = Math.max(0, ticketBeforeDiscount - discountNum - loyaltyOff);
+
+  const netMerchandise = Math.max(0, subtotal - discountNum - loyaltyOff);
+  const discountRatio = subtotal > 0 ? (discountNum + loyaltyOff) / subtotal : 0;
+
+  let totalTax = 0;
+  let totalTaxable = 0;
+  for (const l of cart) {
+    const lineGross = l.unitPrice * l.qty;
+    const lineNet = Math.max(0, lineGross * (1 - discountRatio));
+    const rate = taxSettings.rate;
+    if (rate <= 0) {
+      totalTaxable += lineNet;
+      continue;
+    }
+    if (taxSettings.inclusive) {
+      const taxable = lineNet / (1 + rate);
+      const tax = lineNet - taxable;
+      totalTaxable += taxable;
+      totalTax += tax;
+    } else {
+      const halfRate = rate / 2;
+      const cgst = Math.round((lineNet * halfRate + Number.EPSILON) * 100) / 100;
+      const sgst = Math.round((lineNet * halfRate + Number.EPSILON) * 100) / 100;
+      const tax = Math.round((cgst + sgst) * 100) / 100;
+      totalTaxable += lineNet;
+      totalTax += tax;
+    }
+  }
+
+  const taxAmount = Math.round(totalTax * 100) / 100;
+  const taxableValue = Math.round(totalTaxable * 100) / 100;
+
   const diningModeForFees =
     orderType === "walk_in" ? (resourceId ? "dine_in" : "") : orderType;
   const diningFeeLines = foodFulfillment
     ? diningFeesFromConfig({
         diningMode: diningModeForFees,
-        merchandiseAfterDiscount: ticketNet,
+        merchandiseAfterDiscount: netMerchandise,
         serviceChargePercent:
           selectedDiningTable?.areaServiceChargePercent ??
           selectedDiningFloor?.serviceChargePercent ??
@@ -663,10 +669,11 @@ export default function RetailPosWorkstation({
       })
     : [];
   const diningExtras = diningFeeLines.reduce((s, f) => s + f.amount, 0);
-  /** Exact ticket before nearest-rupee round-off. */
+
+  /** Exact ticket before nearest-rupee round-off: netMerchandise (+ tax if exclusive) + fees */
   const exactDue = Math.max(
     0,
-    Math.round((ticketNet + diningExtras) * 100) / 100,
+    Math.round((taxSettings.inclusive ? netMerchandise + diningExtras : netMerchandise + taxAmount + diningExtras) * 100) / 100,
   );
   const paymentRound = roundOffForDisplay(exactDue);
   const applyCashRound = shouldApplyCashRoundOff(payMethod, {
@@ -725,16 +732,13 @@ export default function RetailPosWorkstation({
       : 0;
   const billTaxLines = cart.map((l) => {
     const lineGross = l.unitPrice * l.qty;
-    const productPct =
-      l.taxRatePercent != null &&
-      Number.isFinite(l.taxRatePercent) &&
-      l.taxRatePercent > 0 &&
-      l.taxRatePercent <= 28
-        ? l.taxRatePercent
-        : null;
-    const rateFrac =
-      productPct != null ? productPct / 100 : taxSettings.rate;
-    const tax = lineTaxAmount(lineGross, rateFrac, taxSettings.inclusive);
+    const rateFrac = taxSettings.rate;
+    const halfRate = rateFrac / 2;
+    const cgst = Math.round((lineGross * halfRate + Number.EPSILON) * 100) / 100;
+    const sgst = Math.round((lineGross * halfRate + Number.EPSILON) * 100) / 100;
+    const tax = taxSettings.inclusive
+      ? lineTaxAmount(lineGross, rateFrac, taxSettings.inclusive)
+      : Math.round((cgst + sgst) * 100) / 100;
     return {
       lineTotal: lineGross,
       taxAmount: tax,
@@ -742,9 +746,12 @@ export default function RetailPosWorkstation({
     };
   });
   const billSummary = buildBillSummary({
-    itemsSubtotal: displaySubtotal,
+    itemsSubtotal: subtotal,
+    grossMrp: grossMrpTotal,
+    productDiscountTotal: lineDiscountsTotal,
     taxTotal: taxAmount,
-    discount: totalDiscountShown,
+    discount: discountNum,
+    billDiscount: discountNum,
     loyaltyOff,
     fees: diningFeeLines,
     taxInclusive: taxSettings.inclusive,
@@ -930,6 +937,14 @@ export default function RetailPosWorkstation({
     const channelPrice = channelKey
       ? Number(row.channelPrices?.[channelKey])
       : NaN;
+    const r = row as Record<string, any>;
+    const rawMrp =
+      r.mrp ??
+      r.product?.mrp ??
+      r.meta?.mrp ??
+      null;
+    const mrp =
+      rawMrp != null && Number(rawMrp) > 0 ? Number(rawMrp) : undefined;
     const price =
       opts?.unitPriceOverride != null &&
       Number.isFinite(opts.unitPriceOverride)
@@ -974,9 +989,16 @@ export default function RetailPosWorkstation({
           );
         }
         if (tracks) {
+          const isSameUnit =
+            String(opts?.orderedUnitSymbol ?? existing.sellUnit ?? row.sellUnit ?? "").toLowerCase() ===
+            String(row.sellUnit ?? unit ?? "").toLowerCase();
           const factor =
             opts?.conversionFactor ?? existing.conversionFactor ?? 1;
-          const need = opts?.baseQty ?? next * factor;
+          const need = isSameUnit
+            ? next
+            : factor > 0 && opts?.baseQty != null
+              ? opts.baseQty / factor
+              : next;
           if (need > onHand + 1e-9) {
             toast.error(
               `Only ${formatQtyWithUnit(onHand, row.sellUnit ?? unit)} in stock`,
@@ -990,8 +1012,12 @@ export default function RetailPosWorkstation({
             ? {
                 ...l,
                 qty: next,
+                mrp: mrp ?? l.mrp,
                 ...(opts?.unitPriceOverride != null
-                  ? { unitPrice: opts.unitPriceOverride }
+                  ? {
+                      unitPrice: opts.unitPriceOverride,
+                      listPrice: opts.unitPriceOverride,
+                    }
                   : {}),
                 ...(opts?.sellingUnitId
                   ? { sellingUnitId: opts.sellingUnitId }
@@ -1008,7 +1034,7 @@ export default function RetailPosWorkstation({
                   ? normalizeSellUnit(opts.orderedUnitSymbol)
                   : unit,
                 image: l.image ?? image,
-                listPrice: l.listPrice ?? price,
+                listPrice: opts?.unitPriceOverride != null ? opts.unitPriceOverride : (l.listPrice ?? (mrp ?? price)),
                 taxRatePercent: l.taxRatePercent ?? taxRatePercent,
                 requiresVariant: row.requiresVariant === true,
                 variantOptions: row.variantOptions ?? [],
@@ -1033,7 +1059,12 @@ export default function RetailPosWorkstation({
             ? normalizeQty(opts.addQty, unit)
             : normalizeQty(step, unit);
         if (tracks) {
-          const need = opts?.baseQty ?? startQty;
+          const isSameUnit = !opts?.orderedUnitSymbol || opts.orderedUnitSymbol.toLowerCase() === unit.toLowerCase();
+          const need = isSameUnit
+            ? startQty
+            : opts?.conversionFactor && opts.conversionFactor > 0 && opts?.baseQty != null
+              ? opts.baseQty / opts.conversionFactor
+              : startQty;
           if (need > onHand + 1e-9) {
             toast.error(`Only ${formatQtyWithUnit(onHand, unit)} in stock`);
             return prev;
@@ -1043,14 +1074,16 @@ export default function RetailPosWorkstation({
           toast.error("Out of stock — set opening qty / stock in Inventory first");
           return prev;
         }
+      const initialPrice = opts?.unitPriceOverride != null && Number.isFinite(opts.unitPriceOverride) ? opts.unitPriceOverride : price;
       return [
         ...prev,
         {
           stockLevelId: row.id,
           sku: row.sku,
           name: row.name,
-          unitPrice: price,
-          listPrice: price,
+          mrp: mrp,
+          unitPrice: initialPrice,
+          listPrice: mrp != null && mrp > initialPrice ? mrp : initialPrice,
           qty: startQty,
           maxQty: tracks ? onHand : 999999,
           sellUnit: opts?.orderedUnitSymbol
@@ -1191,7 +1224,10 @@ export default function RetailPosWorkstation({
           toast.error("Quantity converts to zero in stock unit");
           return;
         }
-        if (qtyPick.tracks && qtyBase > qtyPick.maxQty + 1e-9) {
+        const isSameUnit = String(entrySym ?? "").toLowerCase() === String(row.sellUnit ?? "").toLowerCase();
+        const factor = Number(quote.conversionFactorUsed) || 1;
+        const neededInStockUnit = isSameUnit ? n : (factor > 0 ? qtyBase / factor : n);
+        if (qtyPick.tracks && neededInStockUnit > qtyPick.maxQty + 1e-9) {
           toast.error(
             `Only ${formatQtyWithUnit(qtyPick.maxQty, row.sellUnit)} available`,
           );
@@ -2742,9 +2778,40 @@ export default function RetailPosWorkstation({
                           <p className="line-clamp-2 min-h-[2rem] text-[0.8125rem] leading-snug font-semibold text-[#0b1f33]">
                             {row.name}
                           </p>
-                          <p className="mt-1 text-[0.875rem] font-bold tabular-nums leading-none text-[#1a56db]">
-                            {money(row.sellPrice)}
-                          </p>
+                          {(() => {
+                            const r = row as Record<string, any>;
+                            const rawMrp =
+                              r.mrp ??
+                              r.product?.mrp ??
+                              r.meta?.mrp ??
+                              null;
+                            const mrpNum =
+                              rawMrp != null && Number(rawMrp) > 0
+                                ? Number(rawMrp)
+                                : 0;
+                            const sellNum = Number(row.sellPrice);
+                            const hasDisc = mrpNum > sellNum + 0.001;
+                            const discPct = hasDisc
+                              ? Math.round((1 - sellNum / mrpNum) * 100)
+                              : 0;
+                            return (
+                              <div className="mt-1 flex flex-wrap items-baseline gap-1.5">
+                                {hasDisc ? (
+                                  <>
+                                    <span className="text-[0.7rem] text-[#8b9bb0] line-through">
+                                      {money(mrpNum)}
+                                    </span>
+                                    <span className="rounded bg-emerald-50 px-1 py-0.2 text-[0.62rem] font-bold text-emerald-700">
+                                      {discPct}% OFF
+                                    </span>
+                                  </>
+                                ) : null}
+                                <span className="text-[0.875rem] font-bold tabular-nums leading-none text-[#1a56db]">
+                                  {money(sellNum)}
+                                </span>
+                              </div>
+                            );
+                          })()}
                         </div>
                         <span
                           role="button"
@@ -2973,15 +3040,34 @@ export default function RetailPosWorkstation({
 
           <ul className="max-h-[min(48vh,26rem)] min-h-[8rem] flex-1 space-y-3.5 overflow-y-auto px-3 py-3">
             {cart.map((l) => {
-              const catalogRate = cartLineListPrice(l);
+              const unitSellingPrice = l.unitPrice;
+              const lineMrp =
+                l.mrp && l.mrp > 0
+                  ? l.mrp
+                  : l.listPrice > 0
+                    ? l.listPrice
+                    : unitSellingPrice;
+              const hasLineDiscount = lineMrp > unitSellingPrice + 0.001;
+              const discPct = hasLineDiscount
+                ? Math.round(((1 - unitSellingPrice / lineMrp) * 100) * 10) / 10
+                : 0;
               const rateChanged =
-                Math.abs(l.unitPrice - catalogRate) > 0.001;
-              const discPct = cartLineDiscountPercent(l);
+                Math.abs(l.unitPrice - (l.listPrice ?? l.unitPrice)) > 0.005 &&
+                (l.listPrice ?? 0) > 0;
               const ratePct =
-                catalogRate > 0
-                  ? Math.round(((l.unitPrice / catalogRate - 1) * 100) * 10) /
-                    10
+                rateChanged && (l.listPrice ?? 0) > 0
+                  ? Math.round(
+                      ((l.unitPrice - (l.listPrice ?? l.unitPrice)) /
+                        (l.listPrice ?? l.unitPrice)) *
+                        100,
+                    )
                   : 0;
+              const lineProductDiscount =
+                Math.round(
+                  Math.max(0, lineMrp - unitSellingPrice) * l.qty * 100,
+                ) / 100;
+              const lineNet =
+                Math.round(unitSellingPrice * l.qty * 100) / 100;
               const unitLbl = priceUnitLabel(l.sellUnit);
               const unitShort = unitLbl.replace(/^per\s+/i, "") || "pcs";
               return (
@@ -3005,25 +3091,46 @@ export default function RetailPosWorkstation({
                           ) : null}
                           <span className="truncate">{l.name}</span>
                         </p>
-                        <p className="mt-1 text-[0.75rem] tabular-nums text-[#8b9bb0]">
-                          {discPct > 0 ? (
-                            <>
-                              <span className="mr-1.5 line-through decoration-[#94a3b8]">
-                                {money(catalogRate)}
+                        <div className="mt-1 space-y-0.5 text-[0.75rem] tabular-nums">
+                          {hasLineDiscount ? (
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-[#8b9bb0] line-through decoration-[#94a3b8]">
+                                MRP {money(lineMrp)}
                               </span>
-                              <span className="font-semibold text-[#c2410c]">
-                                {money(l.unitPrice)}
+                              <span className="rounded bg-emerald-100 px-1.5 py-0.2 text-[0.65rem] font-bold text-emerald-800">
+                                {discPct}% OFF
                               </span>
-                            </>
+                              <span className="font-bold text-[#0b1f33]">
+                                {money(unitSellingPrice)}
+                              </span>
+                              <span className="text-[#8b9bb0]">
+                                · {l.qty} {unitShort}
+                              </span>
+                            </div>
                           ) : (
-                            money(l.unitPrice)
-                          )}{" "}
-                          {unitLbl.startsWith("per") ? unitLbl : `per ${unitShort}`}
-                        </p>
+                            <div className="flex items-center gap-1 text-[#8b9bb0]">
+                              <span className="font-semibold text-[#0b1f33]">
+                                {money(unitSellingPrice)}
+                              </span>
+                              <span>
+                                · {l.qty} {unitShort}
+                              </span>
+                            </div>
+                          )}
+                          {hasLineDiscount ? (
+                            <div className="flex flex-wrap items-center gap-1.5 text-[0.7rem] text-[#64748b]">
+                              <span>Product discount {money(lineProductDiscount)}</span>
+                              <span>·</span>
+                              <span className="font-semibold text-[#0f172a]">
+                                Net {money(lineNet)}
+                              </span>
+                            </div>
+                          ) : null}
+                        </div>
                       </div>
                       <div className="flex shrink-0 items-center gap-1">
                         <p className="text-[0.9375rem] font-bold tabular-nums text-[#0b1f33]">
-                          {money(l.unitPrice * l.qty)}
+                          {money(lineNet)}
                         </p>
                         <button
                           type="button"
@@ -3271,7 +3378,7 @@ export default function RetailPosWorkstation({
             <div className="space-y-2 rounded-xl border border-[#e2e8f0] bg-white px-3 py-3 shadow-[0_1px_2px_rgba(11,31,51,0.04)]">
               <BillTotalsLines
                 summary={billSummary}
-                discount={totalDiscountShown}
+                discount={discountNum}
                 loyaltyOff={loyaltyOff}
                 formatMoney={money}
                 netAmount={splitPart ? chargeAmount : billSummary.amountDue}
@@ -4173,7 +4280,16 @@ export default function RetailPosWorkstation({
         </ModalFrame>
       ) : null}
 
-      {payModal === "discount" ? (
+      {payModal === "discount" ? (() => {
+        const ticketBeforeDiscount =
+          billSummary.productNet > 0
+            ? billSummary.productNet
+            : billSummary.itemsSubtotal;
+        const discountNum = moneyNumber(discountAmount || 0);
+        const maxCashierDiscountPercent = 100;
+        const maxDiscountAmount = ticketBeforeDiscount;
+        const discountCapped = false;
+        return (
         <ModalFrame
           title="Discount"
           subtitle="Set a different discount on each product, and/or an amount off the whole bill."
@@ -4413,7 +4529,8 @@ export default function RetailPosWorkstation({
             </div>
           </div>
         </ModalFrame>
-      ) : null}
+        );
+      })() : null}
 
       {payModal === "draft" ? (
         <ModalFrame

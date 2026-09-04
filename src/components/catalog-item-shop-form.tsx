@@ -1151,37 +1151,22 @@ export function CatalogItemShopForm<T extends CatalogItemShopValues>({
                 />
               </ShopField>
               <ShopField
-                label="Tax %"
-                htmlFor="catalog-item-tax"
-                hint={<FieldError message={fieldErrors.taxRatePercent} />}
-              >
-                <Input
-                  id="catalog-item-tax"
-                  name="taxRatePercent"
-                  type="number"
-                  min={0}
-                  max={40}
-                  step="0.01"
-                  placeholder="5 or 18"
-                  value={form.taxRatePercent}
-                  onChange={(e) => {
-                    clearFieldError("taxRatePercent");
-                    setForm((f) => ({
-                      ...f,
-                      taxRatePercent: e.target.value,
-                    }));
-                  }}
-                />
-              </ShopField>
-              <ShopField
                 label="HSN / SAC"
                 htmlFor="catalog-item-hsn"
-                hint={<FieldError message={fieldErrors.taxCode} />}
+                hint={
+                  fieldErrors.taxCode ? (
+                    <FieldError message={fieldErrors.taxCode} />
+                  ) : (
+                    <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
+                      Optional HSN/SAC code for GST invoice reporting. Tax rate is configured in Settings → Tax.
+                    </p>
+                  )
+                }
               >
                 <Input
                   id="catalog-item-hsn"
                   name="taxCode"
-                  placeholder="e.g. GST18 or HSN"
+                  placeholder="e.g. 6109 or 9987 (optional)"
                   value={form.taxCode}
                   onChange={(e) => {
                     clearFieldError("taxCode");

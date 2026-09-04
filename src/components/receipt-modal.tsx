@@ -81,6 +81,10 @@ export type ReceiptData = {
     inventoryUnit?: { barcodeSku: string; size?: string | null } | null;
     retailSku?: { sku: string } | null;
     product?: { name?: string; skuCode?: string } | null;
+    mrp?: string | number | null;
+    grossMrp?: string | number | null;
+    productDiscount?: string | number | null;
+    meta?: Record<string, unknown> | null;
     tracking?: {
       variantId?: string;
       batchId?: string;
@@ -323,10 +327,30 @@ export function ReceiptModal({
   const qrPayAmount = balanceDue > 0.005 ? balanceDue : originalAmount;
   const displayFees = feeRows.filter((f) => f.feeCode !== "round_off");
 
+  const itemsGrossMrp = (data?.items ?? []).reduce((s, it) => {
+    const meta = (it.meta as Record<string, unknown> | null) ?? {};
+    const mrpVal = (meta.grossMrp ?? it.grossMrp ?? it.mrp ?? it.unitPrice) as string | number | null | undefined;
+    const itemGross = moneyNumber(mrpVal) * (moneyNumber(it.quantity) || 1);
+    return s + itemGross;
+  }, 0);
+  const itemsProductDiscount = (data?.items ?? []).reduce((s, it) => {
+    const meta = (it.meta as Record<string, unknown> | null) ?? {};
+    const discVal = (meta.productDiscount ?? it.productDiscount ?? 0) as string | number | null | undefined;
+    const itemDisc = moneyNumber(discVal);
+    return s + itemDisc;
+  }, 0);
+  const hasProdDiscount = itemsProductDiscount > 0 || (itemsGrossMrp > subtotal + 0.001);
+  const prodDiscountTotal = itemsProductDiscount > 0 ? itemsProductDiscount : Math.max(0, itemsGrossMrp - subtotal);
+  const grossMrpTotal = itemsGrossMrp > subtotal ? itemsGrossMrp : subtotal + prodDiscountTotal;
+  const billDiscountAmt = !hasProdDiscount ? discount : 0;
+
   const bill = buildBillSummary({
     itemsSubtotal: itemsSub,
+    grossMrp: grossMrpTotal,
+    productDiscountTotal: prodDiscountTotal,
     taxTotal,
-    discount,
+    discount: billDiscountAmt,
+    billDiscount: billDiscountAmt,
     fees: displayFees,
     taxInclusive: false,
     lines: data?.items ?? [],
@@ -823,19 +847,45 @@ export function ReceiptModal({
 
                 {/* Totals Table */}
                 <div className="space-y-1.5 text-xs">
-                  <div className="flex justify-between py-1 border-b border-gray-100">
-                    <span className="text-gray-600">Subtotal:</span>
-                    <span className="font-mono font-medium">
-                      {currencySymbol}
-                      {pad2(subtotal)}
-                    </span>
-                  </div>
-                  {discount > 0 ? (
-                    <div className="flex justify-between py-1 border-b border-gray-100 text-green-700">
-                      <span>Discount:</span>
+                  {hasProdDiscount ? (
+                    <>
+                      <div className="flex justify-between py-1 border-b border-gray-100 text-gray-500">
+                        <span>Total MRP:</span>
+                        <span className="font-mono font-medium">
+                          {currencySymbol}
+                          {pad2(grossMrpTotal)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between py-1 border-b border-gray-100 text-emerald-700 font-medium">
+                        <span>Product discount:</span>
+                        <span className="font-mono">
+                          -{currencySymbol}
+                          {pad2(prodDiscountTotal)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between py-1 border-b border-gray-100 font-semibold text-gray-900">
+                        <span>Subtotal (Net):</span>
+                        <span className="font-mono font-medium">
+                          {currencySymbol}
+                          {pad2(subtotal)}
+                        </span>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex justify-between py-1 border-b border-gray-100">
+                      <span className="text-gray-600">Subtotal:</span>
+                      <span className="font-mono font-medium">
+                        {currencySymbol}
+                        {pad2(subtotal)}
+                      </span>
+                    </div>
+                  )}
+                  {billDiscountAmt > 0 ? (
+                    <div className="flex justify-between py-1 border-b border-gray-100 text-[#c2410c] font-medium">
+                      <span>{hasProdDiscount ? "Bill discount:" : "Discount:"}</span>
                       <span className="font-mono">
                         -{currencySymbol}
-                        {pad2(discount)}
+                        {pad2(billDiscountAmt)}
                       </span>
                     </div>
                   ) : null}
@@ -1095,19 +1145,45 @@ export function ReceiptModal({
 
               {/* Financial Totals */}
               <div className="space-y-1 text-[11px]">
-                <div className="flex justify-between">
-                  <span>Subtotal</span>
-                  <span className="tabular-nums">
-                    {currencySymbol}
-                    {pad2(subtotal)}
-                  </span>
-                </div>
-                {discount > 0 ? (
+                {hasProdDiscount ? (
+                  <>
+                    <div className="flex justify-between text-gray-500">
+                      <span>Total MRP</span>
+                      <span className="tabular-nums">
+                        {currencySymbol}
+                        {pad2(grossMrpTotal)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-emerald-700 font-medium">
+                      <span>Product discount</span>
+                      <span className="tabular-nums">
+                        -{currencySymbol}
+                        {pad2(prodDiscountTotal)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between font-semibold">
+                      <span>Subtotal (Net)</span>
+                      <span className="tabular-nums">
+                        {currencySymbol}
+                        {pad2(subtotal)}
+                      </span>
+                    </div>
+                  </>
+                ) : (
                   <div className="flex justify-between">
-                    <span>Discount</span>
+                    <span>Subtotal</span>
+                    <span className="tabular-nums">
+                      {currencySymbol}
+                      {pad2(subtotal)}
+                    </span>
+                  </div>
+                )}
+                {billDiscountAmt > 0 ? (
+                  <div className="flex justify-between text-[#c2410c] font-medium">
+                    <span>{hasProdDiscount ? "Bill discount" : "Discount"}</span>
                     <span className="tabular-nums">
                       -{currencySymbol}
-                      {pad2(discount)}
+                      {pad2(billDiscountAmt)}
                     </span>
                   </div>
                 ) : null}
