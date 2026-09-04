@@ -989,9 +989,16 @@ export default function RetailPosWorkstation({
           );
         }
         if (tracks) {
+          const isSameUnit =
+            String(opts?.orderedUnitSymbol ?? existing.sellUnit ?? row.sellUnit ?? "").toLowerCase() ===
+            String(row.sellUnit ?? unit ?? "").toLowerCase();
           const factor =
             opts?.conversionFactor ?? existing.conversionFactor ?? 1;
-          const need = opts?.baseQty ?? next * factor;
+          const need = isSameUnit
+            ? next
+            : factor > 0 && opts?.baseQty != null
+              ? opts.baseQty / factor
+              : next;
           if (need > onHand + 1e-9) {
             toast.error(
               `Only ${formatQtyWithUnit(onHand, row.sellUnit ?? unit)} in stock`,
