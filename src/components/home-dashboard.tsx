@@ -34,6 +34,12 @@ function formatMoney(n: number) {
   })}`;
 }
 
+function formatCompactMoney(n: number) {
+  if (n >= 100000) return `₹${(n / 100000).toFixed(1)}L`;
+  if (n >= 1000) return `₹${(n / 1000).toFixed(1)}k`;
+  return `₹${Math.round(n)}`;
+}
+
 type DashLens = "sales" | "inventory" | "purchase";
 
 /**
@@ -100,19 +106,21 @@ export function HomeDashboard() {
   const stockRows = floor.data?.counts?.stockRows ?? 0;
 
   const spark = useMemo(() => {
-    const days = (monthly.data?.daily ?? []).filter(
-      (d) => Number(d.sales) > 0 || Number(d.orders) > 0,
-    );
-    const slice = days.slice(-7);
+    const daily = monthly.data?.daily ?? [];
+    if (!daily.length) return [];
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const pastDays = daily.filter((d) => d.date <= todayStr);
+    const slice = pastDays.length >= 7 ? pastDays.slice(-7) : daily.slice(0, 7);
     if (!slice.length) return [];
     const max = Math.max(...slice.map((d) => Number(d.sales) || 0), 1);
     return slice.map((d) => {
       const salesN = Number(d.sales) || 0;
       return {
         label: d.date ? d.date.slice(8) : "",
+        fullDate: d.date,
         sales: salesN,
         orders: d.orders ?? 0,
-        pct: Math.max(12, Math.round((salesN / max) * 100)),
+        pct: salesN > 0 ? Math.max(14, Math.round((salesN / max) * 100)) : 0,
       };
     });
   }, [monthly.data]);
@@ -254,30 +262,38 @@ export function HomeDashboard() {
               )}
             >
               {spark.length ? (
-                <div className="rounded-lg border border-[#eef1f4] bg-[#fafbfc] px-3 pb-2 pt-3">
-                  <div className="flex h-36 items-end gap-1.5">
+                <div className="rounded-lg border border-[#eef1f4] bg-[#fafbfc] p-3">
+                  <div className="flex h-36 items-end gap-2 pt-2">
                     {spark.map((bar, i) => (
                       <div
                         key={`${bar.label}-${i}`}
-                        className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1"
+                        className="group flex h-full min-w-0 flex-1 flex-col items-center justify-end"
                       >
-                        <span className="text-[0.6rem] tabular-nums text-[#6b7280]">
-                          {bar.sales > 0 ? Math.round(bar.sales) : ""}
+                        <span className="mb-1 text-[0.625rem] font-medium tabular-nums text-[#4b5563]">
+                          {bar.sales > 0 ? formatCompactMoney(bar.sales) : ""}
                         </span>
-                        <div
-                          className="w-full max-w-[1.75rem] rounded-t-sm bg-[#1a56db]"
-                          style={{ height: `${bar.pct}%` }}
-                          title={`${bar.label}: ${money(bar.sales)}`}
-                        />
-                        <span className="text-[0.65rem] tabular-nums text-[#8b9bb0]">
+                        <div className="relative flex w-full flex-1 items-end justify-center rounded-md bg-[#f1f5f9]/70 p-0.5">
+                          {bar.sales > 0 ? (
+                            <div
+                              className="w-full max-w-[1.85rem] rounded-t-md bg-gradient-to-t from-[#1a56db] to-[#3b82f6] shadow-sm transition-all duration-200 group-hover:from-[#1e40af] group-hover:to-[#2563eb]"
+                              style={{ height: `${bar.pct}%` }}
+                              title={`${bar.fullDate || bar.label}: ${money(bar.sales)} (${bar.orders} orders)`}
+                            />
+                          ) : (
+                            <div
+                              className="h-1 w-full max-w-[1.25rem] rounded-full bg-[#cbd5e1]"
+                              title={`${bar.fullDate || bar.label}: No sales`}
+                            />
+                          )}
+                        </div>
+                        <span className="mt-1.5 text-[0.6875rem] font-medium tabular-nums text-[#64748b]">
                           {bar.label}
                         </span>
                       </div>
                     ))}
                   </div>
-                  <p className="mt-1 text-center text-[0.7rem] text-[#8b9bb0]">
-                    Last 7 days · {orderCount} ticket
-                    {orderCount === 1 ? "" : "s"}
+                  <p className="mt-2 text-center text-[0.7rem] text-[#8b9bb0]">
+                    Last 7 days · {orderCount} ticket{orderCount === 1 ? "" : "s"}
                   </p>
                 </div>
               ) : null}
