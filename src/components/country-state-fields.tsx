@@ -1,10 +1,10 @@
-"use client";
-
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { FieldError } from "@/components/ui/form";
 import { geoStates } from "@/lib/geo";
 import { geoCountrySelectOptions } from "@/components/geo-country-options";
+import { cn } from "@/lib/utils";
 
 type Props = {
   countryCode: string;
@@ -16,7 +16,11 @@ type Props = {
   countryLabel?: string;
   stateLabel?: string;
   countryError?: string;
+  stateError?: string;
 };
+
+const fieldErr =
+  "border-[#fca5a5] focus:border-[#dc2626] focus:shadow-[0_0_0_3px_rgba(220,38,38,0.12)]";
 
 export function CountryStateFields({
   countryCode,
@@ -28,6 +32,7 @@ export function CountryStateFields({
   countryLabel = "Country",
   stateLabel = "State / region",
   countryError,
+  stateError,
 }: Props) {
   const states = geoStates(countryCode);
   return (
@@ -35,10 +40,10 @@ export function CountryStateFields({
       <div>
         <Label>
           {countryLabel}
-          {countryRequired ? " *" : ""}
+          {countryRequired ? <span className="text-[#dc2626]"> *</span> : ""}
         </Label>
         <Select
-          className="mt-1"
+          className={cn("mt-1", countryError && fieldErr)}
           panelMinWidth={280}
           value={countryCode}
           onChange={(e) => {
@@ -50,22 +55,19 @@ export function CountryStateFields({
           <option value="">Select country</option>
           {geoCountrySelectOptions()}
         </Select>
-        {countryError ? (
-          <p className="mt-1 text-[0.75rem] font-medium text-[#b91c1c]">
-            {countryError}
-          </p>
-        ) : null}
+        <FieldError message={countryError} />
       </div>
       <div>
         <Label>
           {stateLabel}
-          {stateRequired ? " *" : ""}
+          {stateRequired ? <span className="text-[#dc2626]"> *</span> : ""}
         </Label>
         {states.length ? (
           <Select
-            className="mt-1"
+            className={cn("mt-1", stateError && fieldErr)}
             value={state}
             onChange={(e) => onState(e.target.value)}
+            aria-invalid={Boolean(stateError)}
           >
             <option value="">Select state</option>
             {states.map((s) => (
@@ -76,12 +78,14 @@ export function CountryStateFields({
           </Select>
         ) : (
           <Input
-            className="mt-1"
+            className={cn("mt-1", stateError && fieldErr)}
             value={state}
             onChange={(e) => onState(e.target.value)}
             placeholder="State / region"
+            aria-invalid={Boolean(stateError)}
           />
         )}
+        <FieldError message={stateError} />
       </div>
     </>
   );
