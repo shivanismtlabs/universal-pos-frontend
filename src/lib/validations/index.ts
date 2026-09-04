@@ -53,16 +53,41 @@ export const personNameSchema = z
     "Use letters and spaces only",
   );
 
+/** Strict Email Regex: Requires valid local part, domain name (min 2 chars), and valid TLD (min 2 letters) */
+export const strictEmailRegex =
+  /^[a-zA-Z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-zA-Z0-9!#$%&'*+/=?^_`{|}~-]+)*@(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/;
+
+export const emailSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .min(1, "Please enter your email address")
+  .max(255, "Email is too long")
+  .email("Enter a valid email address (e.g. name@company.com)")
+  .refine((v) => strictEmailRegex.test(v), {
+    message: "Enter a valid email address (e.g. name@company.com)",
+  })
+  .refine(
+    (v) => {
+      const parts = v.split("@");
+      if (parts.length !== 2) return false;
+      const domain = parts[1];
+      const labels = domain.split(".");
+      if (labels.length < 2) return false;
+      const sld = labels[labels.length - 2];
+      const tld = labels[labels.length - 1];
+      return sld.length >= 2 && tld.length >= 2 && /^[a-zA-Z]+$/.test(tld);
+    },
+    {
+      message: "Enter a valid email with a valid domain (e.g. name@company.com)",
+    },
+  );
+
 /** Zoho-style identity signup (before organization setup) */
 export const signupIdentitySchema = z
   .object({
     fullName: personNameSchema,
-    email: z
-      .string()
-      .trim()
-      .toLowerCase()
-      .email("Enter a valid email")
-      .max(255),
+    email: emailSchema,
     password: strongPasswordSchema,
     confirmPassword: z.string().min(1, "Confirm your password"),
     phone: phoneSchema,
@@ -86,13 +111,7 @@ export const signupIdentitySchema = z
 export type SignupIdentityInput = z.infer<typeof signupIdentitySchema>;
 
 export const loginSchema = z.object({
-  email: z
-    .string()
-    .trim()
-    .toLowerCase()
-    .min(1, "Please enter your email address.")
-    .email("Please enter a valid email address.")
-    .max(255),
+  email: emailSchema,
   password: z.string().min(1, "Please enter your password.").max(72),
 });
 export type LoginInput = z.infer<typeof loginSchema>;
@@ -606,21 +625,7 @@ export const availabilityQuerySchema = z.object({
 
 /** ---- Shared field helpers (use across app forms) ---- */
 
-export const emailSchema = z
-  .string()
-  .trim()
-  .toLowerCase()
-  .email("Enter a valid email")
-  .max(255);
-
-export const optionalEmailSchema = z
-  .string()
-  .trim()
-  .toLowerCase()
-  .email("Enter a valid email")
-  .max(255)
-  .optional()
-  .or(z.literal(""));
+export const optionalEmailSchema = emailSchema.optional().or(z.literal(""));
 
 export const optionalPhoneSchema = phoneSchema.optional().or(z.literal(""));
 

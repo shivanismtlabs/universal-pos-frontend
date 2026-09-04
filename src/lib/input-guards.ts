@@ -29,3 +29,44 @@ export function filterPersonNameInput(raw: string): string {
 export function filterMobileDigits(raw: string): string {
   return raw.replace(/\D/g, "");
 }
+
+/** Prevent space key on keydown (real-time space block for email & password). */
+export function preventSpaceKeyDown(e: { key: string; code?: string; preventDefault: () => void }): void {
+  if (e.key === " " || e.code === "Space") {
+    e.preventDefault();
+  }
+}
+
+/** Strip all whitespace from value (real-time space block for email, password, codes). */
+export function stripSpaces(raw: string): string {
+  return raw.replace(/\s+/g, "");
+}
+
+/**
+ * Prevent leading space (at start of input) or consecutive double spaces on keydown.
+ * Used for name, address, and text fields where single spaces between words are allowed.
+ */
+export function preventLeadingOrDoubleSpaceKeyDown(e: {
+  key: string;
+  code?: string;
+  preventDefault: () => void;
+  currentTarget: { value: string; selectionStart?: number | null };
+}): void {
+  if (e.key === " " || e.code === "Space") {
+    const val = e.currentTarget.value || "";
+    const selStart = e.currentTarget.selectionStart ?? val.length;
+    if (selStart === 0 || val.length === 0) {
+      e.preventDefault();
+      return;
+    }
+    if (selStart > 0 && val[selStart - 1] === " ") {
+      e.preventDefault();
+      return;
+    }
+  }
+}
+
+/** Filter text input in real time: remove leading spaces and collapse consecutive spaces into a single space. */
+export function filterRealTextInput(raw: string): string {
+  return raw.replace(/^\s+/, "").replace(/\s{2,}/g, " ");
+}

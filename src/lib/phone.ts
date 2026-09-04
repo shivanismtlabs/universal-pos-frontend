@@ -78,8 +78,27 @@ export function canonicalPhoneE164(
   return trimmed.startsWith("+") ? trimmed : `+${digits}`;
 }
 
-export function phoneValidationMessage(_countryCode?: string): string {
-  return "Enter a valid phone number for the selected country";
+export function phoneValidationMessage(countryCode?: string): string {
+  const cc = (countryCode ?? "IN").trim().toUpperCase();
+  switch (cc) {
+    case "IN":
+      return "Enter a valid 10-digit mobile number for India (+91)";
+    case "US":
+    case "CA":
+      return "Enter a valid 10-digit phone number for US/Canada (+1)";
+    case "AE":
+      return "Enter a valid 9-digit phone number for UAE (+971)";
+    case "GB":
+      return "Enter a valid phone number for UK (+44)";
+    case "SA":
+      return "Enter a valid 9-digit phone number for Saudi Arabia (+966)";
+    case "SG":
+      return "Enter a valid 8-digit phone number for Singapore (+65)";
+    case "AU":
+      return "Enter a valid phone number for Australia (+61)";
+    default:
+      return `Enter a valid phone number for the selected country`;
+  }
 }
 
 /** @deprecated Use DEFAULT_PHONE_PLACEHOLDER in phone-country-input — kept for imports. */
