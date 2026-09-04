@@ -1052,7 +1052,12 @@ export default function RetailPosWorkstation({
             ? normalizeQty(opts.addQty, unit)
             : normalizeQty(step, unit);
         if (tracks) {
-          const need = opts?.baseQty ?? startQty;
+          const isSameUnit = !opts?.orderedUnitSymbol || opts.orderedUnitSymbol.toLowerCase() === unit.toLowerCase();
+          const need = isSameUnit
+            ? startQty
+            : opts?.conversionFactor && opts.conversionFactor > 0 && opts?.baseQty != null
+              ? opts.baseQty / opts.conversionFactor
+              : startQty;
           if (need > onHand + 1e-9) {
             toast.error(`Only ${formatQtyWithUnit(onHand, unit)} in stock`);
             return prev;
@@ -1212,7 +1217,10 @@ export default function RetailPosWorkstation({
           toast.error("Quantity converts to zero in stock unit");
           return;
         }
-        if (qtyPick.tracks && qtyBase > qtyPick.maxQty + 1e-9) {
+        const isSameUnit = String(entrySym ?? "").toLowerCase() === String(row.sellUnit ?? "").toLowerCase();
+        const factor = Number(quote.conversionFactorUsed) || 1;
+        const neededInStockUnit = isSameUnit ? n : (factor > 0 ? qtyBase / factor : n);
+        if (qtyPick.tracks && neededInStockUnit > qtyPick.maxQty + 1e-9) {
           toast.error(
             `Only ${formatQtyWithUnit(qtyPick.maxQty, row.sellUnit)} available`,
           );
@@ -1284,15 +1292,11 @@ export default function RetailPosWorkstation({
         prev.filter((x) => x.stockLevelId !== line.stockLevelId),
       );
     } else {
-      const factor = line.conversionFactor ?? 1;
-      const needBase = next * factor;
-      if (needBase > line.maxQty + 1e-9) {
+      if (next > line.maxQty + 1e-9) {
         toast.error(
           `Only ${formatQtyWithUnit(line.maxQty, line.sellUnit)} available`,
         );
-        next = line.conversionFactor && line.conversionFactor > 0
-          ? normalizeQty(line.maxQty / line.conversionFactor, line.sellUnit)
-          : normalizeQty(line.maxQty, line.sellUnit);
+        next = normalizeQty(line.maxQty, line.sellUnit);
       }
       setCart((prev) =>
         prev.map((x) =>
@@ -3232,9 +3236,7 @@ export default function RetailPosWorkstation({
                                     x.qty + step,
                                     x.sellUnit,
                                   );
-                                  const factor = x.conversionFactor ?? 1;
-                                  const needBase = next * factor;
-                                  if (needBase > x.maxQty + 1e-9) {
+                                  if (next > x.maxQty + 1e-9) {
                                     toast.error(
                                       `Only ${formatQtyWithUnit(x.maxQty, x.sellUnit)} available`,
                                     );

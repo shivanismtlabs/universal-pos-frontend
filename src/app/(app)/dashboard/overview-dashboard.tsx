@@ -40,13 +40,7 @@ function formatInr(n: number) {
 }
 
 function formatDisplayName(fullName?: string | null) {
-  if (!fullName?.trim()) return null;
-  const parts = fullName.trim().split(/\s+/);
-  // "Shop Owner" → prefer full string over bare "Shop"
-  if (parts[0]?.toLowerCase() === "shop" && parts.length > 1) {
-    return parts.slice(1).join(" ");
-  }
-  return parts[0] ?? fullName.trim();
+  return fullName?.trim() || null;
 }
 
 /**
