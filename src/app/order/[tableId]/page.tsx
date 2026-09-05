@@ -229,7 +229,7 @@ export default function GuestQrOrderPage() {
         <div className="mx-auto flex max-w-lg items-center gap-3">
           <div className="min-w-0 flex-1">
             <p className="text-xs text-[#8b9bb0]">
-              {cart.reduce((n, l) => n + l.quantity, 0)} items · pay at counter
+              {cart.length} item{cart.length === 1 ? "" : "s"} · pay at counter
             </p>
             <p className="text-base font-semibold tabular-nums text-[#0b1f33]">
               {total.toFixed(2)}

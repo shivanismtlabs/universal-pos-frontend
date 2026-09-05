@@ -195,8 +195,6 @@ type UniversalQtyPickerProps = {
       amount: number;
       unitPrice?: string;
       conversionFactorUsed: number;
-      baseUnitSymbol?: string;
-      baseQuantity?: string;
     } | null;
   }) => void;
 };
@@ -220,12 +218,135 @@ function UniversalQuantityPickerModal({
     conversionFactorUsed: number;
     baseUnitSymbol?: string;
     baseQuantity?: string;
+    priceQuantity?: string;
+    priceUnitSymbol?: string;
+    configuredPriceQuantity?: string;
+    stockAvailable?: number;
+    stockRemaining?: number;
+    sufficientStock?: boolean;
   } | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const entryUnits = row.entryUnits ?? [];
-  const selectedUnit = entryUnits.find((u) => u.unitId === unitId);
+  const entryUnits = useMemo(() => {
+    const existing = row.entryUnits ?? [];
+    if (existing.length > 1) return existing;
+
+    const currentSym = String(row.sellUnit ?? "").trim().toLowerCase();
+    const list: Array<{ unitId: string; symbol: string; name: string; conversionToBase?: number }> = [...existing];
+
+    const ensureUnit = (id: string, symbol: string, name: string, factor: number) => {
+      if (!list.some((u) => u.symbol.toLowerCase() === symbol.toLowerCase())) {
+        list.push({ unitId: id, symbol, name, conversionToBase: factor });
+      }
+    };
+
+    if (currentSym === "g") {
+      ensureUnit("u-g", "g", "Gram", 1);
+      ensureUnit("u-kg", "kg", "Kilogram", 1000);
+    } else if (currentSym === "kg") {
+      ensureUnit("u-kg", "kg", "Kilogram", 1);
+      ensureUnit("u-g", "g", "Gram", 0.001);
+    } else if (currentSym === "ml") {
+      ensureUnit("u-ml", "ml", "Millilitre", 1);
+      ensureUnit("u-l", "L", "Litre", 1000);
+    } else if (currentSym === "l") {
+      ensureUnit("u-l", "L", "Litre", 1);
+      ensureUnit("u-ml", "ml", "Millilitre", 0.001);
+    } else if (currentSym === "cm") {
+      ensureUnit("u-cm", "cm", "Centimetre", 1);
+      ensureUnit("u-m", "m", "Metre", 100);
+    } else if (currentSym === "m") {
+      ensureUnit("u-m", "m", "Metre", 1);
+      ensureUnit("u-cm", "cm", "Centimetre", 0.01);
+    } else if (currentSym === "pcs") {
+      ensureUnit("u-pcs", "pcs", "Piece", 1);
+      ensureUnit("u-dozen", "dozen", "Dozen", 12);
+    } else if (currentSym === "dozen") {
+      ensureUnit("u-dozen", "dozen", "Dozen", 1);
+      ensureUnit("u-pcs", "pcs", "Piece", 1 / 12);
+    }
+
+    return list;
+  }, [row.entryUnits, row.sellUnit]);
+
+  const selectedUnit = entryUnits.find((u) => u.unitId === unitId || u.symbol.toLowerCase() === (unitId || "").toLowerCase());
   const entrySym = selectedUnit?.symbol ?? row.sellUnit ?? "";
+
+  const quickPresets = useMemo(() => {
+    const sym = entrySym.trim().toLowerCase();
+    if (sym === "g") {
+      return [
+        { qty: 50, unitSym: "g", label: "50 g" },
+        { qty: 100, unitSym: "g", label: "100 g" },
+        { qty: 250, unitSym: "g", label: "250 g" },
+        { qty: 500, unitSym: "g", label: "500 g" },
+        { qty: 1, unitSym: "kg", label: "1 kg" },
+      ];
+    }
+    if (sym === "kg") {
+      return [
+        { qty: 0.25, unitSym: "kg", label: "0.25 kg" },
+        { qty: 0.5, unitSym: "kg", label: "0.5 kg" },
+        { qty: 1, unitSym: "kg", label: "1 kg" },
+        { qty: 2, unitSym: "kg", label: "2 kg" },
+        { qty: 5, unitSym: "kg", label: "5 kg" },
+      ];
+    }
+    if (sym === "ml") {
+      return [
+        { qty: 100, unitSym: "ml", label: "100 ml" },
+        { qty: 250, unitSym: "ml", label: "250 ml" },
+        { qty: 500, unitSym: "ml", label: "500 ml" },
+        { qty: 1, unitSym: "L", label: "1 L" },
+        { qty: 2, unitSym: "L", label: "2 L" },
+      ];
+    }
+    if (sym === "l") {
+      return [
+        { qty: 0.25, unitSym: "L", label: "0.25 L" },
+        { qty: 0.5, unitSym: "L", label: "0.5 L" },
+        { qty: 1, unitSym: "L", label: "1 L" },
+        { qty: 2, unitSym: "L", label: "2 L" },
+        { qty: 5, unitSym: "L", label: "5 L" },
+      ];
+    }
+    if (sym === "cm") {
+      return [
+        { qty: 10, unitSym: "cm", label: "10 cm" },
+        { qty: 25, unitSym: "cm", label: "25 cm" },
+        { qty: 50, unitSym: "cm", label: "50 cm" },
+        { qty: 1, unitSym: "m", label: "1 m" },
+        { qty: 5, unitSym: "m", label: "5 m" },
+      ];
+    }
+    if (sym === "m") {
+      return [
+        { qty: 0.5, unitSym: "m", label: "0.5 m" },
+        { qty: 1, unitSym: "m", label: "1 m" },
+        { qty: 2, unitSym: "m", label: "2 m" },
+        { qty: 5, unitSym: "m", label: "5 m" },
+        { qty: 10, unitSym: "m", label: "10 m" },
+      ];
+    }
+    if (sym === "pcs" || sym === "piece") {
+      return [
+        { qty: 1, unitSym: "pcs", label: "1 pcs" },
+        { qty: 5, unitSym: "pcs", label: "5 pcs" },
+        { qty: 10, unitSym: "pcs", label: "10 pcs" },
+        { qty: 0.5, unitSym: "dozen", label: "0.5 dozen" },
+        { qty: 1, unitSym: "dozen", label: "1 dozen" },
+      ];
+    }
+    if (sym === "dozen") {
+      return [
+        { qty: 0.5, unitSym: "dozen", label: "0.5 dozen" },
+        { qty: 1, unitSym: "dozen", label: "1 dozen" },
+        { qty: 2, unitSym: "dozen", label: "2 dozen" },
+        { qty: 5, unitSym: "dozen", label: "5 dozen" },
+      ];
+    }
+    return [1, 5, 10, 25, 50].map((q) => ({ qty: q, unitSym: entrySym, label: `${q} ${entrySym}` }));
+  }, [entrySym]);
 
   useEffect(() => {
     const n = Number(val.trim().replace(",", "."));
@@ -233,7 +354,7 @@ function UniversalQuantityPickerModal({
       setQuote(null);
       return;
     }
-    if (!row.productId || !unitId) {
+    if (!row.productId) {
       setQuote(null);
       return;
     }
@@ -244,7 +365,9 @@ function UniversalQuantityPickerModal({
         .quotePricingLine({
           productId: row.productId!,
           enteredQty: n,
-          sellingUnitId: unitId,
+          sellingUnitId: unitId?.startsWith("u-") ? undefined : unitId,
+          sellingUnitSymbol: entrySym || (unitId?.startsWith("u-") ? unitId.replace(/^u-/, "") : undefined),
+          unitPriceOverride: moneyNumber(row.sellPrice),
         })
         .then((q) => {
           if (!cancelled) {
@@ -264,14 +387,20 @@ function UniversalQuantityPickerModal({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [val, unitId, row.productId]);
+  }, [val, unitId, entrySym, row.productId]);
 
   const n = Number(val.trim().replace(",", "."));
   const validQty = Number.isFinite(n) && n > 0;
+  const baseQtyNum = quote?.baseQuantity ? Number(quote.baseQuantity) : n;
+  const isInsufficientStock = tracks && maxQty > 0 && (quote ? quote.sufficientStock === false || (quote.stockRemaining != null && quote.stockRemaining < 0) : baseQtyNum > maxQty);
 
   const handleSubmit = () => {
     if (!validQty) {
       toast.error("Enter a quantity greater than 0");
+      return;
+    }
+    if (isInsufficientStock) {
+      toast.error(`Insufficient stock (Available: ${maxQty} ${quote?.baseUnitSymbol || row.sellUnit}, Requested: ${baseQtyNum} ${quote?.baseUnitSymbol || row.sellUnit})`);
       return;
     }
     onApply({
@@ -282,6 +411,10 @@ function UniversalQuantityPickerModal({
     });
   };
 
+  const baseUnitSymbol = quote?.baseUnitSymbol || row.sellUnit || "";
+  const stockAvailable = quote?.stockAvailable ?? maxQty;
+  const stockRemaining = quote?.stockRemaining ?? (stockAvailable - baseQtyNum);
+
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-[#0b1f33]/40 p-4">
       <div className="w-full max-w-sm rounded-xl border border-[#e2e8f0] bg-white p-5 shadow-2xl">
@@ -290,9 +423,9 @@ function UniversalQuantityPickerModal({
         </h3>
 
         <div className="mt-1 flex items-center justify-between text-xs text-[#5a6b7d]">
-          <span>Available:</span>
+          <span>Available Stock:</span>
           <span className="font-semibold text-[#0b1f33]">
-            {formatQtyWithUnit(maxQty, row.sellUnit)}
+            {formatQtyWithUnit(stockAvailable, baseUnitSymbol)}
           </span>
         </div>
 
@@ -338,7 +471,7 @@ function UniversalQuantityPickerModal({
             className="mt-1 text-center text-2xl font-bold tabular-nums h-12 shadow-sm border-[#d9e0ea] focus:border-[#1a56db]"
             autoFocus
             inputMode="decimal"
-            placeholder="e.g. 5"
+            placeholder="e.g. 100"
             value={val}
             onChange={(e) => {
               const v = e.target.value.replace(",", ".");
@@ -355,15 +488,51 @@ function UniversalQuantityPickerModal({
           />
         </div>
 
-        {/* Real-time Equivalent and Amount Preview calculated from Backend Quote */}
-        <div className="mt-4 rounded-lg border border-[#e8edf4] bg-[#f8fafc] p-3 text-sm space-y-1.5">
+        {/* Dynamic Presets */}
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {quickPresets.map((preset) => (
+            <button
+              key={`${preset.qty}-${preset.unitSym}`}
+              type="button"
+              className="rounded-md border border-[#e2e8f0] bg-white px-2.5 py-1 text-xs font-semibold text-[#0b1f33] hover:border-[#1a56db] hover:text-[#1a56db] hover:bg-[#f0f5ff] transition-colors"
+              onClick={() => {
+                const target = entryUnits.find((u) => u.symbol.toLowerCase() === preset.unitSym.toLowerCase());
+                if (target && target.unitId !== unitId) {
+                  setUnitId(target.unitId);
+                }
+                setVal(String(preset.qty));
+              }}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Live Summary Box */}
+        <div className="mt-4 rounded-lg border border-[#e8edf4] bg-[#f8fafc] p-3 text-sm space-y-2">
           <div className="flex items-center justify-between text-xs">
-            <span className="text-[#5a6b7d]">Equivalent:</span>
+            <span className="text-[#5a6b7d]">You are adding:</span>
+            <span className="font-semibold text-[#0b1f33] tabular-nums">
+              {validQty ? `${n} ${entrySym}` : "—"}
+            </span>
+          </div>
+
+          {quote?.unitPrice ? (
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-[#5a6b7d]">Price Basis:</span>
+              <span className="font-medium text-[#0b1f33] tabular-nums">
+                {money(Number(quote.unitPrice))} / {quote.configuredPriceQuantity || "1"} {quote.priceUnitSymbol || entrySym}
+              </span>
+            </div>
+          ) : null}
+
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-[#5a6b7d]">Base Equivalent:</span>
             <span className="font-semibold text-[#0b1f33] tabular-nums">
               {loading ? (
                 <span className="text-[#8b9bb0]">Calculating…</span>
               ) : quote ? (
-                `${quote.baseQuantity || quote.qtyBase} ${quote.baseUnitSymbol || row.sellUnit}`
+                `${quote.baseQuantity || quote.qtyBase} ${baseUnitSymbol}`
               ) : validQty ? (
                 `${n} ${entrySym}`
               ) : (
@@ -371,8 +540,9 @@ function UniversalQuantityPickerModal({
               )}
             </span>
           </div>
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-[#5a6b7d]">Amount:</span>
+
+          <div className="flex items-center justify-between border-t border-[#e2e8f0] pt-2">
+            <span className="text-xs font-semibold text-[#5a6b7d]">Total Amount:</span>
             <span className="text-base font-bold text-[#1a56db] tabular-nums">
               {loading ? (
                 <span className="text-sm font-normal text-[#8b9bb0]">…</span>
@@ -385,28 +555,33 @@ function UniversalQuantityPickerModal({
               )}
             </span>
           </div>
-        </div>
 
-        {/* Quick preset buttons */}
-        <div className="mt-3.5 flex flex-wrap gap-1.5">
-          {[1, 5, 10, 25, 50, 100, 250, 500].map((q) => (
-            <button
-              key={q}
-              type="button"
-              className="rounded-md border border-[#e2e8f0] bg-white px-2.5 py-1 text-xs font-semibold text-[#0b1f33] hover:border-[#1a56db] hover:text-[#1a56db] hover:bg-[#f0f5ff]"
-              onClick={() => setVal(String(q))}
-            >
-              {q}
-            </button>
-          ))}
+          {tracks ? (
+            <div className="flex items-center justify-between text-xs pt-1 border-t border-[#e2e8f0]">
+              <span className="text-[#5a6b7d]">Stock Remaining:</span>
+              <span className={`font-semibold tabular-nums ${isInsufficientStock ? "text-red-600 font-bold" : "text-[#0b1f33]"}`}>
+                {validQty ? `${stockRemaining} ${baseUnitSymbol}` : `${stockAvailable} ${baseUnitSymbol}`}
+              </span>
+            </div>
+          ) : null}
+
+          {isInsufficientStock ? (
+            <div className="rounded bg-red-50 p-2 text-xs font-medium text-red-600 border border-red-200 text-center mt-1">
+              Insufficient Stock (Available: {stockAvailable} {baseUnitSymbol}, Requested: {baseQtyNum} {baseUnitSymbol})
+            </div>
+          ) : null}
         </div>
 
         <div className="mt-5 flex justify-end gap-2">
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button onClick={handleSubmit}>
-            Set qty
+          <Button
+            onClick={handleSubmit}
+            disabled={!validQty || isInsufficientStock}
+            className={isInsufficientStock ? "bg-red-500 hover:bg-red-600 text-white" : ""}
+          >
+            {isInsufficientStock ? "Insufficient Stock" : "Set qty"}
           </Button>
         </div>
       </div>
@@ -1343,15 +1518,17 @@ export default function RetailPosWorkstation({
           return prev;
         }
       const initialPrice = opts?.unitPriceOverride != null && Number.isFinite(opts.unitPriceOverride) ? opts.unitPriceOverride : price;
+      const calcMrp = mrp != null && mrp > initialPrice ? mrp : initialPrice;
+      const finalMrp = calcMrp > initialPrice * 3 ? initialPrice : calcMrp;
       return [
         ...prev,
         {
           stockLevelId: row.id,
           sku: row.sku,
           name: row.name,
-          mrp: mrp,
+          mrp: finalMrp,
           unitPrice: initialPrice,
-          listPrice: mrp != null && mrp > initialPrice ? mrp : initialPrice,
+          listPrice: finalMrp,
           qty: startQty,
           maxQty: tracks
             ? (!opts?.orderedUnitSymbol || opts.orderedUnitSymbol.toLowerCase() === unit.toLowerCase())
@@ -3307,9 +3484,7 @@ export default function RetailPosWorkstation({
             <div>
               <p className="text-sm font-semibold text-[#0b1f33]">
                 {cart.length
-                  ? `${cart.reduce((n, l) => n + l.qty, 0)} item${
-                      cart.reduce((n, l) => n + l.qty, 0) === 1 ? "" : "s"
-                    }`
+                  ? `${cart.length} item${cart.length === 1 ? "" : "s"}`
                   : "Ticket"}
               </p>
               {!cart.length ? (
@@ -3693,16 +3868,13 @@ export default function RetailPosWorkstation({
                       </button>
                     </div>
 
-                    {l.baseQty != null &&
-                    (l.sellUnit.toLowerCase() !==
-                      (l.baseUnitSymbol || l.sellUnit).toLowerCase() ||
-                      (l.conversionFactor && l.conversionFactor !== 1)) ? (
+                    {(l.baseQty != null || (l.conversionFactor && l.conversionFactor !== 1)) ? (
                       <div className="mt-1 flex items-center gap-1.5 text-[0.72rem] text-[#64748b]">
                         <span className="font-medium text-[#475569]">
                           Equivalent:
                         </span>
                         <span className="font-semibold tabular-nums text-[#0b1f33]">
-                          {l.baseQty} {l.baseUnitSymbol || "base"}
+                          {l.baseQty ?? l.qty} {l.baseUnitSymbol || l.sellUnit}
                         </span>
                       </div>
                     ) : null}
