@@ -8934,7 +8934,10 @@ export const catalogApi = {
       conversionFactorUsed: number;
       orderedQuantity?: string;
       orderedUnit?: string;
+      orderedUnitSymbol?: string;
       baseQuantity?: string;
+      baseUnit?: string;
+      baseUnitSymbol?: string;
       unitPrice?: string;
       priceSource?: string;
       grossAmount?: string;

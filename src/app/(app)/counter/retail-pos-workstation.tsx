@@ -83,6 +83,15 @@ type CartLine = {
   sellingUnitId?: string;
   baseQty?: number;
   conversionFactor?: number;
+  productId?: string;
+  baseUnitSymbol?: string;
+  entryUnits?: Array<{
+    unitId: string;
+    symbol: string;
+    name: string;
+    conversionToBase?: number;
+    isDefaultSellingUnit?: boolean;
+  }>;
   category?: string | null;
   image?: string | null;
   /** Product override % (e.g. 18). null/undefined → tenant rate */
@@ -295,7 +304,22 @@ function UniversalQuantityPickerModal({
             <Select
               className="mt-1 h-10 w-full rounded-lg border border-[#d9e0ea] bg-white px-3 text-sm font-semibold text-[#0b1f33] shadow-sm focus:border-[#1a56db]"
               value={unitId}
-              onChange={(e) => setUnitId(e.target.value)}
+              onChange={(e) => {
+                const nextUnitId = e.target.value;
+                const prevUnit = entryUnits.find((u) => u.unitId === unitId);
+                const nextUnit = entryUnits.find((u) => u.unitId === nextUnitId);
+                if (prevUnit && nextUnit) {
+                  const prevFactor = (prevUnit as any).conversionToBase || 1;
+                  const nextFactor = (nextUnit as any).conversionToBase || 1;
+                  const currentQty = Number(val.trim().replace(",", "."));
+                  if (Number.isFinite(currentQty) && currentQty > 0) {
+                    const baseQty = quote?.baseQuantity ? Number(quote.baseQuantity) : currentQty * prevFactor;
+                    const convertedQty = nextFactor > 0 ? baseQty / nextFactor : currentQty;
+                    setVal(String(Number(convertedQty.toFixed(4))));
+                  }
+                }
+                setUnitId(nextUnitId);
+              }}
             >
               {entryUnits.map((u) => (
                 <option key={u.unitId} value={u.unitId}>
@@ -1274,6 +1298,9 @@ export default function RetailPosWorkstation({
                 image: l.image ?? image,
                 listPrice: opts?.unitPriceOverride != null ? opts.unitPriceOverride : (l.listPrice ?? (mrp ?? price)),
                 taxRatePercent: l.taxRatePercent ?? taxRatePercent,
+                productId: row.productId ?? l.productId,
+                baseUnitSymbol: (row as any).baseUnitSymbol ?? l.baseUnitSymbol ?? (row.entryUnits && row.entryUnits[0]?.symbol) ?? unit,
+                entryUnits: row.entryUnits ?? l.entryUnits,
                 requiresVariant: row.requiresVariant === true,
                 variantOptions: row.variantOptions ?? [],
                 requiresBatch: row.requiresBatch === true,
@@ -1339,6 +1366,9 @@ export default function RetailPosWorkstation({
           sellingUnitId: opts?.sellingUnitId,
           baseQty: opts?.baseQty,
           conversionFactor: opts?.conversionFactor,
+          productId: row.productId,
+          baseUnitSymbol: (row as any).baseUnitSymbol ?? (row.entryUnits && row.entryUnits[0]?.symbol) ?? unit,
+          entryUnits: row.entryUnits,
           category: row.category?.name ?? null,
           image,
           taxRatePercent,
@@ -1557,12 +1587,122 @@ export default function RetailPosWorkstation({
           x.stockLevelId === line.stockLevelId ? { ...x, qty: next } : x,
         ),
       );
+
+      // Multi-UOM re-quote to preserve exact pricing & base inventory deduction
+      if (line.productId && line.sellingUnitId && (line.entryUnits?.length ?? 0) > 0) {
+        catalogApi
+          .quotePricingLine({
+            productId: line.productId,
+            enteredQty: next,
+            sellingUnitId: line.sellingUnitId,
+          })
+          .then((quote) => {
+            const qtyBase = Number(quote.qtyBase);
+            const unitPrice =
+              quote.unitPrice != null
+                ? Number(quote.unitPrice)
+                : next > 0
+                  ? Number(quote.amount) / next
+                  : line.unitPrice;
+            setCart((prev) =>
+              prev.map((x) =>
+                x.stockLevelId === line.stockLevelId
+                  ? {
+                      ...x,
+                      qty: next,
+                      unitPrice,
+                      listPrice: unitPrice,
+                      baseQty: qtyBase,
+                      conversionFactor: Number(quote.conversionFactorUsed),
+                    }
+                  : x,
+              ),
+            );
+          })
+          .catch(() => null);
+      }
     }
     setQtyDraft((d) => {
       const nextDraft = { ...d };
       delete nextDraft[line.stockLevelId];
       return nextDraft;
     });
+  }
+
+  async function switchCartLineUnit(line: CartLine, targetUnitId: string) {
+    if (!targetUnitId || targetUnitId === line.sellingUnitId) return;
+    const targetUnit = line.entryUnits?.find((u) => u.unitId === targetUnitId);
+    if (!targetUnit) return;
+
+    const currentUnit = line.entryUnits?.find((u) => u.unitId === line.sellingUnitId);
+    const currentFactor = currentUnit?.conversionToBase ?? (line.conversionFactor || 1);
+    const targetFactor = targetUnit.conversionToBase || 1;
+
+    // Physical preservation: compute existing base quantity first
+    const currentBaseQty = line.baseQty != null ? line.baseQty : line.qty * currentFactor;
+    const newQty = targetFactor > 0 ? currentBaseQty / targetFactor : line.qty;
+    const formattedQty = Number(newQty.toFixed(4));
+
+    if (line.productId) {
+      try {
+        const quote = await catalogApi.quotePricingLine({
+          productId: line.productId,
+          enteredQty: formattedQty,
+          sellingUnitId: targetUnitId,
+        });
+        const qtyBase = Number(quote.qtyBase);
+        const unitPrice =
+          quote.unitPrice != null
+            ? Number(quote.unitPrice)
+            : formattedQty > 0
+              ? Number(quote.amount) / formattedQty
+              : line.unitPrice;
+
+        setCart((prev) =>
+          prev.map((x) =>
+            x.stockLevelId === line.stockLevelId
+              ? {
+                  ...x,
+                  qty: formattedQty,
+                  sellUnit: normalizeSellUnit(targetUnit.symbol),
+                  sellingUnitId: targetUnitId,
+                  unitPrice,
+                  listPrice: unitPrice,
+                  baseQty: qtyBase,
+                  conversionFactor: Number(quote.conversionFactorUsed),
+                }
+              : x,
+          ),
+        );
+        setQtyDraft((d) => {
+          const next = { ...d };
+          delete next[line.stockLevelId];
+          return next;
+        });
+        toast.success(
+          `Switched to ${targetUnit.symbol} · ${formattedQty} ${targetUnit.symbol} (Eq: ${qtyBase} ${quote.baseUnitSymbol || line.baseUnitSymbol || line.sellUnit})`,
+        );
+      } catch (e) {
+        toast.error(
+          e instanceof ApiError ? e.messages.join(", ") : "Could not quote new unit",
+        );
+      }
+    } else {
+      setCart((prev) =>
+        prev.map((x) =>
+          x.stockLevelId === line.stockLevelId
+            ? {
+                ...x,
+                qty: formattedQty,
+                sellUnit: normalizeSellUnit(targetUnit.symbol),
+                sellingUnitId: targetUnitId,
+                baseQty: currentBaseQty,
+                conversionFactor: targetFactor,
+              }
+            : x,
+        ),
+      );
+    }
   }
 
   function resolveScan(code: string) {
@@ -3505,9 +3645,32 @@ export default function RetailPosWorkstation({
                             +
                           </button>
                         </div>
-                        <span className="text-[0.8125rem] font-medium text-[#8b9bb0]">
-                          {unitShort}
-                        </span>
+                        {l.entryUnits && l.entryUnits.length > 1 ? (
+                          <select
+                            value={
+                              l.sellingUnitId ||
+                              (l.entryUnits.find(
+                                (u) =>
+                                  u.symbol.toLowerCase() ===
+                                  l.sellUnit.toLowerCase(),
+                              )?.unitId ?? "")
+                            }
+                            disabled={Boolean(splitSession)}
+                            onChange={(e) => switchCartLineUnit(l, e.target.value)}
+                            className="h-8 rounded-lg border border-[#e2e8f0] bg-[#f8fafc] px-2 text-xs font-bold text-[#0b1f33] shadow-sm hover:border-[#cbd5e1] focus:border-[#1a56db] focus:outline-none"
+                            title="Change unit of measure"
+                          >
+                            {l.entryUnits.map((u) => (
+                              <option key={u.unitId} value={u.unitId}>
+                                {u.symbol}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="text-[0.8125rem] font-medium text-[#8b9bb0]">
+                            {unitShort}
+                          </span>
+                        )}
                       </div>
                       <button
                         type="button"
@@ -3529,6 +3692,20 @@ export default function RetailPosWorkstation({
                             : "Disc"}
                       </button>
                     </div>
+
+                    {l.baseQty != null &&
+                    (l.sellUnit.toLowerCase() !==
+                      (l.baseUnitSymbol || l.sellUnit).toLowerCase() ||
+                      (l.conversionFactor && l.conversionFactor !== 1)) ? (
+                      <div className="mt-1 flex items-center gap-1.5 text-[0.72rem] text-[#64748b]">
+                        <span className="font-medium text-[#475569]">
+                          Equivalent:
+                        </span>
+                        <span className="font-semibold tabular-nums text-[#0b1f33]">
+                          {l.baseQty} {l.baseUnitSymbol || "base"}
+                        </span>
+                      </div>
+                    ) : null}
 
                   {(l.requiresVariant || l.requiresBatch || l.requiresSerial) && (
                     <div className="mt-2 grid gap-1">
