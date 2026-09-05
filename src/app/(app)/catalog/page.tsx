@@ -67,10 +67,10 @@ const KINDS: { value: CatalogProductKind | ""; label: string }[] = [
   { value: "rental", label: "Rental" },
 ];
 
-type Tab = "products" | "brands" | "categories" | "stock";
+type Tab = "products" | "brands" | "categories";
 
 function parseTab(raw: string | null): Tab {
-  if (raw === "brands" || raw === "categories" || raw === "stock") return raw;
+  if (raw === "brands" || raw === "categories") return raw;
   return "products";
 }
 
@@ -87,28 +87,17 @@ export default function CatalogPage() {
 function CatalogPageInner() {
   const search = useSearchParams();
   const router = useRouter();
-  const { hasMode, hasScreen } = useBootstrap();
+  const { hasMode } = useBootstrap();
   const [importOpen, setImportOpen] = useState(false);
   const hasSale = hasMode("sale");
   const hasRental = hasMode("rental");
-  const showStockTab = hasMode("sale") && hasScreen("inventory");
-  const [tab, setTab] = useState<Tab>(() => {
-    const parsed = parseTab(search.get("tab"));
-    if (parsed === "stock" && !showStockTab) return "products";
-    return parsed;
-  });
+  const [tab, setTab] = useState<Tab>(() => parseTab(search.get("tab")));
 
   useEffect(() => {
-    const parsed = parseTab(search.get("tab"));
-    if (parsed === "stock" && !showStockTab) {
-      setTab("products");
-      return;
-    }
-    setTab(parsed);
-  }, [search, showStockTab]);
+    setTab(parseTab(search.get("tab")));
+  }, [search]);
 
   function goTab(id: Tab) {
-    if (id === "stock" && !showStockTab) return;
     setTab(id);
     const qs =
       id === "products" ? "/catalog" : `/catalog?tab=${id}`;
@@ -120,14 +109,13 @@ function CatalogPageInner() {
     ["categories", "Categories"],
     ["brands", "Brands"],
   ];
-  if (showStockTab) catalogTabs.push(["stock", "Stock levels"]);
 
   return (
     <div className="space-y-4 px-3 sm:px-4">
       <PageHeader
         eyebrow="Inventory"
         title="Product catalog"
-        subtitle="What you sell, rent, or service. Stock quantities live under Stock levels."
+        subtitle="What you sell, rent, or service."
         action={
           tab === "products" ? (
             <div className="flex flex-wrap items-center justify-end gap-2">
@@ -186,28 +174,6 @@ function CatalogPageInner() {
       ) : null}
       {tab === "brands" ? <BrandsPanel /> : null}
       {tab === "categories" ? <CategoriesPanel /> : null}
-      {tab === "stock" ? (
-        <div className="rounded-xl border border-[#d9e0ea] bg-white p-6">
-          <h2 className="text-base font-semibold text-[#0b1f33]">
-            Location stock
-          </h2>
-          <p className="mt-1 text-sm text-[#5a6b7d]">
-            Quantities, transfers, and adjustments are managed in Inventory —
-            not on the product master.
-          </p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Button asChild>
-              <Link href="/inventory">Open stock levels</Link>
-            </Button>
-            <Button variant="secondary" asChild>
-              <Link href="/adjustments">Adjustments</Link>
-            </Button>
-            <Button variant="secondary" asChild>
-              <Link href="/transfers">Stock transfer</Link>
-            </Button>
-          </div>
-        </div>
-      ) : null}
       <ItemsImportDialog
         open={importOpen}
         onClose={() => setImportOpen(false)}

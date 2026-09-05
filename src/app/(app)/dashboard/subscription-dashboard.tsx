@@ -48,6 +48,8 @@ export function SubscriptionDashboard() {
     categoryId: "",
     sku: "",
     price: "",
+    durationQuantity: "1",
+    durationUnit: "month",
     billingPeriodDays: "30",
   });
   const [newCat, setNewCat] = useState("");
@@ -97,6 +99,8 @@ export function SubscriptionDashboard() {
         categoryId: planForm.categoryId,
         sku: planForm.sku.trim(),
         price: Number(planForm.price),
+        durationUnit: planForm.durationUnit,
+        durationQuantity: Number(planForm.durationQuantity) || 1,
         billingPeriodDays: Number(planForm.billingPeriodDays) || 30,
       }),
     onSuccess: () => {
@@ -107,6 +111,8 @@ export function SubscriptionDashboard() {
         categoryId: planForm.categoryId,
         sku: "",
         price: "",
+        durationQuantity: "1",
+        durationUnit: "month",
         billingPeriodDays: "30",
       });
       void qc.invalidateQueries({ queryKey: ["subscriptions-plans"] });
@@ -270,30 +276,49 @@ export function SubscriptionDashboard() {
                     </Button>
                   </div>
                 </div>
+                <div className="field-shell">
+                  <Label>SKU *</Label>
+                  <Input
+                    maxLength={18}
+                    value={planForm.sku}
+                    onChange={(e) =>
+                      setPlanForm((f) => ({ ...f, sku: e.target.value }))
+                    }
+                    placeholder="PLAN-MONTHLY-001"
+                  />
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="field-shell">
-                    <Label>SKU *</Label>
+                    <Label>Duration *</Label>
                     <Input
-                      maxLength={18}
-                      value={planForm.sku}
-                      onChange={(e) =>
-                        setPlanForm((f) => ({ ...f, sku: e.target.value }))
-                      }
-                      placeholder="PLAN-MONTHLY-001"
-                    />
-                  </div>
-                  <div className="field-shell">
-                    <Label>Period (days) *</Label>
-                    <Input
-                      inputMode="numeric"
-                      value={planForm.billingPeriodDays}
+                      type="number"
+                      min={1}
+                      value={planForm.durationQuantity}
                       onChange={(e) =>
                         setPlanForm((f) => ({
                           ...f,
-                          billingPeriodDays: e.target.value,
+                          durationQuantity: e.target.value,
                         }))
                       }
                     />
+                  </div>
+                  <div className="field-shell">
+                    <Label>Duration Unit *</Label>
+                    <Select
+                      value={planForm.durationUnit}
+                      onChange={(e) =>
+                        setPlanForm((f) => ({
+                          ...f,
+                          durationUnit: e.target.value,
+                        }))
+                      }
+                    >
+                      <option value="month">Month</option>
+                      <option value="quarter">Quarter</option>
+                      <option value="year">Year</option>
+                      <option value="week">Week</option>
+                      <option value="day">Day</option>
+                    </Select>
                   </div>
                 </div>
                 <div className="field-shell">
@@ -345,7 +370,7 @@ export function SubscriptionDashboard() {
               Plan catalog
             </h2>
             <ul className="mt-3 divide-y divide-[#eef2f8]">
-              {(plans.data?.items ?? []).map((p) => (
+              {(plans.data?.items ?? []).map((p: any) => (
                 <li
                   key={p.id}
                   className="flex flex-wrap items-center justify-between gap-2 py-3"
@@ -360,7 +385,7 @@ export function SubscriptionDashboard() {
                       ) : null}
                     </p>
                     <p className="font-mono text-[0.7rem] text-[#5a6b7d]">
-                      {p.sku} · {p.billingPeriodDays}d · {p.activeMembers}{" "}
+                      {p.sku} · {p.durationQuantity && p.durationUnit ? `${p.durationQuantity} ${p.durationUnit}` : `${p.billingPeriodDays}d`} · {p.activeMembers}{" "}
                       active
                     </p>
                   </div>

@@ -384,9 +384,11 @@ export function ServiceDashboard({ embed = false }: { embed?: boolean }) {
                             {s.title}
                           </p>
                           <p className="mt-1 text-[0.7rem] text-[#8b9bb0]">
-                            {s.durationMinutes
-                              ? `${s.durationMinutes} min`
-                              : "Duration not set"}
+                            {(s as any).durationQuantity && (s as any).durationUnit
+                              ? `${(s as any).durationQuantity} ${(s as any).durationUnit}`
+                              : s.durationMinutes
+                                ? `${s.durationMinutes} min`
+                                : "Duration not set"}
                             {s.category?.name ? ` · ${s.category.name}` : ""}
                           </p>
                           <p className="mt-auto pt-3 text-sm font-semibold tabular-nums text-[#0b1f33]">
@@ -415,14 +417,19 @@ export function ServiceDashboard({ embed = false }: { embed?: boolean }) {
                     {selected.title}
                   </p>
                   <p className="mt-0.5 text-[0.75rem] text-[#5a6b7d]">
-                    {selected.durationMinutes
-                      ? `${selected.durationMinutes} min`
-                      : "Service"}
+                    {(selected as any).durationQuantity && (selected as any).durationUnit
+                      ? `${(selected as any).durationQuantity} ${(selected as any).durationUnit}`
+                      : selected.durationMinutes
+                        ? `${selected.durationMinutes} min`
+                        : "Service"}
                     {selected.sku ? ` · ${selected.sku}` : ""}
                   </p>
                   <p className="mt-2 text-sm font-semibold tabular-nums">
                     {money(selected.price)}
-                    <span className="font-normal text-[#8b9bb0]"> / service</span>
+                    <span className="font-normal text-[#8b9bb0]">
+                      {" "}
+                      / {(selected as any).durationUnit || "service"}
+                    </span>
                   </p>
                 </div>
               ) : (
@@ -477,9 +484,11 @@ export function ServiceDashboard({ embed = false }: { embed?: boolean }) {
                 <div>
                   <Label>Duration</Label>
                   <p className="mt-1.5 flex h-9 items-center text-sm text-[#0b1f33]">
-                    {selected?.durationMinutes
-                      ? `${selected.durationMinutes * qtyNum} min`
-                      : "—"}
+                    {(selected as any)?.durationQuantity && (selected as any)?.durationUnit
+                      ? `${Number(((selected as any).durationQuantity * qtyNum).toFixed(2))} ${(selected as any).durationUnit}${(selected as any).durationQuantity * qtyNum > 1 && !(selected as any).durationUnit.endsWith('s') ? 's' : ''}`
+                      : selected?.durationMinutes
+                        ? `${selected.durationMinutes * qtyNum} min`
+                        : "—"}
                   </p>
                 </div>
               </div>
