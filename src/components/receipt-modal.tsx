@@ -10,7 +10,11 @@ import { moneyNumber } from "@/lib/utils";
 import { useBootstrapOptional } from "@/lib/bootstrap";
 import { notifyApi } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
-import { buildBillSummary } from "@/lib/bill-summary";
+import {
+  mapToUniversalInvoice,
+  type UniversalInvoiceDocument,
+  type UniversalInvoiceLineItem,
+} from "@/lib/universal-invoice";
 
 function ReceiptOrderBarcode({ value }: { value: string }) {
   const ref = useRef<SVGSVGElement | null>(null);
@@ -21,8 +25,8 @@ function ReceiptOrderBarcode({ value }: { value: string }) {
       JsBarcode(ref.current, trimmed, {
         format: "CODE128",
         displayValue: false,
-        height: 34,
-        width: 1.4,
+        height: 32,
+        width: 1.3,
         margin: 0,
         background: "#ffffff",
         lineColor: "#111827",
@@ -65,10 +69,15 @@ export type ReceiptData = {
     email?: string | null;
   } | null;
   items: Array<{
-    itemType: string;
+    itemType?: string;
     itemKind?: string | null;
+    name?: string | null;
     description?: string | null;
     quantity?: string | number;
+    orderedQuantity?: string | number | null;
+    orderedUnitSymbol?: string | null;
+    baseQuantity?: string | number | null;
+    baseUnitSymbol?: string | null;
     unitPrice: string | number;
     lineTotal?: string | number;
     taxAmount?: string | number;
@@ -77,6 +86,8 @@ export type ReceiptData = {
     hsnOrSac?: string | null;
     durationDays?: number | null;
     durationHours?: number | null;
+    durationLabel?: string | null;
+    sessionsCount?: number | null;
     ratePeriod?: string | null;
     inventoryUnit?: { barcodeSku: string; size?: string | null } | null;
     retailSku?: { sku: string } | null;
@@ -85,153 +96,82 @@ export type ReceiptData = {
     grossMrp?: string | number | null;
     productDiscount?: string | number | null;
     meta?: Record<string, unknown> | null;
-    tracking?: {
-      variantId?: string;
-      batchId?: string;
-      serialNumber?: string;
-    };
   }>;
   totals: {
     subtotal: string | number;
     taxTotal: string | number;
     discountTotal?: string | number;
-    depositTotal: string | number;
-    balanceDue: string | number;
+    depositTotal?: string | number;
+    balanceDue?: string | number;
     feesTotal?: string | number;
-  };
-  fees?: Array<{
-    feeCode: string;
-    reason?: string | null;
-    amount: string | number;
-  }>;
-  paymentRounding?: {
-    originalAmount?: number;
-    roundOffAmount?: number;
-    finalAmount?: number;
+    grossMrp?: string | number | null;
+    productDiscount?: string | number | null;
+    grandTotal?: string | number | null;
   };
   payments?: Array<{
+    id?: string;
     method: string;
-    type: string;
     amount: string | number;
     status?: string;
     gatewayRef?: string | null;
-    provider?: string | null;
+    paidAt?: string | Date | null;
+    createdAt?: string | Date | null;
   }>;
-  register?: { sessionId?: string | null } | null;
-  remainingDue?: string | number | null;
-  amountPaid?: string | number | null;
-  change?: string | number | null;
-  cashTendered?: string | number | null;
   invoices?: Array<{
     id: string;
     invoiceNumber: string;
-    grandTotal?: string | number;
-    taxBreakdown?: Record<string, unknown> | null;
-    createdAt?: string;
+    createdAt?: string | Date | null;
+    taxBreakdown?: any;
   }>;
   activeInvoiceNumber?: string | null;
   activeInvoiceLabel?: string | null;
+  paymentRounding?: {
+    originalAmount?: string | number | null;
+    roundOffAmount?: string | number | null;
+    finalAmount?: string | number | null;
+  };
+  change?: string | number | null;
   fulfillment?: {
-    orderType?: string;
-    resourceId?: string;
-    covers?: number;
-    note?: string;
+    resourceId?: string | null;
+    orderType?: string | null;
   } | null;
   rentalWindow?: {
-    pickupDate?: string | null;
-    returnDueDate?: string | null;
+    pickupDate?: string | Date | null;
+    returnDueDate?: string | Date | null;
     lifecycle?: string | null;
   } | null;
+  fees?: Array<{
+    feeCode: string;
+    amount: string | number;
+  }>;
 };
 
-function moneyLabel(method: string) {
-  const m = method.trim().toLowerCase();
-  if (m === "card" || m === "stripe") return "Card";
-  if (m === "cash") return "Cash";
-  if (m === "upi") return "UPI";
-  if (m === "emi") return "EMI";
-  if (m === "qr") return "QR";
-  if (m === "wallet") return "App pay";
-  if (m === "bank_transfer") return "Bank transfer";
-  if (m === "store_credit") return "Store credit";
-  if (m === "gift_card") return "Gift card";
-  return method.charAt(0).toUpperCase() + method.slice(1).replace(/_/g, " ");
+function formatMoney(amount: number, symbol = "₹"): string {
+  return `${symbol}${amount.toFixed(2)}`;
 }
 
-function pad2(n: number) {
-  return n.toFixed(2);
-}
-
-function formatShortDate(d: Date | string | null | undefined): string {
+function formatDate(d: string | Date | null | undefined): string {
   if (!d) return "—";
-  const date = new Date(d);
-  if (Number.isNaN(date.getTime())) return "—";
-  const months = [
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec",
-  ];
-  const day = String(date.getDate()).padStart(2, "0");
-  const month = months[date.getMonth()];
-  const year = date.getFullYear();
-  const hours = String(date.getHours()).padStart(2, "0");
-  const mins = String(date.getMinutes()).padStart(2, "0");
-  return `${day}-${month}-${year} ${hours}:${mins}`;
+  const date = typeof d === "string" ? new Date(d) : d;
+  if (isNaN(date.getTime())) return String(d);
+  return date.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
 }
 
-function formatOnlyDate(d: Date | string | null | undefined): string {
+function formatDateTime(d: string | Date | null | undefined): string {
   if (!d) return "—";
-  const date = new Date(d);
-  if (Number.isNaN(date.getTime())) return "—";
-  const months = [
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec",
-  ];
-  const day = String(date.getDate()).padStart(2, "0");
-  const month = months[date.getMonth()];
-  const year = date.getFullYear();
-  return `${day}-${month}-${year}`;
-}
-
-function computeDurationLabel(
-  startStr?: string | null,
-  endStr?: string | null,
-): string {
-  if (!startStr || !endStr) return "1 Day";
-  const start = new Date(startStr);
-  const end = new Date(endStr);
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
-    return "1 Day";
-  }
-  const diffMs = Math.max(0, end.getTime() - start.getTime());
-  const diffHours = Math.round(diffMs / (1000 * 60 * 60));
-  const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
-  if (diffDays >= 1) {
-    return diffDays === 1 ? "1 Day" : `${diffDays} Days`;
-  }
-  if (diffHours >= 1) {
-    return diffHours === 1 ? "1 Hour" : `${diffHours} Hours`;
-  }
-  return "1 Day";
+  const date = typeof d === "string" ? new Date(d) : d;
+  if (isNaN(date.getTime())) return String(d);
+  return date.toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 export function ReceiptModal({
@@ -257,7 +197,9 @@ export function ReceiptModal({
         : currencyCode === "GBP"
           ? "£"
           : "₹";
+
   const [viewMode, setViewMode] = useState<"thermal" | "a4">("thermal");
+  const [sending, setSending] = useState(false);
 
   const shopName =
     data?.store?.shopName?.trim() ||
@@ -278,7 +220,6 @@ export function ReceiptModal({
     settings?.tax?.receiptFooter?.trim() ||
     "Thank you! Visit again.";
 
-  const taxId = data?.store?.taxId?.trim() || "";
   const pos =
     settings?.pos && typeof settings.pos === "object" ? settings.pos : {};
   const upiVpa = typeof pos.upiVpa === "string" ? pos.upiVpa.trim() : "";
@@ -286,126 +227,56 @@ export function ReceiptModal({
     (typeof pos.upiPayeeName === "string" && pos.upiPayeeName.trim()) ||
     shopName;
 
-  const paidFromPayments = (data?.payments ?? []).reduce(
-    (s, p) => (p.status === "failed" ? s : s + moneyNumber(p.amount)),
-    0,
-  );
-
-  const depositTotal = moneyNumber(data?.totals.depositTotal);
-  const subtotal = moneyNumber(data?.totals.subtotal);
-  const taxTotal = moneyNumber(data?.totals.taxTotal);
-  const discount = moneyNumber(data?.totals.discountTotal);
-  const feeRows = data?.fees ?? [];
-  const feesTotal =
-    moneyNumber(data?.totals.feesTotal) ||
-    feeRows.reduce((s, f) => s + moneyNumber(f.amount), 0);
-  const itemsSub = Math.max(0, subtotal - feesTotal);
-
-  const balanceDue = moneyNumber(data?.totals.balanceDue);
-  const isPaid = balanceDue <= 0.009;
-
-  const paidTotal =
-    paidFromPayments > 0
-      ? paidFromPayments
-      : isPaid
-        ? Math.max(0, subtotal + taxTotal - discount + depositTotal)
-        : Math.max(
-            0,
-            subtotal + taxTotal - discount + depositTotal - balanceDue,
-          );
-
-  const originalAmount = moneyNumber(
-    data?.paymentRounding?.originalAmount ?? data?.totals.balanceDue,
-  );
-  const finalAmount = moneyNumber(
-    data?.paymentRounding?.finalAmount ?? data?.totals.balanceDue,
-  );
-  const roundOffAmount = moneyNumber(
-    data?.paymentRounding?.roundOffAmount ?? 0,
-  );
-
-  const qrPayAmount = balanceDue > 0.005 ? balanceDue : originalAmount;
-  const displayFees = feeRows.filter((f) => f.feeCode !== "round_off");
-
-  const itemsGrossMrp = (data?.items ?? []).reduce((s, it) => {
-    const meta = (it.meta as Record<string, unknown> | null) ?? {};
-    const mrpVal = (meta.grossMrp ?? it.grossMrp ?? it.mrp ?? it.unitPrice) as string | number | null | undefined;
-    const itemGross = moneyNumber(mrpVal) * (moneyNumber(it.quantity) || 1);
-    return s + itemGross;
-  }, 0);
-  const itemsProductDiscount = (data?.items ?? []).reduce((s, it) => {
-    const meta = (it.meta as Record<string, unknown> | null) ?? {};
-    const discVal = (meta.productDiscount ?? it.productDiscount ?? 0) as string | number | null | undefined;
-    const itemDisc = moneyNumber(discVal);
-    return s + itemDisc;
-  }, 0);
-  const hasProdDiscount = itemsProductDiscount > 0 || (itemsGrossMrp > subtotal + 0.001);
-  const prodDiscountTotal = itemsProductDiscount > 0 ? itemsProductDiscount : Math.max(0, itemsGrossMrp - subtotal);
-  const grossMrpTotal = itemsGrossMrp > subtotal ? itemsGrossMrp : subtotal + prodDiscountTotal;
-  const billDiscountAmt = !hasProdDiscount ? discount : 0;
-
-  const bill = buildBillSummary({
-    itemsSubtotal: itemsSub,
-    grossMrp: grossMrpTotal,
-    productDiscountTotal: prodDiscountTotal,
-    taxTotal,
-    discount: billDiscountAmt,
-    billDiscount: billDiscountAmt,
-    fees: displayFees,
-    taxInclusive: false,
-    lines: data?.items ?? [],
-    applyRoundOff: false,
-    amountDue: finalAmount,
-    roundOffOverride: roundOffAmount,
-  });
-
-  const when = data?.printedAt ? new Date(data.printedAt) : new Date();
-  const whenLabel = formatShortDate(when);
-
-  // Determine order category
-  const isRental =
-    data?.kind === "rental" ||
-    Boolean(data?.rentalWindow?.pickupDate || data?.rentalWindow?.returnDueDate);
-  const isService = data?.kind === "service";
-  const isRestaurant =
-    data?.kind === "restaurant" ||
-    Boolean(data?.fulfillment?.orderType || data?.fulfillment?.resourceId);
-  const isSubscription = data?.kind === "subscription";
-
-  const invoiceTitle = useMemo(() => {
-    if (isRental) return "RENTAL INVOICE";
-    if (isService) return "SERVICE INVOICE";
-    if (isRestaurant) return "RESTAURANT RECEIPT";
-    if (isSubscription) return "SUBSCRIPTION INVOICE";
-    return "TAX INVOICE";
-  }, [isRental, isService, isRestaurant, isSubscription]);
-
-  const durationStr = useMemo(() => {
-    if (!isRental) return "";
-    return computeDurationLabel(
-      data?.rentalWindow?.pickupDate,
-      data?.rentalWindow?.returnDueDate,
-    );
-  }, [isRental, data?.rentalWindow]);
-
-  const rentalLifecycle = data?.rentalWindow?.lifecycle?.toLowerCase();
-  const rentalStatusLabel = useMemo(() => {
-    if (!isRental) return null;
-    const returnDue = data?.rentalWindow?.returnDueDate
-      ? new Date(data.rentalWindow.returnDueDate)
-      : null;
-    const isOverdue =
-      returnDue &&
-      returnDue.getTime() < Date.now() &&
-      rentalLifecycle !== "returned";
-
-    if (isOverdue) return "ACTIVE RENTAL";
-    if (rentalLifecycle === "returned") return "RETURNED";
-    if (rentalLifecycle === "checked_out") return "ACTIVE RENTAL";
-    if (rentalLifecycle === "reserved" || rentalLifecycle === "booked")
-      return "RESERVED";
-    return "ACTIVE RENTAL";
-  }, [isRental, rentalLifecycle, data?.rentalWindow]);
+  // Map to Canonical Universal Invoice Document
+  const doc: UniversalInvoiceDocument | null = useMemo(() => {
+    if (!data) return null;
+    return mapToUniversalInvoice({
+      order: {
+        id: data.orderId,
+        orderNumber: data.orderNumber,
+        kind: data.kind,
+        createdAt: data.printedAt,
+        subtotal: data.totals?.subtotal,
+        taxTotal: data.totals?.taxTotal,
+        discountTotal: data.totals?.discountTotal,
+        depositTotal: data.totals?.depositTotal,
+        roundOff: data.paymentRounding?.roundOffAmount,
+        total: data.paymentRounding?.finalAmount ?? data.totals?.grandTotal,
+        change: change ?? data.change,
+        activeInvoiceNumber: data.activeInvoiceNumber,
+        invoices: data.invoices,
+        fulfillment: data.fulfillment,
+        rentalWindow: data.rentalWindow,
+        cashierName: data.cashier,
+      },
+      shop: {
+        name: shopName,
+        address: data.store?.address,
+        phone: data.store?.phone,
+        email: data.store?.email,
+        taxId: data.store?.taxId,
+        upiVpa,
+        upiPayee,
+      },
+      customer: data.customer,
+      items: data.items,
+      payments: data.payments,
+      config: {
+        currencySymbol,
+        currencyCode,
+        footerNote: receiptFooter,
+      },
+    });
+  }, [
+    data,
+    shopName,
+    upiVpa,
+    upiPayee,
+    currencySymbol,
+    currencyCode,
+    receiptFooter,
+    change,
+  ]);
 
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -420,23 +291,22 @@ export function ReceiptModal({
     };
   }, [onClose]);
 
-  const [sending, setSending] = useState(false);
   async function sendChannels(channels: Array<"email" | "sms">) {
-    if (!data?.customer?.id) {
+    if (!doc?.customer?.id) {
       toast.error("Add a customer on the bill to send it");
       return;
     }
-    if (channels.includes("email") && !data.customer.email) {
+    if (channels.includes("email") && !doc.customer.email) {
       toast.error("This customer has no email");
       return;
     }
-    if (channels.includes("sms") && !data.customer.phone) {
+    if (channels.includes("sms") && !doc.customer.phone) {
       toast.error("This customer has no phone");
       return;
     }
     setSending(true);
     try {
-      if (data.orderId) {
+      if (data?.orderId) {
         const res = await notifyApi.sendInvoice({
           orderId: data.orderId,
           channels,
@@ -454,17 +324,17 @@ export function ReceiptModal({
           await notifyApi.send({
             channel,
             templateKey: "sale_invoice",
-            customerId: data.customer.id,
-            phone: data.customer.phone ?? undefined,
-            email: data.customer.email ?? undefined,
+            customerId: doc.customer.id,
+            phone: doc.customer.phone ?? undefined,
+            email: doc.customer.email ?? undefined,
             payload: {
-              orderNumber: data.orderNumber,
-              total: String(paidTotal),
-              balanceDue: String(balanceDue),
-              storeName: shopName,
-              customerName: data.customer.fullName,
-              subtotal: String(data.totals.subtotal),
-              taxTotal: String(data.totals.taxTotal),
+              orderNumber: doc.header.orderNumber,
+              total: String(doc.totals.netPayable),
+              balanceDue: String(doc.payment.balanceDue),
+              storeName: doc.header.businessName,
+              customerName: doc.customer.name,
+              subtotal: String(doc.totals.subtotalNet),
+              taxTotal: String(doc.totals.taxTotal),
             },
           });
         }
@@ -492,7 +362,7 @@ export function ReceiptModal({
     />
   );
 
-  const changeAmt = change ?? data?.change;
+  if (!data && !loading) return null;
 
   const content = (
     <div className="receipt-print-root fixed inset-0 z-[100] flex items-center justify-center bg-[#0b1f33]/50 p-3 sm:p-4 print:static print:block print:bg-white print:p-0">
@@ -502,12 +372,12 @@ export function ReceiptModal({
         aria-label="Close"
         onClick={onClose}
       />
-      <div className="receipt-sheet relative z-10 flex max-h-[94vh] w-full max-w-[440px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl print:max-h-none print:w-full print:max-w-none print:overflow-visible print:rounded-none print:shadow-none">
-        {/* Modal Top Bar */}
+      <div className="receipt-sheet relative z-10 flex max-h-[94vh] w-full max-w-[460px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl print:max-h-none print:w-full print:max-w-none print:overflow-visible print:rounded-none print:shadow-none">
+        {/* Top Bar */}
         <div className="flex items-center justify-between border-b border-[#e8ebf0] bg-[#f8fafc] px-4 py-3 print:hidden">
           <div className="flex items-center gap-2">
             <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700">
-              {invoiceTitle}
+              {doc?.config.documentTitle || "TAX INVOICE"}
             </span>
             <div className="flex rounded-lg bg-gray-200/80 p-0.5 text-xs">
               <button
@@ -535,7 +405,7 @@ export function ReceiptModal({
             </div>
           </div>
           <div className="flex items-center gap-1.5">
-            {data?.customer ? (
+            {doc?.customer?.id ? (
               <Button
                 type="button"
                 size="sm"
@@ -568,142 +438,130 @@ export function ReceiptModal({
           </div>
         </div>
 
-        {/* Printable Area */}
+        {/* Scrollable Printable Document Area */}
         <div className="scroll-soft flex-1 overflow-y-auto px-4 py-5 print:overflow-visible print:px-0 print:py-0">
           {loading ? (
             <p className="py-12 text-center text-sm text-[#5a6b7d]">
               Loading invoice…
             </p>
-          ) : !data ? (
+          ) : !doc ? (
             <p className="py-12 text-center text-sm text-[#c81e1e]">
               Invoice details not found
             </p>
           ) : viewMode === "a4" ? (
             /* ──────────────────────────────────────────────────────────
-               A4 / FULL PAGE INVOICE DESIGN
+               UNIVERSAL FULL A4 INVOICE DESIGN
                ────────────────────────────────────────────────────────── */
             <div className="receipt-print a4-invoice mx-auto w-full bg-white font-sans text-xs leading-relaxed text-gray-900">
               {/* Header */}
               <div className="flex justify-between border-b-2 border-gray-900 pb-4">
                 <div>
                   <h1 className="text-xl font-bold uppercase tracking-tight text-gray-900">
-                    {shopName}
+                    {doc.header.businessName}
                   </h1>
-                  {data.store.address ? (
+                  {doc.header.tagline ? (
+                    <p className="text-[11px] text-gray-500">{doc.header.tagline}</p>
+                  ) : null}
+                  {doc.header.address ? (
                     <p className="mt-1 text-gray-600 whitespace-pre-wrap">
-                      {data.store.address}
+                      {doc.header.address}
                     </p>
                   ) : null}
-                  {taxId ? (
+                  {doc.header.taxRegistration ? (
                     <p className="font-semibold text-gray-800">
-                      GSTIN: {taxId}
+                      {doc.header.taxRegistration.label}: {doc.header.taxRegistration.value}
                     </p>
                   ) : null}
-                  {data.store.phone ? (
-                    <p className="text-gray-600">Ph: {data.store.phone}</p>
+                  {doc.header.phone ? (
+                    <p className="text-gray-600">Ph: {doc.header.phone}</p>
                   ) : null}
-                  {data.store.email ? (
-                    <p className="text-gray-600">Email: {data.store.email}</p>
+                  {doc.header.email ? (
+                    <p className="text-gray-600">Email: {doc.header.email}</p>
                   ) : null}
                 </div>
                 <div className="text-right">
                   <span className="inline-block rounded-lg bg-gray-900 px-3 py-1 font-mono text-sm font-bold text-white uppercase tracking-wider">
-                    {invoiceTitle}
+                    {doc.config.documentTitle || "INVOICE"}
                   </span>
                   <p className="mt-2 text-xs font-semibold text-gray-700">
                     Invoice #:{" "}
                     <span className="font-mono text-gray-900">
-                      {data.activeInvoiceNumber ||
-                        data.invoices?.[data.invoices.length - 1]
-                          ?.invoiceNumber ||
-                        data.orderNumber}
+                      {doc.header.invoiceNumber}
                     </span>
                   </p>
                   <p className="text-xs text-gray-600">
                     Order #:{" "}
-                    <span className="font-mono">{data.orderNumber}</span>
+                    <span className="font-mono">{doc.header.orderNumber}</span>
                   </p>
-                  <p className="text-xs text-gray-600">Date: {whenLabel}</p>
-                  {data.cashier ? (
+                  <p className="text-xs text-gray-600">
+                    Date: {formatDateTime(doc.header.issueDate)}
+                  </p>
+                  {doc.header.cashierName ? (
                     <p className="text-xs text-gray-600">
-                      Cashier: {data.cashier}
+                      Staff: {doc.header.cashierName}
                     </p>
                   ) : null}
                 </div>
               </div>
 
-              {/* Bill To & Meta Details */}
+              {/* Bill To & Commerce Summary Blocks */}
               <div className="grid grid-cols-2 gap-4 py-3 text-xs">
                 <div className="rounded-lg border border-gray-200 bg-gray-50/50 p-2.5">
                   <p className="font-bold text-gray-800 uppercase tracking-wide text-[10px]">
                     Billed To
                   </p>
                   <p className="mt-1 font-semibold text-gray-900">
-                    {data.customer?.fullName || "Walk-in Customer"}
+                    {doc.customer?.name || "Walk-in Customer"}
                   </p>
-                  {data.customer?.phone ? (
-                    <p className="text-gray-600">Ph: {data.customer.phone}</p>
+                  {doc.customer?.phone ? (
+                    <p className="text-gray-600">Ph: {doc.customer.phone}</p>
                   ) : null}
-                  {data.customer?.email ? (
-                    <p className="text-gray-600">
-                      Email: {data.customer.email}
+                  {doc.customer?.email ? (
+                    <p className="text-gray-600">Email: {doc.customer.email}</p>
+                  ) : null}
+                  {doc.customer?.taxRegistrationNumber ? (
+                    <p className="text-gray-700 font-medium">
+                      Tax ID: {doc.customer.taxRegistrationNumber}
                     </p>
                   ) : null}
                 </div>
-                {isRental ? (
-                  <div className="rounded-lg border border-blue-200 bg-blue-50/40 p-2.5">
-                    <p className="font-bold text-blue-900 uppercase tracking-wide text-[10px]">
-                      Rental Information
+
+                <div className="rounded-lg border border-gray-200 bg-gray-50/50 p-2.5">
+                  <p className="font-bold text-gray-800 uppercase tracking-wide text-[10px]">
+                    Status &amp; Commerce Info
+                  </p>
+                  <p className="mt-1 text-xs font-bold">
+                    Status:{" "}
+                    <span
+                      className={
+                        doc.payment.status === "PAID"
+                          ? "text-green-700"
+                          : doc.payment.status === "REFUNDED"
+                            ? "text-purple-700"
+                            : "text-amber-700"
+                      }
+                    >
+                      {doc.payment.status}
+                    </span>
+                  </p>
+                  {doc.commerceMetadata?.rentalStartDate ? (
+                    <p className="text-gray-700">
+                      Rental: {formatDate(doc.commerceMetadata.rentalStartDate)} →{" "}
+                      {formatDate(doc.commerceMetadata.rentalEndDate)}
                     </p>
-                    <div className="mt-1 grid grid-cols-2 gap-1 text-[11px]">
-                      <div>
-                        <span className="text-gray-500">Rental Start:</span>
-                        <p className="font-semibold text-gray-900">
-                          {formatShortDate(data.rentalWindow?.pickupDate)}
-                        </p>
-                      </div>
-                      <div>
-                        <span className="text-gray-500">Return Due:</span>
-                        <p className="font-semibold text-blue-800">
-                          {formatShortDate(data.rentalWindow?.returnDueDate)}
-                        </p>
-                      </div>
-                      <div>
-                        <span className="text-gray-500">Duration:</span>
-                        <p className="font-semibold text-gray-900">
-                          {durationStr}
-                        </p>
-                      </div>
-                      <div>
-                        <span className="text-gray-500">Status:</span>
-                        <p className="font-bold text-blue-700">
-                          ● {rentalStatusLabel}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="rounded-lg border border-gray-200 bg-gray-50/50 p-2.5">
-                    <p className="font-bold text-gray-800 uppercase tracking-wide text-[10px]">
-                      Payment Summary
+                  ) : null}
+                  {doc.commerceMetadata?.tableNumber ? (
+                    <p className="text-gray-700">
+                      Table: {doc.commerceMetadata.tableNumber}{" "}
+                      {doc.commerceMetadata.orderType ? `(${doc.commerceMetadata.orderType})` : ""}
                     </p>
-                    <p className="mt-1 text-xs">
-                      Status:{" "}
-                      <span
-                        className={`font-bold ${
-                          isPaid ? "text-green-700" : "text-amber-700"
-                        }`}
-                      >
-                        {isPaid ? "PAID IN FULL" : "PAYMENT DUE"}
-                      </span>
+                  ) : null}
+                  {doc.commerceMetadata?.returnReason ? (
+                    <p className="text-red-700">
+                      Return Reason: {doc.commerceMetadata.returnReason}
                     </p>
-                    <p className="text-xs text-gray-600">
-                      Paid: {currencySymbol}
-                      {pad2(paidTotal)} · Due: {currencySymbol}
-                      {pad2(balanceDue)}
-                    </p>
-                  </div>
-                )}
+                  ) : null}
+                </div>
               </div>
 
               {/* Items Table */}
@@ -711,34 +569,22 @@ export function ReceiptModal({
                 <thead>
                   <tr className="border-y-2 border-gray-900 bg-gray-100 font-bold uppercase text-[10px] tracking-wider text-gray-800">
                     <th className="py-2 px-2">#</th>
-                    <th className="py-2 px-2">Item Description</th>
-                    <th className="py-2 px-2 text-center">Qty</th>
-                    <th className="py-2 px-2 text-right">
-                      {isRental ? "Rate / Unit" : "Rate"}
-                    </th>
-                    {isRental ? (
-                      <th className="py-2 px-2 text-center">Duration</th>
-                    ) : null}
+                    <th className="py-2 px-2">Description</th>
+                    <th className="py-2 px-2 text-center">Tax Code</th>
+                    <th className="py-2 px-2 text-center">Qty / UOM</th>
+                    <th className="py-2 px-2 text-right">Rate</th>
+                    <th className="py-2 px-2 text-right">Tax</th>
                     <th className="py-2 px-2 text-right">Amount</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {data.items.map((item, idx) => {
-                    const qty = moneyNumber(item.quantity ?? 1);
-                    const label =
-                      item.description ||
-                      item.product?.name ||
-                      item.inventoryUnit?.barcodeSku ||
-                      item.retailSku?.sku ||
-                      item.itemType;
-                    const amt =
-                      item.lineTotal !== undefined
-                        ? moneyNumber(item.lineTotal)
-                        : moneyNumber(item.unitPrice) * qty;
-                    const rate = moneyNumber(item.unitPrice);
-                    const rateDisplay = isRental
-                      ? `${currencySymbol}${pad2(rate)}/day`
-                      : `${currencySymbol}${pad2(rate)}`;
+                  {doc.items.map((item, idx) => {
+                    const qtyStr = item.unitSymbol
+                      ? `${item.quantity} ${item.unitSymbol}`
+                      : item.quantity % 1 === 0
+                        ? String(item.quantity)
+                        : item.quantity.toFixed(2);
+
                     return (
                       <tr
                         key={idx}
@@ -748,33 +594,44 @@ export function ReceiptModal({
                           {idx + 1}
                         </td>
                         <td className="py-2 px-2 font-medium text-gray-900">
-                          <div>{label}</div>
-                          {item.hsnOrSac || item.taxRatePercent ? (
+                          <div>{item.name}</div>
+                          {item.commerceMetadata?.durationLabel ? (
+                            <div className="text-[10px] text-blue-700">
+                              Duration: {item.commerceMetadata.durationLabel}
+                            </div>
+                          ) : item.commerceMetadata?.sessionsCount ? (
+                            <div className="text-[10px] text-blue-700">
+                              Sessions: {item.commerceMetadata.sessionsCount}
+                            </div>
+                          ) : null}
+                          {item.commerceMetadata?.validityStartDate ? (
+                            <div className="text-[10px] text-emerald-700">
+                              Validity: {formatDate(item.commerceMetadata.validityStartDate)} →{" "}
+                              {formatDate(item.commerceMetadata.validityEndDate)}
+                            </div>
+                          ) : null}
+                          {item.equivalentBaseQuantity != null && item.equivalentBaseUnitSymbol ? (
                             <div className="text-[10px] text-gray-500">
-                              {item.hsnOrSac ? `HSN: ${item.hsnOrSac}` : null}
-                              {item.hsnOrSac && item.taxRatePercent
-                                ? " | "
-                                : null}
-                              {item.taxRatePercent
-                                ? `GST: ${item.taxRatePercent}%`
-                                : null}
+                              Equivalent: {item.equivalentBaseQuantity}{" "}
+                              {item.equivalentBaseUnitSymbol}
                             </div>
                           ) : null}
                         </td>
-                        <td className="py-2 px-2 text-center font-mono">
-                          {qty % 1 === 0 ? String(qty) : pad2(qty)}
+                        <td className="py-2 px-2 text-center font-mono text-gray-600">
+                          {item.taxClassification?.code || "—"}
+                        </td>
+                        <td className="py-2 px-2 text-center font-mono font-semibold">
+                          {qtyStr}
                         </td>
                         <td className="py-2 px-2 text-right font-mono">
-                          {rateDisplay}
+                          {formatMoney(item.unitPrice, currencySymbol)}
+                          {item.pricingUnitSymbol && item.pricingUnitSymbol !== item.unitSymbol ? `/${item.pricingUnitSymbol}` : ""}
                         </td>
-                        {isRental ? (
-                          <td className="py-2 px-2 text-center font-semibold text-gray-800">
-                            {durationStr || "1 Day"}
-                          </td>
-                        ) : null}
+                        <td className="py-2 px-2 text-right font-mono text-gray-600">
+                          {formatMoney(item.taxAmount ?? 0, currencySymbol)}
+                        </td>
                         <td className="py-2 px-2 text-right font-mono font-bold text-gray-900">
-                          {currencySymbol}
-                          {pad2(amt)}
+                          {formatMoney(item.lineTotal, currencySymbol)}
                         </td>
                       </tr>
                     );
@@ -782,56 +639,51 @@ export function ReceiptModal({
                 </tbody>
               </table>
 
-              {/* Financial Breakdown */}
+              {/* Totals & Payments Grid */}
               <div className="mt-4 grid grid-cols-2 gap-6">
+                {/* Payments */}
                 <div className="space-y-3">
-                  {/* Payment Details */}
                   <div className="rounded-lg border border-gray-200 p-3 bg-gray-50/50">
                     <p className="font-bold uppercase tracking-wider text-[10px] text-gray-700">
                       Payment Breakdown
                     </p>
                     <div className="mt-2 space-y-1 text-xs">
-                      {(data.payments ?? []).map((p, i) => (
+                      {doc.payment.payments.map((p, i) => (
                         <div key={i} className="flex justify-between">
                           <span className="text-gray-600">
-                            {moneyLabel(p.method)}
-                            {p.status && p.status !== "succeeded"
-                              ? ` (${p.status})`
-                              : ""}
+                            {p.label || p.method}
+                            {p.status && p.status !== "succeeded" ? ` (${p.status})` : ""}
                           </span>
                           <span className="font-mono font-medium">
-                            {currencySymbol}
-                            {pad2(moneyNumber(p.amount))}
+                            {formatMoney(p.amount, currencySymbol)}
                           </span>
                         </div>
                       ))}
                       <div className="border-t border-gray-200 pt-1.5 flex justify-between font-bold">
                         <span>Total Paid:</span>
                         <span className="font-mono text-green-700">
-                          {currencySymbol}
-                          {pad2(paidTotal)}
+                          {formatMoney(doc.payment.totalPaid, currencySymbol)}
                         </span>
                       </div>
-                      {balanceDue > 0 ? (
+                      {doc.payment.balanceDue > 0 ? (
                         <div className="flex justify-between font-bold text-red-600">
                           <span>Balance Due:</span>
                           <span className="font-mono">
-                            {currencySymbol}
-                            {pad2(balanceDue)}
+                            {formatMoney(doc.payment.balanceDue, currencySymbol)}
                           </span>
                         </div>
                       ) : null}
                     </div>
                   </div>
 
-                  {upiVpa && balanceDue > 0 ? (
+                  {upiVpa && doc.payment.balanceDue > 0 ? (
                     <div className="flex items-center gap-3 rounded-lg border border-gray-200 p-2.5">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         alt="Pay QR"
                         className="h-16 w-16 bg-white"
                         src={`https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(
-                          `upi://pay?pa=${encodeURIComponent(upiVpa)}&pn=${encodeURIComponent(upiPayee)}&am=${qrPayAmount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(data.orderNumber)}`,
+                          `upi://pay?pa=${encodeURIComponent(upiVpa)}&pn=${encodeURIComponent(upiPayee)}&am=${doc.payment.balanceDue.toFixed(2)}&cu=INR&tn=${encodeURIComponent(doc.header.orderNumber)}`,
                         )}`}
                       />
                       <div className="text-[11px]">
@@ -845,164 +697,146 @@ export function ReceiptModal({
                   ) : null}
                 </div>
 
-                {/* Totals Table */}
+                {/* Financial Totals */}
                 <div className="space-y-1.5 text-xs">
-                  {hasProdDiscount ? (
-                    <>
-                      <div className="flex justify-between py-1 border-b border-gray-100 text-gray-500">
-                        <span>Total MRP:</span>
-                        <span className="font-mono font-medium">
-                          {currencySymbol}
-                          {pad2(grossMrpTotal)}
-                        </span>
-                      </div>
-                      <div className="flex justify-between py-1 border-b border-gray-100 text-emerald-700 font-medium">
-                        <span>Product discount:</span>
-                        <span className="font-mono">
-                          -{currencySymbol}
-                          {pad2(prodDiscountTotal)}
-                        </span>
-                      </div>
-                      <div className="flex justify-between py-1 border-b border-gray-100 font-semibold text-gray-900">
-                        <span>Subtotal (Net):</span>
-                        <span className="font-mono font-medium">
-                          {currencySymbol}
-                          {pad2(subtotal)}
-                        </span>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="flex justify-between py-1 border-b border-gray-100">
-                      <span className="text-gray-600">Subtotal:</span>
-                      <span className="font-mono font-medium">
-                        {currencySymbol}
-                        {pad2(subtotal)}
-                      </span>
+                  {doc.totals.grossMrpTotal ? (
+                    <div className="flex justify-between py-1 border-b border-gray-100 text-gray-500">
+                      <span>Total MRP:</span>
+                      <span className="font-mono">{formatMoney(doc.totals.grossMrpTotal, currencySymbol)}</span>
                     </div>
-                  )}
-                  {billDiscountAmt > 0 ? (
+                  ) : null}
+                  {doc.totals.productDiscountTotal ? (
+                    <div className="flex justify-between py-1 border-b border-gray-100 text-emerald-700 font-medium">
+                      <span>Product Discount:</span>
+                      <span className="font-mono">-{formatMoney(doc.totals.productDiscountTotal, currencySymbol)}</span>
+                    </div>
+                  ) : null}
+                  <div className="flex justify-between py-1 border-b border-gray-100 font-semibold text-gray-900">
+                    <span>Subtotal (Net):</span>
+                    <span className="font-mono">{formatMoney(doc.totals.subtotalNet, currencySymbol)}</span>
+                  </div>
+                  {doc.totals.billDiscountTotal ? (
                     <div className="flex justify-between py-1 border-b border-gray-100 text-[#c2410c] font-medium">
-                      <span>{hasProdDiscount ? "Bill discount:" : "Discount:"}</span>
-                      <span className="font-mono">
-                        -{currencySymbol}
-                        {pad2(billDiscountAmt)}
-                      </span>
+                      <span>Bill Discount:</span>
+                      <span className="font-mono">-{formatMoney(doc.totals.billDiscountTotal, currencySymbol)}</span>
                     </div>
                   ) : null}
-                  {taxTotal > 0 ? (
+                  {doc.totals.taxTotal > 0 ? (
                     <div className="flex justify-between py-1 border-b border-gray-100">
-                      <span className="text-gray-600">Taxes (GST):</span>
-                      <span className="font-mono">
-                        {currencySymbol}
-                        {pad2(taxTotal)}
-                      </span>
+                      <span className="text-gray-600">Tax Total:</span>
+                      <span className="font-mono">{formatMoney(doc.totals.taxTotal, currencySymbol)}</span>
                     </div>
                   ) : null}
-                  {depositTotal > 0 ? (
+                  {doc.totals.securityDepositTotal ? (
                     <div className="flex justify-between py-1 border-b border-gray-100 text-blue-800">
                       <span>Security Deposit:</span>
-                      <span className="font-mono font-medium">
-                        {currencySymbol}
-                        {pad2(depositTotal)}
-                      </span>
+                      <span className="font-mono">{formatMoney(doc.totals.securityDepositTotal, currencySymbol)}</span>
                     </div>
                   ) : null}
-                  {roundOffAmount !== 0 ? (
+                  {doc.totals.roundOff ? (
                     <div className="flex justify-between py-1 border-b border-gray-100 text-gray-500">
                       <span>Round Off:</span>
                       <span className="font-mono">
-                        {roundOffAmount > 0 ? "+" : ""}
-                        {currencySymbol}
-                        {pad2(roundOffAmount)}
+                        {doc.totals.roundOff > 0 ? "+" : ""}
+                        {formatMoney(doc.totals.roundOff, currencySymbol)}
                       </span>
                     </div>
                   ) : null}
+
                   <div className="flex justify-between border-t-2 border-b-2 border-gray-900 py-2 text-sm font-bold text-gray-900">
                     <span>NET PAYABLE:</span>
-                    <span className="font-mono text-base">
-                      {currencySymbol}
-                      {pad2(finalAmount)}
-                    </span>
+                    <span className="font-mono text-base">{formatMoney(doc.totals.netPayable, currencySymbol)}</span>
                   </div>
                 </div>
               </div>
 
               {/* Footer */}
               <div className="mt-8 border-t border-gray-200 pt-4 text-center text-[11px] text-gray-500">
-                <ReceiptOrderBarcode value={data.orderNumber} />
+                <ReceiptOrderBarcode value={doc.header.orderNumber} />
                 <p className="mt-2 font-semibold text-gray-800">
-                  {receiptFooter}
+                  {doc.config.footerNote}
                 </p>
-                <p className="mt-0.5">GST included as applicable.</p>
+                <p className="mt-0.5">This is a computer-generated invoice.</p>
               </div>
             </div>
           ) : (
             /* ──────────────────────────────────────────────────────────
-               THERMAL RECEIPT (80mm / 58mm) DESIGN
+               UNIVERSAL THERMAL (80mm / 58mm) DESIGN
                ────────────────────────────────────────────────────────── */
             <div className="receipt-print mx-auto w-full max-w-[320px] bg-white font-mono text-[12px] leading-[1.35] text-black">
               {/* Header */}
               <header className="text-center">
                 <p className="text-[14px] font-bold tracking-wider uppercase text-black">
-                  {shopName}
+                  {doc.header.businessName}
                 </p>
-                {data.store.address ? (
+                {doc.header.address ? (
                   <p className="mt-0.5 text-[11px] whitespace-pre-wrap">
-                    {data.store.address}
+                    {doc.header.address}
                   </p>
                 ) : null}
-                {taxId ? (
-                  <p className="text-[11px] font-bold">GSTIN: {taxId}</p>
+                {doc.header.taxRegistration ? (
+                  <p className="text-[11px] font-bold">
+                    {doc.header.taxRegistration.label}: {doc.header.taxRegistration.value}
+                  </p>
                 ) : null}
-                {data.store.phone ? (
-                  <p className="text-[11px]">Ph: {data.store.phone}</p>
+                {doc.header.phone ? (
+                  <p className="text-[11px]">Ph: {doc.header.phone}</p>
                 ) : null}
               </header>
 
               {solidDivider}
 
-              {/* Title Header */}
+              {/* Title */}
               <div className="text-center">
                 <p className="text-[13px] font-bold tracking-wide uppercase">
-                  {invoiceTitle}
+                  {doc.config.documentTitle || "TAX INVOICE"}
                 </p>
               </div>
 
               {divider}
 
-              {/* Meta Info */}
+              {/* Meta */}
               <section className="space-y-0.5 text-[11px]">
                 <div className="flex justify-between">
-                  <span>
-                    Inv:{" "}
-                    {data.activeInvoiceNumber ||
-                      data.invoices?.[data.invoices.length - 1]
-                        ?.invoiceNumber ||
-                      data.orderNumber}
-                  </span>
-                  <span>{formatOnlyDate(when)}</span>
+                  <span>Inv #: {doc.header.invoiceNumber}</span>
+                  <span>{formatDate(doc.header.issueDate)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span>Order: {data.orderNumber}</span>
-                  <span>{when.toTimeString().slice(0, 5)}</span>
+                  <span>Order: {doc.header.orderNumber}</span>
+                  <span>{new Date(doc.header.issueDate).toTimeString().slice(0, 5)}</span>
                 </div>
-                {data.cashier ? <p>Cashier: {data.cashier}</p> : null}
+                {doc.header.cashierName ? <p>Staff: {doc.header.cashierName}</p> : null}
                 <div className="flex justify-between">
-                  <span>
-                    Customer: {data.customer?.fullName || "Walk-in"}
-                  </span>
-                  {data.customer?.phone ? (
-                    <span>{data.customer.phone}</span>
-                  ) : null}
+                  <span>Customer: {doc.customer?.name || "Walk-in"}</span>
+                  {doc.customer?.phone ? <span>{doc.customer.phone}</span> : null}
                 </div>
               </section>
 
-              {/* RENTAL DETAILS HEADER BLOCK (When Rental) */}
-              {isRental ? (
+              {/* Commerce Specific Header Block */}
+              {doc.commerceMetadata?.rentalStartDate ? (
                 <>
                   {solidDivider}
                   <div className="text-center font-bold text-[11px] tracking-wider uppercase">
                     RENTAL DETAILS
+                  </div>
+                  <div className="text-[10px] space-y-0.5 mt-1">
+                    <div className="flex justify-between">
+                      <span>Start:</span>
+                      <span>{formatDate(doc.commerceMetadata.rentalStartDate)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Due:</span>
+                      <span className="font-bold">{formatDate(doc.commerceMetadata.rentalEndDate)}</span>
+                    </div>
+                  </div>
+                  {divider}
+                </>
+              ) : doc.commerceMetadata?.tableNumber ? (
+                <>
+                  {solidDivider}
+                  <div className="text-center font-bold text-[11px]">
+                    TABLE: {doc.commerceMetadata.tableNumber}{" "}
+                    {doc.commerceMetadata.orderType ? `(${doc.commerceMetadata.orderType.toUpperCase()})` : ""}
                   </div>
                   {divider}
                 </>
@@ -1010,101 +844,59 @@ export function ReceiptModal({
                 solidDivider
               )}
 
-              {/* Items Column Header */}
-              {isRental ? (
-                <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-x-1.5 font-bold text-[11px] pb-1">
-                  <span>Item</span>
-                  <span className="w-6 text-center">Qty</span>
-                  <span className="w-12 text-right">Rate</span>
-                  <span className="w-12 text-center">Dur</span>
-                  <span className="w-12 text-right">Amt</span>
-                </div>
-              ) : (
-                <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-1.5 font-bold text-[11px] pb-1">
-                  <span>Item</span>
-                  <span className="w-7 text-center">Qty</span>
-                  <span className="w-12 text-right">Rate</span>
-                  <span className="w-14 text-right">Amt</span>
-                </div>
-              )}
+              {/* Column Headers */}
+              <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-1.5 font-bold text-[11px] pb-1">
+                <span>Item</span>
+                <span className="w-8 text-center">Qty</span>
+                <span className="w-12 text-right">Rate</span>
+                <span className="w-14 text-right">Amt</span>
+              </div>
 
               {divider}
 
-              {/* Item Rows */}
+              {/* Items List */}
               <div className="space-y-2">
-                {data.items.map((item, i) => {
-                  const qty = moneyNumber(item.quantity ?? 1);
-                  const label =
-                    item.description ||
-                    item.product?.name ||
-                    item.inventoryUnit?.barcodeSku ||
-                    item.retailSku?.sku ||
-                    item.itemType;
-                  const amt =
-                    item.lineTotal !== undefined
-                      ? moneyNumber(item.lineTotal)
-                      : moneyNumber(item.unitPrice) * qty;
-                  const rate = moneyNumber(item.unitPrice);
-                  const taxAmt = moneyNumber(item.taxAmount);
-                  let gst = moneyNumber(item.taxRatePercent ?? 0);
-                  if (taxAmt > 0 && amt > 0) {
-                    const derived = Math.round((taxAmt / amt) * 1000) / 10;
-                    if (!gst || gst > 28) gst = derived;
-                  }
-                  const rawHsn = (item.hsnOrSac || item.taxCode || "").trim();
-                  const hsn =
-                    rawHsn && !/^(?:GST|VAT|TAX)\s*\d/i.test(rawHsn)
-                      ? rawHsn
-                      : "";
-
-                  const rateText = isRental
-                    ? `${currencySymbol}${pad2(rate)}/d`
-                    : `${currencySymbol}${pad2(rate)}`;
+                {doc.items.map((item, i) => {
+                  const qtyStr = item.unitSymbol
+                    ? `${item.quantity} ${item.unitSymbol}`
+                    : item.quantity % 1 === 0
+                      ? String(item.quantity)
+                      : item.quantity.toFixed(2);
 
                   return (
                     <div key={i} className="text-[11px]">
-                      {isRental ? (
-                        <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-x-1.5 items-start">
-                          <span className="min-w-0 break-words font-medium pr-1">
-                            {label}
-                          </span>
-                          <span className="w-6 text-center tabular-nums">
-                            {qty % 1 === 0 ? String(qty) : pad2(qty)}
-                          </span>
-                          <span className="w-12 text-right tabular-nums">
-                            {rateText}
-                          </span>
-                          <span className="w-12 text-center font-semibold">
-                            {durationStr || "1 Day"}
-                          </span>
-                          <span className="w-12 text-right tabular-nums font-bold">
-                            {currencySymbol}
-                            {pad2(amt)}
-                          </span>
-                        </div>
-                      ) : (
-                        <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-1.5 items-start">
-                          <span className="min-w-0 break-words font-medium pr-1">
-                            {label}
-                          </span>
-                          <span className="w-7 text-center tabular-nums">
-                            {qty % 1 === 0 ? String(qty) : pad2(qty)}
-                          </span>
-                          <span className="w-12 text-right tabular-nums">
-                            {currencySymbol}
-                            {pad2(rate)}
-                          </span>
-                          <span className="w-14 text-right tabular-nums font-bold">
-                            {currencySymbol}
-                            {pad2(amt)}
-                          </span>
-                        </div>
-                      )}
-                      {hsn || gst ? (
+                      <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-1.5 items-start">
+                        <span className="min-w-0 break-words font-medium pr-1">
+                          {item.name}
+                        </span>
+                        <span className="w-8 text-center tabular-nums">
+                          {qtyStr}
+                        </span>
+                        <span className="w-12 text-right tabular-nums">
+                          {formatMoney(item.unitPrice, currencySymbol)}
+                        </span>
+                        <span className="w-14 text-right tabular-nums font-bold">
+                          {formatMoney(item.lineTotal, currencySymbol)}
+                        </span>
+                      </div>
+                      {item.commerceMetadata?.durationLabel ? (
                         <p className="text-[10px] text-gray-700 pl-0.5">
-                          {hsn ? `HSN: ${hsn}` : null}
-                          {hsn && gst ? " | " : null}
-                          {gst ? `GST: ${gst}%` : null}
+                          Duration: {item.commerceMetadata.durationLabel}
+                        </p>
+                      ) : item.commerceMetadata?.sessionsCount ? (
+                        <p className="text-[10px] text-gray-700 pl-0.5">
+                          Sessions: {item.commerceMetadata.sessionsCount}
+                        </p>
+                      ) : null}
+                      {item.equivalentBaseQuantity != null && item.equivalentBaseUnitSymbol ? (
+                        <p className="text-[10px] text-gray-600 pl-0.5">
+                          Eq: {item.equivalentBaseQuantity} {item.equivalentBaseUnitSymbol}
+                        </p>
+                      ) : null}
+                      {item.taxClassification?.code ? (
+                        <p className="text-[10px] text-gray-600 pl-0.5">
+                          {item.taxClassification.label || "Code"}: {item.taxClassification.code}
+                          {item.taxRatePercent ? ` (${item.taxRatePercent}%)` : ""}
                         </p>
                       ) : null}
                     </div>
@@ -1112,106 +904,50 @@ export function ReceiptModal({
                 })}
               </div>
 
-              {/* RENTAL WINDOW TIMESTAMPS (Under Items) */}
-              {isRental ? (
-                <>
-                  <div className="mt-2.5 rounded border border-gray-400 p-1.5 text-[10px] space-y-0.5 bg-gray-50/70">
-                    <div className="flex justify-between">
-                      <span className="text-gray-700">Rental Start:</span>
-                      <span className="font-bold">
-                        {formatShortDate(data.rentalWindow?.pickupDate)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-700">Return Due:</span>
-                      <span className="font-bold text-black">
-                        {formatShortDate(data.rentalWindow?.returnDueDate)}
-                      </span>
-                    </div>
-                    {depositTotal > 0 ? (
-                      <div className="flex justify-between border-t border-dashed border-gray-300 pt-0.5">
-                        <span className="text-gray-700">Deposit Held:</span>
-                        <span className="font-bold">
-                          {currencySymbol}
-                          {pad2(depositTotal)}
-                        </span>
-                      </div>
-                    ) : null}
-                  </div>
-                </>
-              ) : null}
-
               {divider}
 
-              {/* Financial Totals */}
+              {/* Totals */}
               <div className="space-y-1 text-[11px]">
-                {hasProdDiscount ? (
-                  <>
-                    <div className="flex justify-between text-gray-500">
-                      <span>Total MRP</span>
-                      <span className="tabular-nums">
-                        {currencySymbol}
-                        {pad2(grossMrpTotal)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-emerald-700 font-medium">
-                      <span>Product discount</span>
-                      <span className="tabular-nums">
-                        -{currencySymbol}
-                        {pad2(prodDiscountTotal)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between font-semibold">
-                      <span>Subtotal (Net)</span>
-                      <span className="tabular-nums">
-                        {currencySymbol}
-                        {pad2(subtotal)}
-                      </span>
-                    </div>
-                  </>
-                ) : (
-                  <div className="flex justify-between">
-                    <span>Subtotal</span>
-                    <span className="tabular-nums">
-                      {currencySymbol}
-                      {pad2(subtotal)}
-                    </span>
+                {doc.totals.grossMrpTotal ? (
+                  <div className="flex justify-between text-gray-500">
+                    <span>Total MRP</span>
+                    <span className="tabular-nums">{formatMoney(doc.totals.grossMrpTotal, currencySymbol)}</span>
                   </div>
-                )}
-                {billDiscountAmt > 0 ? (
+                ) : null}
+                {doc.totals.productDiscountTotal ? (
+                  <div className="flex justify-between text-emerald-700 font-medium">
+                    <span>Product Discount</span>
+                    <span className="tabular-nums">-{formatMoney(doc.totals.productDiscountTotal, currencySymbol)}</span>
+                  </div>
+                ) : null}
+                <div className="flex justify-between font-semibold">
+                  <span>Subtotal (Net)</span>
+                  <span className="tabular-nums">{formatMoney(doc.totals.subtotalNet, currencySymbol)}</span>
+                </div>
+                {doc.totals.billDiscountTotal ? (
                   <div className="flex justify-between text-[#c2410c] font-medium">
-                    <span>{hasProdDiscount ? "Bill discount" : "Discount"}</span>
-                    <span className="tabular-nums">
-                      -{currencySymbol}
-                      {pad2(billDiscountAmt)}
-                    </span>
+                    <span>Bill Discount</span>
+                    <span className="tabular-nums">-{formatMoney(doc.totals.billDiscountTotal, currencySymbol)}</span>
                   </div>
                 ) : null}
-                {taxTotal > 0 ? (
+                {doc.totals.taxTotal > 0 ? (
                   <div className="flex justify-between">
-                    <span>Tax (GST)</span>
-                    <span className="tabular-nums">
-                      {currencySymbol}
-                      {pad2(taxTotal)}
-                    </span>
+                    <span>Tax Total</span>
+                    <span className="tabular-nums">{formatMoney(doc.totals.taxTotal, currencySymbol)}</span>
                   </div>
                 ) : null}
-                {depositTotal > 0 ? (
-                  <div className="flex justify-between">
+                {doc.totals.securityDepositTotal ? (
+                  <div className="flex justify-between text-blue-900 font-semibold">
                     <span>Security Deposit</span>
-                    <span className="tabular-nums">
-                      {currencySymbol}
-                      {pad2(depositTotal)}
-                    </span>
+                    <span className="tabular-nums">{formatMoney(doc.totals.securityDepositTotal, currencySymbol)}</span>
                   </div>
                 ) : null}
-                {roundOffAmount !== 0 ? (
-                  <div className="flex justify-between">
+                {doc.totals.roundOff ? (
+                  <div className="flex justify-between text-gray-500">
                     <span>Round Off</span>
                     <span className="tabular-nums">
-                      {roundOffAmount > 0 ? "+" : ""}
-                      {currencySymbol}
-                      {pad2(roundOffAmount)}
+                      {doc.totals.roundOff > 0 ? "+" : ""}
+                      {formatMoney(doc.totals.roundOff, currencySymbol)}
                     </span>
                   </div>
                 ) : null}
@@ -1219,96 +955,70 @@ export function ReceiptModal({
 
               {solidDivider}
 
-              {/* NET PAYABLE */}
+              {/* Net Payable */}
               <div className="flex justify-between text-[13px] font-bold">
                 <span>NET PAYABLE</span>
                 <span className="tabular-nums text-[14px]">
-                  {currencySymbol}
-                  {pad2(finalAmount)}
+                  {formatMoney(doc.totals.netPayable, currencySymbol)}
                 </span>
               </div>
 
               {solidDivider}
 
-              {/* PAYMENT SECTION */}
+              {/* Payments Section */}
               <div className="space-y-1 text-[11px]">
                 <div className="font-bold uppercase tracking-wider text-[10px]">
                   PAYMENT
                 </div>
-                {(data.payments ?? []).map((p, i) => (
+                {doc.payment.payments.map((p, i) => (
                   <div key={i} className="flex justify-between">
                     <span>
-                      {moneyLabel(p.method)}
-                      {p.status && p.status !== "succeeded"
-                        ? ` (${p.status})`
-                        : ""}
+                      {p.label || p.method}
+                      {p.status && p.status !== "succeeded" ? ` (${p.status})` : ""}
                     </span>
-                    <span className="tabular-nums">
-                      {currencySymbol}
-                      {pad2(moneyNumber(p.amount))}
-                    </span>
+                    <span className="tabular-nums">{formatMoney(p.amount, currencySymbol)}</span>
                   </div>
                 ))}
                 <div className="flex justify-between font-bold pt-0.5">
                   <span>Amount Paid</span>
-                  <span className="tabular-nums">
-                    {currencySymbol}
-                    {pad2(paidTotal)}
+                  <span className="tabular-nums text-green-800">
+                    {formatMoney(doc.payment.totalPaid, currencySymbol)}
                   </span>
                 </div>
-                <div className="flex justify-between font-bold">
-                  <span>Balance Due</span>
-                  <span className="tabular-nums">
-                    {currencySymbol}
-                    {pad2(balanceDue)}
-                  </span>
-                </div>
+                {doc.payment.balanceDue > 0 ? (
+                  <div className="flex justify-between font-bold text-red-700">
+                    <span>Balance Due</span>
+                    <span className="tabular-nums">
+                      {formatMoney(doc.payment.balanceDue, currencySymbol)}
+                    </span>
+                  </div>
+                ) : null}
                 <div className="flex justify-between pt-0.5">
-                  <span>Payment Status:</span>
+                  <span>Status:</span>
                   <span
                     className={`font-bold uppercase ${
-                      isPaid ? "text-green-800" : "text-red-700"
+                      doc.payment.status === "PAID"
+                        ? "text-green-800"
+                        : doc.payment.status === "REFUNDED"
+                          ? "text-purple-800"
+                          : "text-red-700"
                     }`}
                   >
-                    {isPaid
-                      ? "PAID"
-                      : paidTotal > 0
-                        ? "PARTIALLY PAID"
-                        : "UNPAID"}
+                    {doc.payment.status}
                   </span>
                 </div>
-                {changeAmt != null && moneyNumber(changeAmt) > 0 ? (
+                {doc.payment.changeReturned ? (
                   <div className="flex justify-between text-blue-900 font-semibold">
                     <span>Change Returned</span>
                     <span className="tabular-nums">
-                      {currencySymbol}
-                      {pad2(moneyNumber(changeAmt))}
+                      {formatMoney(doc.payment.changeReturned, currencySymbol)}
                     </span>
                   </div>
                 ) : null}
               </div>
 
-              {/* RENTAL STATUS HIGHLIGHT BLOCK */}
-              {isRental ? (
-                <>
-                  {solidDivider}
-                  <div className="rounded border border-gray-800 bg-gray-50 py-2 px-2 text-center">
-                    <p className="text-[10px] font-bold tracking-wider text-gray-700 uppercase">
-                      RENTAL STATUS
-                    </p>
-                    <p className="mt-1 text-[12px] font-extrabold text-blue-900">
-                      ● {rentalStatusLabel}
-                    </p>
-                    <p className="mt-0.5 text-[10px] text-gray-800">
-                      Return Due:{" "}
-                      {formatOnlyDate(data.rentalWindow?.returnDueDate)}
-                    </p>
-                  </div>
-                </>
-              ) : null}
-
-              {/* UPI QR SCAN & PAY */}
-              {upiVpa && balanceDue > 0 ? (
+              {/* UPI QR Scan & Pay */}
+              {upiVpa && doc.payment.balanceDue > 0 ? (
                 <>
                   {divider}
                   <div className="mt-2 text-center">
@@ -1317,12 +1027,11 @@ export function ReceiptModal({
                       alt="Pay QR"
                       className="mx-auto h-24 w-24 bg-white border border-gray-300 p-0.5"
                       src={`https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(
-                        `upi://pay?pa=${encodeURIComponent(upiVpa)}&pn=${encodeURIComponent(upiPayee)}&am=${qrPayAmount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(data.orderNumber)}`,
+                        `upi://pay?pa=${encodeURIComponent(upiVpa)}&pn=${encodeURIComponent(upiPayee)}&am=${doc.payment.balanceDue.toFixed(2)}&cu=INR&tn=${encodeURIComponent(doc.header.orderNumber)}`,
                       )}`}
                     />
-                    <p className="mt-1 font-bold text-[11px]">Scan &amp; Pay</p>
-                    <p className="text-[10px]">UPI: {upiVpa}</p>
-                    <p className="text-[10px]">Name: {upiPayee}</p>
+                    <p className="mt-1 font-bold text-[11px]">Scan &amp; Pay via UPI</p>
+                    <p className="text-[10px]">VPA: {upiVpa}</p>
                   </div>
                 </>
               ) : null}
@@ -1331,10 +1040,10 @@ export function ReceiptModal({
 
               {/* Barcode & Footer */}
               <div className="text-center">
-                <ReceiptOrderBarcode value={data.orderNumber} />
-                <p className="mt-2 font-bold text-[11px]">{receiptFooter}</p>
+                <ReceiptOrderBarcode value={doc.header.orderNumber} />
+                <p className="mt-2 font-bold text-[11px]">{doc.config.footerNote}</p>
                 <p className="mt-0.5 text-[10px] text-gray-600">
-                  GST included as applicable.
+                  This is a computer-generated invoice.
                 </p>
               </div>
             </div>
