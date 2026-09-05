@@ -45,7 +45,7 @@ export function BillTotalsLines({
           </div>
           <div className={row}>
             <span className="flex items-center gap-1.5 text-emerald-700 font-medium">
-              <span>Product discount</span>
+              <span>Product Discount</span>
               {summary.productDiscountPercent > 0 ? (
                 <span className="rounded bg-emerald-100 px-1.5 py-0.2 text-[0.6875rem] font-bold text-emerald-800">
                   {summary.productDiscountPercent}% OFF
@@ -63,7 +63,7 @@ export function BillTotalsLines({
         </>
       ) : (
         <div className={row}>
-          <span>Total</span>
+          <span>Total MRP</span>
           <span className="tabular-nums">{formatMoney(summary.itemsSubtotal)}</span>
         </div>
       )}
@@ -72,7 +72,7 @@ export function BillTotalsLines({
       {billDiscountAmt > 0 ? (
         <div className={row}>
           <span className="text-[#c2410c] font-medium">
-            {hasProdDiscount ? "Bill discount" : "Discount"}
+            Bill Discount
           </span>
           <span className="tabular-nums font-medium text-[#c2410c]">
             −{formatMoney(billDiscountAmt)}
@@ -82,7 +82,7 @@ export function BillTotalsLines({
 
       {loyaltyOff > 0 ? (
         <div className={row}>
-          <span className="text-[#1a56db]">Points</span>
+          <span className="text-[#1a56db]">Payment Offer</span>
           <span className="tabular-nums font-medium text-[#1a56db]">
             −{formatMoney(loyaltyOff)}
           </span>
@@ -105,7 +105,7 @@ export function BillTotalsLines({
       {summary.taxTotal > 0 ? (
         <>
           <div className={row}>
-            <span>Taxable value</span>
+            <span>Taxable Value</span>
             <span className="tabular-nums">
               {formatMoney(summary.taxableValue)}
             </span>
@@ -141,7 +141,7 @@ export function BillTotalsLines({
 
       {summary.showRoundOff ? (
         <div className={row}>
-          <span>Round off</span>
+          <span>Round Off</span>
           <span className="tabular-nums">
             {summary.roundOff > 0 ? "+" : ""}
             {formatMoney(summary.roundOff)}

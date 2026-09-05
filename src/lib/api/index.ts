@@ -4837,6 +4837,8 @@ export const subscriptionsApi = {
         description?: string | null;
         price: string | number;
         billingPeriodDays: number;
+        durationUnit?: string | null;
+        durationQuantity?: number | null;
         isActive: boolean;
         category?: { id: string; name: string } | null;
         activeMembers: number;
@@ -4850,7 +4852,9 @@ export const subscriptionsApi = {
     categoryId: string;
     sku: string;
     price: number;
-    billingPeriodDays: number;
+    billingPeriodDays?: number;
+    durationUnit?: string;
+    durationQuantity?: number;
   }) {
     return apiRequest("/subscriptions/plans", {
       method: "POST",
@@ -4865,6 +4869,8 @@ export const subscriptionsApi = {
       description?: string;
       price?: number;
       billingPeriodDays?: number;
+      durationUnit?: string;
+      durationQuantity?: number;
       isActive?: boolean;
     },
   ) {
@@ -4888,8 +4894,20 @@ export const subscriptionsApi = {
         price: string | number;
         startsAt: string;
         currentPeriodEnd: string;
-        customer: { id: string; fullName: string; phone: string };
-        plan: { id: string; title: string; sku: string; price?: string | number };
+        cancelledAt?: string | null;
+        lastOrderId?: string | null;
+        customer: {
+          id: string;
+          fullName: string;
+          phone?: string | null;
+          email?: string | null;
+        };
+        plan: {
+          id: string;
+          title: string;
+          sku: string;
+          price: string | number;
+        };
       }>;
       counts: { active: number; listed: number };
     }>(`/subscriptions${q ? `?${q}` : ""}`, { token: token() });
@@ -4898,12 +4916,13 @@ export const subscriptionsApi = {
     customerId: string;
     productId: string;
     paymentMethod?: string;
+    locationId?: string;
     idempotencyKey?: string;
   }) {
     return apiRequest<{
       subscription: { id: string; status: string; currentPeriodEnd: string };
       order: { id: string; orderNumber: string };
-      payment: { id: string; amount: string | number; method: string };
+      payment: { id: string; amount: string; method: string };
     }>("/subscriptions/enroll", {
       method: "POST",
       body,
@@ -4928,24 +4947,23 @@ export const subscriptionsApi = {
       subscriptionId: string;
       status: string;
       isCheckedIn: boolean;
-      customer: { id: string; fullName: string; phone: string; email?: string | null };
-      plan: { id: string; title: string; sku: string; price: string | number };
+      customer: { id: string; fullName: string; phone?: string | null; email?: string | null };
+      plan: { id: string; title: string; sku: string; price: string };
       startsAt: string;
       currentPeriodEnd: string;
-      cancelledAt: string | null;
-      lastVisitAt: string | null;
-      currentSessionStartedAt: string | null;
-      history: Array<{ id: string; action: string; at: string; note?: string | null }>;
+      lastVisitAt?: string | null;
+      currentSessionStartedAt?: string | null;
+      history: Array<{ id: string; action: string; at: string; note?: string }>;
     }>(`/subscriptions/${id}/check-in`, { token: token() });
   },
-  checkIn(id: string, body?: { locationId?: string; note?: string }) {
+  checkIn(id: string, body?: { note?: string; locationId?: string }) {
     return apiRequest(`/subscriptions/${id}/check-in`, {
       method: "POST",
       body: body ?? {},
       token: token(),
     });
   },
-  checkOut(id: string, body?: { locationId?: string; note?: string }) {
+  checkOut(id: string, body?: { note?: string; locationId?: string }) {
     return apiRequest(`/subscriptions/${id}/check-out`, {
       method: "POST",
       body: body ?? {},
@@ -4971,6 +4989,9 @@ export const servicesCommerceApi = {
         description?: string | null;
         price: string | number;
         durationMinutes?: number | null;
+        durationUnit?: string | null;
+        durationQuantity?: number | null;
+        sessionDurationMinutes?: number | null;
         taxRatePercent?: number | null;
         isActive: boolean;
         category?: { id: string; name: string } | null;
@@ -4985,6 +5006,9 @@ export const servicesCommerceApi = {
     sku: string;
     price: number;
     durationMinutes?: number;
+    durationUnit?: string;
+    durationQuantity?: number;
+    sessionDurationMinutes?: number;
   }) {
     return apiRequest<{ id: string }>("/services", {
       method: "POST",
@@ -5004,6 +5028,7 @@ export const servicesCommerceApi = {
     productId: string;
     paymentMethod?: "cash" | "card" | "upi";
     quantity?: number;
+    orderedUnitSymbol?: string;
     appointmentId?: string;
     locationId?: string;
     idempotencyKey?: string;

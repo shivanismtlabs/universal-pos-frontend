@@ -6,15 +6,17 @@ export type MeasureUnitRow = {
   system?: boolean;
 };
 
+export type MeasureUnit = MeasureUnitRow;
+
 export const FALLBACK_UNITS: MeasureUnitRow[] = [
   { code: "pcs", name: "Piece", decimalQty: false, active: true, system: true },
-  { code: "pack", name: "Pack / box", decimalQty: false, active: true, system: true },
-  { code: "box", name: "Box", decimalQty: false, active: true, system: true },
-  { code: "dozen", name: "Dozen", decimalQty: false, active: true, system: true },
+  { code: "pack", name: "Pack / box", decimalQty: true, active: true, system: true },
+  { code: "box", name: "Box", decimalQty: true, active: true, system: true },
+  { code: "dozen", name: "Dozen", decimalQty: true, active: true, system: true },
   { code: "kg", name: "Kilogram", decimalQty: true, active: true, system: true },
-  { code: "g", name: "Gram", decimalQty: false, active: true, system: true },
+  { code: "g", name: "Gram", decimalQty: true, active: true, system: true },
   { code: "L", name: "Litre", decimalQty: true, active: true, system: true },
-  { code: "ml", name: "Millilitre", decimalQty: false, active: true, system: true },
+  { code: "ml", name: "Millilitre", decimalQty: true, active: true, system: true },
   { code: "lb", name: "Pound", decimalQty: true, active: true, system: true },
   { code: "oz", name: "Ounce", decimalQty: true, active: true, system: true },
   { code: "gal", name: "Gallon (US)", decimalQty: true, active: true, system: true },
@@ -229,4 +231,14 @@ export function defaultUnitForBusinessType(
     return "pcs";
   }
   return "pcs";
+}
+
+export function decimalQtyForUnit(
+  unit: string,
+  units: MeasureUnitRow[] = FALLBACK_UNITS,
+): boolean {
+  const code = unit.trim().toLowerCase();
+  const found = units.find((u) => u.code.toLowerCase() === code);
+  if (found) return found.decimalQty;
+  return FALLBACK_UNITS.some((u) => u.code.toLowerCase() === code && u.decimalQty);
 }

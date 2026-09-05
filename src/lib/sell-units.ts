@@ -1,9 +1,7 @@
-/** Mirrors backend sell-units + tenant Settings → Units. */
+import { decimalQtyForUnit, type MeasureUnit } from "./measure-units";
 
 export const SELL_UNITS = ["pcs", "pack", "kg", "g", "L", "ml"] as const;
 export type SellUnit = string;
-
-const DECIMAL_UNITS = new Set(["kg", "L", "lb", "m", "hour", "gal"]);
 
 export const SELL_UNIT_OPTIONS: Array<{
   value: string;
@@ -21,7 +19,13 @@ export const SELL_UNIT_OPTIONS: Array<{
     value: "pack",
     label: "Pack / box",
     priceHint: "Price per pack",
-    qtyHint: "Whole packs only",
+    qtyHint: "Decimals allowed when splittable",
+  },
+  {
+    value: "dozen",
+    label: "Dozen (dz)",
+    priceHint: "Price per dozen",
+    qtyHint: "Decimals allowed (e.g. 0.5, 1.5)",
   },
   {
     value: "kg",
@@ -33,7 +37,7 @@ export const SELL_UNIT_OPTIONS: Array<{
     value: "g",
     label: "Gram (g)",
     priceHint: "Price per gram",
-    qtyHint: "Whole grams preferred",
+    qtyHint: "Decimals allowed",
   },
   {
     value: "L",
@@ -45,7 +49,7 @@ export const SELL_UNIT_OPTIONS: Array<{
     value: "ml",
     label: "Millilitre (ml)",
     priceHint: "Price per ml",
-    qtyHint: "Whole ml preferred",
+    qtyHint: "Decimals allowed",
   },
 ];
 
@@ -57,21 +61,31 @@ export function normalizeSellUnit(v: unknown): SellUnit {
   return isSellUnit(v) ? String(v).trim() : "pcs";
 }
 
-export function requiresWholeQty(unit: string): boolean {
-  return !allowsDecimalQty(unit);
+export function requiresWholeQty(
+  unit: string,
+  units?: MeasureUnit[],
+): boolean {
+  return !allowsDecimalQty(unit, units);
 }
 
-export function allowsDecimalQty(unit: string): boolean {
-  return DECIMAL_UNITS.has(normalizeSellUnit(unit));
+export function allowsDecimalQty(
+  unit: string,
+  units?: MeasureUnit[],
+): boolean {
+  return decimalQtyForUnit(normalizeSellUnit(unit), units);
 }
 
-export function qtyStep(unit: SellUnit): number {
-  return allowsDecimalQty(unit) ? 0.1 : 1;
+export function qtyStep(unit: SellUnit, units?: MeasureUnit[]): number {
+  return allowsDecimalQty(unit, units) ? 0.5 : 1;
 }
 
-export function normalizeQty(qty: number, unit: SellUnit): number {
+export function normalizeQty(
+  qty: number,
+  unit: SellUnit,
+  units?: MeasureUnit[],
+): number {
   if (!Number.isFinite(qty) || qty < 0) return NaN;
-  if (requiresWholeQty(unit)) return Math.round(qty);
+  if (requiresWholeQty(unit, units)) return Math.round(qty);
   return Math.round(qty * 1000) / 1000;
 }
 
@@ -85,16 +99,18 @@ export function validateSellPrice(price: number): string | null {
   return null;
 }
 
-export function validateSellQty(qty: number, unit: SellUnit): string | null {
+export function validateSellQty(
+  qty: number,
+  unit: SellUnit,
+  units?: MeasureUnit[],
+): string | null {
   if (!Number.isFinite(qty)) return "Enter a valid quantity";
   if (qty < 0) return "Quantity cannot be negative";
   if (qty > 99_999_999) return "Quantity is too large";
 
-  if (requiresWholeQty(unit)) {
+  if (requiresWholeQty(unit, units)) {
     if (!Number.isInteger(qty)) {
-      return unit === "pcs" || unit === "pack"
-        ? `Quantity for ${unit} must be a whole number (no decimals)`
-        : `Quantity for ${unit} must be a whole number`;
+      return `Quantity for ${unit} must be a whole number`;
     }
   } else {
     const rounded = Math.round(qty * 1000) / 1000;

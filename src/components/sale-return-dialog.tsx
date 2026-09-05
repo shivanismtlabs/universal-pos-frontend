@@ -99,6 +99,9 @@ export function SaleReturnDialog({
         alreadyReturned: number;
         remaining: number;
         unitPrice: number;
+        unitSymbol?: string;
+        baseUnitSymbol?: string;
+        baseQty?: number | null;
       }
     >();
     for (const item of items) {
@@ -112,6 +115,16 @@ export function SaleReturnDialog({
           item.product?.name ||
           item.stockLevel?.product?.name ||
           "Item";
+      const itemMeta = (item as any).meta;
+      const unitSymbol =
+        (item as any).orderedUnitSymbol ||
+        (typeof itemMeta === "object" && itemMeta?.orderedUnitSymbol) ||
+        "";
+      const baseUnitSymbol =
+        (item as any).baseUnitSymbol ||
+        (typeof itemMeta === "object" && itemMeta?.baseUnitSymbol) ||
+        "";
+      const baseQty = (item as any).baseQuantity != null ? moneyNumber((item as any).baseQuantity) : null;
       if (prev) {
         prev.soldQty += qty;
         prev.remaining = Math.max(
@@ -127,6 +140,9 @@ export function SaleReturnDialog({
           alreadyReturned: ar,
           remaining: Math.max(0, qty - ar),
           unitPrice: price,
+          unitSymbol,
+          baseUnitSymbol,
+          baseQty,
         });
       }
     }
@@ -510,24 +526,29 @@ export function SaleReturnDialog({
                       <div>
                         <dt className="text-[#8b9bb0]">Sold</dt>
                         <dd className="font-semibold tabular-nums text-[#0b1f33]">
-                          {l.soldQty}
+                          {l.soldQty} {l.unitSymbol}
+                          {l.baseQty != null && l.unitSymbol && l.baseUnitSymbol && l.unitSymbol.toLowerCase() !== l.baseUnitSymbol.toLowerCase() && (
+                            <span className="block text-[0.65rem] font-normal text-[#8b9bb0]">
+                              ({l.baseQty} {l.baseUnitSymbol})
+                            </span>
+                          )}
                         </dd>
                       </div>
                       <div>
                         <dt className="text-[#8b9bb0]">Returned</dt>
                         <dd className="font-semibold tabular-nums text-[#0b1f33]">
-                          {l.alreadyReturned}
+                          {l.alreadyReturned} {l.unitSymbol}
                         </dd>
                       </div>
                       <div>
                         <dt className="text-[#8b9bb0]">Returnable</dt>
                         <dd className="font-semibold tabular-nums text-[#1a56db]">
-                          {l.remaining}
+                          {l.remaining} {l.unitSymbol}
                         </dd>
                       </div>
                     </dl>
                     <p className="mt-0.5 font-mono text-[0.65rem] text-[#8b9bb0]">
-                      {money(l.unitPrice)} each (original sale)
+                      {money(l.unitPrice)} {l.unitSymbol ? `/ ${l.unitSymbol}` : "each"} (original sale)
                     </p>
                   </div>
                   <div className="flex flex-col items-end gap-1">
