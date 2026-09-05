@@ -8926,7 +8926,9 @@ export const catalogApi = {
   quotePricingLine(body: {
     productId: string;
     enteredQty: number;
-    sellingUnitId: string;
+    sellingUnitId?: string;
+    sellingUnitSymbol?: string;
+    unitPriceOverride?: number;
   }) {
     return apiRequest<{
       qtyBase: number;
@@ -8934,11 +8936,22 @@ export const catalogApi = {
       conversionFactorUsed: number;
       orderedQuantity?: string;
       orderedUnit?: string;
+      orderedUnitSymbol?: string;
+      enteredQuantity?: string;
+      enteredUnitSymbol?: string;
       baseQuantity?: string;
+      baseUnit?: string;
+      baseUnitSymbol?: string;
+      priceQuantity?: string;
+      priceUnitSymbol?: string;
+      configuredPriceQuantity?: string;
       unitPrice?: string;
       priceSource?: string;
       grossAmount?: string;
       finalAmount?: string;
+      stockAvailable?: number;
+      stockRemaining?: number;
+      sufficientStock?: boolean;
     }>("/catalog/pricing/quote", {
       method: "POST",
       body,
