@@ -453,19 +453,12 @@ export const addSaleProductSchema = z
   .superRefine((v, ctx) => {
     if (!v.trackInventory) return;
     // Opening stock may be 0; only reject negatives (handled by .min(0)) and unit rules.
-    const whole =
-      v.sellUnit === "pcs" ||
-      v.sellUnit === "pack" ||
-      v.sellUnit === "g" ||
-      v.sellUnit === "ml";
+    const whole = requiresWholeQty(v.sellUnit);
     if (whole && !Number.isInteger(v.qty)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["qty"],
-        message:
-          v.sellUnit === "pcs" || v.sellUnit === "pack"
-            ? `Opening stock for ${v.sellUnit} must be a whole number`
-            : `Quantity for ${v.sellUnit} must be a whole number`,
+        message: `Opening stock for ${v.sellUnit} must be a whole number`,
       });
       return;
     }
@@ -502,11 +495,7 @@ export const updateSaleProductSchema = z
       .max(99_999_999, "Quantity is too large"),
   })
   .superRefine((v, ctx) => {
-    const whole =
-      v.sellUnit === "pcs" ||
-      v.sellUnit === "pack" ||
-      v.sellUnit === "g" ||
-      v.sellUnit === "ml";
+    const whole = requiresWholeQty(v.sellUnit);
     if (whole && !Number.isInteger(v.qty)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

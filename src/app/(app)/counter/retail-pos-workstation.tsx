@@ -160,6 +160,236 @@ type PayMethod =
   | "gift_card"
   | "collect_later";
 
+type UniversalQtyPickerProps = {
+  row: {
+    id: string;
+    name: string;
+    sku: string;
+    sellUnit?: string | null;
+    sellPrice: number | string;
+    qtyOnHand: number | string;
+    productId?: string;
+    entryUnits?: Array<{ unitId: string; symbol: string; name: string }>;
+  };
+  initialValue: string;
+  defaultUnitId: string;
+  maxQty: number;
+  tracks: boolean;
+  money: (n: number) => string;
+  onClose: () => void;
+  onApply: (params: {
+    qty: number;
+    unitId: string;
+    entrySym: string;
+    quote?: {
+      qtyBase: number;
+      amount: number;
+      unitPrice?: string;
+      conversionFactorUsed: number;
+      baseUnitSymbol?: string;
+      baseQuantity?: string;
+    } | null;
+  }) => void;
+};
+
+function UniversalQuantityPickerModal({
+  row,
+  initialValue,
+  defaultUnitId,
+  maxQty,
+  tracks,
+  money,
+  onClose,
+  onApply,
+}: UniversalQtyPickerProps) {
+  const [val, setVal] = useState(initialValue);
+  const [unitId, setUnitId] = useState(defaultUnitId);
+  const [quote, setQuote] = useState<{
+    qtyBase: number;
+    amount: number;
+    unitPrice?: string;
+    conversionFactorUsed: number;
+    baseUnitSymbol?: string;
+    baseQuantity?: string;
+  } | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const entryUnits = row.entryUnits ?? [];
+  const selectedUnit = entryUnits.find((u) => u.unitId === unitId);
+  const entrySym = selectedUnit?.symbol ?? row.sellUnit ?? "";
+
+  useEffect(() => {
+    const n = Number(val.trim().replace(",", "."));
+    if (!Number.isFinite(n) || n <= 0) {
+      setQuote(null);
+      return;
+    }
+    if (!row.productId || !unitId) {
+      setQuote(null);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    const timer = setTimeout(() => {
+      catalogApi
+        .quotePricingLine({
+          productId: row.productId!,
+          enteredQty: n,
+          sellingUnitId: unitId,
+        })
+        .then((q) => {
+          if (!cancelled) {
+            setQuote(q);
+            setLoading(false);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setQuote(null);
+            setLoading(false);
+          }
+        });
+    }, 120);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [val, unitId, row.productId]);
+
+  const n = Number(val.trim().replace(",", "."));
+  const validQty = Number.isFinite(n) && n > 0;
+
+  const handleSubmit = () => {
+    if (!validQty) {
+      toast.error("Enter a quantity greater than 0");
+      return;
+    }
+    onApply({
+      qty: n,
+      unitId,
+      entrySym,
+      quote,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-[#0b1f33]/40 p-4">
+      <div className="w-full max-w-sm rounded-xl border border-[#e2e8f0] bg-white p-5 shadow-2xl">
+        <h3 className="text-base font-bold text-[#0b1f33]">
+          Quantity · {row.name}
+        </h3>
+
+        <div className="mt-1 flex items-center justify-between text-xs text-[#5a6b7d]">
+          <span>Available:</span>
+          <span className="font-semibold text-[#0b1f33]">
+            {formatQtyWithUnit(maxQty, row.sellUnit)}
+          </span>
+        </div>
+
+        {entryUnits.length > 1 ? (
+          <div className="mt-3.5">
+            <Label className="text-[0.65rem] font-bold tracking-wider uppercase text-[#8b9bb0]">
+              ENTER AS:
+            </Label>
+            <Select
+              className="mt-1 h-10 w-full rounded-lg border border-[#d9e0ea] bg-white px-3 text-sm font-semibold text-[#0b1f33] shadow-sm focus:border-[#1a56db]"
+              value={unitId}
+              onChange={(e) => setUnitId(e.target.value)}
+            >
+              {entryUnits.map((u) => (
+                <option key={u.unitId} value={u.unitId}>
+                  {u.symbol} — {u.name}
+                </option>
+              ))}
+            </Select>
+          </div>
+        ) : null}
+
+        <div className="mt-3.5">
+          <Label className="text-[0.65rem] font-bold tracking-wider uppercase text-[#8b9bb0]">
+            Quantity:
+          </Label>
+          <Input
+            className="mt-1 text-center text-2xl font-bold tabular-nums h-12 shadow-sm border-[#d9e0ea] focus:border-[#1a56db]"
+            autoFocus
+            inputMode="decimal"
+            placeholder="e.g. 5"
+            value={val}
+            onChange={(e) => {
+              const v = e.target.value.replace(",", ".");
+              if (v !== "" && !/^\d*\.?\d*$/.test(v)) return;
+              setVal(v);
+            }}
+            onFocus={(e) => e.target.select()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                handleSubmit();
+              }
+            }}
+          />
+        </div>
+
+        {/* Real-time Equivalent and Amount Preview calculated from Backend Quote */}
+        <div className="mt-4 rounded-lg border border-[#e8edf4] bg-[#f8fafc] p-3 text-sm space-y-1.5">
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-[#5a6b7d]">Equivalent:</span>
+            <span className="font-semibold text-[#0b1f33] tabular-nums">
+              {loading ? (
+                <span className="text-[#8b9bb0]">Calculating…</span>
+              ) : quote ? (
+                `${quote.baseQuantity || quote.qtyBase} ${quote.baseUnitSymbol || row.sellUnit}`
+              ) : validQty ? (
+                `${n} ${entrySym}`
+              ) : (
+                `—`
+              )}
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-[#5a6b7d]">Amount:</span>
+            <span className="text-base font-bold text-[#1a56db] tabular-nums">
+              {loading ? (
+                <span className="text-sm font-normal text-[#8b9bb0]">…</span>
+              ) : quote ? (
+                money(Number(quote.amount))
+              ) : validQty ? (
+                money(n * moneyNumber(row.sellPrice))
+              ) : (
+                money(0)
+              )}
+            </span>
+          </div>
+        </div>
+
+        {/* Quick preset buttons */}
+        <div className="mt-3.5 flex flex-wrap gap-1.5">
+          {[1, 5, 10, 25, 50, 100, 250, 500].map((q) => (
+            <button
+              key={q}
+              type="button"
+              className="rounded-md border border-[#e2e8f0] bg-white px-2.5 py-1 text-xs font-semibold text-[#0b1f33] hover:border-[#1a56db] hover:text-[#1a56db] hover:bg-[#f0f5ff]"
+              onClick={() => setVal(String(q))}
+            >
+              {q}
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={handleSubmit}>
+            Set qty
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const TOUCH_KEY = "upos-counter-touch-mode";
 
 /**
@@ -996,9 +1226,11 @@ export default function RetailPosWorkstation({
             opts?.conversionFactor ?? existing.conversionFactor ?? 1;
           const need = isSameUnit
             ? next
-            : factor > 0 && opts?.baseQty != null
-              ? opts.baseQty / factor
-              : next;
+            : opts?.baseQty != null && opts.baseQty > 0
+              ? opts.baseQty
+              : factor > 0
+                ? next * factor
+                : next;
           if (need > onHand + 1e-9) {
             toast.error(
               `Only ${formatQtyWithUnit(onHand, row.sellUnit ?? unit)} in stock`,
@@ -1029,7 +1261,13 @@ export default function RetailPosWorkstation({
                 ...(opts?.conversionFactor != null
                   ? { conversionFactor: opts.conversionFactor }
                   : {}),
-                maxQty: tracks ? onHand : Math.max(l.maxQty, next + 100),
+                maxQty: tracks
+                  ? String(opts?.orderedUnitSymbol ?? existing.sellUnit ?? row.sellUnit ?? "").toLowerCase() === String(row.sellUnit ?? unit ?? "").toLowerCase()
+                    ? onHand
+                    : (opts?.conversionFactor ?? existing.conversionFactor ?? 1) > 0
+                      ? onHand / (opts?.conversionFactor ?? existing.conversionFactor ?? 1)
+                      : onHand
+                  : Math.max(l.maxQty, next + 100),
                 sellUnit: opts?.orderedUnitSymbol
                   ? normalizeSellUnit(opts.orderedUnitSymbol)
                   : unit,
@@ -1060,11 +1298,14 @@ export default function RetailPosWorkstation({
             : normalizeQty(step, unit);
         if (tracks) {
           const isSameUnit = !opts?.orderedUnitSymbol || opts.orderedUnitSymbol.toLowerCase() === unit.toLowerCase();
+          const factor = opts?.conversionFactor ?? 1;
           const need = isSameUnit
             ? startQty
-            : opts?.conversionFactor && opts.conversionFactor > 0 && opts?.baseQty != null
-              ? opts.baseQty / opts.conversionFactor
-              : startQty;
+            : opts?.baseQty != null && opts.baseQty > 0
+              ? opts.baseQty
+              : factor > 0
+                ? startQty * factor
+                : startQty;
           if (need > onHand + 1e-9) {
             toast.error(`Only ${formatQtyWithUnit(onHand, unit)} in stock`);
             return prev;
@@ -1085,7 +1326,13 @@ export default function RetailPosWorkstation({
           unitPrice: initialPrice,
           listPrice: mrp != null && mrp > initialPrice ? mrp : initialPrice,
           qty: startQty,
-          maxQty: tracks ? onHand : 999999,
+          maxQty: tracks
+            ? (!opts?.orderedUnitSymbol || opts.orderedUnitSymbol.toLowerCase() === unit.toLowerCase())
+              ? onHand
+              : (opts?.conversionFactor ?? 1) > 0
+                ? onHand / (opts?.conversionFactor ?? 1)
+                : onHand
+            : 999999,
           sellUnit: opts?.orderedUnitSymbol
             ? normalizeSellUnit(opts.orderedUnitSymbol)
             : unit,
@@ -1226,7 +1473,7 @@ export default function RetailPosWorkstation({
         }
         const isSameUnit = String(entrySym ?? "").toLowerCase() === String(row.sellUnit ?? "").toLowerCase();
         const factor = Number(quote.conversionFactorUsed) || 1;
-        const neededInStockUnit = isSameUnit ? n : (factor > 0 ? qtyBase / factor : n);
+        const neededInStockUnit = isSameUnit ? n : (qtyBase > 0 ? qtyBase : (factor > 0 ? n * factor : n));
         if (qtyPick.tracks && neededInStockUnit > qtyPick.maxQty + 1e-9) {
           toast.error(
             `Only ${formatQtyWithUnit(qtyPick.maxQty, row.sellUnit)} available`,
@@ -1768,6 +2015,7 @@ export default function RetailPosWorkstation({
           quantity: l.qty,
           unitPrice: l.unitPrice,
           ...(l.sellingUnitId ? { sellingUnitId: l.sellingUnitId } : {}),
+          ...(l.sellUnit ? { sellingUnitSymbol: l.sellUnit } : {}),
           ...(l.variantId ? { variantId: l.variantId } : {}),
           ...(l.batchId ? { batchId: l.batchId } : {}),
           ...(l.serialNumber?.trim()
@@ -3840,86 +4088,79 @@ export default function RetailPosWorkstation({
       ) : null}
 
       {qtyPick ? (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-[#0b1f33]/40 p-4">
-          <div className="w-full max-w-sm rounded-xl border border-[#e2e8f0] bg-white p-4 shadow-lg">
-            <h3 className="text-sm font-semibold text-[#0b1f33]">
-              Quantity · {qtyPick.row.name}
-            </h3>
-            <p className="mt-1 text-xs text-[#5a6b7d]">
-              Type how many to put on the bill
-              {qtyPick.tracks
-                ? ` · max ${formatQtyWithUnit(qtyPick.maxQty, qtyPick.row.sellUnit)}`
-                : ""}
-              {(qtyPick.row.entryUnits?.length ?? 0) > 1
-                ? " · pick entry unit (e.g. g or kg)"
-                : ""}
-              .
-            </p>
-            {(qtyPick.row.entryUnits?.length ?? 0) > 1 ? (
-              <div className="mt-3">
-                <Label className="text-[0.65rem] uppercase text-[#8b9bb0]">
-                  Enter as
-                </Label>
-                <Select
-                  className="mt-1 h-9 w-full rounded-md border border-[#d9e0ea] bg-white px-2 text-sm"
-                  value={qtyPick.entryUnitId}
-                  onChange={(e) =>
-                    setQtyPick((cur) =>
-                      cur ? { ...cur, entryUnitId: e.target.value } : cur,
-                    )
-                  }
-                >
-                  {qtyPick.row.entryUnits!.map((u) => (
-                    <option key={u.unitId} value={u.unitId}>
-                      {u.symbol} — {u.name}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-            ) : null}
-            <Input
-              className="mt-3 text-center text-lg font-bold tabular-nums"
-              autoFocus
-              inputMode="decimal"
-              placeholder="e.g. 500"
-              value={qtyPick.value}
-              onChange={(e) => {
-                const v = e.target.value.replace(",", ".");
-                if (v !== "" && !/^\d*\.?\d*$/.test(v)) return;
-                setQtyPick((cur) => (cur ? { ...cur, value: v } : cur));
-              }}
-              onFocus={(e) => e.target.select()}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  void applyQtyPick();
+        <UniversalQuantityPickerModal
+          row={qtyPick.row}
+          initialValue={qtyPick.value}
+          defaultUnitId={qtyPick.entryUnitId}
+          maxQty={qtyPick.maxQty}
+          tracks={qtyPick.tracks}
+          money={money}
+          onClose={() => setQtyPick(null)}
+          onApply={async ({ qty, unitId, entrySym, quote }) => {
+            if (!qtyPick) return;
+            const row = qtyPick.row;
+            let resolvedQuote = quote;
+
+            if (!resolvedQuote && row.productId && unitId && (row.entryUnits?.length ?? 0) > 0) {
+              try {
+                resolvedQuote = await catalogApi.quotePricingLine({
+                  productId: row.productId,
+                  enteredQty: qty,
+                  sellingUnitId: unitId,
+                });
+              } catch (e) {
+                if (!(e instanceof ApiError && /base unit/i.test(e.message))) {
+                  toast.error(
+                    e instanceof ApiError ? e.messages.join(", ") : "Could not price qty",
+                  );
+                  return;
                 }
-              }}
-            />
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {[1, 5, 10, 25, 50, 100, 250, 500].map((q) => (
-                <button
-                  key={q}
-                  type="button"
-                  className="rounded-md border border-[#e2e8f0] bg-[#f8fafc] px-2.5 py-1 text-xs font-semibold text-[#0b1f33] hover:border-[#1a56db] hover:text-[#1a56db]"
-                  onClick={() =>
-                    setQtyPick((cur) =>
-                      cur ? { ...cur, value: String(q) } : cur,
-                    )
-                  }
-                >
-                  {q}
-                </button>
-              ))}
-            </div>
-            <div className="mt-4 flex justify-end gap-2">
-              <Button variant="secondary" onClick={() => setQtyPick(null)}>
-                Cancel
-              </Button>
-              <Button onClick={() => void applyQtyPick()}>Set qty</Button>
-            </div>
-          </div>
-        </div>
+              }
+            }
+
+            if (resolvedQuote) {
+              const qtyBase = Number(resolvedQuote.qtyBase);
+              if (!(qtyBase > 0)) {
+                toast.error("Quantity converts to zero in stock unit");
+                return;
+              }
+              const isSameUnit = String(entrySym ?? "").toLowerCase() === String(row.sellUnit ?? "").toLowerCase();
+              const factor = Number(resolvedQuote.conversionFactorUsed) || 1;
+              const neededInStockUnit = isSameUnit ? qty : (qtyBase > 0 ? qtyBase : (factor > 0 ? qty * factor : qty));
+              if (qtyPick.tracks && neededInStockUnit > qtyPick.maxQty + 1e-9) {
+                toast.error(
+                  `Only ${formatQtyWithUnit(qtyPick.maxQty, row.sellUnit)} available`,
+                );
+                return;
+              }
+              const unitPrice =
+                resolvedQuote.unitPrice != null
+                  ? Number(resolvedQuote.unitPrice)
+                  : qty > 0
+                    ? Number(resolvedQuote.amount) / qty
+                    : moneyNumber(row.sellPrice);
+              setQtyPick(null);
+              upsertLine(row, {
+                setQty: qty,
+                unitPriceOverride: unitPrice,
+                sellingUnitId: unitId,
+                orderedUnitSymbol: entrySym,
+                baseQty: qtyBase,
+                conversionFactor: Number(resolvedQuote.conversionFactorUsed),
+              });
+              toast.success(
+                `${formatQtyWithUnit(qty, entrySym)} · ${money(Number(resolvedQuote.amount))}`,
+              );
+              return;
+            }
+
+            setQtyPick(null);
+            upsertLine(row, { setQty: qty });
+            toast.success(
+              `Qty ${formatQtyWithUnit(qty, row.sellUnit)} · ${row.name}`,
+            );
+          }}
+        />
       ) : null}
 
       {receipt ? (

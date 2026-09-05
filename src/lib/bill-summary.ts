@@ -102,7 +102,7 @@ export function slabsToGstBreakup(
     const halfRate = Math.round((s.rate / 2) * 100) / 100;
     const half = Math.round(((s.tax / 2) + Number.EPSILON) * 100) / 100;
     const cgst = half;
-    const sgst = Math.round(((s.tax - half) + Number.EPSILON) * 100) / 100;
+    const sgst = half;
     const tax = Math.round((cgst + sgst) * 100) / 100;
     return {
       rate: s.rate,
