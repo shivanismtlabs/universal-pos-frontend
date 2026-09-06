@@ -64,6 +64,8 @@ export default function OrdersPage() {
     id: string;
     orderNumber: string;
     balanceDue: number;
+    total?: number;
+    depositTotal?: number;
   } | null>(null);
   const [payAmount, setPayAmount] = useState("");
   const [payMethod, setPayMethod] = useState("cash");
@@ -236,6 +238,10 @@ export default function OrdersPage() {
               {rows.map((o) => {
                 const total = orderGrandTotal(o);
                 const balance = Number(o.balanceDue ?? 0);
+                const depositTotal = Number(o.depositTotal ?? 0);
+                const isSettled = Boolean((o.meta as any)?.depositSettledAt);
+                const returnDeposit =
+                  !isSettled && depositTotal > total ? depositTotal - total : 0;
                 return (
                   <tr key={o.id} className="hover:bg-[#f7f9fc]">
                     <td className="px-4 py-3 font-medium">
@@ -293,6 +299,8 @@ export default function OrdersPage() {
                                 id: o.id,
                                 orderNumber: o.orderNumber,
                                 balanceDue: balance,
+                                total: total,
+                                depositTotal: Number(o.depositTotal ?? 0),
                               });
                               setPayAmount(String(balance));
                               setPayMethod("cash");
@@ -302,9 +310,19 @@ export default function OrdersPage() {
                           </Button>
                         </div>
                       ) : (
-                        <span className="inline-flex rounded-md bg-[#dcfce7] px-2 py-0.5 text-xs font-semibold text-[#15803d]">
-                          Paid
-                        </span>
+                        <div className="flex flex-col items-end gap-0.5">
+                          <span className="inline-flex rounded-md bg-[#dcfce7] px-2 py-0.5 text-xs font-semibold text-[#15803d]">
+                            Paid
+                          </span>
+                          {returnDeposit > 0 ? (
+                            <Link
+                              href="/returns"
+                              className="text-[0.7rem] font-medium text-amber-700 hover:underline"
+                            >
+                              Return deposit: {money(returnDeposit)} →
+                            </Link>
+                          ) : null}
+                        </div>
                       )}
                     </td>
                     <td className="px-4 py-3 text-right">
@@ -344,9 +362,19 @@ export default function OrdersPage() {
               </button>
             </div>
 
-            <div className="rounded-lg bg-[#fee2e2] p-3 text-xs space-y-1 text-[#991b1b]">
-              <div className="flex justify-between font-bold text-sm">
-                <span>Unpaid Balance Due:</span>
+            <div className="rounded-lg bg-[#fee2e2] p-3 text-xs space-y-1.5 text-[#991b1b]">
+              <div className="flex justify-between text-xs text-[#7f1d1d]">
+                <span>Order Total:</span>
+                <span className="font-semibold">{money(payOrder.total ?? payOrder.balanceDue)}</span>
+              </div>
+              {payOrder.depositTotal ? (
+                <div className="flex justify-between text-xs text-emerald-800 font-medium">
+                  <span>Deposit Already Paid:</span>
+                  <span>- {money(payOrder.depositTotal)} (adjusted)</span>
+                </div>
+              ) : null}
+              <div className="flex justify-between font-bold text-sm border-t border-red-200 pt-1">
+                <span>Remaining Due:</span>
                 <span>{money(payOrder.balanceDue)}</span>
               </div>
             </div>
