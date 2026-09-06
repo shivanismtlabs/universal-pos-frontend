@@ -192,43 +192,22 @@ export default function PosWorkstation() {
     }
   }, [locations.data, locationId]);
 
+  const lastInitTicketId = useRef<string | null>(null);
   useEffect(() => {
-    if (!ticket.data) return;
-    const balanceDue = moneyNumber(ticket.data.balanceDue);
-    const required = moneyNumber(
-      ticket.data.depositRequired ??
-        (ticket.data.items ?? []).reduce(
-          (sum, i) => sum + moneyNumber(i.stockUnit?.depositAmount),
-          0,
-        ),
-    );
-    const collected = moneyNumber(
-      ticket.data.depositCollected ?? ticket.data.depositTotal,
-    );
-    const depositDue = moneyNumber(
-      ticket.data.depositDue ?? Math.max(0, required - collected),
-    );
-    // After partial pay, refresh the amount box to remaining deposit or balance
-    if (payType === "deposit") {
-      setAmount(
-        depositDue > 0
-          ? String(depositDue)
-          : balanceDue > 0
-            ? String(balanceDue)
-            : "",
-      );
-    } else {
-      setAmount(balanceDue > 0 ? String(balanceDue) : "");
+    if (!ticket.data) {
+      lastInitTicketId.current = null;
+      return;
     }
-  }, [
-    ticket.data?.id,
-    ticket.data?.balanceDue,
-    ticket.data?.depositTotal,
-    ticket.data?.depositDue,
-    ticket.data?.depositCollected,
-    ticket.data?.depositRequired,
-    payType,
-  ]);
+    // Only auto-fill amount once when a ticket is newly selected
+    if (lastInitTicketId.current !== ticket.data.id) {
+      lastInitTicketId.current = ticket.data.id;
+      const balanceDue = moneyNumber(ticket.data.balanceDue);
+      setAmount(balanceDue > 0 ? String(balanceDue) : "");
+      if (ticket.data.orderNumber) {
+        setFindQuery(ticket.data.orderNumber);
+      }
+    }
+  }, [ticket.data?.id, ticket.data?.balanceDue, ticket.data?.orderNumber]);
 
   const filteredQueue = useMemo(() => {
     let rows = queue.data?.items ?? [];
@@ -283,6 +262,17 @@ export default function PosWorkstation() {
     });
   }, [floor.data?.units, unitFilter, unitCategory]);
 
+  const ticketItemIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of ticket.data?.items ?? []) {
+      if (item.stockUnitId) set.add(item.stockUnitId);
+      if (item.stockUnit?.id) set.add(item.stockUnit.id);
+      if (item.inventoryUnitId) set.add(item.inventoryUnitId);
+      if (item.inventoryUnit?.id) set.add(item.inventoryUnit.id);
+    }
+    return set;
+  }, [ticket.data?.items]);
+
   const floorServices = useMemo(() => {
     type Svc = {
       id: string;
@@ -295,30 +285,34 @@ export default function PosWorkstation() {
       image?: string | null;
       photoUrl?: string | null;
     };
-    const fromFloor: Svc[] = (floor.data?.services ?? []).map((s) => ({
-      id: s.id,
-      productId: s.productId || s.id,
-      title: s.title,
-      sku: s.sku,
-      rentalPrice: s.rentalPrice,
-      kind: s.kind,
-      category: s.category,
-      image: s.image,
-      photoUrl: s.photoUrl,
-    }));
-    const fromCatalog: Svc[] = (serviceCatalog.data?.items ?? []).map((p) => ({
-      id: p.id,
-      productId: p.id,
-      title: p.name,
-      sku: p.skuCode,
-      rentalPrice: p.basePrice,
-      kind: p.kind,
-      category: p.category
-        ? { id: p.category.id, name: p.category.name }
-        : null,
-      image: p.photoUrl,
-      photoUrl: p.photoUrl,
-    }));
+    const fromFloor: Svc[] = (floor.data?.services ?? [])
+      .filter((s) => s.kind === "service")
+      .map((s) => ({
+        id: s.id,
+        productId: s.productId || s.id,
+        title: s.title,
+        sku: s.sku,
+        rentalPrice: s.rentalPrice,
+        kind: s.kind,
+        category: s.category,
+        image: s.image,
+        photoUrl: s.photoUrl,
+      }));
+    const fromCatalog: Svc[] = (serviceCatalog.data?.items ?? [])
+      .filter((p) => p.kind === "service")
+      .map((p) => ({
+        id: p.id,
+        productId: p.id,
+        title: p.name,
+        sku: p.skuCode,
+        rentalPrice: p.basePrice,
+        kind: p.kind,
+        category: p.category
+          ? { id: p.category.id, name: p.category.name }
+          : null,
+        image: p.photoUrl,
+        photoUrl: p.photoUrl,
+      }));
     const byId = new Map<string, Svc>();
     for (const s of [...fromFloor, ...fromCatalog]) {
       byId.set(s.productId, s);
@@ -352,7 +346,7 @@ export default function PosWorkstation() {
     return [...map.values()];
   }, [floor.data?.categories, floorServices]);
 
-  const readyCount = floorUnits.length + floorServices.length;
+  const readyCount = floorUnits.length;
 
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ["orders"] });
@@ -374,11 +368,20 @@ export default function PosWorkstation() {
         if (phoneDigits.length < 7 || phoneDigits.length > 15) {
           throw new Error("Enter a valid phone number (any country)");
         }
+        const phoneFormatted = phoneRaw.startsWith("+") ? phoneRaw : phoneDigits;
         const created = await customersApi.create({
           fullName: name,
-          phone: phoneRaw.startsWith("+") ? phoneRaw : phoneDigits,
+          phone: phoneFormatted,
+          returnExisting: true,
         });
         customerId = created.id;
+        if (name && created.fullName !== name) {
+          try {
+            await customersApi.update(created.id, { fullName: name });
+          } catch {
+            /* ignore update error */
+          }
+        }
       }
       return ordersApi.create({
         kind: "rental",
@@ -391,10 +394,16 @@ export default function PosWorkstation() {
     onSuccess: (data) => {
       toast.success(`Quote ${data.orderNumber} · scan units`);
       setSelectedId(data.id);
+      setFindQuery(data.orderNumber);
+      setTab("all");
+      qc.setQueryData(["order", data.id], data);
       setShowNew(false);
       setWalkInName("");
       setWalkInPhone("");
-      invalidate();
+      void qc.invalidateQueries({ queryKey: ["orders"] });
+      void qc.invalidateQueries({ queryKey: ["order", data.id] });
+      void qc.invalidateQueries({ queryKey: ["reports"] });
+      void qc.invalidateQueries({ queryKey: ["pos-rental-floor"] });
       barcodeRef.current?.focus();
     },
     onError: (e) => toast.error(errMsg(e)),
@@ -569,9 +578,14 @@ export default function PosWorkstation() {
     const q = findQuery.trim();
     if (!q) return;
     try {
-      if (/^\d{10}$/.test(q)) {
-        const customers = await customersApi.list({ q, limit: 5 });
-        const customer = customers.items[0];
+      const digits = q.replace(/\D/g, "");
+      if (digits.length >= 7 && digits.length <= 15 && !q.toUpperCase().startsWith("ORD-")) {
+        const customers = await customersApi.list({ q: digits, limit: 5 });
+        const customer =
+          customers.items.find((c) => {
+            const cd = c.phone.replace(/\D/g, "");
+            return cd === digits || (digits.length >= 10 && cd.endsWith(digits.slice(-10)));
+          }) || customers.items[0];
         if (!customer) {
           toast.error("No customer with that phone");
           return;
@@ -590,6 +604,7 @@ export default function PosWorkstation() {
           return;
         }
         setSelectedId(open.id);
+        setFindQuery(open.orderNumber);
         toast.success(`Loaded ${open.orderNumber}`);
         return;
       }
@@ -601,6 +616,7 @@ export default function PosWorkstation() {
         return;
       }
       setSelectedId(hit.id);
+      setFindQuery(hit.orderNumber);
       toast.success(`Loaded ${hit.orderNumber}`);
     } catch (e) {
       toast.error(errMsg(e));
@@ -672,6 +688,31 @@ export default function PosWorkstation() {
       );
     }
     barcodeRef.current?.focus();
+  }
+
+  async function removeUnitFromTicket(unitId: string) {
+    const orderData = ticket.data;
+    if (!selectedId || !orderData) return;
+    const ticketMutable = canMutateRentalItems(orderData);
+    if (!ticketMutable) {
+      toast.error("This ticket is locked — cannot remove items");
+      return;
+    }
+    const item = (orderData.items ?? []).find(
+      (i) =>
+        i.stockUnitId === unitId ||
+        i.stockUnit?.id === unitId ||
+        i.inventoryUnitId === unitId ||
+        i.inventoryUnit?.id === unitId,
+    );
+    if (!item) return;
+    try {
+      await ordersApi.removeItem(selectedId, item.id);
+      toast.success("Unit removed from ticket");
+      invalidate();
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
   }
 
   async function applyService(svc: {
@@ -747,17 +788,89 @@ export default function PosWorkstation() {
   );
   const depositRequired = moneyNumber(
     data?.depositRequired ??
-      (data?.items ?? []).reduce(
-        (sum, i) => sum + moneyNumber(i.stockUnit?.depositAmount),
-        0,
-      ),
+    (data?.items ?? []).reduce(
+      (sum, i) => sum + moneyNumber(i.stockUnit?.depositAmount),
+      0,
+    ),
   );
   const depositDue = moneyNumber(
     data?.depositDue ?? Math.max(0, depositRequired - depositCollected),
   );
+  const totalPaid = (data?.payments ?? []).reduce(
+    (sum, p) =>
+      p.status === "succeeded" && (p.type === "payment" || p.type === "deposit")
+        ? sum + moneyNumber(p.amount)
+        : sum,
+    0,
+  );
+  const rentAmount = moneyNumber(data?.subtotal ?? (data as { totalAmount?: number | string } | undefined)?.totalAmount);
+  const extraDeposit = Math.max(
+    0,
+    depositCollected > 0 && depositCollected >= rentAmount
+      ? depositCollected - (balance <= 0 ? rentAmount : 0)
+      : depositCollected > 0
+        ? depositCollected
+        : totalPaid - rentAmount,
+  );
   const settled = Boolean(data) && balance <= 0;
   const credit = settled ? Math.abs(balance) : 0;
   const canAddItems = data ? canMutateRentalItems(data) : false;
+
+  const groupedItems = useMemo(() => {
+    if (!data?.items) return [];
+    type GroupedItem = {
+      key: string;
+      unitName: string;
+      variantName: string;
+      unitPrice: number | string;
+      totalQuantity: number;
+      totalRent: number;
+      itemIds: string[];
+      sampleItem: (typeof data.items)[0];
+    };
+    const map = new Map<string, GroupedItem>();
+    for (const item of data.items) {
+      const key =
+        item.stockUnitId ??
+        item.inventoryUnitId ??
+        item.productId ??
+        item.description ??
+        item.id;
+      const unitName =
+        item.stockUnit?.barcodeSku ??
+        item.inventoryUnit?.barcodeSku ??
+        item.description ??
+        item.itemKind ??
+        item.itemType ??
+        "—";
+      const variantName =
+        item.stockUnit?.variantLabel ??
+        item.size ??
+        item.inventoryUnit?.size ??
+        "—";
+      const qty = moneyNumber(item.quantity) || 1;
+      const price = moneyNumber(item.unitPrice);
+
+      const existing = map.get(key);
+      if (existing) {
+        existing.totalQuantity += qty;
+        existing.totalRent += price * qty;
+        existing.itemIds.push(item.id);
+      } else {
+        map.set(key, {
+          key,
+          unitName,
+          variantName,
+          unitPrice: item.unitPrice,
+          totalQuantity: qty,
+          totalRent: price * qty,
+          itemIds: [item.id],
+          sampleItem: item,
+        });
+      }
+    }
+    return [...map.values()];
+  }, [data?.items]);
   const nextLifecycles = (
     RENTAL_LIFECYCLE_TRANSITIONS[lifecycle] ?? []
   ).filter((s) => s !== "cancelled");
@@ -894,24 +1007,50 @@ export default function PosWorkstation() {
         </section>
       ) : null}
 
-      <div className="rounded-[14px] border border-[#d9e0ea] bg-white p-3 sm:p-3.5">
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="min-w-[12rem] flex-1">
-            <Label>Find ticket</Label>
-            <Input
-              className="mt-1.5"
-              placeholder="Order number or phone"
-              value={findQuery}
-              onChange={(e) => setFindQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  void findTicket();
-                }
+      <div className="rounded-[14px] border border-[#d9e0ea] bg-white p-3.5 sm:p-4">
+        <div className="grid gap-4 md:grid-cols-2 items-start">
+          <div className="space-y-1.5">
+            <Label htmlFor="find-ticket-input" className="text-[#5a6b7d]">
+              Find ticket
+            </Label>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void findTicket();
               }}
-            />
+              className="flex gap-1.5"
+            >
+              <div className="relative min-w-0 flex-1">
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-[#8b9bb0]"
+                >
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.5" />
+                    <path d="M10.5 10.5L14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  </svg>
+                </span>
+                <Input
+                  id="find-ticket-input"
+                  className="h-12 pl-10 text-[0.95rem]"
+                  placeholder="Order number or phone"
+                  value={findQuery}
+                  onChange={(e) => setFindQuery(e.target.value)}
+                />
+              </div>
+              <Button
+                type="submit"
+                variant="secondary"
+                className="h-12 shrink-0 px-4 font-medium"
+              >
+                Load
+              </Button>
+            </form>
+            <p className="text-[0.6875rem] text-[#8b9bb0]">
+              Enter order number or phone · Enter submits
+            </p>
           </div>
-          <div className="w-full sm:min-w-[16rem] sm:flex-1 sm:max-w-sm">
+          <div>
             <BarcodeScanInput
               value={barcode}
               onChange={setBarcode}
@@ -921,15 +1060,6 @@ export default function PosWorkstation() {
               inputRef={barcodeRef}
               autoFocus
             />
-          </div>
-          <div className="flex gap-2 pb-0.5">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => void findTicket()}
-            >
-              Load
-            </Button>
           </div>
         </div>
       </div>
@@ -1015,87 +1145,67 @@ export default function PosWorkstation() {
           </span>
         </div>
         <ul className="max-h-[14rem] divide-y divide-[#eef2f8] overflow-y-auto">
-          {floorServices.map((s) => (
-            <li key={`svc-${s.productId}`}>
-              <div
-                onClick={() => void applyService(s)}
-                className="flex w-full cursor-pointer items-center gap-2.5 px-3 py-2 text-left transition hover:bg-[#f8fafc]"
-              >
-                <ProductThumb
-                  src={s.image ?? s.photoUrl}
-                  label={s.title}
-                  size="sm"
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-[#0b1f33]">
-                    {s.title}
-                    <span className="ml-1.5 rounded bg-[#fff7ed] px-1.5 py-0.5 text-[0.6rem] font-semibold text-[#c2410c]">
-                      {s.kind === "service" ? "Service" : "Item"}
-                    </span>
-                  </p>
-                  <p className="font-mono text-[0.65rem] text-[#8b9bb0]">
-                    {s.sku}
-                    {s.category?.name ? ` · ${s.category.name}` : ""}
-                    {" · no unit needed"}
-                  </p>
-                </div>
-                <div className="shrink-0 text-right">
-                  <p className="text-sm font-bold tabular-nums text-[#0b1f33]">
-                    {money(s.rentalPrice)}
-                  </p>
-                </div>
-                <span className="inline-flex h-7 items-center rounded-md bg-[#1a56db] px-2 text-[0.65rem] font-semibold text-white">
-                  ADD
-                </span>
-              </div>
-            </li>
-          ))}
-          {floorUnits.map((u) => (
-            <li key={u.id}>
-              <div
-                onClick={() => void applyUnit(u)}
-                className="flex w-full cursor-pointer items-center gap-2.5 px-3 py-2 text-left transition hover:bg-[#f8fafc]"
-              >
-                <ProductThumb
-                  src={u.image ?? u.photoUrl}
-                  label={u.title}
-                  size="sm"
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-[#0b1f33]">
-                    {u.title}
-                    {u.variant || u.size ? (
-                      <span className="ml-1.5 font-normal text-[#5a6b7d]">
-                        · {u.variant || u.size}
-                      </span>
-                    ) : null}
-                  </p>
-                  <p className="font-mono text-[0.65rem] text-[#8b9bb0]">
-                    {u.barcodeSku || u.barcode}
-                    {u.category?.name ? ` · ${u.category.name}` : ""}
-                  </p>
-                </div>
-                <div className="shrink-0 text-right">
-                  <p className="text-sm font-bold tabular-nums text-[#0b1f33]">
-                    {money(u.rentalPrice)}
-                  </p>
-                  {moneyNumber(u.deposit) > 0 ? (
-                    <p className="text-[0.65rem] text-[#8b9bb0]">
-                      dep {money(u.deposit)}
+          {floorUnits.map((u) => {
+            const isAdded = ticketItemIds.has(u.id);
+            return (
+              <li key={u.id}>
+                <div
+                  onClick={() => {
+                    if (isAdded) {
+                      void removeUnitFromTicket(u.id);
+                    } else {
+                      void applyUnit(u);
+                    }
+                  }}
+                  className="flex w-full cursor-pointer items-center gap-2.5 px-3 py-2 text-left transition hover:bg-[#f8fafc]"
+                >
+                  <ProductThumb
+                    src={u.image ?? u.photoUrl}
+                    label={u.title}
+                    size="sm"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-[#0b1f33]">
+                      {u.title}
+                      {u.variant || u.size ? (
+                        <span className="ml-1.5 font-normal text-[#5a6b7d]">
+                          · {u.variant || u.size}
+                        </span>
+                      ) : null}
                     </p>
-                  ) : null}
+                    <p className="font-mono text-[0.65rem] text-[#8b9bb0]">
+                      {u.barcodeSku || u.barcode}
+                      {u.category?.name ? ` · ${u.category.name}` : ""}
+                    </p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="text-sm font-bold tabular-nums text-[#0b1f33]">
+                      {money(u.rentalPrice)}
+                    </p>
+                    {moneyNumber(u.deposit) > 0 ? (
+                      <p className="text-[0.65rem] text-[#8b9bb0]">
+                        dep {money(u.deposit)}
+                      </p>
+                    ) : null}
+                  </div>
+                  {isAdded ? (
+                    <span className="inline-flex h-7 items-center rounded-md bg-rose-600 px-2.5 text-[0.65rem] font-semibold text-white hover:bg-rose-700">
+                      REMOVE
+                    </span>
+                  ) : (
+                    <span className="inline-flex h-7 items-center rounded-md bg-[#1a56db] px-2 text-[0.65rem] font-semibold text-white">
+                      ADD
+                    </span>
+                  )}
                 </div>
-                <span className="inline-flex h-7 items-center rounded-md bg-[#1a56db] px-2 text-[0.65rem] font-semibold text-white">
-                  ADD
-                </span>
-              </div>
-            </li>
-          ))}
+              </li>
+            );
+          })}
           {!readyCount ? (
             <li className="px-3 py-8 text-center text-sm text-[#5a6b7d]">
-              {floor.isLoading || serviceCatalog.isLoading
+              {floor.isLoading
                 ? "Loading…"
-                : "No units or services — add Items (service) or rental stock units"}
+                : "No rental stock units available"}
             </li>
           ) : null}
         </ul>
@@ -1138,7 +1248,10 @@ export default function PosWorkstation() {
                 <li key={o.id} className="border-b border-[#eef1f4] last:border-0">
                   <button
                     type="button"
-                    onClick={() => setSelectedId(o.id)}
+                    onClick={() => {
+                      setSelectedId(o.id);
+                      setFindQuery(o.orderNumber);
+                    }}
                     className={cn(
                       "w-full px-3 py-3 text-left transition",
                       active
@@ -1265,12 +1378,16 @@ export default function PosWorkstation() {
                 {[
                   ["Due", money(data.balanceDue)],
                   [
-                    "Deposit left",
-                    depositDue > 0
-                      ? money(depositDue)
-                      : depositRequired > 0
-                        ? money(0)
-                        : money(depositCollected),
+                    extraDeposit > 0
+                      ? "Deposit to return"
+                      : settled || depositDue <= 0
+                        ? "Deposit held"
+                        : "Deposit left",
+                    extraDeposit > 0
+                      ? money(extraDeposit)
+                      : settled || depositDue <= 0
+                        ? money(depositCollected)
+                        : money(depositDue),
                   ],
                   ["Rent", money(data.subtotal)],
                 ].map(([k, v]) => (
@@ -1278,10 +1395,20 @@ export default function PosWorkstation() {
                     <p className="text-[0.65rem] font-semibold tracking-wide text-[#8b9bb0] uppercase">
                       {k}
                     </p>
-                    <p className="font-semibold tabular-nums text-[#0b1f33]">
+                    <p className={cn("font-semibold tabular-nums", k === "Deposit to return" ? "text-emerald-700" : "text-[#0b1f33]")}>
                       {v}
                     </p>
-                    {k === "Deposit left" && depositRequired > 0 ? (
+                    {k === "Deposit to return" ? (
+                      <p className="mt-0.5 text-[0.65rem] font-medium tabular-nums text-emerald-600">
+                        {totalPaid > rentAmount
+                          ? `${money(totalPaid)} paid · ${money(rentAmount)} rent = ${money(extraDeposit)} return amount`
+                          : `${money(extraDeposit)} refundable on return`}
+                      </p>
+                    ) : k === "Deposit held" && depositCollected > 0 ? (
+                      <p className="mt-0.5 text-[0.65rem] font-medium tabular-nums text-emerald-600">
+                        {money(depositCollected)} paid · refundable
+                      </p>
+                    ) : k === "Deposit left" && depositRequired > 0 ? (
                       <p className="mt-0.5 text-[0.65rem] tabular-nums text-[#8b9bb0]">
                         {money(depositCollected)} of {money(depositRequired)}{" "}
                         paid
@@ -1297,36 +1424,131 @@ export default function PosWorkstation() {
                     <tr className="border-b border-[#d9e0ea]">
                       <th className="px-4 py-2.5 font-semibold">Unit</th>
                       <th className="px-2 py-2.5 font-semibold">Variant</th>
+                      <th className="px-2 py-2.5 text-center font-semibold">
+                        Qty
+                      </th>
                       <th className="px-4 py-2.5 text-right font-semibold">
                         Rent
                       </th>
+                      {canMutateRentalItems(data) ? (
+                        <th className="px-3 py-2.5 text-right font-semibold">
+                          Action
+                        </th>
+                      ) : null}
                     </tr>
                   </thead>
                   <tbody>
-                    {data.items.map((item) => (
-                      <tr key={item.id} className="border-b border-[#eef1f4]">
+                    {groupedItems.map((group) => (
+                      <tr key={group.key} className="border-b border-[#eef1f4]">
                         <td className="px-4 py-2.5 font-medium text-[#0b1f33]">
-                          {item.stockUnit?.barcodeSku ??
-                            item.inventoryUnit?.barcodeSku ??
-                            item.description ??
-                            item.itemKind ??
-                            item.itemType}
+                          {group.unitName}
                         </td>
                         <td className="px-2 py-2.5 text-[#6b7280]">
-                          {item.stockUnit?.variantLabel ??
-                            item.size ??
-                            item.inventoryUnit?.size ??
-                            "—"}
+                          {group.variantName}
+                        </td>
+                        <td className="px-2 py-2.5 text-center">
+                          {canMutateRentalItems(data) ? (
+                            <div className="inline-flex items-center justify-center gap-1.5 rounded-md border border-[#d9e0ea] bg-[#f8fafc] px-1.5 py-0.5">
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  try {
+                                    const lastId =
+                                      group.itemIds[group.itemIds.length - 1];
+                                    if (lastId) {
+                                      await ordersApi.removeItem(data.id, lastId);
+                                      toast.success("Item updated");
+                                      invalidate();
+                                    }
+                                  } catch (e) {
+                                    toast.error(errMsg(e));
+                                  }
+                                }}
+                                className="flex h-5 w-5 items-center justify-center rounded border border-[#cbd5e1] bg-white text-xs font-bold text-[#475569] hover:bg-slate-100 transition"
+                                title="Decrease quantity"
+                              >
+                                -
+                              </button>
+                              <span className="min-w-[1rem] text-center font-mono text-xs font-semibold text-[#0b1f33]">
+                                {group.totalQuantity}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  try {
+                                    const item = group.sampleItem;
+                                    if (item.stockUnitId) {
+                                      await ordersApi.addItem(data.id, {
+                                        itemKind: "stock_unit",
+                                        stockUnitId: item.stockUnitId,
+                                        unitPrice: moneyNumber(item.unitPrice),
+                                        quantity: 1,
+                                        description: item.description,
+                                      });
+                                      toast.success("Quantity increased");
+                                      invalidate();
+                                      return;
+                                    }
+                                    if (item.productId) {
+                                      await ordersApi.addItem(data.id, {
+                                        itemKind: "product",
+                                        productId: item.productId,
+                                        unitPrice: moneyNumber(item.unitPrice),
+                                        quantity: 1,
+                                        description: item.description,
+                                      });
+                                      toast.success("Quantity increased");
+                                      invalidate();
+                                    }
+                                  } catch (e) {
+                                    toast.error(errMsg(e));
+                                  }
+                                }}
+                                className="flex h-5 w-5 items-center justify-center rounded border border-[#cbd5e1] bg-white text-xs font-bold text-[#475569] hover:bg-slate-100 transition"
+                                title="Increase quantity"
+                              >
+                                +
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="font-mono text-xs font-semibold text-[#0b1f33]">
+                              {group.totalQuantity}
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-2.5 text-right tabular-nums">
-                          {money(item.unitPrice)}
+                          {money(group.totalRent)}
                         </td>
+                        {canMutateRentalItems(data) ? (
+                          <td className="px-3 py-2.5 text-right">
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  await Promise.all(
+                                    group.itemIds.map((id) =>
+                                      ordersApi.removeItem(data.id, id),
+                                    ),
+                                  );
+                                  toast.success("Item removed from ticket");
+                                  invalidate();
+                                } catch (e) {
+                                  toast.error(errMsg(e));
+                                }
+                              }}
+                              className="rounded-md border border-rose-200 bg-rose-50 px-2 py-0.5 text-xs font-semibold text-rose-700 hover:bg-rose-100 transition"
+                              title="Remove item"
+                            >
+                              Remove
+                            </button>
+                          </td>
+                        ) : null}
                       </tr>
                     ))}
-                    {!data.items.length ? (
+                    {!groupedItems.length ? (
                       <tr>
                         <td
-                          colSpan={3}
+                          colSpan={canMutateRentalItems(data) ? 5 : 4}
                           className="px-4 py-12 text-center text-[#6b7280]"
                         >
                           Scan a barcode to add units
@@ -1336,6 +1558,43 @@ export default function PosWorkstation() {
                   </tbody>
                 </table>
               </div>
+
+              {data?.payments?.length ? (
+                <div className="border-t border-[#e5e7eb] bg-[#f8fafc] px-3.5 py-2 text-xs">
+                  <span className="font-semibold text-[#5a6b7d]">
+                    Payments collected:
+                  </span>
+                  <div className="mt-1 flex flex-wrap gap-2">
+                    {data.payments.map((p, idx) => (
+                      <span
+                        key={p.id ?? idx}
+                        className="inline-flex items-center gap-1 rounded-md border border-[#e2e8f0] bg-white px-2 py-0.5 text-xs text-[#0b1f33]"
+                      >
+                        <span className="font-medium text-[#6b7280]">
+                          {p.type === "deposit" ? "Security deposit" : "Rent"}:
+                        </span>
+                        <strong className="tabular-nums font-semibold">
+                          {money(p.amount)}
+                        </strong>
+                        <span className="text-[0.65rem] text-[#8b9bb0] uppercase">
+                          ({p.method})
+                        </span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {extraDeposit > 0 ? (
+                <div className="border-t border-emerald-200 bg-emerald-50 px-3.5 py-2 text-xs text-emerald-900 flex items-center justify-between">
+                  <span>
+                    <strong>Return amount on return:</strong> Customer paid {money(totalPaid || depositCollected)}. When product is returned, refund <strong>{money(extraDeposit)}</strong> extra deposit.
+                  </span>
+                  <span className="font-bold text-sm text-emerald-700 tabular-nums">
+                    {money(extraDeposit)}
+                  </span>
+                </div>
+              ) : null}
 
               {nextLifecycles.length || ["quote", "reserved", "fitted", "ready"].includes(lifecycle) ? (
                 <div className="flex flex-wrap items-center gap-1.5 border-t border-[#e5e7eb] px-3 py-2">

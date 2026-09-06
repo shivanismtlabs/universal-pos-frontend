@@ -660,18 +660,22 @@ function OrderDetailInner() {
                 ["Subtotal", formatInr(data.subtotal)],
                 ["Tax", formatInr(data.taxTotal)],
                 [
-                  "Deposit left",
+                  moneyNumber(data.depositCollected ?? data.depositTotal) > 0
+                    ? "Deposit to return"
+                    : "Deposit left",
                   formatInr(
-                    moneyNumber(
-                      data.depositDue ??
-                        Math.max(
-                          0,
-                          moneyNumber(data.depositRequired) -
-                            moneyNumber(
-                              data.depositCollected ?? data.depositTotal,
+                    moneyNumber(data.depositCollected ?? data.depositTotal) > 0
+                      ? moneyNumber(data.depositCollected ?? data.depositTotal)
+                      : moneyNumber(
+                          data.depositDue ??
+                            Math.max(
+                              0,
+                              moneyNumber(data.depositRequired) -
+                                moneyNumber(
+                                  data.depositCollected ?? data.depositTotal,
+                                ),
                             ),
                         ),
-                    ),
                   ),
                 ],
                 [
@@ -711,7 +715,11 @@ function OrderDetailInner() {
             <p className="mt-1 text-[0.95rem] font-bold tabular-nums text-[#0b1f33]">
               {v}
             </p>
-            {k === "Deposit left" &&
+            {k === "Deposit to return" ? (
+              <p className="mt-0.5 text-[0.65rem] tabular-nums font-medium text-emerald-600">
+                Refundable on return
+              </p>
+            ) : k === "Deposit left" &&
             moneyNumber(data.depositRequired ?? data.depositTotal) > 0 ? (
               <p className="mt-0.5 text-[0.65rem] tabular-nums text-[#94a3b8]">
                 {formatInr(data.depositCollected ?? data.depositTotal)} of{" "}

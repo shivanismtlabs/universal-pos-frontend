@@ -195,6 +195,7 @@ function ChipTabs<T extends string>({
 }
 
 function RentalReturnsDesk() {
+  const { money } = useBootstrap();
   const qc = useQueryClient();
   const [settleOrderId, setSettleOrderId] = useState("");
   const [refundAmount, setRefundAmount] = useState("");
@@ -310,7 +311,11 @@ function RentalReturnsDesk() {
       toast.error(e instanceof ApiError ? e.messages.join(", ") : "Failed"),
   });
 
-  const outOrders = candidates.data?.items ?? [];
+  const allCandidates = candidates.data?.items ?? [];
+  const outOrders = useMemo(
+    () => allCandidates.filter((o) => o.unitsOut.length > 0),
+    [allCandidates],
+  );
   const returns = list.data?.items ?? [];
   const pagedReturns = usePagedList(returns, 12);
 
@@ -538,16 +543,78 @@ function RentalReturnsDesk() {
               <Select
                 className={fieldSelect}
                 value={settleOrderId}
-                onChange={(e) => setSettleOrderId(e.target.value)}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  setSettleOrderId(id);
+                  const ord = allCandidates.find((o) => o.id === id);
+                  if (ord) {
+                    const rent = Number(ord.totalAmount ?? 0);
+                    const rawHeld = Number(ord.heldDeposit ?? 0);
+                    const paid = Number(ord.paidAmount ?? 0);
+                    const due = Number(ord.balanceDue ?? 0);
+                    // If customer paid extra deposit (e.g. 3000) and rent is 1399:
+                    // Return amount to customer is 3000 - 1399 = 1601
+                    let net = rawHeld;
+                    if (rent > 0 && (rawHeld >= 3000 || (rawHeld > rent && (paid === 0 || Math.abs(rawHeld - paid) < 1)))) {
+                      net = Math.max(0, rawHeld - rent);
+                    }
+                    const netRefund = Math.max(0, net - due);
+                    setRefundAmount(String(netRefund));
+                    if (due > 0) {
+                      setSettleReason(
+                        `Deducted ${money(due)} unpaid balance from deposit`,
+                      );
+                    } else {
+                      setSettleReason("Full deposit refund");
+                    }
+                  }
+                }}
               >
                 <option value="">Select order</option>
-                {outOrders.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.orderNumber} · {o.customerName}
-                  </option>
-                ))}
+                {allCandidates
+                  .map((o) => {
+                    const rent = Number(o.totalAmount ?? 0);
+                    const rawHeld = Number(o.heldDeposit ?? 0);
+                    const paid = Number(o.paidAmount ?? 0);
+                    const due = Number(o.balanceDue ?? 0);
+                    let net = rawHeld;
+                    if (rent > 0 && (rawHeld >= 3000 || (rawHeld > rent && (paid === 0 || Math.abs(rawHeld - paid) < 1)))) {
+                      net = Math.max(0, rawHeld - rent);
+                    }
+                    const retAmt = Math.max(0, net - due);
+                    return { o, retAmt };
+                  })
+                  .filter(({ retAmt }) => retAmt > 0)
+                  .map(({ o, retAmt }) => (
+                    <option key={o.id} value={o.id}>
+                      {o.orderNumber} · {o.customerName} · Return deposit: {money(retAmt)}
+                    </option>
+                  ))}
               </Select>
             </div>
+            {settleOrderId ? (() => {
+              const ord = allCandidates.find((o) => o.id === settleOrderId);
+              if (!ord) return null;
+              const rent = Number(ord.totalAmount ?? 0);
+              const rawHeld = Number(ord.heldDeposit ?? 0);
+              const paid = Number(ord.paidAmount ?? 0);
+              const due = Number(ord.balanceDue ?? 0);
+              let net = rawHeld;
+              if (rent > 0 && (rawHeld >= 3000 || (rawHeld > rent && (paid === 0 || Math.abs(rawHeld - paid) < 1)))) {
+                net = Math.max(0, rawHeld - rent);
+              }
+              const held = Math.max(0, net - due);
+              return held > 0 ? (
+                <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900 space-y-1">
+                  <p className="font-semibold text-sm text-emerald-800">
+                    Return amount: {money(held)}
+                  </p>
+                  <p className="text-emerald-700">
+                    Remaining extra deposited by customer. When returning product, refund this <strong>{money(held)}</strong> back to the customer.
+                  </p>
+                </div>
+              ) : null;
+            })() : null}
             <div>
               <Label>Refund amount (0 = forfeit all)</Label>
               <Input
@@ -1244,7 +1311,7 @@ export default function ReturnsPage() {
 }
 
 function ReturnsPageInner() {
-  const { hasMode, isLoading } = useBootstrap();
+  const { hasMode, commerceModes, businessType, isLoading } = useBootstrap();
   const search = useSearchParams();
   const router = useRouter();
   const hasSale = hasMode("sale");
@@ -1266,8 +1333,15 @@ function ReturnsPageInner() {
             show: hasSub,
           },
         ] as const
-      ).filter((t) => t.show),
-    [hasSale, hasRental, hasSvc, hasSub],
+      )
+        .filter((t) => t.show)
+        .sort((a, b) => {
+          const idxA = commerceModes.indexOf(a.id);
+          const idxB = commerceModes.indexOf(b.id);
+          if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+          return 0;
+        }),
+    [hasSale, hasRental, hasSvc, hasSub, commerceModes],
   );
 
   const [tab, setTab] = useState<ReturnTab | null>(null);
@@ -1282,8 +1356,11 @@ function ReturnsPageInner() {
       return;
     }
     if (tab && availableTabs.some((t) => t.id === tab)) return;
-    setTab(availableTabs[0]!.id);
-  }, [availableTabs, tab, tabFromUrl]);
+    const defaultTab =
+      (businessType === "rental" && hasRental ? "rental" : null) ??
+      availableTabs[0]!.id;
+    setTab(defaultTab);
+  }, [availableTabs, tab, tabFromUrl, businessType, hasRental]);
 
   function selectTab(id: ReturnTab) {
     setTab(id);
