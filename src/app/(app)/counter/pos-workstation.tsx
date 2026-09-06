@@ -262,6 +262,17 @@ export default function PosWorkstation() {
     });
   }, [floor.data?.units, unitFilter, unitCategory]);
 
+  const ticketItemIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of ticket.data?.items ?? []) {
+      if (item.stockUnitId) set.add(item.stockUnitId);
+      if (item.stockUnit?.id) set.add(item.stockUnit.id);
+      if (item.inventoryUnitId) set.add(item.inventoryUnitId);
+      if (item.inventoryUnit?.id) set.add(item.inventoryUnit.id);
+    }
+    return set;
+  }, [ticket.data?.items]);
+
   const floorServices = useMemo(() => {
     type Svc = {
       id: string;
@@ -335,7 +346,7 @@ export default function PosWorkstation() {
     return [...map.values()];
   }, [floor.data?.categories, floorServices]);
 
-  const readyCount = floorUnits.length + floorServices.length;
+  const readyCount = floorUnits.length;
 
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ["orders"] });
@@ -679,6 +690,31 @@ export default function PosWorkstation() {
     barcodeRef.current?.focus();
   }
 
+  async function removeUnitFromTicket(unitId: string) {
+    const orderData = ticket.data;
+    if (!selectedId || !orderData) return;
+    const ticketMutable = canMutateRentalItems(orderData);
+    if (!ticketMutable) {
+      toast.error("This ticket is locked — cannot remove items");
+      return;
+    }
+    const item = (orderData.items ?? []).find(
+      (i) =>
+        i.stockUnitId === unitId ||
+        i.stockUnit?.id === unitId ||
+        i.inventoryUnitId === unitId ||
+        i.inventoryUnit?.id === unitId,
+    );
+    if (!item) return;
+    try {
+      await ordersApi.removeItem(selectedId, item.id);
+      toast.success("Unit removed from ticket");
+      invalidate();
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  }
+
   async function applyService(svc: {
     productId: string;
     title: string;
@@ -779,6 +815,62 @@ export default function PosWorkstation() {
   const settled = Boolean(data) && balance <= 0;
   const credit = settled ? Math.abs(balance) : 0;
   const canAddItems = data ? canMutateRentalItems(data) : false;
+
+  const groupedItems = useMemo(() => {
+    if (!data?.items) return [];
+    type GroupedItem = {
+      key: string;
+      unitName: string;
+      variantName: string;
+      unitPrice: number | string;
+      totalQuantity: number;
+      totalRent: number;
+      itemIds: string[];
+      sampleItem: (typeof data.items)[0];
+    };
+    const map = new Map<string, GroupedItem>();
+    for (const item of data.items) {
+      const key =
+        item.stockUnitId ??
+        item.inventoryUnitId ??
+        item.productId ??
+        item.description ??
+        item.id;
+      const unitName =
+        item.stockUnit?.barcodeSku ??
+        item.inventoryUnit?.barcodeSku ??
+        item.description ??
+        item.itemKind ??
+        item.itemType ??
+        "—";
+      const variantName =
+        item.stockUnit?.variantLabel ??
+        item.size ??
+        item.inventoryUnit?.size ??
+        "—";
+      const qty = moneyNumber(item.quantity) || 1;
+      const price = moneyNumber(item.unitPrice);
+
+      const existing = map.get(key);
+      if (existing) {
+        existing.totalQuantity += qty;
+        existing.totalRent += price * qty;
+        existing.itemIds.push(item.id);
+      } else {
+        map.set(key, {
+          key,
+          unitName,
+          variantName,
+          unitPrice: item.unitPrice,
+          totalQuantity: qty,
+          totalRent: price * qty,
+          itemIds: [item.id],
+          sampleItem: item,
+        });
+      }
+    }
+    return [...map.values()];
+  }, [data?.items]);
   const nextLifecycles = (
     RENTAL_LIFECYCLE_TRANSITIONS[lifecycle] ?? []
   ).filter((s) => s !== "cancelled");
@@ -1053,87 +1145,67 @@ export default function PosWorkstation() {
           </span>
         </div>
         <ul className="max-h-[14rem] divide-y divide-[#eef2f8] overflow-y-auto">
-          {floorServices.map((s) => (
-            <li key={`svc-${s.productId}`}>
-              <div
-                onClick={() => void applyService(s)}
-                className="flex w-full cursor-pointer items-center gap-2.5 px-3 py-2 text-left transition hover:bg-[#f8fafc]"
-              >
-                <ProductThumb
-                  src={s.image ?? s.photoUrl}
-                  label={s.title}
-                  size="sm"
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-[#0b1f33]">
-                    {s.title}
-                    <span className="ml-1.5 rounded bg-[#fff7ed] px-1.5 py-0.5 text-[0.6rem] font-semibold text-[#c2410c]">
-                      {s.kind === "service" ? "Service" : "Item"}
-                    </span>
-                  </p>
-                  <p className="font-mono text-[0.65rem] text-[#8b9bb0]">
-                    {s.sku}
-                    {s.category?.name ? ` · ${s.category.name}` : ""}
-                    {" · no unit needed"}
-                  </p>
-                </div>
-                <div className="shrink-0 text-right">
-                  <p className="text-sm font-bold tabular-nums text-[#0b1f33]">
-                    {money(s.rentalPrice)}
-                  </p>
-                </div>
-                <span className="inline-flex h-7 items-center rounded-md bg-[#1a56db] px-2 text-[0.65rem] font-semibold text-white">
-                  ADD
-                </span>
-              </div>
-            </li>
-          ))}
-          {floorUnits.map((u) => (
-            <li key={u.id}>
-              <div
-                onClick={() => void applyUnit(u)}
-                className="flex w-full cursor-pointer items-center gap-2.5 px-3 py-2 text-left transition hover:bg-[#f8fafc]"
-              >
-                <ProductThumb
-                  src={u.image ?? u.photoUrl}
-                  label={u.title}
-                  size="sm"
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-[#0b1f33]">
-                    {u.title}
-                    {u.variant || u.size ? (
-                      <span className="ml-1.5 font-normal text-[#5a6b7d]">
-                        · {u.variant || u.size}
-                      </span>
-                    ) : null}
-                  </p>
-                  <p className="font-mono text-[0.65rem] text-[#8b9bb0]">
-                    {u.barcodeSku || u.barcode}
-                    {u.category?.name ? ` · ${u.category.name}` : ""}
-                  </p>
-                </div>
-                <div className="shrink-0 text-right">
-                  <p className="text-sm font-bold tabular-nums text-[#0b1f33]">
-                    {money(u.rentalPrice)}
-                  </p>
-                  {moneyNumber(u.deposit) > 0 ? (
-                    <p className="text-[0.65rem] text-[#8b9bb0]">
-                      dep {money(u.deposit)}
+          {floorUnits.map((u) => {
+            const isAdded = ticketItemIds.has(u.id);
+            return (
+              <li key={u.id}>
+                <div
+                  onClick={() => {
+                    if (isAdded) {
+                      void removeUnitFromTicket(u.id);
+                    } else {
+                      void applyUnit(u);
+                    }
+                  }}
+                  className="flex w-full cursor-pointer items-center gap-2.5 px-3 py-2 text-left transition hover:bg-[#f8fafc]"
+                >
+                  <ProductThumb
+                    src={u.image ?? u.photoUrl}
+                    label={u.title}
+                    size="sm"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-[#0b1f33]">
+                      {u.title}
+                      {u.variant || u.size ? (
+                        <span className="ml-1.5 font-normal text-[#5a6b7d]">
+                          · {u.variant || u.size}
+                        </span>
+                      ) : null}
                     </p>
-                  ) : null}
+                    <p className="font-mono text-[0.65rem] text-[#8b9bb0]">
+                      {u.barcodeSku || u.barcode}
+                      {u.category?.name ? ` · ${u.category.name}` : ""}
+                    </p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="text-sm font-bold tabular-nums text-[#0b1f33]">
+                      {money(u.rentalPrice)}
+                    </p>
+                    {moneyNumber(u.deposit) > 0 ? (
+                      <p className="text-[0.65rem] text-[#8b9bb0]">
+                        dep {money(u.deposit)}
+                      </p>
+                    ) : null}
+                  </div>
+                  {isAdded ? (
+                    <span className="inline-flex h-7 items-center rounded-md bg-rose-600 px-2.5 text-[0.65rem] font-semibold text-white hover:bg-rose-700">
+                      REMOVE
+                    </span>
+                  ) : (
+                    <span className="inline-flex h-7 items-center rounded-md bg-[#1a56db] px-2 text-[0.65rem] font-semibold text-white">
+                      ADD
+                    </span>
+                  )}
                 </div>
-                <span className="inline-flex h-7 items-center rounded-md bg-[#1a56db] px-2 text-[0.65rem] font-semibold text-white">
-                  ADD
-                </span>
-              </div>
-            </li>
-          ))}
+              </li>
+            );
+          })}
           {!readyCount ? (
             <li className="px-3 py-8 text-center text-sm text-[#5a6b7d]">
-              {floor.isLoading || serviceCatalog.isLoading
+              {floor.isLoading
                 ? "Loading…"
-                : "No units or services — add Items (service) or rental stock units"}
+                : "No rental stock units available"}
             </li>
           ) : null}
         </ul>
@@ -1352,36 +1424,131 @@ export default function PosWorkstation() {
                     <tr className="border-b border-[#d9e0ea]">
                       <th className="px-4 py-2.5 font-semibold">Unit</th>
                       <th className="px-2 py-2.5 font-semibold">Variant</th>
+                      <th className="px-2 py-2.5 text-center font-semibold">
+                        Qty
+                      </th>
                       <th className="px-4 py-2.5 text-right font-semibold">
                         Rent
                       </th>
+                      {canMutateRentalItems(data) ? (
+                        <th className="px-3 py-2.5 text-right font-semibold">
+                          Action
+                        </th>
+                      ) : null}
                     </tr>
                   </thead>
                   <tbody>
-                    {data.items.map((item) => (
-                      <tr key={item.id} className="border-b border-[#eef1f4]">
+                    {groupedItems.map((group) => (
+                      <tr key={group.key} className="border-b border-[#eef1f4]">
                         <td className="px-4 py-2.5 font-medium text-[#0b1f33]">
-                          {item.stockUnit?.barcodeSku ??
-                            item.inventoryUnit?.barcodeSku ??
-                            item.description ??
-                            item.itemKind ??
-                            item.itemType}
+                          {group.unitName}
                         </td>
                         <td className="px-2 py-2.5 text-[#6b7280]">
-                          {item.stockUnit?.variantLabel ??
-                            item.size ??
-                            item.inventoryUnit?.size ??
-                            "—"}
+                          {group.variantName}
+                        </td>
+                        <td className="px-2 py-2.5 text-center">
+                          {canMutateRentalItems(data) ? (
+                            <div className="inline-flex items-center justify-center gap-1.5 rounded-md border border-[#d9e0ea] bg-[#f8fafc] px-1.5 py-0.5">
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  try {
+                                    const lastId =
+                                      group.itemIds[group.itemIds.length - 1];
+                                    if (lastId) {
+                                      await ordersApi.removeItem(data.id, lastId);
+                                      toast.success("Item updated");
+                                      invalidate();
+                                    }
+                                  } catch (e) {
+                                    toast.error(errMsg(e));
+                                  }
+                                }}
+                                className="flex h-5 w-5 items-center justify-center rounded border border-[#cbd5e1] bg-white text-xs font-bold text-[#475569] hover:bg-slate-100 transition"
+                                title="Decrease quantity"
+                              >
+                                -
+                              </button>
+                              <span className="min-w-[1rem] text-center font-mono text-xs font-semibold text-[#0b1f33]">
+                                {group.totalQuantity}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  try {
+                                    const item = group.sampleItem;
+                                    if (item.stockUnitId) {
+                                      await ordersApi.addItem(data.id, {
+                                        itemKind: "stock_unit",
+                                        stockUnitId: item.stockUnitId,
+                                        unitPrice: moneyNumber(item.unitPrice),
+                                        quantity: 1,
+                                        description: item.description,
+                                      });
+                                      toast.success("Quantity increased");
+                                      invalidate();
+                                      return;
+                                    }
+                                    if (item.productId) {
+                                      await ordersApi.addItem(data.id, {
+                                        itemKind: "product",
+                                        productId: item.productId,
+                                        unitPrice: moneyNumber(item.unitPrice),
+                                        quantity: 1,
+                                        description: item.description,
+                                      });
+                                      toast.success("Quantity increased");
+                                      invalidate();
+                                    }
+                                  } catch (e) {
+                                    toast.error(errMsg(e));
+                                  }
+                                }}
+                                className="flex h-5 w-5 items-center justify-center rounded border border-[#cbd5e1] bg-white text-xs font-bold text-[#475569] hover:bg-slate-100 transition"
+                                title="Increase quantity"
+                              >
+                                +
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="font-mono text-xs font-semibold text-[#0b1f33]">
+                              {group.totalQuantity}
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-2.5 text-right tabular-nums">
-                          {money(item.unitPrice)}
+                          {money(group.totalRent)}
                         </td>
+                        {canMutateRentalItems(data) ? (
+                          <td className="px-3 py-2.5 text-right">
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  await Promise.all(
+                                    group.itemIds.map((id) =>
+                                      ordersApi.removeItem(data.id, id),
+                                    ),
+                                  );
+                                  toast.success("Item removed from ticket");
+                                  invalidate();
+                                } catch (e) {
+                                  toast.error(errMsg(e));
+                                }
+                              }}
+                              className="rounded-md border border-rose-200 bg-rose-50 px-2 py-0.5 text-xs font-semibold text-rose-700 hover:bg-rose-100 transition"
+                              title="Remove item"
+                            >
+                              Remove
+                            </button>
+                          </td>
+                        ) : null}
                       </tr>
                     ))}
-                    {!data.items.length ? (
+                    {!groupedItems.length ? (
                       <tr>
                         <td
-                          colSpan={3}
+                          colSpan={canMutateRentalItems(data) ? 5 : 4}
                           className="px-4 py-12 text-center text-[#6b7280]"
                         >
                           Scan a barcode to add units
