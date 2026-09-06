@@ -2422,6 +2422,10 @@ export const returnsApi = {
         lifecycle: string | null;
         customerName: string;
         customerPhone?: string | null;
+        totalAmount?: number;
+        paidAmount?: number;
+        balanceDue?: number;
+        heldDeposit?: number;
         unitsOut: Array<{
           stockUnitId: string;
           barcode: string;
