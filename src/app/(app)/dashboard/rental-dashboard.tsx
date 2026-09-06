@@ -175,6 +175,11 @@ export function RentalDashboard({
     0,
   );
 
+  const outCandidates = useMemo(
+    () => (candidates.data?.items ?? []).filter((o) => o.unitsOut.length > 0),
+    [candidates.data?.items],
+  );
+
   const selectedCandidate = useMemo(
     () => (candidates.data?.items ?? []).find((o) => o.id === returnOrderId),
     [candidates.data, returnOrderId],
@@ -824,12 +829,37 @@ export function RentalDashboard({
                   className="mt-1 w-full rounded-xl border border-[#e5e7eb] px-3 py-2.5 text-sm"
                   value={returnOrderId}
                   onChange={(e) => {
-                    setReturnOrderId(e.target.value);
+                    const id = e.target.value;
+                    setReturnOrderId(id);
                     setReturnUnitId("");
+                    const cand = (candidates.data?.items ?? []).find(
+                      (o) => o.id === id,
+                    );
+                    if (cand) {
+                      const rent = Number(cand.totalAmount ?? 0);
+                      const rawHeld = Number(cand.heldDeposit ?? 0);
+                      const paid = Number(cand.paidAmount ?? 0);
+                      const due = Number(cand.balanceDue ?? 0);
+                      let net = rawHeld;
+                      if (rent > 0 && (rawHeld >= 3000 || (rawHeld > rent && (paid === 0 || Math.abs(rawHeld - paid) < 1)))) {
+                        net = Math.max(0, rawHeld - rent);
+                      }
+                      const retAmt = Math.max(0, net - due);
+                      if (retAmt > 0) {
+                        setDepositRefund(String(retAmt));
+                        setDepositReason("Full deposit refund");
+                      } else {
+                        setDepositRefund("");
+                        setDepositReason("");
+                      }
+                    } else {
+                      setDepositRefund("");
+                      setDepositReason("");
+                    }
                   }}
                 >
                   <option value="">Select…</option>
-                  {(candidates.data?.items ?? []).map((o) => (
+                  {outCandidates.map((o) => (
                     <option key={o.id} value={o.id}>
                       {o.orderNumber} · {o.customerName} (
                       {o.unitsOut.length} out)
@@ -878,13 +908,47 @@ export function RentalDashboard({
                 {doReturn.isPending ? "Saving…" : "Record return"}
               </Button>
               <div className="rounded-lg border border-[#e8eef5] bg-[#f8fafc] p-3 space-y-2">
-                <p className="text-xs font-semibold uppercase tracking-wide text-[#8b9bb0]">
-                  Deposit settlement
-                </p>
-                <p className="text-xs text-[#6b7280]">
-                  Refund part or all of the held deposit after return/inspect.
-                  Remaining amount is forfeited with an audit record.
-                </p>
+                {(() => {
+                  if (!selectedCandidate) return null;
+                  const rent = Number(selectedCandidate.totalAmount ?? 0);
+                  const rawHeld = Number(selectedCandidate.heldDeposit ?? 0);
+                  const paid = Number(selectedCandidate.paidAmount ?? 0);
+                  const due = Number(selectedCandidate.balanceDue ?? 0);
+                  let net = rawHeld;
+                  if (rent > 0 && (rawHeld >= 3000 || (rawHeld > rent && (paid === 0 || Math.abs(rawHeld - paid) < 1)))) {
+                    net = Math.max(0, rawHeld - rent);
+                  }
+                  const retAmt = Math.max(0, net - due);
+                  return (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-[#8b9bb0]">
+                          Deposit settlement
+                        </p>
+                        <span className="text-xs font-medium text-[#0b1f33]">
+                          Held deposit:{" "}
+                          <strong className="text-emerald-700 font-bold">
+                            {money(retAmt)}
+                          </strong>
+                        </span>
+                      </div>
+                      <p className="text-xs text-[#6b7280]">
+                        Refund part or all of the held deposit after return/inspect.
+                        Remaining amount is forfeited with an audit record.
+                      </p>
+                      {retAmt > 0 ? (
+                        <div className="text-xs text-emerald-900 bg-emerald-50 rounded-md p-3 border border-emerald-200 space-y-1">
+                          <p className="font-semibold text-sm text-emerald-800">
+                            Return amount: {money(retAmt)}
+                          </p>
+                          <p className="text-emerald-700">
+                            Remaining extra deposited by customer. When returning product, refund this <strong>{money(retAmt)}</strong> back to the customer.
+                          </p>
+                        </div>
+                      ) : null}
+                    </>
+                  );
+                })()}
                 <div className="grid gap-2 sm:grid-cols-2">
                   <div>
                     <Label>Refund amount</Label>
@@ -1068,7 +1132,7 @@ export function RentalDashboard({
                 }}
               >
                 <option value="">Select…</option>
-                {(candidates.data?.items ?? []).map((o) => (
+                {outCandidates.map((o) => (
                   <option key={o.id} value={o.id}>
                     {o.orderNumber} · {o.customerName}
                   </option>
