@@ -196,10 +196,19 @@ function ChipTabs<T extends string>({
 
 function RentalReturnsDesk() {
   const { money } = useBootstrap();
+  const currencySymbol = useMemo(
+    () => money(0).replace(/[0-9.,\s]/g, "").trim() || "$",
+    [money],
+  );
   const qc = useQueryClient();
   const [settleOrderId, setSettleOrderId] = useState("");
   const [refundAmount, setRefundAmount] = useState("");
+  const [manualLateFee, setManualLateFee] = useState("");
+  const [manualDamageFee, setManualDamageFee] = useState("");
   const [settleReason, setSettleReason] = useState("");
+  const [returnQty, setReturnQty] = useState(1);
+  const [selectedCondition, setSelectedCondition] = useState<"ok" | "cleaning" | "damaged">("ok");
+  const [damageFee, setDamageFee] = useState("");
 
   const list = useQuery({
     queryKey: ["returns"],
@@ -221,6 +230,7 @@ function RentalReturnsDesk() {
   });
 
   const orderId = useWatch({ control: form.control, name: "orderId" });
+  const selectedUnitId = useWatch({ control: form.control, name: "inventoryUnitId" });
 
   const selected = useMemo(
     () => (candidates.data?.items ?? []).find((o) => o.id === orderId),
@@ -242,6 +252,7 @@ function RentalReturnsDesk() {
       const key = u.productId
         ? `prod:${u.productId}`
         : `unit:${u.barcodeSku || u.barcode || u.stockUnitId}`;
+      const qty = Number((u as { quantity?: number }).quantity ?? 1);
       if (!map.has(key)) {
         map.set(key, {
           id: u.stockUnitId,
@@ -249,17 +260,18 @@ function RentalReturnsDesk() {
           barcodeSku: u.barcodeSku || u.barcode,
           variant: u.variant,
           title: u.title,
-          count: 1,
+          count: qty,
         });
       } else {
         const item = map.get(key)!;
-        item.count += 1;
+        item.count += qty;
         item.allIds.push(u.stockUnitId);
       }
     }
     return Array.from(map.values()).map((g) => ({
       id: g.id,
       allIds: g.allIds,
+      count: g.count,
       label:
         g.count > 1
           ? `${g.count} × ${g.barcodeSku}${g.variant ? ` · ${g.variant}` : ""}${
@@ -271,29 +283,50 @@ function RentalReturnsDesk() {
     }));
   }, [selected]);
 
+  const selectedGroup = useMemo(
+    () => returnableUnits.find((u) => u.id === selectedUnitId),
+    [returnableUnits, selectedUnitId],
+  );
+
   const create = useMutation({
     mutationFn: async (v: CreateReturnInput) => {
       const group = returnableUnits.find((u) => u.id === v.inventoryUnitId);
-      const targetIds = group?.allIds?.length ? group.allIds : [v.inventoryUnitId];
+      const allTargetIds = group?.allIds?.length ? group.allIds : [v.inventoryUnitId];
+      const maxAvailable = group?.count ?? 1;
+      const actualQty = Math.min(returnQty, maxAvailable);
+      const targetIds = allTargetIds.slice(0, actualQty);
+      const qtyPerCall = Math.max(1, Math.floor(actualQty / Math.max(1, targetIds.length)));
+
       for (const targetId of targetIds) {
         await returnsApi.create({
           orderId: v.orderId,
           stockUnitId: targetId,
           inventoryUnitId: targetId,
-          cleaningRequired: v.cleaningRequired,
+          cleaningRequired: selectedCondition === "cleaning",
+          inspectStatus: selectedCondition === "damaged" ? "damaged" : selectedCondition === "cleaning" ? "needs_cleaning" : "clean_ready",
+          damageFee: selectedCondition === "damaged" && damageFee.trim() ? Number(damageFee) : undefined,
           inspectNotes: v.inspectNotes || undefined,
+          quantityToReturn: qtyPerCall,
         });
       }
     },
     onSuccess: (_d, v) => {
       toast.success("Return recorded");
       form.reset();
+      setReturnQty(1);
+      setSelectedCondition("ok");
+      setDamageFee("");
       void qc.invalidateQueries({ queryKey: ["returns"] });
       void qc.invalidateQueries({ queryKey: ["returns-candidates"] });
       void qc.invalidateQueries({ queryKey: ["orders"] });
     },
-    onError: (e) =>
-      toast.error(e instanceof ApiError ? e.messages.join(", ") : "Failed"),
+    onError: (e) => {
+      const raw = e instanceof ApiError ? e.messages.join(", ") : "Failed to record return";
+      const clean = raw.includes("not checked out yet") || raw.includes("not returnable yet")
+        ? "Selected order is not ready for return processing."
+        : raw;
+      toast.error(clean);
+    },
   });
 
   const inspect = useMutation({
@@ -538,17 +571,134 @@ function RentalReturnsDesk() {
                 message={form.formState.errors.inventoryUnitId?.message}
               />
             </div>
-            <label className="flex items-center gap-2 text-sm text-[#374151]">
-              <input
-                type="checkbox"
-                className="accent-[#1a56db]"
-                {...form.register("cleaningRequired")}
-              />
-              Needs cleaning / service
-            </label>
+            {selectedUnitId ? (() => {
+              const maxQty = selectedGroup?.count ?? 1;
+              return (
+                <div className="rounded-lg border border-[#e4e9f0] bg-[#f8fafc] p-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-semibold text-[#334155]">
+                      Quantity to Return Today
+                    </Label>
+                    <span className="text-[0.72rem] font-medium text-[#64748b]">
+                      Out of {maxQty} checked out
+                    </span>
+                  </div>
+                  <div className="mt-2 flex items-center gap-3">
+                    <div className="flex items-center rounded-lg border border-[#d6deea] bg-white shadow-sm">
+                      <button
+                        type="button"
+                        className="flex h-9 w-9 items-center justify-center text-lg font-bold text-[#334155] hover:bg-[#f1f5f9] disabled:opacity-30"
+                        disabled={returnQty <= 1}
+                        onClick={() => setReturnQty((q) => Math.max(1, q - 1))}
+                      >
+                        -
+                      </button>
+                      <input
+                        type="number"
+                        min={1}
+                        max={maxQty}
+                        value={returnQty}
+                        onChange={(e) => {
+                          const v = Number(e.target.value) || 1;
+                          setReturnQty(Math.min(maxQty, Math.max(1, v)));
+                        }}
+                        className="h-9 w-14 text-center text-sm font-semibold text-[#0b1f33] focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        className="flex h-9 w-9 items-center justify-center text-lg font-bold text-[#334155] hover:bg-[#f1f5f9] disabled:opacity-30"
+                        disabled={returnQty >= maxQty}
+                        onClick={() => setReturnQty((q) => Math.min(maxQty, q + 1))}
+                      >
+                        +
+                      </button>
+                    </div>
+                    <div className="text-xs">
+                      <span className="font-semibold text-[#1a56db]">{returnQty}</span> returning today,{" "}
+                      <span className="font-semibold text-[#d97706]">{Math.max(0, maxQty - returnQty)}</span> remain checked out
+                    </div>
+                  </div>
+                </div>
+              );
+            })() : null}
             <div>
-              <Label>Notes</Label>
-              <Input className="mt-1.5" {...form.register("inspectNotes")} />
+              <Label>Item Condition</Label>
+              <div className="mt-1.5 grid grid-cols-3 gap-1.5 text-xs">
+                <button
+                  type="button"
+                  className={cn(
+                    "rounded-md border py-2 font-medium transition",
+                    selectedCondition === "ok"
+                      ? "border-[#1a56db] bg-[#eff6ff] text-[#1a56db]"
+                      : "border-[#e5e7eb] bg-white text-[#5a6b7d]",
+                  )}
+                  onClick={() => {
+                    setSelectedCondition("ok");
+                    form.setValue("cleaningRequired", false);
+                  }}
+                >
+                  ✓ Good (OK)
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    "rounded-md border py-2 font-medium transition",
+                    selectedCondition === "cleaning"
+                      ? "border-indigo-600 bg-indigo-50 text-indigo-700 font-semibold"
+                      : "border-[#e5e7eb] bg-white text-[#5a6b7d]",
+                  )}
+                  onClick={() => {
+                    setSelectedCondition("cleaning");
+                    form.setValue("cleaningRequired", true);
+                  }}
+                >
+                  🧹 Needs Clean
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    "rounded-md border py-2 font-medium transition",
+                    selectedCondition === "damaged"
+                      ? "border-red-500 bg-red-50 text-red-700 font-semibold"
+                      : "border-[#e5e7eb] bg-white text-[#5a6b7d] hover:border-red-300 hover:text-red-600",
+                  )}
+                  onClick={() => {
+                    setSelectedCondition("damaged");
+                    form.setValue("cleaningRequired", false);
+                  }}
+                >
+                  ⚠️ Damaged
+                </button>
+              </div>
+            </div>
+
+            {selectedCondition === "damaged" && (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3 space-y-1.5">
+                <Label className="text-xs font-semibold text-red-900">
+                  Damage Fee Charge ({currencySymbol})
+                </Label>
+                <Input
+                  type="number"
+                  min={0}
+                  step="any"
+                  value={damageFee}
+                  onChange={(e) => setDamageFee(e.target.value)}
+                  placeholder="Enter repair or damage fee (e.g. 50)"
+                  className="mt-1 bg-white font-semibold text-red-950 border-red-300 focus:border-red-500"
+                />
+                <p className="text-[0.7rem] text-red-700">
+                  Fee recorded with damage report
+                </p>
+              </div>
+            )}
+
+            <div>
+              <Label>Notes & Inspection Details</Label>
+              <Input
+                className="mt-1.5"
+                placeholder="Condition notes, wear & tear, or damage description…"
+                {...form.register("inspectNotes")}
+              />
             </div>
             <Button
               type="submit"
@@ -577,18 +727,31 @@ function RentalReturnsDesk() {
                 onChange={(e) => {
                   const id = e.target.value;
                   setSettleOrderId(id);
-                  const ord = allCandidates.find((o) => o.id === id);
+                  const ord = allCandidates.find((o) => o.id === id) as (typeof allCandidates[0] & { overdueDays?: number; overdueFee?: number; totalDamageFees?: number; suggestedRefund?: number }) | undefined;
                   if (ord) {
-                    const held = Math.max(0, Number(ord.heldDeposit ?? 0) - Number(ord.balanceDue ?? 0));
-                    setRefundAmount(String(held));
-                    const due = Number(ord.balanceDue ?? 0);
-                    if (due > 0) {
-                      setSettleReason(
-                        `Deducted ${money(due)} unpaid balance from deposit`,
-                      );
-                    } else {
-                      setSettleReason("Full deposit refund");
+                    const overdueFee = ord.overdueFee ?? 0;
+                    const damageFees = ord.totalDamageFees ?? 0;
+                    const balanceDue = Number(ord.balanceDue ?? 0);
+                    const rawHeld = Number(ord.heldDeposit ?? 0);
+                    setManualLateFee(String(overdueFee));
+                    setManualDamageFee(String(damageFees));
+                    const suggested = Math.max(0, rawHeld - balanceDue - overdueFee - damageFees);
+                    setRefundAmount(String(suggested));
+                    
+                    const reasons: string[] = [];
+                    if (damageFees > 0) {
+                      reasons.push(`Deducted ${money(damageFees)} damage fee`);
                     }
+                    if (overdueFee > 0) {
+                      reasons.push(`Deducted ${money(overdueFee)} late fee (${ord.overdueDays} days overdue)`);
+                    }
+                    if (balanceDue > 0) {
+                      reasons.push(`Deducted ${money(balanceDue)} unpaid balance`);
+                    }
+                    if (reasons.length === 0) {
+                      reasons.push("Full deposit refund");
+                    }
+                    setSettleReason(reasons.join(". "));
                   }
                 }}
               >
@@ -598,35 +761,98 @@ function RentalReturnsDesk() {
                     const held = Number(o.heldDeposit ?? 0);
                     const due = Number(o.balanceDue ?? 0);
                     const retAmt = Math.max(0, held - due);
-                    return { o, retAmt };
+                    const overdue = (o as { overdueDays?: number }).overdueDays ?? 0;
+                    return { o, retAmt, overdue };
                   })
                   .filter(({ retAmt }) => retAmt > 0)
-                  .map(({ o, retAmt }) => (
+                  .map(({ o, retAmt, overdue }) => (
                     <option key={o.id} value={o.id}>
-                      {o.orderNumber} · {o.customerName} · Return deposit: {money(retAmt)}
+                      {o.orderNumber} · {o.customerName} · Deposit: {money(retAmt)}{overdue > 0 ? ` ⚠️ (${overdue}d overdue)` : ""}
                     </option>
                   ))}
               </Select>
             </div>
             {settleOrderId ? (() => {
-              const ord = allCandidates.find((o) => o.id === settleOrderId);
+              const ord = allCandidates.find((o) => o.id === settleOrderId) as (typeof allCandidates[0] & { overdueDays?: number; overdueFee?: number; totalDamageFees?: number; suggestedRefund?: number }) | undefined;
               if (!ord) return null;
               const held = Math.max(0, Number(ord.heldDeposit ?? 0) - Number(ord.balanceDue ?? 0));
-              return held > 0 ? (
-                <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900 space-y-1">
-                  <p className="font-semibold text-sm text-emerald-800">
-                    Return amount: {money(held)}
-                  </p>
-                  <p className="text-emerald-700">
-                    Return deposit held for customer. When returning product, refund this <strong>{money(held)}</strong> back to the customer.
-                  </p>
+              const overdueDays = ord.overdueDays ?? 0;
+              const currentLateFee = Number(manualLateFee || 0);
+              const currentDamageFee = Number(manualDamageFee || 0);
+              const suggested = Math.max(0, held - currentLateFee - currentDamageFee);
+
+              const updateDeductionState = (late: number, dmg: number) => {
+                const newRefund = Math.max(0, held - late - dmg);
+                setRefundAmount(String(newRefund));
+                const reasons: string[] = [];
+                if (dmg > 0) reasons.push(`Deducted ${money(dmg)} damage fee`);
+                if (late > 0) reasons.push(`Deducted ${money(late)} late fee`);
+                if (reasons.length === 0) reasons.push("Full deposit refund");
+                setSettleReason(reasons.join(". "));
+              };
+
+              return (
+                <div className="space-y-3">
+                  {overdueDays > 0 ? (
+                    <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 space-y-1">
+                      <p className="font-semibold text-amber-950 flex items-center gap-1.5">
+                        <span className="inline-block rounded bg-amber-200 px-1.5 py-0.5 text-[0.65rem] font-bold uppercase tracking-wider text-amber-900">Overdue</span>
+                        Item return is {overdueDays} {overdueDays === 1 ? "day" : "days"} late
+                      </p>
+                      <p className="text-amber-800">
+                        Suggested auto late fee: {money(ord.overdueFee ?? 0)}. You can adjust fees below manually.
+                      </p>
+                    </div>
+                  ) : null}
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <Label>Damage Charge ({currencySymbol})</Label>
+                      <Input
+                        className="mt-1.5 font-semibold text-red-700"
+                        inputMode="decimal"
+                        value={manualDamageFee}
+                        onChange={(e) => {
+                          const valStr = e.target.value;
+                          setManualDamageFee(valStr);
+                          updateDeductionState(currentLateFee, Number(valStr || 0));
+                        }}
+                        placeholder="0"
+                      />
+                    </div>
+                    <div>
+                      <Label>Overdue / Late Fee ({currencySymbol})</Label>
+                      <Input
+                        className="mt-1.5 font-semibold text-[#0b1f33]"
+                        inputMode="decimal"
+                        value={manualLateFee}
+                        onChange={(e) => {
+                          const valStr = e.target.value;
+                          setManualLateFee(valStr);
+                          updateDeductionState(Number(valStr || 0), currentDamageFee);
+                        }}
+                        placeholder="0"
+                      />
+                    </div>
+                  </div>
+
+                  {held > 0 ? (
+                    <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900 space-y-1">
+                      <p className="font-semibold text-sm text-emerald-800">
+                        Net Refund: {money(suggested)} <span className="text-xs font-normal text-emerald-700">(Held Deposit: {money(held)})</span>
+                      </p>
+                      <p className="text-emerald-700">
+                        Refunding <strong>{money(suggested)}</strong> back to customer after <strong>{money(currentDamageFee)}</strong> damage fee and <strong>{money(currentLateFee)}</strong> late fee deduction.
+                      </p>
+                    </div>
+                  ) : null}
                 </div>
-              ) : null;
+              );
             })() : null}
             <div>
               <Label>Refund amount (0 = forfeit all)</Label>
               <Input
-                className="mt-1.5"
+                className="mt-1.5 font-semibold text-[#15803d]"
                 inputMode="decimal"
                 value={refundAmount}
                 onChange={(e) => setRefundAmount(e.target.value)}
