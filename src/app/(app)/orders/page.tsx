@@ -263,9 +263,16 @@ export default function OrdersPage() {
                     <td className="max-w-[220px] px-4 py-3 text-[var(--muted)]">
                       <p className="line-clamp-2 text-sm text-[var(--ink)]">
                         {o.productSummary ||
-                          (o.productNames?.length
-                            ? o.productNames.join(", ")
-                            : "—")}
+                          (() => {
+                            if (!o.productNames?.length) return "—";
+                            const map = new Map<string, number>();
+                            for (const name of o.productNames) {
+                              map.set(name, (map.get(name) ?? 0) + 1);
+                            }
+                            return Array.from(map.entries())
+                              .map(([name, qty]) => (qty > 1 ? `${qty} × ${name}` : name))
+                              .join(", ");
+                          })()}
                       </p>
                       {o.itemCount != null && o.itemCount > 0 ? (
                         <p className="text-xs text-[var(--muted)]">

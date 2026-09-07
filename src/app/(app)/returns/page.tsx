@@ -227,35 +227,66 @@ function RentalReturnsDesk() {
     [candidates.data, orderId],
   );
 
-  const returnableUnits = useMemo(
-    () =>
-      (selected?.unitsOut ?? []).map((u) => ({
-        id: u.stockUnitId,
-        label: `${u.barcodeSku}${u.variant ? ` · ${u.variant}` : ""}${
-          u.title ? ` · ${u.title}` : ""
-        }`,
-      })),
-    [selected],
-  );
+  const returnableUnits = useMemo(() => {
+    const raw = selected?.unitsOut ?? [];
+    type GroupItem = {
+      id: string;
+      allIds: string[];
+      barcodeSku: string;
+      variant?: string | null;
+      title: string;
+      count: number;
+    };
+    const map = new Map<string, GroupItem>();
+    for (const u of raw) {
+      const key = u.productId
+        ? `prod:${u.productId}`
+        : `unit:${u.barcodeSku || u.barcode || u.stockUnitId}`;
+      if (!map.has(key)) {
+        map.set(key, {
+          id: u.stockUnitId,
+          allIds: [u.stockUnitId],
+          barcodeSku: u.barcodeSku || u.barcode,
+          variant: u.variant,
+          title: u.title,
+          count: 1,
+        });
+      } else {
+        const item = map.get(key)!;
+        item.count += 1;
+        item.allIds.push(u.stockUnitId);
+      }
+    }
+    return Array.from(map.values()).map((g) => ({
+      id: g.id,
+      allIds: g.allIds,
+      label:
+        g.count > 1
+          ? `${g.count} × ${g.barcodeSku}${g.variant ? ` · ${g.variant}` : ""}${
+              g.title ? ` · ${g.title}` : ""
+            }`
+          : `${g.barcodeSku}${g.variant ? ` · ${g.variant}` : ""}${
+              g.title ? ` · ${g.title}` : ""
+            }`,
+    }));
+  }, [selected]);
 
   const create = useMutation({
-    mutationFn: (v: CreateReturnInput) =>
-      returnsApi.create({
-        orderId: v.orderId,
-        stockUnitId: v.inventoryUnitId,
-        inventoryUnitId: v.inventoryUnitId,
-        cleaningRequired: v.cleaningRequired,
-        inspectNotes: v.inspectNotes || undefined,
-      }),
+    mutationFn: async (v: CreateReturnInput) => {
+      const group = returnableUnits.find((u) => u.id === v.inventoryUnitId);
+      const targetIds = group?.allIds?.length ? group.allIds : [v.inventoryUnitId];
+      for (const targetId of targetIds) {
+        await returnsApi.create({
+          orderId: v.orderId,
+          stockUnitId: targetId,
+          inventoryUnitId: targetId,
+          cleaningRequired: v.cleaningRequired,
+          inspectNotes: v.inspectNotes || undefined,
+        });
+      }
+    },
     onSuccess: (_d, v) => {
-      const stillOut =
-        (candidates.data?.items ?? []).find((o) => o.id === v.orderId)?.unitsOut
-          .length ?? 1;
-      toast.success(
-        stillOut > 1
-          ? "Partial return recorded — ticket stays open until all units are back"
-          : "Return recorded",
-      );
+      toast.success("Return recorded");
       form.reset();
       void qc.invalidateQueries({ queryKey: ["returns"] });
       void qc.invalidateQueries({ queryKey: ["returns-candidates"] });
@@ -548,18 +579,9 @@ function RentalReturnsDesk() {
                   setSettleOrderId(id);
                   const ord = allCandidates.find((o) => o.id === id);
                   if (ord) {
-                    const rent = Number(ord.totalAmount ?? 0);
-                    const rawHeld = Number(ord.heldDeposit ?? 0);
-                    const paid = Number(ord.paidAmount ?? 0);
+                    const held = Math.max(0, Number(ord.heldDeposit ?? 0) - Number(ord.balanceDue ?? 0));
+                    setRefundAmount(String(held));
                     const due = Number(ord.balanceDue ?? 0);
-                    // If customer paid extra deposit (e.g. 3000) and rent is 1399:
-                    // Return amount to customer is 3000 - 1399 = 1601
-                    let net = rawHeld;
-                    if (rent > 0 && (rawHeld >= 3000 || (rawHeld > rent && (paid === 0 || Math.abs(rawHeld - paid) < 1)))) {
-                      net = Math.max(0, rawHeld - rent);
-                    }
-                    const netRefund = Math.max(0, net - due);
-                    setRefundAmount(String(netRefund));
                     if (due > 0) {
                       setSettleReason(
                         `Deducted ${money(due)} unpaid balance from deposit`,
@@ -573,15 +595,9 @@ function RentalReturnsDesk() {
                 <option value="">Select order</option>
                 {allCandidates
                   .map((o) => {
-                    const rent = Number(o.totalAmount ?? 0);
-                    const rawHeld = Number(o.heldDeposit ?? 0);
-                    const paid = Number(o.paidAmount ?? 0);
+                    const held = Number(o.heldDeposit ?? 0);
                     const due = Number(o.balanceDue ?? 0);
-                    let net = rawHeld;
-                    if (rent > 0 && (rawHeld >= 3000 || (rawHeld > rent && (paid === 0 || Math.abs(rawHeld - paid) < 1)))) {
-                      net = Math.max(0, rawHeld - rent);
-                    }
-                    const retAmt = Math.max(0, net - due);
+                    const retAmt = Math.max(0, held - due);
                     return { o, retAmt };
                   })
                   .filter(({ retAmt }) => retAmt > 0)
@@ -595,22 +611,14 @@ function RentalReturnsDesk() {
             {settleOrderId ? (() => {
               const ord = allCandidates.find((o) => o.id === settleOrderId);
               if (!ord) return null;
-              const rent = Number(ord.totalAmount ?? 0);
-              const rawHeld = Number(ord.heldDeposit ?? 0);
-              const paid = Number(ord.paidAmount ?? 0);
-              const due = Number(ord.balanceDue ?? 0);
-              let net = rawHeld;
-              if (rent > 0 && (rawHeld >= 3000 || (rawHeld > rent && (paid === 0 || Math.abs(rawHeld - paid) < 1)))) {
-                net = Math.max(0, rawHeld - rent);
-              }
-              const held = Math.max(0, net - due);
+              const held = Math.max(0, Number(ord.heldDeposit ?? 0) - Number(ord.balanceDue ?? 0));
               return held > 0 ? (
                 <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900 space-y-1">
                   <p className="font-semibold text-sm text-emerald-800">
                     Return amount: {money(held)}
                   </p>
                   <p className="text-emerald-700">
-                    Remaining extra deposited by customer. When returning product, refund this <strong>{money(held)}</strong> back to the customer.
+                    Return deposit held for customer. When returning product, refund this <strong>{money(held)}</strong> back to the customer.
                   </p>
                 </div>
               ) : null;

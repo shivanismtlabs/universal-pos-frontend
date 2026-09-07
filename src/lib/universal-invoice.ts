@@ -455,10 +455,31 @@ export function mapToUniversalInvoice(input: {
     showBarcode: input.config?.showBarcode ?? true,
   };
 
+  const groupedItems: UniversalInvoiceLineItem[] = [];
+  const groupMap = new Map<string, UniversalInvoiceLineItem>();
+
+  for (const item of mappedItems) {
+    const key = `${item.name}:${item.unitPrice}:${item.commerceMetadata?.sku || ""}`;
+    if (!groupMap.has(key)) {
+      const copy = { ...item };
+      groupMap.set(key, copy);
+      groupedItems.push(copy);
+    } else {
+      const existing = groupMap.get(key)!;
+      existing.quantity += item.quantity;
+      existing.lineTotal += item.lineTotal;
+      if (item.taxAmount) existing.taxAmount = (existing.taxAmount || 0) + item.taxAmount;
+    }
+  }
+
+  groupedItems.forEach((it, idx) => {
+    it.lineNumber = idx + 1;
+  });
+
   return {
     header,
     customer,
-    items: mappedItems,
+    items: groupedItems,
     commerceMetadata,
     totals,
     payment,

@@ -244,24 +244,6 @@ export default function PosWorkstation() {
     return rows;
   }, [queue.data, tab, today]);
 
-  const floorUnits = useMemo(() => {
-    const units = floor.data?.units ?? [];
-    const q = unitFilter.trim().toLowerCase();
-    return units.filter((u) => {
-      if (String(u.status).toLowerCase() !== "available") return false;
-      if (unitCategory !== "all" && u.category?.id !== unitCategory) {
-        return false;
-      }
-      if (!q) return true;
-      return (
-        u.title.toLowerCase().includes(q) ||
-        u.sku.toLowerCase().includes(q) ||
-        (u.barcodeSku || u.barcode || "").toLowerCase().includes(q) ||
-        (u.variant || u.size || "").toLowerCase().includes(q)
-      );
-    });
-  }, [floor.data?.units, unitFilter, unitCategory]);
-
   const ticketItemIds = useMemo(() => {
     const set = new Set<string>();
     for (const item of ticket.data?.items ?? []) {
@@ -269,6 +251,8 @@ export default function PosWorkstation() {
       if (item.stockUnit?.id) set.add(item.stockUnit.id);
       if (item.inventoryUnitId) set.add(item.inventoryUnitId);
       if (item.inventoryUnit?.id) set.add(item.inventoryUnit.id);
+      if (item.productId) set.add(item.productId);
+      if (item.product?.id) set.add(item.product.id);
     }
     return set;
   }, [ticket.data?.items]);
@@ -280,60 +264,108 @@ export default function PosWorkstation() {
       title: string;
       sku: string;
       rentalPrice: string | number;
+      deposit?: string | number;
       kind?: string;
       category?: { id: string; name: string } | null;
       image?: string | null;
       photoUrl?: string | null;
+      isProduct?: boolean;
     };
-    const fromFloor: Svc[] = (floor.data?.services ?? [])
-      .filter((s) => s.kind === "service")
-      .map((s) => ({
-        id: s.id,
-        productId: s.productId || s.id,
-        title: s.title,
-        sku: s.sku,
-        rentalPrice: s.rentalPrice,
-        kind: s.kind,
-        category: s.category,
-        image: s.image,
-        photoUrl: s.photoUrl,
-      }));
-    const fromCatalog: Svc[] = (serviceCatalog.data?.items ?? [])
-      .filter((p) => p.kind === "service")
-      .map((p) => ({
-        id: p.id,
-        productId: p.id,
-        title: p.name,
-        sku: p.skuCode,
-        rentalPrice: p.basePrice,
-        kind: p.kind,
-        category: p.category
-          ? { id: p.category.id, name: p.category.name }
-          : null,
-        image: p.photoUrl,
-        photoUrl: p.photoUrl,
-      }));
+    const fromFloor: Svc[] = (floor.data?.services ?? []).map((s) => ({
+      id: s.id,
+      productId: s.productId || s.id,
+      title: s.title,
+      sku: s.sku,
+      rentalPrice: s.rentalPrice,
+      deposit: (s as { deposit?: number | string }).deposit ?? 0,
+      kind: s.kind,
+      category: s.category,
+      image: s.image,
+      photoUrl: s.photoUrl,
+      isProduct: true,
+    }));
+    const fromCatalog: Svc[] = (serviceCatalog.data?.items ?? []).map((p) => ({
+      id: p.id,
+      productId: p.id,
+      title: p.name,
+      sku: p.skuCode,
+      rentalPrice: p.basePrice,
+      deposit: 0,
+      kind: p.kind,
+      category: p.category
+        ? { id: p.category.id, name: p.category.name }
+        : null,
+      image: p.photoUrl,
+      photoUrl: p.photoUrl,
+      isProduct: true,
+    }));
     const byId = new Map<string, Svc>();
     for (const s of [...fromFloor, ...fromCatalog]) {
       byId.set(s.productId, s);
     }
+    return [...byId.values()];
+  }, [floor.data?.services, serviceCatalog.data?.items]);
+
+  const floorUnits = useMemo(() => {
+    const stockUnits = (floor.data?.units ?? []).map((u) => ({
+      id: u.id,
+      productId: (u as { productId?: string }).productId,
+      isProduct: false,
+      title: u.title,
+      sku: u.sku,
+      barcodeSku: u.barcodeSku || u.barcode || u.sku,
+      barcode: u.barcodeSku || u.barcode || u.sku,
+      variant: u.variant || u.size || "",
+      size: u.size || "",
+      rentalPrice: u.rentalPrice,
+      deposit: u.deposit,
+      status: u.status,
+      category: u.category,
+      image: u.image ?? u.photoUrl,
+      photoUrl: u.photoUrl ?? u.image,
+    }));
+
+    const stockProductIds = new Set(
+      stockUnits.map((u) => u.productId).filter(Boolean),
+    );
+
+    const catalogUnits = floorServices
+      .filter((p) => !stockProductIds.has(p.productId))
+      .map((p) => ({
+        id: p.productId,
+        productId: p.productId,
+        isProduct: true,
+        title: p.title,
+        sku: p.sku,
+        barcodeSku: p.sku,
+        barcode: p.sku,
+        variant: p.kind ? String(p.kind).toLowerCase() : "catalog",
+        size: "",
+        rentalPrice: p.rentalPrice,
+        deposit: p.deposit ?? 0,
+        status: "Available",
+        category: p.category,
+        image: p.image ?? p.photoUrl,
+        photoUrl: p.photoUrl ?? p.image,
+      }));
+
+    const combined = [...stockUnits, ...catalogUnits];
     const q = unitFilter.trim().toLowerCase();
-    return [...byId.values()].filter((s) => {
-      if (unitCategory !== "all" && s.category?.id !== unitCategory) {
+
+    return combined.filter((u) => {
+      if (String(u.status).toLowerCase() !== "available") return false;
+      if (unitCategory !== "all" && u.category?.id !== unitCategory) {
         return false;
       }
       if (!q) return true;
       return (
-        s.title.toLowerCase().includes(q) ||
-        s.sku.toLowerCase().includes(q)
+        u.title.toLowerCase().includes(q) ||
+        u.sku.toLowerCase().includes(q) ||
+        (u.barcodeSku || "").toLowerCase().includes(q) ||
+        (u.variant || "").toLowerCase().includes(q)
       );
     });
-  }, [
-    floor.data?.services,
-    serviceCatalog.data?.items,
-    unitFilter,
-    unitCategory,
-  ]);
+  }, [floor.data?.units, floorServices, unitFilter, unitCategory]);
 
   const floorCategories = useMemo(() => {
     const base = floor.data?.categories ?? [];
@@ -703,12 +735,14 @@ export default function PosWorkstation() {
         i.stockUnitId === unitId ||
         i.stockUnit?.id === unitId ||
         i.inventoryUnitId === unitId ||
-        i.inventoryUnit?.id === unitId,
+        i.inventoryUnit?.id === unitId ||
+        i.productId === unitId ||
+        i.product?.id === unitId,
     );
     if (!item) return;
     try {
       await ordersApi.removeItem(selectedId, item.id);
-      toast.success("Unit removed from ticket");
+      toast.success("Item removed from ticket");
       invalidate();
     } catch (e) {
       toast.error(errMsg(e));
@@ -724,7 +758,7 @@ export default function PosWorkstation() {
     const orderData = ticket.data;
     const ticketMutable = orderData ? canMutateRentalItems(orderData) : false;
     if (!selectedId || !ticketMutable) {
-      toast.info("Create or open a quote, then add the service");
+      toast.info("Create or open a quote, then add the item");
       return;
     }
     try {
@@ -752,13 +786,39 @@ export default function PosWorkstation() {
     try {
       const unit = await posApi.rentalLookup(sku);
       if (!unit?.id) {
-        toast.error("Barcode not found");
+        const matched = floorServices.find(
+          (s) => s.sku.trim().toUpperCase() === sku,
+        );
+        if (matched) {
+          setBarcode("");
+          await applyService({
+            productId: matched.productId,
+            title: matched.title,
+            sku: matched.sku,
+            rentalPrice: matched.rentalPrice,
+          });
+          return;
+        }
+        toast.error("Barcode or SKU not found");
         setScannedUnit(null);
         return;
       }
       setBarcode("");
       await applyUnit(unit);
     } catch (e) {
+      const matched = floorServices.find(
+        (s) => s.sku.trim().toUpperCase() === sku,
+      );
+      if (matched) {
+        setBarcode("");
+        await applyService({
+          productId: matched.productId,
+          title: matched.title,
+          sku: matched.sku,
+          rentalPrice: matched.rentalPrice,
+        });
+        return;
+      }
       toast.error(errMsg(e));
       barcodeRef.current?.focus();
     }
@@ -1153,6 +1213,13 @@ export default function PosWorkstation() {
                   onClick={() => {
                     if (isAdded) {
                       void removeUnitFromTicket(u.id);
+                    } else if (u.isProduct) {
+                      void applyService({
+                        productId: u.id,
+                        title: u.title,
+                        sku: u.barcodeSku || u.sku,
+                        rentalPrice: u.rentalPrice,
+                      });
                     } else {
                       void applyUnit(u);
                     }
