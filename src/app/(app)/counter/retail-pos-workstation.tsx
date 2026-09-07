@@ -125,6 +125,23 @@ function cartLineListPrice(line: CartLine): number {
   return line.listPrice > 0 ? line.listPrice : line.unitPrice;
 }
 
+/** Gross line amount respecting converted UOM quantities and base pricing. */
+function cartLineGrossAmount(line: CartLine): number {
+  const qty = line.qty;
+  const factor = line.conversionFactor ?? 1;
+  if (
+    factor > 0 &&
+    factor !== 1 &&
+    line.unitPrice > 1 &&
+    Math.abs(line.unitPrice - (line.listPrice ?? line.unitPrice)) < 0.001
+  ) {
+    const effectiveQty =
+      line.baseQty != null && line.baseQty > 0 ? line.baseQty : qty * factor;
+    return Math.round(line.unitPrice * effectiveQty * 100) / 100;
+  }
+  return Math.round(line.unitPrice * qty * 100) / 100;
+}
+
 /** Discount % off list for this line only (0 if none / markup). */
 function cartLineDiscountPercent(line: CartLine): number {
   const base = cartLineListPrice(line);
@@ -135,7 +152,18 @@ function cartLineDiscountPercent(line: CartLine): number {
 /** ₹ off list × qty for this line (not bill-level coupon). */
 function cartLineDiscountAmount(line: CartLine): number {
   const base = cartLineListPrice(line);
-  const off = Math.max(0, base - line.unitPrice) * line.qty;
+  const factor = line.conversionFactor ?? 1;
+  const isConvertedUnit =
+    factor > 0 &&
+    factor !== 1 &&
+    line.unitPrice > 1 &&
+    Math.abs(line.unitPrice - (line.listPrice ?? line.unitPrice)) < 0.001;
+  const effectiveQty = isConvertedUnit
+    ? line.baseQty != null && line.baseQty > 0
+      ? line.baseQty
+      : line.qty * factor
+    : line.qty;
+  const off = Math.max(0, base - line.unitPrice) * effectiveQty;
   return Math.round(off * 100) / 100;
 }
 
@@ -367,7 +395,7 @@ function UniversalQuantityPickerModal({
           enteredQty: n,
           sellingUnitId: unitId?.startsWith("u-") ? undefined : unitId,
           sellingUnitSymbol: entrySym || (unitId?.startsWith("u-") ? unitId.replace(/^u-/, "") : undefined),
-          unitPriceOverride: moneyNumber(row.sellPrice),
+          unitPriceOverride: undefined,
         })
         .then((q) => {
           if (!cancelled) {
@@ -1020,11 +1048,19 @@ export default function RetailPosWorkstation({
       ),
   });
 
-  const subtotal = Math.round(cart.reduce((s, l) => s + l.unitPrice * l.qty, 0) * 100) / 100;
-  /** Gross MRP across all items: MRP × qty */
+  const subtotal = Math.round(cart.reduce((s, l) => s + cartLineGrossAmount(l), 0) * 100) / 100;
+  /** Gross MRP across all items: MRP × qty (or scaled by UOM) */
   const grossMrpTotal =
     Math.round(
-      cart.reduce((s, l) => s + cartLineListPrice(l) * l.qty, 0) * 100,
+      cart.reduce((s, l) => {
+        const factor = l.conversionFactor ?? 1;
+        const listP = cartLineListPrice(l);
+        if (factor > 0 && factor !== 1 && listP > 1 && Math.abs(listP - (l.listPrice ?? listP)) < 0.001) {
+          const effectiveQty = l.baseQty != null && l.baseQty > 0 ? l.baseQty : l.qty * factor;
+          return s + listP * effectiveQty;
+        }
+        return s + listP * l.qty;
+      }, 0) * 100,
     ) / 100;
   /** Sum of per-item discounts (MRP − selling price) × qty */
   const lineDiscountsTotal =
@@ -1055,7 +1091,7 @@ export default function RetailPosWorkstation({
   let totalTax = 0;
   let totalTaxable = 0;
   for (const l of cart) {
-    const lineGross = l.unitPrice * l.qty;
+    const lineGross = cartLineGrossAmount(l);
     const lineNet = Math.max(0, lineGross * (1 - discountRatio));
     const rate = taxSettings.rate;
     if (rate <= 0) {
@@ -1160,7 +1196,7 @@ export default function RetailPosWorkstation({
       ? cashChangeDue(tenderedNum, chargeAmount)
       : 0;
   const billTaxLines = cart.map((l) => {
-    const lineGross = l.unitPrice * l.qty;
+    const lineGross = cartLineGrossAmount(l);
     const rateFrac = taxSettings.rate;
     const halfRate = rateFrac / 2;
     const cgst = Math.round((lineGross * halfRate + Number.EPSILON) * 100) / 100;
@@ -1540,9 +1576,9 @@ export default function RetailPosWorkstation({
           sellUnit: opts?.orderedUnitSymbol
             ? normalizeSellUnit(opts.orderedUnitSymbol)
             : unit,
-          sellingUnitId: opts?.sellingUnitId,
+          sellingUnitId: opts?.sellingUnitId ?? row.entryUnits?.find((u) => u.symbol.toLowerCase() === unit.toLowerCase())?.unitId,
           baseQty: opts?.baseQty,
-          conversionFactor: opts?.conversionFactor,
+          conversionFactor: opts?.conversionFactor ?? (row.entryUnits?.find((u) => u.symbol.toLowerCase() === unit.toLowerCase()) as any)?.conversionToBase ?? 1,
           productId: row.productId,
           baseUnitSymbol: (row as any).baseUnitSymbol ?? (row.entryUnits && row.entryUnits[0]?.symbol) ?? unit,
           entryUnits: row.entryUnits,
@@ -1761,17 +1797,29 @@ export default function RetailPosWorkstation({
       }
       setCart((prev) =>
         prev.map((x) =>
-          x.stockLevelId === line.stockLevelId ? { ...x, qty: next } : x,
+          x.stockLevelId === line.stockLevelId
+            ? {
+                ...x,
+                qty: next,
+                baseQty: next * (x.conversionFactor ?? 1),
+              }
+            : x,
         ),
       );
 
       // Multi-UOM re-quote to preserve exact pricing & base inventory deduction
-      if (line.productId && line.sellingUnitId && (line.entryUnits?.length ?? 0) > 0) {
+      const effectiveSellingUnitId =
+        line.sellingUnitId ||
+        line.entryUnits?.find(
+          (u) => u.symbol.toLowerCase() === String(line.sellUnit || "").toLowerCase(),
+        )?.unitId;
+      if (line.productId && (effectiveSellingUnitId || (line.entryUnits?.length ?? 0) > 0)) {
         catalogApi
           .quotePricingLine({
             productId: line.productId,
             enteredQty: next,
-            sellingUnitId: line.sellingUnitId,
+            sellingUnitId: effectiveSellingUnitId,
+            sellingUnitSymbol: line.sellUnit,
           })
           .then((quote) => {
             const qtyBase = Number(quote.qtyBase);
@@ -2327,19 +2375,24 @@ export default function RetailPosWorkstation({
       const cartPayload = {
         locationId,
         ...(customerId ? { customerId } : {}),
-        items: cart.map((l) => ({
-          stockLevelId: l.stockLevelId,
-          quantity: l.qty,
-          unitPrice: l.unitPrice,
-          ...(l.sellingUnitId ? { sellingUnitId: l.sellingUnitId } : {}),
-          ...(l.sellUnit ? { sellingUnitSymbol: l.sellUnit } : {}),
-          ...(l.variantId ? { variantId: l.variantId } : {}),
-          ...(l.batchId ? { batchId: l.batchId } : {}),
-          ...(l.serialNumber?.trim()
-            ? { serialNumber: l.serialNumber.trim() }
-            : {}),
-          ...(l.modifiers?.length ? { modifiers: l.modifiers } : {}),
-        })),
+        items: cart.map((l) => {
+          const isConvertedUnit = Boolean(l.conversionFactor && l.conversionFactor !== 1);
+          const isUnscaledBasePrice = isConvertedUnit && Math.abs(l.unitPrice - (l.listPrice ?? l.unitPrice)) < 0.001;
+          const effectivePrice = isUnscaledBasePrice ? (l.unitPrice * (l.conversionFactor ?? 1)) : l.unitPrice;
+          return {
+            stockLevelId: l.stockLevelId,
+            quantity: l.qty,
+            unitPrice: effectivePrice,
+            ...(l.sellingUnitId ? { sellingUnitId: l.sellingUnitId } : {}),
+            ...(l.sellUnit ? { sellingUnitSymbol: l.sellUnit } : {}),
+            ...(l.variantId ? { variantId: l.variantId } : {}),
+            ...(l.batchId ? { batchId: l.batchId } : {}),
+            ...(l.serialNumber?.trim()
+              ? { serialNumber: l.serialNumber.trim() }
+              : {}),
+            ...(l.modifiers?.length ? { modifiers: l.modifiers } : {}),
+          };
+        }),
         ...(discountNum > 0 ? { discountAmount: discountNum } : {}),
         ...(applyCashRound && Math.abs(paymentRoundOff) >= 0.005
           ? { roundOffAmount: paymentRoundOff }
@@ -3259,10 +3312,14 @@ export default function RetailPosWorkstation({
                     : ([row.image ?? row.photoUrl].filter(Boolean) as string[]);
                 const src = gallery[0] ?? row.image ?? row.photoUrl;
                 const inCart = cart.find((l) => l.stockLevelId === row.id);
-                const cartQty = inCart?.qty ?? 0;
+                const cartBaseQty = inCart
+                  ? (inCart.baseQty != null && inCart.baseQty > 0
+                      ? inCart.baseQty
+                      : inCart.qty * (inCart.conversionFactor ?? 1))
+                  : 0;
                 const available =
                   row.trackQty !== false && !row.recipeTracked
-                    ? Math.max(0, Number(row.qtyOnHand) - cartQty)
+                    ? Math.max(0, Number(row.qtyOnHand) - cartBaseQty)
                     : 999;
                 const stock = productStockHint({
                   kind: row.kind,
@@ -3740,7 +3797,11 @@ export default function RetailPosWorkstation({
                                       x.qty - step,
                                       x.sellUnit,
                                     );
-                                    return { ...x, qty: Math.max(0, next) };
+                                    return {
+                                      ...x,
+                                      qty: Math.max(0, next),
+                                      baseQty: Math.max(0, next) * (x.conversionFactor ?? 1),
+                                    };
                                   })
                                   .filter((x) => x.qty > 0),
                               )
@@ -3812,7 +3873,11 @@ export default function RetailPosWorkstation({
                                     );
                                     return x;
                                   }
-                                  return { ...x, qty: next };
+                                  return {
+                                    ...x,
+                                    qty: next,
+                                    baseQty: next * (x.conversionFactor ?? 1),
+                                  };
                                 }),
                               )
                             }
@@ -3874,7 +3939,12 @@ export default function RetailPosWorkstation({
                           Equivalent:
                         </span>
                         <span className="font-semibold tabular-nums text-[#0b1f33]">
-                          {l.baseQty ?? l.qty} {l.baseUnitSymbol || l.sellUnit}
+                          {l.baseQty != null
+                            ? l.baseQty
+                            : l.conversionFactor
+                              ? Number((l.qty * l.conversionFactor).toFixed(4))
+                              : l.qty}{" "}
+                          {l.baseUnitSymbol || l.sellUnit}
                         </span>
                       </div>
                     ) : null}
