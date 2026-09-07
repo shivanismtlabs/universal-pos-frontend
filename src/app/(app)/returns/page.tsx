@@ -257,9 +257,9 @@ function RentalReturnsDesk() {
         map.set(key, {
           id: u.stockUnitId,
           allIds: [u.stockUnitId],
-          barcodeSku: u.barcodeSku || u.barcode,
+          barcodeSku: u.barcodeSku || u.barcode || u.stockUnitId || "",
           variant: u.variant,
-          title: u.title,
+          title: u.title ?? "Rental Item",
           count: qty,
         });
       } else {
@@ -366,8 +366,12 @@ function RentalReturnsDesk() {
       toast.success(
         `Deposit settled — refunded ${r.refunded}, forfeited ${r.forfeited}`,
       );
+      setSettleOrderId("");
       setRefundAmount("");
+      setManualLateFee("");
+      setManualDamageFee("");
       setSettleReason("");
+      void qc.invalidateQueries({ queryKey: ["returns-candidates"] });
       void qc.invalidateQueries({ queryKey: ["orders"] });
       void qc.invalidateQueries({ queryKey: ["order", settleOrderId] });
     },
@@ -762,12 +766,12 @@ function RentalReturnsDesk() {
                     const due = Number(o.balanceDue ?? 0);
                     const retAmt = Math.max(0, held - due);
                     const overdue = (o as { overdueDays?: number }).overdueDays ?? 0;
-                    return { o, retAmt, overdue };
+                    return { o, held, due, retAmt, overdue };
                   })
-                  .filter(({ retAmt }) => retAmt > 0)
-                  .map(({ o, retAmt, overdue }) => (
+                  .filter(({ held, o }) => !(o as { isSettled?: boolean }).isSettled && held > 0)
+                  .map(({ o, held, overdue }) => (
                     <option key={o.id} value={o.id}>
-                      {o.orderNumber} · {o.customerName} · Deposit: {money(retAmt)}{overdue > 0 ? ` ⚠️ (${overdue}d overdue)` : ""}
+                      {o.orderNumber} · {o.customerName} · Deposit: {money(held)}{overdue > 0 ? ` ⚠️ (${overdue}d overdue)` : ""}
                     </option>
                   ))}
               </Select>
