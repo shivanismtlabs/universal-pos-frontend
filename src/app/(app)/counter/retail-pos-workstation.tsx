@@ -119,27 +119,33 @@ type CartLine = {
   modifiers?: string[];
 };
 
-/** Shelf / list rate for a cart line (before this ticket’s line discount). */
+/** Shelf / list rate for a cart line (scaled to current selling unit). */
 function cartLineListPrice(line: CartLine): number {
-  if (line.mrp && line.mrp > 0) return line.mrp;
-  return line.listPrice > 0 ? line.listPrice : line.unitPrice;
+  const price = line.unitPrice;
+  const rawMrp = line.mrp && line.mrp > 0 ? line.mrp : line.listPrice;
+  if (!rawMrp || rawMrp <= price + 0.001) return price;
+
+  const factor = line.conversionFactor ?? 1;
+  if (factor > 0 && factor !== 1) {
+    if (rawMrp >= price * (factor - 0.01) && rawMrp > price * 1.5) {
+      const scaled = rawMrp / factor;
+      return Math.max(price, Math.round(scaled * 100) / 100);
+    }
+  }
+  return rawMrp;
 }
 
-/** Gross line amount respecting converted UOM quantities and base pricing. */
+/** Gross line amount: line.unitPrice × line.qty */
 function cartLineGrossAmount(line: CartLine): number {
-  const qty = line.qty;
-  const factor = line.conversionFactor ?? 1;
-  if (
-    factor > 0 &&
-    factor !== 1 &&
-    line.unitPrice > 1 &&
-    Math.abs(line.unitPrice - (line.listPrice ?? line.unitPrice)) < 0.001
-  ) {
-    const effectiveQty =
-      line.baseQty != null && line.baseQty > 0 ? line.baseQty : qty * factor;
-    return Math.round(line.unitPrice * effectiveQty * 100) / 100;
-  }
-  return Math.round(line.unitPrice * qty * 100) / 100;
+  return Math.round(line.unitPrice * line.qty * 100) / 100;
+}
+
+/** Gross MRP for line respecting unit price and conversion factor */
+function cartLineGrossMrp(line: CartLine): number {
+  const listP = cartLineListPrice(line);
+  const grossNet = cartLineGrossAmount(line);
+  if (listP <= line.unitPrice + 0.001) return grossNet;
+  return Math.max(grossNet, Math.round(listP * line.qty * 100) / 100);
 }
 
 /** Discount % off list for this line only (0 if none / markup). */
@@ -152,19 +158,10 @@ function cartLineDiscountPercent(line: CartLine): number {
 /** ₹ off list × qty for this line (not bill-level coupon). */
 function cartLineDiscountAmount(line: CartLine): number {
   const base = cartLineListPrice(line);
-  const factor = line.conversionFactor ?? 1;
-  const isConvertedUnit =
-    factor > 0 &&
-    factor !== 1 &&
-    line.unitPrice > 1 &&
-    Math.abs(line.unitPrice - (line.listPrice ?? line.unitPrice)) < 0.001;
-  const effectiveQty = isConvertedUnit
-    ? line.baseQty != null && line.baseQty > 0
-      ? line.baseQty
-      : line.qty * factor
-    : line.qty;
-  const off = Math.max(0, base - line.unitPrice) * effectiveQty;
-  return Math.round(off * 100) / 100;
+  if (base <= line.unitPrice + 0.001) return 0;
+  const grossMrp = cartLineGrossMrp(line);
+  const grossNet = cartLineGrossAmount(line);
+  return Math.max(0, Math.round((grossMrp - grossNet) * 100) / 100);
 }
 
 function unitPriceAfterLineDiscount(
@@ -453,7 +450,18 @@ function UniversalQuantityPickerModal({
         <div className="mt-1 flex items-center justify-between text-xs text-[#5a6b7d]">
           <span>Available Stock:</span>
           <span className="font-semibold text-[#0b1f33]">
-            {formatQtyWithUnit(stockAvailable, baseUnitSymbol)}
+            {(() => {
+              const baseText = formatQtyWithUnit(stockAvailable, baseUnitSymbol);
+              const factor = (selectedUnit as any)?.conversionToBase || 1;
+              if (factor > 0 && factor !== 1 && entrySym.toLowerCase() !== baseUnitSymbol.toLowerCase()) {
+                const inEntryUnit = stockAvailable / factor;
+                const rounded = Number.isInteger(inEntryUnit)
+                  ? inEntryUnit
+                  : Number(inEntryUnit.toFixed(2));
+                return `${baseText} (${formatQtyWithUnit(rounded, entrySym)})`;
+              }
+              return baseText;
+            })()}
           </span>
         </div>
 
@@ -545,44 +553,59 @@ function UniversalQuantityPickerModal({
             </span>
           </div>
 
-          {quote?.unitPrice ? (
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-[#5a6b7d]">Price Basis:</span>
-              <span className="font-medium text-[#0b1f33] tabular-nums">
-                {money(Number(quote.unitPrice))} / {quote.configuredPriceQuantity || "1"} {quote.priceUnitSymbol || entrySym}
-              </span>
-            </div>
-          ) : null}
+          {(() => {
+            const fallbackUnitPrice = (() => {
+              const rawP = moneyNumber(row.sellPrice);
+              const factor = (selectedUnit as any)?.conversionToBase || 1;
+              const currentSym = String(row.sellUnit ?? "").trim().toLowerCase();
+              const targetSym = String(entrySym ?? "").trim().toLowerCase();
+              if (currentSym !== targetSym && factor > 0) {
+                if (factor > 1 && (targetSym === "pcs" || targetSym === "g" || targetSym === "ml" || targetSym === "cm")) {
+                  return rawP / factor;
+                }
+              }
+              return rawP;
+            })();
+            const displayUnitPrice = quote?.unitPrice != null ? Number(quote.unitPrice) : fallbackUnitPrice;
+            const displayAmount = quote?.amount != null ? Number(quote.amount) : (validQty ? n * fallbackUnitPrice : 0);
 
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-[#5a6b7d]">Base Equivalent:</span>
-            <span className="font-semibold text-[#0b1f33] tabular-nums">
-              {loading ? (
-                <span className="text-[#8b9bb0]">Calculating…</span>
-              ) : quote ? (
-                `${quote.baseQuantity || quote.qtyBase} ${baseUnitSymbol}`
-              ) : validQty ? (
-                `${n} ${entrySym}`
-              ) : (
-                `—`
-              )}
-            </span>
-          </div>
+            return (
+              <>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-[#5a6b7d]">Price Basis:</span>
+                  <span className="font-medium text-[#0b1f33] tabular-nums">
+                    {money(displayUnitPrice)} / {quote?.configuredPriceQuantity || "1"} {quote?.priceUnitSymbol || entrySym}
+                  </span>
+                </div>
 
-          <div className="flex items-center justify-between border-t border-[#e2e8f0] pt-2">
-            <span className="text-xs font-semibold text-[#5a6b7d]">Total Amount:</span>
-            <span className="text-base font-bold text-[#1a56db] tabular-nums">
-              {loading ? (
-                <span className="text-sm font-normal text-[#8b9bb0]">…</span>
-              ) : quote ? (
-                money(Number(quote.amount))
-              ) : validQty ? (
-                money(n * moneyNumber(row.sellPrice))
-              ) : (
-                money(0)
-              )}
-            </span>
-          </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-[#5a6b7d]">Base Equivalent:</span>
+                  <span className="font-semibold text-[#0b1f33] tabular-nums">
+                    {loading ? (
+                      <span className="text-[#8b9bb0]">Calculating…</span>
+                    ) : quote ? (
+                      `${quote.baseQuantity || quote.qtyBase} ${baseUnitSymbol}`
+                    ) : validQty ? (
+                      `${n} ${entrySym}`
+                    ) : (
+                      `—`
+                    )}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between border-t border-[#e2e8f0] pt-2">
+                  <span className="text-xs font-semibold text-[#5a6b7d]">Total Amount:</span>
+                  <span className="text-base font-bold text-[#1a56db] tabular-nums">
+                    {loading ? (
+                      <span className="text-sm font-normal text-[#8b9bb0]">…</span>
+                    ) : (
+                      money(displayAmount)
+                    )}
+                  </span>
+                </div>
+              </>
+            );
+          })()}
 
           {tracks ? (
             <div className="flex items-center justify-between text-xs pt-1 border-t border-[#e2e8f0]">
@@ -1052,15 +1075,7 @@ export default function RetailPosWorkstation({
   /** Gross MRP across all items: MRP × qty (or scaled by UOM) */
   const grossMrpTotal =
     Math.round(
-      cart.reduce((s, l) => {
-        const factor = l.conversionFactor ?? 1;
-        const listP = cartLineListPrice(l);
-        if (factor > 0 && factor !== 1 && listP > 1 && Math.abs(listP - (l.listPrice ?? listP)) < 0.001) {
-          const effectiveQty = l.baseQty != null && l.baseQty > 0 ? l.baseQty : l.qty * factor;
-          return s + listP * effectiveQty;
-        }
-        return s + listP * l.qty;
-      }, 0) * 100,
+      cart.reduce((s, l) => s + cartLineGrossMrp(l), 0) * 100,
     ) / 100;
   /** Sum of per-item discounts (MRP − selling price) × qty */
   const lineDiscountsTotal =
@@ -1093,7 +1108,10 @@ export default function RetailPosWorkstation({
   for (const l of cart) {
     const lineGross = cartLineGrossAmount(l);
     const lineNet = Math.max(0, lineGross * (1 - discountRatio));
-    const rate = taxSettings.rate;
+    const rate =
+      l.taxRatePercent != null && Number.isFinite(l.taxRatePercent)
+        ? l.taxRatePercent / 100
+        : taxSettings.rate;
     if (rate <= 0) {
       totalTaxable += lineNet;
       continue;
@@ -1197,7 +1215,10 @@ export default function RetailPosWorkstation({
       : 0;
   const billTaxLines = cart.map((l) => {
     const lineGross = cartLineGrossAmount(l);
-    const rateFrac = taxSettings.rate;
+    const rateFrac =
+      l.taxRatePercent != null && Number.isFinite(l.taxRatePercent)
+        ? l.taxRatePercent / 100
+        : taxSettings.rate;
     const halfRate = rateFrac / 2;
     const cgst = Math.round((lineGross * halfRate + Number.EPSILON) * 100) / 100;
     const sgst = Math.round((lineGross * halfRate + Number.EPSILON) * 100) / 100;
@@ -1679,9 +1700,7 @@ export default function RetailPosWorkstation({
       "";
     setQtyPick({
       row,
-      value: inCart
-        ? String(inCart.qty)
-        : String(qtyStep(unit) >= 1 ? 1 : qtyStep(unit)),
+      value: "",
       maxQty: tracks ? onHand : 999999,
       tracks,
       entryUnitId: defaultEntry,
@@ -1719,7 +1738,7 @@ export default function RetailPosWorkstation({
         const neededInStockUnit = isSameUnit ? n : (qtyBase > 0 ? qtyBase : (factor > 0 ? n * factor : n));
         if (qtyPick.tracks && neededInStockUnit > qtyPick.maxQty + 1e-9) {
           toast.error(
-            `Only ${formatQtyWithUnit(qtyPick.maxQty, row.sellUnit)} available`,
+            `Only ${formatQtyWithUnit(qtyPick.maxQty, (row as any).baseUnitSymbol || row.sellUnit)} available`,
           );
           return;
         }
@@ -1893,6 +1912,7 @@ export default function RetailPosWorkstation({
                   sellingUnitId: targetUnitId,
                   unitPrice,
                   listPrice: unitPrice,
+                  mrp: x.mrp && x.mrp > 0 ? (currentFactor > 0 ? Math.round((x.mrp / currentFactor) * targetFactor * 100) / 100 : unitPrice) : unitPrice,
                   baseQty: qtyBase,
                   conversionFactor: Number(quote.conversionFactorUsed),
                 }
@@ -3321,12 +3341,31 @@ export default function RetailPosWorkstation({
                   row.trackQty !== false && !row.recipeTracked
                     ? Math.max(0, Number(row.qtyOnHand) - cartBaseQty)
                     : 999;
+                const stockDisplayQty = (() => {
+                  const targetUnit = String(row.sellUnit || (row as any).baseUnitSymbol || "pcs").trim();
+                  const unitInfo = row.entryUnits?.find(
+                    (u) => u.symbol.trim().toLowerCase() === targetUnit.toLowerCase(),
+                  );
+                  const factor = Number((unitInfo as any)?.conversionToBase ?? 1);
+                  if (factor > 0 && factor !== 1) {
+                    const qtyInSellUnit = available / factor;
+                    const rounded = Number.isInteger(qtyInSellUnit)
+                      ? qtyInSellUnit
+                      : Number(qtyInSellUnit.toFixed(2));
+                    return formatQtyWithUnit(rounded, targetUnit);
+                  }
+                  const roundedBase = Number.isInteger(available)
+                    ? available
+                    : Number(available.toFixed(2));
+                  return formatQtyWithUnit(roundedBase, targetUnit);
+                })();
+
                 const stock = productStockHint({
                   kind: row.kind,
                   trackQty: row.trackQty,
                   recipeTracked: row.recipeTracked,
                   available,
-                  qtyLeftLabel: formatQtyWithUnit(available, row.sellUnit),
+                  qtyLeftLabel: stockDisplayQty,
                 });
                 return (
                   <li key={row.id} className="min-w-0">
@@ -3334,7 +3373,7 @@ export default function RetailPosWorkstation({
                       role="button"
                       tabIndex={stock.tone === "out" ? -1 : 0}
                       onClick={() => {
-                        if (stock.tone !== "out") upsertLine(row);
+                        if (stock.tone !== "out") openQtyPick(row);
                       }}
                       onKeyDown={(e) => {
                         if (
@@ -3342,7 +3381,7 @@ export default function RetailPosWorkstation({
                           stock.tone !== "out"
                         ) {
                           e.preventDefault();
-                          upsertLine(row);
+                          openQtyPick(row);
                         }
                       }}
                       className={cn(
@@ -3711,51 +3750,34 @@ export default function RetailPosWorkstation({
                           ) : null}
                           <span className="truncate">{l.name}</span>
                         </p>
-                        <div className="mt-1 space-y-0.5 text-[0.75rem] tabular-nums">
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[0.75rem] tabular-nums">
                           {hasLineDiscount ? (
-                            <div className="flex flex-wrap items-center gap-1.5">
+                            <>
                               <span className="text-[#8b9bb0] line-through decoration-[#94a3b8]">
                                 MRP {money(lineMrp)}
                               </span>
-                              <span className="rounded bg-emerald-100 px-1.5 py-0.2 text-[0.65rem] font-bold text-emerald-800">
+                              <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[0.65rem] font-bold text-emerald-800">
                                 {discPct}% OFF
                               </span>
-                              <span className="font-bold text-[#0b1f33]">
-                                {money(unitSellingPrice)}
+                              <span className="font-semibold text-[#475569]">
+                                {money(unitSellingPrice)}/{unitShort}
                               </span>
-                              <span className="text-[#8b9bb0]">
-                                · {l.qty} {unitShort}
-                              </span>
-                            </div>
+                            </>
                           ) : (
-                            <div className="flex items-center gap-1 text-[#8b9bb0]">
-                              <span className="font-semibold text-[#0b1f33]">
-                                {money(unitSellingPrice)}
-                              </span>
-                              <span>
-                                · {l.qty} {unitShort}
-                              </span>
-                            </div>
+                            <span className="font-semibold text-[#475569]">
+                              {money(unitSellingPrice)}/{unitShort}
+                            </span>
                           )}
-                          {hasLineDiscount ? (
-                            <div className="flex flex-wrap items-center gap-1.5 text-[0.7rem] text-[#64748b]">
-                              <span>Product discount {money(lineProductDiscount)}</span>
-                              <span>·</span>
-                              <span className="font-semibold text-[#0f172a]">
-                                Net {money(lineNet)}
-                              </span>
-                            </div>
-                          ) : null}
                         </div>
                       </div>
-                      <div className="flex shrink-0 items-center gap-1">
+                      <div className="flex shrink-0 items-center gap-1.5">
                         <p className="text-[0.9375rem] font-bold tabular-nums text-[#0b1f33]">
                           {money(lineNet)}
                         </p>
                         <button
                           type="button"
                           disabled={Boolean(splitSession)}
-                          className="grid h-7 w-7 place-items-center rounded-md text-[#94a3b8] transition hover:bg-[#fff1f1] hover:text-[#c81e1e] disabled:opacity-40"
+                          className="grid h-7 w-7 place-items-center rounded-lg text-[#94a3b8] transition hover:bg-[#fff1f1] hover:text-[#c81e1e] disabled:opacity-40"
                           title="Remove item"
                           aria-label={`Remove ${l.name}`}
                           onClick={() =>
@@ -3766,7 +3788,7 @@ export default function RetailPosWorkstation({
                             )
                           }
                         >
-                          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
+                          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden>
                             <path
                               d="M3 4.5h10M6 4.5V3.5a1 1 0 011-1h2a1 1 0 011 1v1M5.5 4.5l.5 8h4l.5-8"
                               stroke="currentColor"
@@ -3779,9 +3801,9 @@ export default function RetailPosWorkstation({
                       </div>
                     </div>
 
-                    <div className="mt-3 flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2.5">
-                        <div className="flex shrink-0 items-center rounded-lg border border-[#e2e8f0] bg-white">
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <div className="flex shrink-0 items-center rounded-lg border border-[#e2e8f0] bg-white shadow-sm">
                           <button
                             type="button"
                             disabled={Boolean(splitSession)}
@@ -3816,7 +3838,7 @@ export default function RetailPosWorkstation({
                                 ? "decimal"
                                 : "numeric"
                             }
-                            className="h-8 w-14 border-0 bg-transparent text-center text-sm font-bold tabular-nums text-[#0b1f33] outline-none disabled:opacity-40"
+                            className="h-8 w-12 border-0 bg-transparent text-center text-sm font-bold tabular-nums text-[#0b1f33] outline-none disabled:opacity-40"
                             aria-label={`Quantity for ${l.name}`}
                             title="Type quantity (e.g. 455)"
                             value={
@@ -3907,46 +3929,36 @@ export default function RetailPosWorkstation({
                             ))}
                           </select>
                         ) : (
-                          <span className="text-[0.8125rem] font-medium text-[#8b9bb0]">
+                          <span className="text-xs font-semibold text-[#64748b]">
                             {unitShort}
                           </span>
                         )}
                       </div>
+
                       <button
                         type="button"
                         className={cn(
-                          "text-[0.8125rem] font-semibold",
-                          discPct > 0
-                            ? "text-[#c2410c] hover:underline"
-                            : rateChanged
-                              ? "text-[#c2410c] hover:underline"
-                              : "text-[#1a56db] hover:underline",
+                          "h-8 rounded-lg border px-2.5 text-xs font-semibold shadow-sm transition",
+                          discPct > 0 || rateChanged
+                            ? "border-[#fed7aa] bg-[#fff7ed] text-[#c2410c] hover:bg-[#ffedd5]"
+                            : "border-[#e2e8f0] bg-white text-[#1a56db] hover:bg-[#f8fafc]",
                         )}
                         title="Change price or discount for this item only"
                         onClick={() => openRateEdit(l)}
                       >
                         {discPct > 0
-                          ? `−${discPct}%`
+                          ? `−${discPct}% Disc`
                           : rateChanged
                             ? `${ratePct > 0 ? "+" : ""}${ratePct}%`
                             : "Disc"}
                       </button>
                     </div>
 
-                    {(l.baseQty != null || (l.conversionFactor && l.conversionFactor !== 1)) ? (
-                      <div className="mt-1 flex items-center gap-1.5 text-[0.72rem] text-[#64748b]">
-                        <span className="font-medium text-[#475569]">
-                          Equivalent:
-                        </span>
-                        <span className="font-semibold tabular-nums text-[#0b1f33]">
-                          {l.baseQty != null
-                            ? l.baseQty
-                            : l.conversionFactor
-                              ? Number((l.qty * l.conversionFactor).toFixed(4))
-                              : l.qty}{" "}
-                          {l.baseUnitSymbol || l.sellUnit}
-                        </span>
-                      </div>
+                    {(l.conversionFactor && l.conversionFactor !== 1) ? (
+                      <p className="mt-1.5 text-[0.72rem] font-medium text-[#64748b]">
+                        1 {unitShort} = {l.conversionFactor} {l.baseUnitSymbol || "pcs"}
+                        {l.baseQty != null ? ` (${l.baseQty} total ${l.baseUnitSymbol || "pcs"})` : ""}
+                      </p>
                     ) : null}
 
                   {(l.requiresVariant || l.requiresBatch || l.requiresSerial) && (
